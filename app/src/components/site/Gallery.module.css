@@ -1,0 +1,139 @@
+/* Prototype A course gallery: large main image, small square images below — here in a carousel (Maria C32). */
+
+.gallery {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.placeholder {
+  aspect-ratio: 5 / 4;
+  border-radius: 20px;
+  background: #e6dfe0;
+}
+
+.main {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 4;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 20px;
+  background: #e6dfe0;
+  cursor: zoom-in;
+}
+
+.mainImage {
+  object-fit: cover;
+  transition: transform 0.6s var(--ease);
+}
+
+.main:hover .mainImage {
+  transform: scale(1.02);
+}
+
+.main:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 3px;
+}
+
+.thumbs {
+  position: relative;
+}
+
+.track {
+  --visible: 4;
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.track::-webkit-scrollbar {
+  display: none;
+}
+
+.item {
+  flex: 0 0 calc((100% - (var(--visible) - 1) * 10px) / var(--visible));
+  scroll-snap-align: start;
+}
+
+.thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 14px;
+  background: #e6dfe0;
+  cursor: zoom-in;
+}
+
+.thumb[aria-current="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+/* The track clips anything outside it, so the focus ring is drawn inside the thumbnail. */
+.thumb:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: -2px;
+}
+
+.thumbImage {
+  object-fit: cover;
+  transition: transform 0.4s var(--ease);
+}
+
+.thumb:hover .thumbImage {
+  transform: scale(1.04);
+}
+
+.arrow {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 6px 18px -8px rgba(34, 34, 34, 0.45);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: opacity 0.2s;
+}
+
+.arrow:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.arrowPrev {
+  left: 8px;
+}
+
+.arrowNext {
+  right: 8px;
+}
+
+@media (max-width: 640px) {
+  .track {
+    --visible: 3;
+  }
+}

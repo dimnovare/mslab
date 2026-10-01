@@ -1,0 +1,124 @@
+/* Full-screen image viewer (native modal <dialog>, top layer above the sticky header). */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #161415;
+  color: #fff;
+  overscroll-behavior: contain;
+}
+
+.lightbox[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.lightbox::backdrop {
+  background: transparent;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px clamp(16px, 3vw, 32px);
+}
+
+/* JetBrains Mono is kept for small numerals (G4). */
+.counter {
+  font: 400 13px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+  padding: 0 clamp(16px, 7vw, 120px) clamp(16px, 3vw, 32px);
+}
+
+.frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.image {
+  object-fit: contain;
+}
+
+.caption {
+  margin-top: 14px;
+  color: var(--heather);
+  font: 400 13px/1.4 var(--font-body);
+  text-align: center;
+}
+
+.round {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(34, 34, 34, 0.55);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.round:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.round:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.prev,
+.next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.prev {
+  left: clamp(12px, 2vw, 32px);
+}
+
+.next {
+  right: clamp(12px, 2vw, 32px);
+}
+
+@media (max-width: 640px) {
+  .figure {
+    padding: 0 0 88px;
+  }
+
+  /* On phones the arrows sit under the image, out of the way of the picture and the swipe. */
+  .prev,
+  .next {
+    top: auto;
+    bottom: 20px;
+    transform: none;
+  }
+
+  .prev {
+    left: calc(50% - 60px);
+  }
+
+  .next {
+    right: calc(50% - 60px);
+  }
+}

@@ -1,0 +1,89 @@
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: #a49b9f;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  white-space: nowrap;
+}
+
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+.avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: 50% 18%;
+}
+
+/* Compact D trainer block on the canvas surface. */
+.card {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 24px clamp(28px, 4vw, 56px);
+  align-items: center;
+  padding: clamp(20px, 3vw, 36px);
+  border-radius: var(--r-tile);
+  background: var(--canvas);
+}
+
+.photo {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: 20px;
+  background: #e6dfe0;
+}
+
+.image {
+  object-fit: cover;
+  object-position: 50% 20%;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.name {
+  margin: 0;
+  font: 400 clamp(28px, 3vw, 40px) / 1.1 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.role {
+  margin: 10px 0 0;
+  color: #675d62;
+  font: 500 14px/1.4 var(--font-body);
+}
+
+.text {
+  max-width: 620px;
+  margin: 16px 0 0;
+  color: #3a3437;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.body > a {
+  margin-top: 24px;
+}
+
+@media (max-width: 640px) {
+  .card {
+    grid-template-columns: 1fr;
+  }
+
+  .photo {
+    max-width: 260px;
+  }
+}

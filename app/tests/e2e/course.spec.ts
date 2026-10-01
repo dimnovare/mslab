@@ -1,0 +1,302 @@
+import { test, expect, type Page } from "@playwright/test";
+
+// Course pages (Task 8): Maria's P1–P16. The first two tests are the brief's tests (verbatim except one locator:
+// getByLabel("E-post") also matches the footer newsletter's "Sinu e-post", so it is `exact`); the rest cover the
+// remaining checklist items against the seed data. Registration actions are Task 10 placeholders (nothing stored).
+
+test("e-learning course page", async ({ page }) => {
+  await page.goto("/koolitused/kulmumeistri-e-koolitus");
+  await expect(page.getByText(/Maksa kohe/)).toBeVisible();
+  await expect(page.getByText(/järelmaks/i)).toBeVisible();
+  await expect(page.getByText(/Grupikoolitus|Hübriid/)).toHaveCount(0);
+  await expect(page.getByText(/praktilise töö hindamine/i)).toBeVisible();
+  await expect(page.getByText("Sulle võiksid huvi pakkuda")).toBeVisible();
+  await page.locator("[data-gallery-main]").click(); await expect(page.getByRole("dialog")).toBeVisible(); await page.keyboard.press("Escape");
+});
+test("contact course group registration stays awaiting prepayment", async ({ page }) => {
+  await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+  await expect(page.getByText(/E-õpe|Hübriidõpe/)).toHaveCount(0);
+  await page.getByRole("radio", { name: /Grupikoolitus/ }).check();
+  await page.locator("[data-session]:not([aria-disabled='true'])").first().click();
+  await page.getByLabel("Nimi").fill("Test Õpilane"); await page.getByLabel("E-post", { exact: true }).fill("test@example.com"); await page.getByLabel("Telefon").fill("+3725555555");
+  await page.getByRole("radio", { name: /50%/ }).check(); await page.getByLabel(/modellide leidmisel/).check(); await page.getByLabel(/tingimustega/).check();
+  await page.getByRole("button", { name: "Registreeru" }).click();
+  await expect(page.getByText(/koht kinnitub pärast ettemaksu/)).toBeVisible();
+});
+
+const noErrors = (page: Page) => {
+  const errors: string[] = [];
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("pageerror", (e) => errors.push(e.message));
+  return errors;
+};
+
+test.describe("e-learning page", () => {
+  test("purchase block: price, pay now default, instalment shown but disabled, Osta kohe → cart (P8, P9)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-e-koolitus");
+    const buy = page.locator("[data-buy]");
+    await expect(buy).toContainText("190 €");
+    await expect(page.getByRole("radio", { name: /Maksa kohe/ })).toBeChecked();
+    await expect(page.getByRole("radio", { name: /järelmaks/ })).toBeDisabled();
+    await expect(page.getByRole("link", { name: "Osta kohe" })).toHaveAttribute("href", "/ostukorv?kursus=kulmumeistri-e-koolitus");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kulmumeistri e-koolitus");
+  });
+
+  test("summary column like browmaniac: modules, videos, access, language, trainer link, discount (P3, P7)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-e-koolitus");
+    const s = page.locator("[data-course-summary]");
+    await expect(s).toContainText("Moodulid");
+    await expect(s).toContainText("6");
+    await expect(s).toContainText("24");
+    await expect(s).toContainText("6 kuud");
+    await expect(s).toContainText("ET / RU");
+    await expect(s).toContainText("−10% järgmiselt koolituselt");
+    await expect(s.getByRole("link", { name: /Maria Sosnina/ })).toHaveAttribute("href", "/koolitaja");
+    await expect(page.locator("[data-trainer-card]").getByRole("link")).toHaveAttribute("href", "/koolitaja");
+  });
+
+  test("includes list and modules visible but locked, not openable (P8)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-e-koolitus");
+    const inc = page.locator("[data-includes]");
+    await expect(inc).toContainText("24 õppevideot");
+    await expect(inc).toContainText("Teadmiste test");
+    await expect(inc).toContainText("Tunnistus pärast edukat lõpetamist");
+    const modules = page.locator("[data-modules] li");
+    await expect(modules).toHaveCount(6);
+    await expect(page.locator("[data-modules] [data-locked]")).toHaveCount(6);
+    await expect(page.locator("[data-modules]").getByRole("link")).toHaveCount(0);
+    await expect(page.locator("[data-modules]").getByRole("button")).toHaveCount(0);
+  });
+
+  test("recommendations are at the very bottom and lead to other courses (P5)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-e-koolitus");
+    const rec = page.locator("[data-recommendations]");
+    await expect(rec.locator("[data-course-card]").first()).toBeVisible();
+    await expect(rec.locator("[data-course-card][href='/koolitused/kulmumeistri-e-koolitus']")).toHaveCount(0);
+    const isLast = await rec.evaluate((el) => {
+      const main = document.getElementById("main")!;
+      const all = Array.from(main.querySelectorAll("section"));
+      return all[all.length - 1] === el;
+    });
+    expect(isLast).toBe(true);
+  });
+});
+
+test.describe("contact page", () => {
+  test("participation switch: group lists sessions, individual shows the request form (P12, P13)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    await expect(page.getByRole("radio", { name: /Grupikoolitus/ })).toHaveAccessibleName(/350 €/);
+    await expect(page.getByRole("radio", { name: /Individuaalkoolitus/ })).toHaveAccessibleName(/450 €/);
+    await expect(page.locator("[data-session]")).toHaveCount(3);
+    await expect(page.locator("[data-session]").first()).toContainText("Pärnu");
+    await expect(page.locator("[data-session]").first()).toContainText("Vabu kohti");
+    await page.getByRole("radio", { name: /Individuaalkoolitus/ }).check();
+    await expect(page.locator("[data-session]")).toHaveCount(0);
+    await expect(page.getByLabel("Soovitud periood või kuupäev")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Saada päring" })).toBeVisible();
+  });
+
+  test("cancelled sessions are shown but cannot be picked", async ({ page }) => {
+    await page.goto("/koolitused/lash-lift-botox");
+    const cancelled = page.locator("[data-session][aria-disabled='true']");
+    await expect(cancelled).toHaveCount(1);
+    await expect(cancelled).toContainText("Tühistatud");
+    await cancelled.click({ force: true });
+    await expect(cancelled).toHaveAttribute("aria-checked", "false");
+  });
+
+  test("sessions are a radio group: arrow keys skip dates that cannot be picked", async ({ page }) => {
+    await page.goto("/koolitused/lash-lift-botox");
+    const s = page.locator("[data-session]");
+    await expect(s).toHaveCount(3); // Tallinn, Viljandi, Tartu (cancelled)
+    await s.nth(0).click();
+    await expect(s.nth(0)).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("ArrowDown");
+    await expect(s.nth(1)).toHaveAttribute("aria-checked", "true");
+    await expect(s.nth(1)).toBeFocused();
+    await page.keyboard.press("ArrowDown"); // the cancelled date is skipped: back to the first
+    await expect(s.nth(0)).toHaveAttribute("aria-checked", "true");
+    await expect(s.nth(2)).toHaveAttribute("aria-checked", "false");
+  });
+
+  test("?sessioon preselects the session (links from home and calendar)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const id = await page.locator("[data-session]").nth(1).getAttribute("data-session");
+    await page.goto(`/koolitused/kulmumeistri-baaskoolitus?sessioon=${id}`);
+    await expect(page.locator(`[data-session='${id}']`)).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: /Grupikoolitus/ })).toBeChecked();
+  });
+
+  test("form: payment options, models and account checkboxes, prepayment info line (P11, P14, P15, P16)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const form = page.locator("[data-register-form]");
+    await expect(form.getByRole("radio", { name: "100% kohe" })).toBeChecked();
+    await expect(form.getByRole("radio", { name: /50% registreerimisel \+ 50% koolituspäeval/ })).toBeVisible();
+    await expect(form.getByLabel("Loo mulle kohe konto MS LAB keskkonda")).toBeVisible();
+    await expect(form.getByText("Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.")).toBeVisible();
+    // Submitting without a date and fields shows errors instead of a success screen, and keeps what was chosen.
+    await form.getByRole("radio", { name: /50% registreerimisel/ }).check();
+    await form.getByLabel(/tingimustega/).check();
+    await form.getByRole("button", { name: "Registreeru" }).click();
+    await expect(form.getByText("Vali sobiv kuupäev.")).toBeVisible();
+    await expect(form.getByLabel("Nimi")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText(/koht kinnitub pärast ettemaksu/)).toHaveCount(0);
+    await expect(form.getByLabel(/tingimustega/)).toBeChecked();
+    await expect(form.getByRole("radio", { name: /50% registreerimisel/ })).toBeChecked();
+    await page.locator("[data-session]").first().click();
+    await expect(form.getByText("Vali sobiv kuupäev.")).toHaveCount(0);
+  });
+
+  test("individual request is sent", async ({ page }) => {
+    await page.goto("/koolitused/kulmude-lami");
+    await page.getByRole("radio", { name: /Individuaalkoolitus/ }).check();
+    const form = page.locator("[data-register-form]");
+    await form.getByLabel("Nimi").fill("Test Õpilane");
+    await form.getByLabel("E-post").fill("test@example.com");
+    await form.getByLabel("Telefon").fill("+3725555555");
+    await form.getByLabel("Soovitud periood või kuupäev").fill("Detsembri teine pool");
+    await form.getByLabel(/tingimustega/).check();
+    await form.getByRole("button", { name: "Saada päring" }).click();
+    await expect(page.getByText("Aitäh! Sinu päring on saadetud.")).toBeVisible();
+  });
+
+  test("Koolitus sisaldab in Maria's words, models note, programme (P10, P11)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const inc = page.locator("[data-includes] li");
+    await expect(inc).toHaveCount(8);
+    await expect(inc.nth(1)).toHaveText("Praktiline osa, nt töö kahel modellil");
+    await expect(page.getByText("Võid tulla oma modellidega; vajadusel aitame leida.")).toBeVisible();
+    await expect(page.locator("[data-modules] li")).toHaveCount(4);
+    await expect(page.locator("[data-modules] [data-locked]")).toHaveCount(0);
+    const s = page.locator("[data-course-summary]");
+    await expect(s).toContainText("2 päeva · 16 ak");
+    await expect(s).toContainText("Pärnu, Tallinn");
+  });
+});
+
+test.describe("both types", () => {
+  test("share: Web Share API when present, otherwise copy link + toast (P4)", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.addInitScript(() => { Object.defineProperty(navigator, "share", { value: undefined, configurable: true }); });
+    await page.goto("/koolitused/kulmude-lami");
+    await page.getByRole("button", { name: "Jaga koolitust" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Koolituse link kopeeritud." })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/koolitused\/kulmude-lami$/);
+
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "share", { value: async (d: ShareData) => { (window as unknown as { shared: ShareData }).shared = d; }, configurable: true });
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Jaga koolitust" }).click();
+    const shared = await page.evaluate(() => (window as unknown as { shared?: ShareData }).shared);
+    expect(shared?.url).toMatch(/\/koolitused\/kulmude-lami$/);
+    expect(shared?.title).toBe("Kulmude LAMI");
+  });
+
+  test("favourite toggles and is remembered in this browser (P6)", async ({ page }) => {
+    await page.goto("/koolitused/kulmude-lami");
+    const fav = page.getByRole("button", { name: "Lisa lemmikutesse" });
+    await expect(fav).toHaveAttribute("aria-pressed", "false");
+    await fav.click();
+    await expect(fav).toHaveAttribute("aria-pressed", "true");
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mslab-fav") ?? "[]"))).toEqual(["kulmude-lami"]);
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Lisa lemmikutesse" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Lisa lemmikutesse" }).click();
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mslab-fav") ?? "[]"))).toEqual([]);
+  });
+
+  test("gallery: main 5:4, thumbnails open the lightbox at that image; arrows, focus trap, Esc (P2)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const main = page.locator("[data-gallery-main]");
+    const box = await main.boundingBox();
+    expect(Math.abs(box!.width / box!.height - 1.25)).toBeLessThan(0.02);
+    await expect(page.locator("[data-gallery-thumb]")).toHaveCount(4);
+    await page.locator("[data-gallery-thumb]").nth(2).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("3 / 4")).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog.getByText("4 / 4")).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog.getByText("1 / 4")).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(dialog.getByText("4 / 4")).toBeVisible();
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("Tab");
+      expect(await dialog.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator("[data-gallery-thumb]").nth(2)).toBeFocused();
+  });
+
+  test("gallery thumbnail carousel shows 4 thumbnails on desktop, 3 on phones", async ({ page, isMobile }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const visible = await page.locator("[data-gallery-thumb]").evaluateAll((els) => {
+      const track = els[0].closest("[data-gallery-track]")!.getBoundingClientRect();
+      return els.filter((e) => { const r = e.getBoundingClientRect(); return r.left >= track.left - 1 && r.right <= track.right + 1; }).length;
+    });
+    expect(visible).toBe(isMobile ? 3 : 4);
+    if (isMobile) {
+      const next = page.getByRole("button", { name: "Järgmised pildid" });
+      await expect(next).toBeEnabled();
+      await next.click();
+      await expect(next).toBeDisabled();
+    }
+  });
+
+  test("tags show type, level and language; no hybrid wording on any course page (K1, K2)", async ({ page }) => {
+    for (const slug of ["kulmumeistri-baaskoolitus", "lash-lift-botox", "kulmude-lami", "kulmumeistri-e-koolitus", "kulmukuju-ja-summeetria", "ripsmete-laminatsiooni-alused"]) {
+      await page.goto(`/koolitused/${slug}`);
+      await expect(page.getByText(/hübriid/i), slug).toHaveCount(0);
+    }
+    const tags = page.locator("[data-course-tags]");
+    await expect(tags).toContainText("E-õpe");
+    await expect(tags).toContainText("Baaskoolitus");
+    await expect(tags).toContainText("ET / RU");
+  });
+
+  test("unknown or unpublished slug is a 404", async ({ page }) => {
+    const res = await page.goto("/koolitused/ei-ole-olemas");
+    expect(res?.status()).toBe(404);
+  });
+
+  test("RU course page", async ({ page }) => {
+    await page.goto("/ru/koolitused/kulmumeistri-baaskoolitus");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Базовый курс бровиста");
+    await expect(page.getByRole("radio", { name: /Групповое обучение/ })).toBeVisible();
+  });
+
+  test("no horizontal overflow and no console errors", async ({ page }) => {
+    const errors = noErrors(page);
+    for (const p of ["/koolitused/kulmumeistri-e-koolitus", "/koolitused/kulmumeistri-baaskoolitus", "/ru/koolitused/lash-lift-botox", "/ostukorv?kursus=kulmumeistri-e-koolitus"]) {
+      await page.goto(p);
+      await page.waitForLoadState("networkidle");
+      const w = await page.evaluate(() => window.innerWidth);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), p).toBeLessThanOrEqual(w);
+    }
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe("cart (/ostukorv)", () => {
+  test("summarises the e-course, says payment opens soon, takes an e-mail (P9)", async ({ page }) => {
+    await page.goto("/ostukorv?kursus=kulmumeistri-e-koolitus");
+    await expect(page.getByRole("heading", { name: "Kulmumeistri e-koolitus" })).toBeVisible();
+    await expect(page.locator("[data-cart-summary]")).toContainText("190 €");
+    await expect(page.getByText(/Makse lisandub peagi — saad koolituse osta niipea, kui makse on avatud\. Jäta oma e-post, anname teada\./)).toBeVisible();
+    const form = page.locator("[data-interest-form]");
+    await form.getByLabel("E-post").fill("test@example.com");
+    await form.getByRole("button").click();
+    await expect(page.getByText("Aitäh! Anname teada, kui makse on avatud.")).toBeVisible();
+  });
+
+  test("empty cart without a course or for a contact course", async ({ page }) => {
+    for (const p of ["/ostukorv", "/ostukorv?kursus=kulmumeistri-baaskoolitus", "/ostukorv?kursus=ei-ole"]) {
+      await page.goto(p);
+      await expect(page.getByRole("heading", { name: "Ostukorv on tühi" }), p).toBeVisible();
+      await expect(page.getByRole("link", { name: /Vaata e-õppe koolitusi/ })).toHaveAttribute("href", "/koolitused?vorm=e");
+    }
+  });
+});

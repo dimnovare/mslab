@@ -1,0 +1,226 @@
+/* Course page: prototype B detail() — .breadcrumb, .course-detail (two columns, sticky image), .detail-info,
+   .detail-bottom (two columns, h2 32px, .check-list, .notice) — in Jost / Manrope (G2). */
+
+.crumb {
+  padding: 28px 0 16px;
+}
+
+.crumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  color: #716a6d;
+  font-size: 12px;
+  list-style: none;
+}
+
+.crumb li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.crumb li + li::before {
+  content: "/";
+  color: #a49b9f;
+}
+
+.crumb a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.crumb a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.crumb [aria-current="page"] {
+  color: var(--ink);
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(28px, 4.5vw, 65px);
+  align-items: start;
+}
+
+/* B .detail-image: the gallery stays in view while the right column scrolls (below the sticky header). */
+.media {
+  position: sticky;
+  top: calc(var(--header-h) + 24px);
+  min-width: 0;
+}
+
+.info {
+  min-width: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+/* B .tag */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--first);
+  font: 500 12px/1.3 var(--font-body);
+  white-space: nowrap;
+}
+
+.tagOutline {
+  background: transparent;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 7px;
+  font: 600 12px/1.3 var(--font-body);
+}
+
+.title {
+  margin: 22px 0 16px;
+  font: 400 clamp(36px, 3.6vw, 52px) / 1.06 var(--font-display);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.summary {
+  max-width: 600px;
+  margin: 0;
+  color: #5e5559;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 26px;
+  margin-top: 14px;
+}
+
+/* B .detail-bottom */
+.bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 clamp(35px, 5vw, 70px);
+  margin-top: clamp(56px, 6vw, 90px);
+}
+
+.column {
+  display: grid;
+  align-content: start;
+  gap: 48px;
+  min-width: 0;
+}
+
+.h2 {
+  margin: 0 0 24px;
+  font: 400 clamp(26px, 2.4vw, 32px) / 1.15 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.prose p {
+  max-width: 640px;
+  margin: 0 0 14px;
+  color: #3a3437;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+/* B .check-list */
+.checkList {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.checkList li {
+  display: flex;
+  gap: 14px;
+}
+
+.checkList svg {
+  flex: none;
+  margin-top: 3px;
+  color: #8c6f80;
+}
+
+/* B .notice */
+.notice {
+  margin: 24px 0 0;
+  padding: 14px 18px;
+  border-left: 2px solid var(--rose);
+  border-radius: 0 10px 10px 0;
+  background: #f0ebed;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.trainer {
+  margin-top: clamp(56px, 6vw, 90px);
+}
+
+@media (max-width: 1180px) {
+  .detail {
+    gap: 35px;
+  }
+}
+
+/* The registration column needs room: below 980px the gallery sits above the facts and the form (B goes
+   single-column at 640px, but its right column was a few lines; ours holds the whole registration). */
+@media (max-width: 980px) {
+  .detail {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .media {
+    position: relative;
+    top: 0;
+  }
+}
+
+@media (max-width: 860px) {
+  .bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .column + .column {
+    margin-top: 48px;
+  }
+}
+
+@media (max-width: 640px) {
+  .crumb {
+    padding: 12px 0 8px;
+  }
+
+  .title {
+    margin: 18px 0 12px;
+  }
+}

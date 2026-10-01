@@ -119,6 +119,10 @@ export const et = {
     onlineStart: "Veebis · alusta kohe",
     from: "alates",
     cardCta: "Vaata õppekava",
+    // Format explainer: the hybrid card and note only explain (K1, K8); they never filter.
+    readMore: "Loe lähemalt",
+    hybridNote: "Soovid e-õpet ja kontaktõpet omavahel kombineerida?",
+    results: "Leitud koolitusi: {n}",
   },
 
   course: {
@@ -137,20 +141,30 @@ export const et = {
     // E-learning purchase (P8, P9)
     payNow: "Maksa kohe — 100% pangalingiga",
     instalmentSoon: "Vormista järelmaks — tulekul",
-    instalmentNote: "Järelmaksu võimalus lisandub hiljem.",
+    // Under the disabled instalment option; says "later" without repeating the option name.
+    instalmentNote: "See võimalus lisandub hiljem.",
     buyNow: "Osta kohe",
     checkoutSoon:
       "Makse lisandub peagi — saad koolituse osta niipea, kui makse on avatud. Jäta oma e-post, anname teada.",
     includesTitle: "Koolitus sisaldab",
+    // E-learning "Koolitus sisaldab" (P8): the video count line comes first, then these.
+    includesVideos: "{n} õppevideot",
     includesElearning: [
-      "Videotunnid ja õppematerjalid",
+      "Õppematerjalid",
       "Teadmiste test",
       "Praktilise töö hindamine",
       "Tunnistus pärast edukat lõpetamist",
     ],
+    descriptionTitle: "Koolitusest",
     programmeTitle: "Õppekava",
     outcomesTitle: "Pärast koolitust oskad",
     locked: "Lukustatud",
+    breadcrumb: "Lehe asukoht",
+    thumbsLabel: "Kõik pildid",
+    prevThumbs: "Eelmised pildid",
+    nextThumbs: "Järgmised pildid",
+    individualNote: "Individuaalkoolituse aja lepime kokku. Märgi soovitud periood — Maria võtab sinuga ühendust.",
+    sessionRequired: "Vali sobiv kuupäev.",
     // Contact course registration (P10 - P15)
     participationLabel: "Osalemisviis",
     group: "Grupikoolitus",
@@ -258,7 +272,10 @@ export const et = {
     payHalf: "50% registreerimisel + 50% koolituspäeval",
     // Individual request, waitlist, cart interest
     preferredPeriod: "Soovitud periood või kuupäev",
+    preferredPeriodPlaceholder: "Nt detsembri teine pool või 12.12",
+    optional: "valikuline",
     requestSubmit: "Saada päring",
+    interestSubmit: "Anna mulle teada",
     waitlistTitle: "Liitu ootenimekirjaga",
     waitlistLead: "Jäta oma e-post ja anname teada, kui koht vabaneb või lisandub uus kuupäev.",
     waitlistSubmit: "Liitu ootenimekirjaga",
@@ -308,6 +325,14 @@ export const et = {
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
     sentTitle: "Kontrolli oma postkasti",
+  },
+
+  // /ostukorv: e-learning purchase placeholder until bank-link payment arrives (P9).
+  cart: {
+    title: "Ostukorv",
+    emptyTitle: "Ostukorv on tühi",
+    emptyText: "Vali endale sobiv e-koolitus — selle saad osta kohe, kui makse avaneb.",
+    total: "Kokku",
   },
 
   // Campaign popup. No "Mitte praegu" button (M3); the CTA label is editable in admin, this is the default (M4).

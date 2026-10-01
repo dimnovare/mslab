@@ -1,0 +1,128 @@
+import { test, expect } from "@playwright/test";
+
+// Catalogue (Task 8): Maria's K1–K13. The first test is the brief's test verbatim; the rest cover the
+// remaining checklist items against the seed data (3 contact + 3 e-learning courses).
+
+test("catalogue filters are on separate rows and hybrid has no steps", async ({ page }) => {
+  await page.goto("/koolitused");
+  const f = await page.locator("[data-filter-row='format']").boundingBox(); const l = await page.locator("[data-filter-row='level']").boundingBox();
+  expect(l!.y).toBeGreaterThan(f!.y + f!.height - 1);
+  await page.getByRole("button", { name: "E-õpe" }).first().click();
+  await expect(page.locator("[data-steps]")).toBeVisible();
+  await expect(page.locator("[data-course-card][data-type='contact']")).toHaveCount(0);
+  await page.getByRole("button", { name: /Hübriidõpe/ }).click();
+  await expect(page.locator("[data-steps]")).toHaveCount(0);
+});
+
+test.describe("catalogue", () => {
+  test("Kõik shows the three Õppevormid cards; the hybrid card explains only and does not filter (K1, K7, K8)", async ({ page }) => {
+    await page.goto("/koolitused");
+    const explainer = page.locator("[data-explainer]");
+    await expect(explainer.getByText("Õppevormid")).toBeVisible();
+    await expect(explainer.locator("[data-format-card]")).toHaveCount(3);
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    // No hybrid filter chip: the format row has Kõik / E-õpe / Kontaktõpe only (K1).
+    await expect(page.locator("[data-filter-row='format'] button")).toHaveText(["Kõik", "E-õpe", "Kontaktõpe"]);
+    const hybrid = explainer.locator("[data-format-card='h']");
+    await hybrid.click();
+    await expect(hybrid).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("[data-hybrid-panel]").getByText(/Hübriidõpe ühendab kaks erinevat õppevormi/)).toBeVisible();
+    await expect(page.locator("[data-steps]")).toHaveCount(0);
+    await expect(page.locator("[data-hybrid-panel]").getByRole("link")).toHaveCount(0);
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    expect(new URL(page.url()).search).toBe("");
+  });
+
+  test("format and level filters keep the URL (?vorm, ?tase) and survive a reload (K3, K4)", async ({ page }) => {
+    await page.goto("/koolitused");
+    await page.locator("[data-filter-row='format']").getByRole("button", { name: "Kontaktõpe" }).click();
+    await expect(page).toHaveURL(/\?vorm=k$/);
+    await expect(page.locator("[data-course-card][data-type='e_learning']")).toHaveCount(0);
+    await expect(page.locator("[data-course-card]")).toHaveCount(3);
+    await page.locator("[data-filter-row='level']").getByRole("button", { name: "Täiendkoolitused" }).click();
+    await expect(page).toHaveURL(/\?vorm=k&tase=taiend$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await page.reload();
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await expect(page.locator("[data-filter-row='level']").getByRole("button", { name: "Täiendkoolitused" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("[data-steps]")).toBeVisible();
+  });
+
+  test("home links ?vorm=e and level ?tase=baas are honoured on first render", async ({ page }) => {
+    await page.goto("/koolitused?vorm=e&tase=baas");
+    await expect(page.locator("[data-course-card]")).toHaveCount(2);
+    await expect(page.locator("[data-course-card][data-type='contact']")).toHaveCount(0);
+    await expect(page.locator("[data-filter-row='format']").getByRole("button", { name: "E-õpe" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("heading", { name: "Mis on e-õpe?" })).toBeVisible();
+    await expect(page.locator("[data-steps] li").nth(3)).toContainText("Sulle luuakse automaatselt õpilase konto"); // K11
+  });
+
+  test("the hybrid note in a format panel switches to all courses with the hybrid explanation", async ({ page }) => {
+    await page.goto("/koolitused?vorm=k");
+    await page.getByRole("button", { name: /Hübriidõpe/ }).click();
+    await expect(page).toHaveURL(/\/koolitused$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    await expect(page.locator("[data-hybrid-panel]")).toBeVisible();
+    await expect(page.locator("[data-hybrid-panel] h2")).toBeFocused();
+  });
+
+  test("search filters cards, empty state resets (K13)", async ({ page }) => {
+    await page.goto("/koolitused");
+    const search = page.getByRole("searchbox", { name: "Otsi koolitust" });
+    await search.fill("lami"); // Kulmude LAMI and Ripsmete laminatsiooni alused
+    await expect(page.locator("[data-course-card]")).toHaveCount(2);
+    await search.fill("KULMUDE lami");
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await expect(page.locator("[data-course-card]")).toContainText("Kulmude LAMI");
+    await search.fill("sümmeetria");
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await search.fill("summeetria"); // diacritics are ignored
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await search.fill("zzzz");
+    await expect(page.locator("[data-course-card]")).toHaveCount(0);
+    await expect(page.getByText("Sobivat koolitust ei leitud")).toBeVisible();
+    await page.getByRole("button", { name: "Lähtesta filtrid" }).click();
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    await expect(search).toHaveValue("");
+  });
+
+  test("cards: badge, contact meta with next date and city, e-learning meta (K12)", async ({ page }) => {
+    await page.goto("/koolitused");
+    const brow = page.locator("[data-course-card]", { hasText: "Kulmumeistri baaskoolitus" });
+    await expect(brow.getByText("Populaarne")).toBeVisible();
+    await expect(brow).toContainText("14.11 · Pärnu");
+    await expect(brow).toHaveAttribute("href", "/koolitused/kulmumeistri-baaskoolitus");
+    await expect(page.locator("[data-course-card]", { hasText: "Kulmumeistri e-koolitus" })).toContainText("Veebis · alusta kohe");
+    // Catalogue cards are square (1:1).
+    const box = await brow.locator("[data-card-photo]").boundingBox();
+    expect(Math.abs(box!.width - box!.height)).toBeLessThan(2);
+  });
+
+  test("type sizes: heading smaller (K9), intro 17px (K10), explainer text 16px (K6)", async ({ page }) => {
+    await page.goto("/koolitused?vorm=e");
+    const h1 = await page.getByRole("heading", { level: 1 }).evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+    expect(h1).toBeGreaterThanOrEqual(34);
+    expect(h1).toBeLessThanOrEqual(52);
+    expect(await page.locator("[data-catalogue-intro]").evaluate((e) => getComputedStyle(e).fontSize)).toBe("17px");
+    expect(await page.locator("[data-explainer-text]").evaluate((e) => getComputedStyle(e).fontSize)).toBe("16px");
+  });
+
+  test("RU catalogue", async ({ page }) => {
+    await page.goto("/ru/koolitused?vorm=k");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Найдите свой курс.");
+    await expect(page.locator("[data-course-card]").first()).toHaveAttribute("href", /^\/ru\/koolitused\//);
+  });
+
+  test("no horizontal overflow and no console errors", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    page.on("pageerror", (e) => errors.push(e.message));
+    for (const p of ["/koolitused", "/koolitused?vorm=e", "/ru/koolitused?vorm=k"]) {
+      await page.goto(p);
+      await page.waitForLoadState("networkidle");
+      const w = await page.evaluate(() => window.innerWidth);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), p).toBeLessThanOrEqual(w);
+    }
+    expect(errors).toEqual([]);
+  });
+});

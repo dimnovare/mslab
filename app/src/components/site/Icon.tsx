@@ -10,18 +10,22 @@ const PATHS = {
   flower: ["M12 12C-2 9 7-5 12 9c5-14 14 0 0 3 14 3 5 17 0 3-5 14-14 0 0-3Z"],
   clock: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z", "M12 7v5l3 2"],
   check: ["m5 12 4 4L19 6"],
+  heart: ["M12 20s-7.5-4.6-7.5-10.2A4.1 4.1 0 0 1 12 7.4a4.1 4.1 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20Z"],
+  lock: ["M6.5 11h11v9h-11z", "M9 11V8a3 3 0 0 1 6 0v3"],
+  search: ["M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z", "m20 20-4.4-4.4"],
 } as const;
 
 export type IconName = keyof typeof PATHS;
 
-export function Icon({ name, size = 19, className }: { name: IconName; size?: number; className?: string }) {
+/** `filled` paints the shape in currentColor too (the pressed favourite heart). */
+export function Icon({ name, size = 19, className, filled }: { name: IconName; size?: number; className?: string; filled?: boolean }) {
   return (
     <svg
       className={className}
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill="none"
+      fill={filled ? "currentColor" : "none"}
       stroke="currentColor"
       strokeWidth={1.4}
       strokeLinecap="round"

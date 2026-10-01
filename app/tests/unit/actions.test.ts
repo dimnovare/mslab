@@ -1,0 +1,40 @@
+import { describe, expect, test } from "vitest";
+import { registerContact, submitIndividual, submitPurchaseInterest } from "@/server/actions/public";
+
+// Task 8 placeholders: validation only (Task 10 adds storage, notifications and rate limits).
+
+const form = (fields: Record<string, string>) => {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+};
+const base = { course: "kulmumeistri-baaskoolitus", name: "Test Õpilane", email: "test@example.com", phone: "+372 5555 5555", payment: "half", terms: "on", locale: "et" };
+
+describe("registerContact (group)", () => {
+  test("accepts a complete registration", async () => {
+    expect(await registerContact(form({ ...base, session: "12", modelHelp: "on" }))).toEqual({ ok: true });
+  });
+  test("needs a session, contact details, a payment choice and the terms", async () => {
+    const r = await registerContact(form({ course: "x", email: "nope", phone: "abc", payment: "all" }));
+    expect(r).toEqual({ ok: false, errors: { session: "required", name: "required", email: "invalid", phone: "required", payment: "required", terms: "required" } });
+  });
+  test("a course slug is required", async () => {
+    expect(await registerContact(form({ ...base, course: "", session: "1" }))).toEqual({ ok: false, errors: { form: "invalid" } });
+  });
+});
+
+describe("submitIndividual", () => {
+  test("accepts a request with the preferred period", async () => {
+    expect(await submitIndividual(form({ ...base, period: "Detsembri teine pool" }))).toEqual({ ok: true });
+  });
+  test("the preferred period is required, the message is limited", async () => {
+    expect(await submitIndividual(form({ ...base, message: "x".repeat(2001) }))).toEqual({ ok: false, errors: { period: "required", message: "required" } });
+  });
+});
+
+describe("submitPurchaseInterest", () => {
+  test("e-mail and course", async () => {
+    expect(await submitPurchaseInterest(form({ course: "kulmumeistri-e-koolitus", email: "test@example.com" }))).toEqual({ ok: true });
+    expect(await submitPurchaseInterest(form({ course: "", email: "x" }))).toEqual({ ok: false, errors: { email: "invalid", form: "invalid" } });
+  });
+});

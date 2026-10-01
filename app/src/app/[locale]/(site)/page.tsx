@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { BlogCarousel } from "@/components/site/BlogCarousel";
 import { ContactBlock } from "@/components/site/ContactBlock";
-import { CourseCard, type CourseCardData } from "@/components/site/CourseCard";
+import { CourseCard } from "@/components/site/CourseCard";
+import { courseCardData } from "@/components/site/course-card-data";
 import { Faq } from "@/components/site/Faq";
 import { FormatsBlock, type FormatTab } from "@/components/site/FormatsBlock";
 import { Hero, type HeroSlideView } from "@/components/site/Hero";
@@ -15,14 +16,13 @@ import { TrainerTeaser } from "@/components/site/TrainerTeaser";
 import { UpcomingStrip } from "@/components/site/UpcomingStrip";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
-import { getHomeData, listUpcomingSessions, type CourseWithImages, type UpcomingSession } from "@/db/queries/public";
-import { fromPrice, priceOptions } from "@/domain/course";
+import { getHomeData, listUpcomingSessions } from "@/db/queries/public";
 import { firstParagraph, nextSessionByCourse, nextSessions, pickHomeCourses } from "@/domain/home";
 import { formatEUR } from "@/domain/money";
 import { pick, pickList } from "@/i18n/field";
 import { fill, formatDate, formatDayMonth, formatWeekday } from "@/i18n/format";
 import { href } from "@/i18n/href";
-import { getDict, isLocale, type Dict, type Locale } from "@/i18n/locales";
+import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "./home.module.css";
 
@@ -57,7 +57,7 @@ export default async function Home({ params }: Props) {
   }));
 
   const nextByCourse = nextSessionByCourse(sessions);
-  const cards = pickHomeCourses(home.courses).map((c) => courseCard(c, nextByCourse.get(c.id), locale, d, to));
+  const cards = pickHomeCourses(home.courses).map((c) => courseCardData(c, nextByCourse.get(c.id), locale, d, to));
 
   const f = d.formats;
   const formatTabs: FormatTab[] = [
@@ -208,25 +208,4 @@ export default async function Home({ params }: Props) {
       />
     </>
   );
-}
-
-/** Card data for a course: B card with the type's chip, level, D meta line (next date + city, or "Veebis · alusta kohe"). */
-function courseCard(c: CourseWithImages, next: UpcomingSession | undefined, l: Locale, d: Dict, to: (path: string) => string): CourseCardData {
-  const title = pick(c.title, l);
-  const image = c.images[0];
-  const from = fromPrice(c);
-  const online = c.type === "e_learning";
-  return {
-    id: c.id,
-    type: c.type,
-    href: to(`/koolitused/${c.slug}`),
-    title,
-    summary: pick(c.summary, l),
-    image: image ? mediaUrl(image.key) : "",
-    imageAlt: pick(image?.alt, l) || title,
-    badge: c.badge,
-    tags: [online ? d.formats.elearning.name : d.formats.contact.name, c.level === "basic" ? d.course.levelBasic : d.course.levelAdvanced],
-    meta: online ? { text: d.catalogue.onlineStart } : next ? { lead: formatDayMonth(next.startsAt, l), text: next.city } : { text: d.formats.contact.short },
-    price: from == null ? "" : priceOptions(c).length > 1 ? `${d.catalogue.from} ${formatEUR(from, l)}` : formatEUR(from, l),
-  };
 }

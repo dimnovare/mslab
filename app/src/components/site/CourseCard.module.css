@@ -21,6 +21,12 @@
   background: #e6dfe0;
 }
 
+/* Catalogue and recommendations: 1:1 photo (prototype D card(c, "1/1")), at every width. */
+.photo.square {
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+
 .image {
   object-fit: cover;
   transition: transform 0.6s;
@@ -128,13 +134,13 @@
 }
 
 @media (max-width: 1180px) {
-  .photo {
+  .photo:not(.square) {
     height: 300px;
   }
 }
 
 @media (max-width: 640px) {
-  .photo {
+  .photo:not(.square) {
     height: 350px;
   }
 

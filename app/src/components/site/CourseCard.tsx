@@ -20,12 +20,15 @@ export type CourseCardData = {
   price: string;
 };
 
-/** Prototype B `courseCard` (journey.js badge top right, chips bottom left) with D's type-specific meta line (K12). */
-export function CourseCard({ c }: { c: CourseCardData }) {
+/**
+ * Prototype B `courseCard` (journey.js badge top right, chips bottom left) with D's type-specific meta line (K12).
+ * `square`: the catalogue and recommendation grids use D's 1:1 photo instead of B's fixed photo height.
+ */
+export function CourseCard({ c, square, sizes = "(max-width: 640px) 100vw, (max-width: 1180px) 50vw, 25vw" }: { c: CourseCardData; square?: boolean; sizes?: string }) {
   return (
     <Link className={styles.card} href={c.href} data-course-card="" data-type={c.type}>
-      <div className={styles.photo}>
-        {c.image && <Image className={styles.image} src={c.image} alt={c.imageAlt} fill unoptimized sizes="(max-width: 640px) 100vw, (max-width: 1180px) 50vw, 25vw" />}
+      <div className={square ? `${styles.photo} ${styles.square}` : styles.photo} data-card-photo="">
+        {c.image && <Image className={styles.image} src={c.image} alt={c.imageAlt} fill unoptimized sizes={sizes} />}
         {c.badge?.label && (
           <span className={styles.badge} style={{ background: c.badge.bg, color: c.badge.fg }}>
             {c.badge.label}
