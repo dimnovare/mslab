@@ -197,9 +197,11 @@ export const et = {
     stateFull: "Täis",
     stateCancelled: "Tühistatud",
     register: "Registreeru",
-    waitlist: "Liitu ootenimekirjaga",
-    others: "Vaata teisi koolitusi",
+    // Row buttons (prototype A): full → waitlist form, cancelled → the course page with its other dates.
+    waitlist: "Ootenimekirja",
+    others: "Vaata teisi",
     empty: "Selles linnas hetkel koolitusi pole.",
+    results: "Kuupäevi: {n}",
   },
 
   practice: {
@@ -208,7 +210,7 @@ export const et = {
     onlyParnuShort: "Ainult Pärnus",
     // Home practice block eyebrow above the big "Praktika" heading (H11, C22).
     eyebrowParnu: "Individuaalpraktika · ainult Pärnus",
-    onlyParnu: "Praktika toimub ainult Pärnus.",
+    onlyParnu: "Praktika toimub ainult Pärnus, MS LAB stuudios.",
     slogan: "Teadmised muutuvad oskusteks.",
     lead: "Harjuta, küsi ja katseta. Üks-ühele juhendamine aitab leida sinu käekirja ja järgmise arengusammu.",
     intro:
@@ -233,6 +235,7 @@ export const et = {
     requestSubmit: "Saada taotlus",
     requestSent: "Taotlus on saadetud.",
     requestSentText: "Maria võtab sinuga ühendust ja pakub sobiva aja.",
+    packageRequired: "Vali praktikapakett.",
   },
 
   trainer: {
@@ -254,6 +257,9 @@ export const et = {
     readMore: "Loe edasi",
     more: "Loe veel",
     carouselLabel: "Postituste karussell",
+    // /uudised (prototype D pNewsList: eyebrow "Uudised ja nõuanded", heading "Blogi.").
+    pageTitle: "Blogi.",
+    coursesCta: "Vaata koolitusi",
   },
 
   forms: {
@@ -285,6 +291,7 @@ export const et = {
     contactPageTitle: "Alustame vestlusest.",
     contactPageLead: "Küsimus koolituse, praktika või koostöö kohta? Jäta oma mõte siia.",
     contactDetails: "Kontaktandmed",
+    address: "Asukoht",
     // Results and errors
     contactSent: "Aitäh! Sinu sõnum on saadetud.",
     individualSent: "Aitäh! Sinu päring on saadetud.",

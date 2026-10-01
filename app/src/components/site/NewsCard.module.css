@@ -1,0 +1,130 @@
+/* Prototype D .grid / .news (light card on the canvas surface). D's 1240px page gave three columns on desktop and two
+   below ~900px; our wider page keeps those counts. */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grid > li {
+  min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--r-card);
+  background: var(--canvas);
+  color: var(--ink);
+  text-decoration: none;
+  transition:
+    transform 0.45s var(--ease),
+    box-shadow 0.45s var(--ease);
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 40px -22px rgba(34, 34, 34, 0.35);
+}
+
+.photo {
+  position: relative;
+  display: block;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--first);
+}
+
+.image {
+  object-fit: cover;
+  transition: transform 0.9s var(--ease);
+}
+
+.card:hover .image {
+  transform: scale(1.05);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px 26px;
+}
+
+.meta {
+  color: #675d62;
+  font: 500 12px/1.2 var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  font: 400 21px/1.25 var(--font-display);
+  letter-spacing: -0.005em;
+}
+
+.excerpt {
+  color: #675d62;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* D .more */
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  margin-top: auto;
+  font: 500 15px/1 var(--font-body);
+}
+
+.more::after {
+  content: "›";
+  font-size: 1.3em;
+  transform: translateY(-1px);
+  transition: transform 0.3s var(--ease);
+}
+
+.card:hover .more::after {
+  transform: translate(3px, -1px);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .grid {
+    gap: 28px 12px;
+  }
+
+  .body {
+    padding: 16px;
+  }
+
+  .title {
+    font-size: 17px;
+  }
+
+  .excerpt {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card:hover,
+  .card:hover .image {
+    transform: none;
+  }
+}

@@ -1,0 +1,25 @@
+/* Prototype B .page-head + .prose (750px column, muted paragraphs). */
+
+.page {
+  min-height: 45vh;
+  padding-top: clamp(48px, 7vw, 96px);
+  padding-bottom: 30px;
+}
+
+.inner {
+  max-width: 750px;
+  margin: 0 auto;
+}
+
+.title {
+  margin: 0 0 clamp(24px, 3vw, 36px);
+  font: 400 clamp(36px, 4.5vw, 60px) / 1.06 var(--font-display);
+  letter-spacing: -0.015em;
+}
+
+.body p {
+  margin: 0 0 22px;
+  color: #3a3437;
+  font-size: 17px;
+  line-height: 1.7;
+}

@@ -1,0 +1,209 @@
+/* Prototype B practice request (.registration: form-grid of two columns, .field, .notice, .success-block),
+   with the package as radio cards (B/D option cards) and Manrope inputs at 16px. */
+
+.selected {
+  margin: 0 0 22px;
+  color: #716a6d;
+  font-size: 15px;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 20px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.packages {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  display: block;
+  margin: 0 0 10px;
+  padding: 0;
+  font: 600 13px/1.3 var(--font-body);
+}
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+}
+
+.option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "radio name price"
+    "radio duration price";
+  gap: 2px 12px;
+  align-items: center;
+  min-height: 64px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.option:hover {
+  border-color: var(--fog);
+}
+
+.option:has(input:checked) {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.option input {
+  grid-area: radio;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--ink);
+  cursor: inherit;
+}
+
+.optionName {
+  grid-area: name;
+  font: 400 24px/1.1 var(--font-display);
+}
+
+.optionDuration {
+  grid-area: duration;
+  color: #5e5559;
+  font: 500 13px/1.3 var(--font-body);
+}
+
+.optionPrice {
+  grid-area: price;
+  font: 400 22px/1 var(--font-display);
+  white-space: nowrap;
+}
+
+.packages[aria-invalid="true"] .option {
+  border-color: var(--bad);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  font: 600 12px/1.3 var(--font-body);
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 16px/1.4 var(--font-body);
+}
+
+.field textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
+  border-color: var(--rose);
+}
+
+.field [aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.optional {
+  color: #716a6d;
+  font-weight: 400;
+}
+
+/* B .notice */
+.note {
+  margin: 0;
+  padding: 14px 18px;
+  border-left: 2px solid var(--rose);
+  border-radius: 0 10px 10px 0;
+  background: #f0ebed;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.error {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--bad);
+  font: 400 12px/1.4 var(--font-body);
+}
+
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+/* B .success-block */
+.sent {
+  padding: 45px 25px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--paper);
+  text-align: center;
+}
+
+.sent:focus {
+  outline: none;
+}
+
+.sent:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 3px;
+}
+
+.tick {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 25px;
+  border-radius: 50%;
+  background: #e6eee8;
+  color: #35533f;
+}
+
+.sentTitle {
+  margin: 0 0 14px;
+  font: 400 clamp(28px, 3vw, 37px) / 1.1 var(--font-display);
+}
+
+.sentText {
+  margin: 0;
+  color: #716a6d;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 17px;
+  }
+}

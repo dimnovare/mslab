@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { registerContact, submitIndividual, submitPurchaseInterest } from "@/server/actions/public";
+import { registerContact, submitIndividual, submitPractice, submitPurchaseInterest, submitWaitlist } from "@/server/actions/public";
 
 // Task 8 placeholders: validation only (Task 10 adds storage, notifications and rate limits).
 
@@ -42,5 +42,27 @@ describe("submitPurchaseInterest", () => {
   test("e-mail and course", async () => {
     expect(await submitPurchaseInterest(form({ course: "kulmumeistri-e-koolitus", email: "test@example.com" }))).toEqual({ ok: true });
     expect(await submitPurchaseInterest(form({ course: "", email: "x" }))).toEqual({ ok: false, errors: { email: "invalid", form: "invalid" } });
+  });
+});
+
+describe("submitPractice", () => {
+  const practice = { package: "MINI", name: "Test Õpilane", email: "test@example.com", phone: "+372 5555 5555", times: "Tööpäeva õhtud", locale: "et" };
+  test("accepts a complete request; the completed course is optional", async () => {
+    expect(await submitPractice(form(practice))).toEqual({ ok: true });
+    expect(await submitPractice(form({ ...practice, course: "Kulmumeistri baaskoolitus" }))).toEqual({ ok: true });
+  });
+  test("needs a package, contact details and preferred times", async () => {
+    expect(await submitPractice(form({ email: "x", course: "y".repeat(201) }))).toEqual({
+      ok: false,
+      errors: { package: "required", name: "required", email: "invalid", phone: "required", course: "required", times: "required" },
+    });
+    expect(await submitPractice(form({ ...practice, package: "<script>" }))).toEqual({ ok: false, errors: { package: "required" } });
+  });
+});
+
+describe("submitWaitlist", () => {
+  test("name, e-mail and the session", async () => {
+    expect(await submitWaitlist(form({ session: "12", name: "Test", email: "test@example.com" }))).toEqual({ ok: true });
+    expect(await submitWaitlist(form({ session: "abc", name: "", email: "nope" }))).toEqual({ ok: false, errors: { form: "invalid", name: "required", email: "invalid" } });
   });
 });

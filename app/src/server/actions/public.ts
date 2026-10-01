@@ -91,3 +91,44 @@ export async function submitPurchaseInterest(formData: FormData): Promise<Action
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true };
 }
+
+const PACKAGE_CODE = /^[A-Za-z0-9_-]{1,20}$/;
+
+/**
+ * Practice request (/praktika#taotlus, R1). Nothing is booked or paid: Maria agrees the time afterwards. Task 10 stores it
+ * as a request of kind `practice` and notifies Maria. Fields: package (code, e.g. MINI), name, email, phone,
+ * course (optional: completed course or experience), times (preferred times), locale, website (honeypot).
+ * Errors: package/name/phone/times "required", email "invalid", course "required" when too long.
+ */
+export async function submitPractice(formData: FormData): Promise<ActionResult> {
+  const field = (k: string) => String(formData.get(k) ?? "").trim();
+  const errors: Record<string, string> = {};
+  const name = field("name");
+  const email = field("email");
+  const times = field("times");
+  if (!PACKAGE_CODE.test(field("package"))) errors.package = "required";
+  if (!name || name.length > MAX.name) errors.name = "required";
+  if (!EMAIL.test(email) || email.length > MAX.email) errors.email = "invalid";
+  if (!PHONE.test(field("phone"))) errors.phone = "required";
+  if (field("course").length > MAX.period) errors.course = "required";
+  if (!times || times.length > MAX.message) errors.times = "required";
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true };
+}
+
+/**
+ * Waitlist for a full calendar session (Ootenimekirja, A3). Task 10 stores a request of kind `waitlist` with the session id
+ * and tells Maria. Fields: session (id), name, email, locale, website (honeypot).
+ * Errors: name "required", email "invalid", form "invalid" (no session id).
+ */
+export async function submitWaitlist(formData: FormData): Promise<ActionResult> {
+  const field = (k: string) => String(formData.get(k) ?? "").trim();
+  const errors: Record<string, string> = {};
+  const name = field("name");
+  const email = field("email");
+  if (!/^\d{1,9}$/.test(field("session"))) errors.form = "invalid";
+  if (!name || name.length > MAX.name) errors.name = "required";
+  if (!EMAIL.test(email) || email.length > MAX.email) errors.email = "invalid";
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true };
+}

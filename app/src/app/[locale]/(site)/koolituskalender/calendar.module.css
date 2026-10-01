@@ -1,0 +1,24 @@
+/* Prototype A calendar screen: heading in Jost, then the chips and rows (CalendarList). */
+
+.page {
+  padding-top: clamp(32px, 5vw, 72px);
+  padding-bottom: 30px;
+}
+
+.head {
+  margin-bottom: 28px;
+}
+
+.title {
+  margin: 0;
+  font: 400 clamp(40px, 5vw, 68px) / 1.04 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.lead {
+  max-width: 640px;
+  margin: 14px 0 0;
+  color: #5e5559;
+  font-size: 16px;
+  line-height: 1.55;
+}

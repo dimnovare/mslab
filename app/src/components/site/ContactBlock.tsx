@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useActionState, useEffect, useId, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import type { Locale } from "@/i18n/locales";
 import { submitContact } from "@/server/actions/public";
 import { Icon } from "./Icon";
@@ -31,7 +31,8 @@ type State = { status: "idle" } | { status: "sent" } | { status: "error"; errors
 
 /**
  * Prototype D contact block (Maria C31 / H15): "Ei tea, milline koolitus sobib?" with Maria's photo and a form
- * that posts to the `submitContact` server action (storage and notification arrive in Task 10).
+ * that posts to the `submitContact` server action (storage and notification arrive in Task 10). Used on the home page
+ * and on /kontakt. After a failed submit focus goes to the first field with an error, after success to the confirmation.
  */
 export function ContactBlock({ locale, t, person }: { locale: Locale; t: ContactTexts; person: { name: string; photo: string } }) {
   const id = useId();
@@ -54,10 +55,14 @@ export function ContactBlock({ locale, t, person }: { locale: Locale; t: Contact
     }
   }, { status: "idle" });
 
-  // Move focus to the confirmation so screen readers and keyboard users land on it.
+  // Land keyboard and screen-reader users on the confirmation, or on the first field that needs fixing.
   useEffect(() => {
     if (state.status === "sent") sentRef.current?.focus();
-  }, [state.status]);
+    else if (state.status === "error") {
+      const first = (["name", "email", "message"] as const).find((f) => state.errors[f]);
+      document.getElementById(first ? `${id}-${first}` : `${id}-form-error`)?.focus();
+    }
+  }, [state, id]);
 
   const errors: Errors = state.status === "error" ? state.errors : {};
   const fieldProps = (k: "name" | "email" | "message") => ({
@@ -105,7 +110,19 @@ export function ContactBlock({ locale, t, person }: { locale: Locale; t: Contact
               <p>{t.sent}</p>
             </div>
           ) : (
-            <form className={styles.form} action={formAction} noValidate data-contact-form="">
+            <form
+              className={styles.form}
+              method="post"
+              noValidate
+              data-contact-form=""
+              // Submitted by hand, as the other forms (no React form reset); method="post" keeps the message out of the URL.
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (pending) return;
+                const formData = new FormData(e.currentTarget);
+                startTransition(() => formAction(formData));
+              }}
+            >
               <div className={styles.field}>
                 <label htmlFor={`${id}-name`}>{t.name}</label>
                 <input {...fieldProps("name")} type="text" required autoComplete="name" maxLength={120} />
@@ -130,11 +147,12 @@ export function ContactBlock({ locale, t, person }: { locale: Locale; t: Contact
                 </label>
               </div>
               {errors.form && (
-                <p className={styles.error} role="alert">
+                <p id={`${id}-form-error`} className={styles.error} role="alert" tabIndex={-1}>
                   {errors.form}
                 </p>
               )}
-              <button className={`${ui.btn} ${ui.btnFull}`} type="submit" disabled={pending}>
+              {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
+              <button className={`${ui.btn} ${ui.btnFull}`} type="submit" aria-disabled={pending || undefined}>
                 {pending ? t.sending : t.submit}
                 <Icon name="arrow" />
               </button>

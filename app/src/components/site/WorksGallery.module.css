@@ -1,0 +1,117 @@
+/* "Koolitaja tööd" (Maria C29): a small carousel under the portrait. Square images, 3 / 2 / 1.2 per view. */
+
+.works {
+  margin-top: 20px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  margin-bottom: 12px;
+}
+
+/* D .eyebrow (spaced capitals) as the gallery's heading. */
+.title {
+  margin: 0;
+  color: #675d62;
+  font: 600 12px/1.2 var(--font-body);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.arrows {
+  display: flex;
+  gap: 8px;
+}
+
+.arrow {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    opacity 0.2s;
+}
+
+.arrow:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+.arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.track {
+  --visible: 3;
+  --gap: 10px;
+  display: flex;
+  gap: var(--gap);
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.track::-webkit-scrollbar {
+  display: none;
+}
+
+.item {
+  flex: 0 0 calc((100% - (var(--visible) - 1) * var(--gap)) / var(--visible));
+  scroll-snap-align: start;
+}
+
+.thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px;
+  background: var(--first);
+  cursor: zoom-in;
+}
+
+/* The track clips anything outside it, so the focus ring is drawn inside the image. */
+.thumb:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: -2px;
+}
+
+.image {
+  object-fit: cover;
+  transition: transform 0.5s var(--ease);
+}
+
+.thumb:hover .image {
+  transform: scale(1.04);
+}
+
+@media (max-width: 860px) {
+  .track {
+    --visible: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .track {
+    --visible: 1.2;
+  }
+}

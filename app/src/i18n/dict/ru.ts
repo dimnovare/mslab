@@ -188,9 +188,10 @@ export const ru: Dict = {
     stateFull: "Мест нет",
     stateCancelled: "Отменено",
     register: "Записаться",
-    waitlist: "Лист ожидания",
-    others: "Другие курсы",
+    waitlist: "В лист ожидания",
+    others: "Другие даты",
     empty: "В этом городе пока нет курсов.",
+    results: "Дат: {n}",
   },
 
   practice: {
@@ -198,7 +199,7 @@ export const ru: Dict = {
     eyebrow: "Индивидуальная практика",
     onlyParnuShort: "Только в Пярну",
     eyebrowParnu: "Индивидуальная практика · только в Пярну",
-    onlyParnu: "Практика проходит только в Пярну.",
+    onlyParnu: "Практика проходит только в Пярну, в студии MS LAB.",
     slogan: "Знания становятся навыками.",
     lead: "Практикуйтесь, спрашивайте, пробуйте. Индивидуальная работа поможет найти свой почерк и следующий шаг.",
     intro:
@@ -223,6 +224,7 @@ export const ru: Dict = {
     requestSubmit: "Отправить заявку",
     requestSent: "Заявка отправлена.",
     requestSentText: "Мария свяжется с вами и предложит подходящее время.",
+    packageRequired: "Выберите пакет практики.",
   },
 
   trainer: {
@@ -244,6 +246,8 @@ export const ru: Dict = {
     readMore: "Читать далее",
     more: "Читайте также",
     carouselLabel: "Карусель публикаций",
+    pageTitle: "Блог.",
+    coursesCta: "Смотреть курсы",
   },
 
   forms: {
@@ -272,6 +276,7 @@ export const ru: Dict = {
     contactPageTitle: "Начнём с разговора.",
     contactPageLead: "Вопрос о курсе, практике или сотрудничестве? Оставьте сообщение.",
     contactDetails: "Контактные данные",
+    address: "Адрес",
     contactSent: "Спасибо! Ваше сообщение отправлено.",
     individualSent: "Спасибо! Ваш запрос отправлен.",
     waitlistSent: "Спасибо! Вы в листе ожидания.",

@@ -58,6 +58,46 @@
   margin-top: 12px;
 }
 
+/* ---- variant="page" (/praktika): the H1 above says "Praktika", the panel title is B's slogan at B's size ---- */
+
+.onPage {
+  padding-top: 0;
+}
+
+.pageTitle {
+  margin: 18px 0 0;
+  font: 400 clamp(30px, 3.3vw, 47px) / 1.08 var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.points {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  color: #e4dcdf;
+  font-size: 13px;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.points li {
+  display: flex;
+  gap: 10px;
+}
+
+.points li::before {
+  content: "—";
+  color: var(--iced);
+}
+
+/* B .practice-card.selected: the package picked in the request form (?pakett). */
+.card[data-selected="true"] {
+  outline: 3px solid #b29aa7;
+  outline-offset: 4px;
+}
+
 .options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

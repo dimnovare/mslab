@@ -1,0 +1,71 @@
+/* Prototype B practice page: .page-head, the dark panel (PracticeBlock variant "page"), .registration (max 750px). */
+
+.head {
+  padding-top: clamp(36px, 5vw, 65px);
+  padding-bottom: clamp(28px, 3.5vw, 48px);
+}
+
+.eyebrow {
+  color: #5e5559;
+}
+
+/* H11: "Praktika" first and largest on the page. */
+.title {
+  margin: 18px 0 0;
+  font: 400 clamp(56px, 8vw, 112px) / 0.98 var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* R4: practice takes place only in Pärnu. */
+.where {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 0 0;
+  padding: 12px 18px;
+  border-radius: 99px;
+  background: var(--first);
+  font: 600 15px/1.35 var(--font-body);
+}
+
+.pin {
+  flex: none;
+  color: var(--warn);
+}
+
+.intro {
+  max-width: 660px;
+  margin: 22px 0 0;
+  color: #5e5559;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.request {
+  /* The sticky header must not cover the heading when #taotlus is the target. */
+  scroll-margin-top: calc(var(--header-h) + 12px);
+  padding-top: clamp(20px, 3vw, 40px);
+  padding-bottom: 30px;
+}
+
+.requestInner {
+  max-width: 750px;
+  margin: 0 auto;
+}
+
+.requestTitle {
+  margin: 0 0 14px;
+  font: 400 clamp(34px, 3.8vw, 56px) / 1.09 var(--font-display);
+  letter-spacing: -0.015em;
+}
+
+@media (max-width: 640px) {
+  .where {
+    align-items: flex-start;
+    border-radius: 16px;
+  }
+
+  .pin {
+    margin-top: 1px;
+  }
+}
