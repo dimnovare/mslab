@@ -34,7 +34,7 @@ describe("locale middleware", () => {
   });
 
   test("admin, api, media, hub and static paths are not rewritten", () => {
-    for (const p of ["/admin", "/admin/login", "/api/feedback", "/media/img/a.jpg", "/guide/", "/p/b/index.html", "/_next/static/chunk.js", "/feedback.js", "/robots.txt", "/favicon.ico", "/seed/r1.jpg", "/og.png"])
+    for (const p of ["/admin", "/admin/login", "/api/feedback", "/media/img/a.jpg", "/guide/", "/p/b/index.html", "/_next/static/chunk.js", "/feedback.js", "/robots.txt", "/favicon.ico", "/icon.svg", "/brand/logo.png", "/seed/r1.jpg", "/og.png"])
       expect(passesThrough(p), p).toBe(true);
   });
 

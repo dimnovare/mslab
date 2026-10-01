@@ -22,6 +22,7 @@ export const et = {
     openMenu: "Ava menüü",
     closeMenu: "Sulge menüü",
     home: "MS LAB Koolituskeskus — avaleht",
+    skip: "Liigu sisuni",
   },
 
   hero: {
@@ -303,6 +304,7 @@ export const et = {
     confirmText: "Saatsime sulle kinnituskirja. Vajuta kirjas olevale lingile, et liitumine lõpule viia.",
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
+    sentTitle: "Kontrolli oma postkasti",
   },
 
   // Campaign popup. No "Mitte praegu" button (M3); the CTA label is editable in admin, this is the default (M4).
@@ -322,6 +324,13 @@ export const et = {
     imageViewer: "Pildivaatur",
     openImage: "Ava pilt suuremalt",
     accountSoon: "Õppija konto avaneb peagi",
+  },
+
+  // Localized 404 inside the site shell.
+  notFound: {
+    title: "Lehte ei leitud",
+    text: "Seda lehte ei ole olemas või on see teisaldatud.",
+    home: "Avalehele",
   },
 };
 

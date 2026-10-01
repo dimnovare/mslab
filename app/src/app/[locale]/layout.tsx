@@ -13,7 +13,7 @@ const jost = Jost({
 
 const manrope = Manrope({
   subsets: ["latin", "latin-ext", "cyrillic"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["300", "400", "500", "600", "700"],
   variable: "--font-manrope",
 });
 

@@ -1,0 +1,158 @@
+/* Prototype B .footer, with the newsletter block (Newsletter.module.css) placed above the link columns. */
+
+.footer {
+  margin-top: 80px;
+  padding: 66px var(--page);
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-body);
+  line-height: 1.65;
+}
+
+:where(.footer) a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1.3fr;
+  gap: 40px;
+  margin-top: 66px;
+}
+
+.logo {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 168px;
+  height: 66px;
+}
+
+.logo img {
+  display: block;
+  width: 166px;
+  height: auto;
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+.text {
+  max-width: 220px;
+  margin: 20px 0 0;
+  color: #b7afb3;
+  font-size: 12px;
+}
+
+.title {
+  margin: 0 0 22px;
+  color: #fff;
+  font: 500 12px/1.65 var(--font-body);
+  letter-spacing: normal;
+}
+
+.link {
+  display: block;
+  width: fit-content;
+  margin-bottom: 9px;
+  color: #c9c1c5;
+  font-size: 12px;
+}
+
+.link:hover {
+  color: #fff;
+}
+
+.contact {
+  margin-top: 12px;
+}
+
+.cta {
+  margin-top: 20px;
+}
+
+.bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 50px;
+  padding-top: 23px;
+  border-top: 1px solid #494347;
+  color: #a9a0a5;
+  font-size: 10px;
+}
+
+.legal {
+  display: flex;
+  gap: 14px;
+}
+
+.legal .link {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1180px) {
+  .main {
+    grid-template-columns: 1.5fr 1fr 1fr;
+  }
+
+  .main > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .main > div:last-child .text {
+    max-width: none;
+  }
+}
+
+/* Touch screens: links get a 44px target (B's 12px lines are ~20px). */
+@media (max-width: 1099px) {
+  .link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin-bottom: 0;
+  }
+
+  .contact,
+  .cta {
+    margin-top: 8px;
+  }
+
+  .title {
+    margin-bottom: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .footer {
+    margin-top: 40px;
+    padding: 45px var(--page);
+  }
+
+  .main {
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-top: 45px;
+  }
+
+  .main > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .logo {
+    width: 140px;
+    height: 55px;
+  }
+
+  .logo img {
+    width: 138px;
+  }
+
+  .bottom {
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 30px;
+  }
+}

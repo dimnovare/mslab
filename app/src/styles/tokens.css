@@ -23,7 +23,22 @@
   /* Layout */
   --gutter: clamp(16px, 4vw, 56px);
   --max: 1280px;
+  --page: clamp(22px, 5.5vw, 100px); /* B side padding: header, footer and B-based sections align on it */
+  --header-h: 92px; /* B header height; the home hero sits under the transparent header */
   --r-card: 20px;
   --r-tile: 28px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (max-width: 1099px) {
+  :root {
+    --header-h: 84px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page: 22px;
+    --header-h: 78px;
+  }
 }

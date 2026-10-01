@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { pick, pickList } from "@/i18n/field";
-import { href, switchLocaleHref } from "@/i18n/href";
+import { href, publicPath, switchLocaleHref } from "@/i18n/href";
 import { fill } from "@/i18n/format";
 import { LOCALES, getDict } from "@/i18n/locales";
 import { et } from "@/i18n/dict/et";
@@ -28,6 +28,14 @@ describe("i18n", () => {
     expect(switchLocaleHref("/ru/praktika", "et")).toBe("/praktika");
     expect(switchLocaleHref("/praktika", "ru")).toBe("/ru/praktika");
     expect(switchLocaleHref("/", "ru")).toBe("/ru");
+  });
+  test("publicPath drops the internal /et prefix only", () => {
+    expect(publicPath("/et")).toBe("/");
+    expect(publicPath("/et/konto")).toBe("/konto");
+    expect(publicPath("/konto")).toBe("/konto");
+    expect(publicPath("/etude")).toBe("/etude");
+    expect(publicPath("/ru/konto")).toBe("/ru/konto");
+    expect(publicPath("/")).toBe("/");
   });
   test("ru dictionary has every et key", () => {
     expect(keys(ru).sort()).toEqual(keys(et).sort());

@@ -1,7 +1,7 @@
 // ET lives at "/", RU at "/ru"; internally both render app/[locale]/…
 import { NextResponse, type NextRequest } from "next/server";
 
-const PASS = /^\/(ru(\/|$)|admin|api|media|guide|p\/|_next|feedback\.js|robots\.txt|favicon|seed\/|og\.)/;
+const PASS = /^\/(ru(\/|$)|admin|api|media|guide|p\/|_next|feedback\.js|robots\.txt|favicon|icon\.svg|brand\/|seed\/|og\.)/;
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

@@ -1,0 +1,73 @@
+import Link from "next/link";
+import { href } from "@/i18n/href";
+import { getDict, type Locale } from "@/i18n/locales";
+import { HeaderFrame } from "./HeaderFrame";
+import { Icon } from "./Icon";
+import { LangSwitch } from "./LangSwitch";
+import { Logo } from "./Logo";
+import { MobileMenu } from "./MobileMenu";
+import { NavLink } from "./NavLink";
+import styles from "./Header.module.css";
+
+/**
+ * B header (G3): logo left, five menu links, then ET / RU, cart and "Logi sisse"; burger below 1100px.
+ * Menu, login and language switch use Manrope 500 15px (G4). `overHero` defaults to "on the home page":
+ * there the header is transparent, follows the hero tone (G5) and turns white after scrolling.
+ */
+export function Header({ locale, overHero }: { locale: Locale; overHero?: boolean }) {
+  const d = getDict(locale);
+  const home = href(locale, "/");
+  const links: [string, string][] = [
+    [href(locale, "/koolitused"), d.nav.courses],
+    [href(locale, "/koolituskalender"), d.nav.calendar],
+    [href(locale, "/praktika"), d.nav.practice],
+    [href(locale, "/koolitaja"), d.nav.trainer],
+    [href(locale, "/uudised"), d.nav.news],
+  ];
+  const account = href(locale, "/konto");
+
+  return (
+    <>
+      <a className={styles.skip} href="#main">
+        {d.nav.skip}
+      </a>
+      <HeaderFrame homePath={home} overHero={overHero}>
+        <Logo href={home} label={d.nav.home} className={styles.logo} eager />
+        <nav className={styles.nav} aria-label={d.nav.mainLabel}>
+          {links.map(([to, label]) => (
+            <NavLink key={to} href={to} className={styles.navLink} activeClassName={styles.active}>
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className={styles.actions}>
+          <LangSwitch locale={locale} label={d.nav.langSwitch} className={styles.lang} />
+          {/* Cart arrives in phase 2; the count stays 0 until then. */}
+          <Link className={styles.cart} href={href(locale, "/ostukorv")} aria-label={d.nav.cart}>
+            <Icon name="bag" />
+            <span className={styles.cartCount} aria-hidden="true">
+              0
+            </span>
+          </Link>
+          <Link className={styles.login} href={account}>
+            {d.nav.login}
+          </Link>
+          <MobileMenu openLabel={d.nav.openMenu} closeLabel={d.nav.closeMenu} dialogLabel={d.nav.menu}>
+            <Logo href={home} label={d.nav.home} className={styles.menuLogo} />
+            <nav className={styles.menuNav} aria-label={d.nav.mainLabel}>
+              {links.map(([to, label]) => (
+                <NavLink key={to} href={to} className={styles.menuLink}>
+                  {label}
+                </NavLink>
+              ))}
+              <LangSwitch locale={locale} label={d.nav.langSwitch} className={styles.menuLang} />
+              <Link className={styles.menuLogin} href={account}>
+                {d.nav.login}
+              </Link>
+            </nav>
+          </MobileMenu>
+        </div>
+      </HeaderFrame>
+    </>
+  );
+}

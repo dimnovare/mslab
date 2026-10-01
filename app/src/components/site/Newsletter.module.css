@@ -1,0 +1,186 @@
+/* Prototype B .newsletter: lilac surface with white / ink / lilac (Maria C10), now inside the footer (H13). */
+
+.newsletter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  align-items: center;
+  padding: 60px;
+  border-radius: 24px;
+  background: var(--lilac);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.65;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.025em;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.title {
+  margin: 20px 0 0;
+  font: 400 43px/1.09 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.text {
+  max-width: 520px;
+  margin: 16px 0 0;
+  font-size: 13px;
+}
+
+.form {
+  justify-self: end;
+  width: 100%;
+  max-width: 620px; /* wide screens: the field does not stretch across the whole footer */
+}
+
+.label {
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  min-height: 49px;
+  padding: 14px 20px;
+  border: 1px solid #c6b8c0;
+  border-radius: 99px;
+  background: #f9f6f8;
+  color: var(--ink);
+  font: 400 15px/1.2 var(--font-body);
+}
+
+.input:focus {
+  border-color: var(--rose);
+}
+
+.submit {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  min-height: 49px;
+  padding: 13px 24px;
+  border: 1px solid var(--ink);
+  border-radius: 99px;
+  background: var(--ink);
+  color: #fff;
+  font: 600 13px/1.2 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+
+.submit:hover {
+  background: #40383c;
+  transform: translateY(-2px);
+}
+
+.submit:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 15px;
+  color: #61555d;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.check input {
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.sentTitle {
+  margin: 0;
+  font: 400 27px/1.09 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.error {
+  margin: 12px 0 0;
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+@media (max-width: 1180px) {
+  .newsletter {
+    gap: 35px;
+    padding: 40px;
+  }
+}
+
+@media (max-width: 900px) {
+  .newsletter {
+    grid-template-columns: 1fr;
+    gap: 25px;
+  }
+
+  .form {
+    justify-self: stretch;
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .newsletter {
+    padding: 30px 23px;
+  }
+
+  .title {
+    font-size: clamp(28px, 8.7vw, 35px); /* B 35px; keeps "Hea järgmine samm." on one line at 360-390px */
+  }
+
+  .row {
+    flex-direction: column;
+  }
+
+  .input {
+    font-size: 16px;
+  }
+}
