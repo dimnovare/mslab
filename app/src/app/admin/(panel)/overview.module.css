@@ -1,0 +1,25 @@
+.stats {
+  padding: 0;
+  list-style: none;
+}
+
+.stats > li {
+  display: grid;
+}
+
+/* B table min-width: on a phone the table scrolls inside its card instead of squeezing the course names. */
+.upcoming {
+  min-width: 460px;
+}
+
+@media (max-width: 640px) {
+  .upcoming {
+    min-width: 0;
+  }
+
+  .upcoming th,
+  .upcoming td {
+    padding-right: 8px;
+    padding-left: 0;
+  }
+}

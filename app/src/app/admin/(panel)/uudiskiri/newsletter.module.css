@@ -1,0 +1,73 @@
+.downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.card {
+  container-type: inline-size;
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: 0;
+}
+
+.email {
+  overflow-wrap: anywhere;
+}
+
+/* Narrow card: each subscriber as label + value rows. */
+@container (max-width: 640px) {
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    width: 100%;
+  }
+
+  .table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .table td,
+  .table td:first-child {
+    display: grid;
+    grid-template-columns: minmax(90px, 32%) minmax(0, 1fr);
+    justify-items: start;
+    gap: 12px;
+    padding: 4px 0;
+    border: 0;
+    white-space: normal;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    color: #716a6d;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .downloads {
+    width: 100%;
+  }
+
+  .downloads a {
+    flex: 1 1 100%;
+  }
+}

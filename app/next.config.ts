@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
       { source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/admin/:path*", headers: noStore },
       { source: "/api/auth/:path*", headers: noStore },
+      { source: "/api/admin/:path*", headers: noStore },
     ];
   },
 };

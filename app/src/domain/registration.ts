@@ -9,3 +9,15 @@ export function registrationStatusAfterPayment(r: { status: RegStatus; paidCents
   if (r.status === "cancelled") return "cancelled";
   return r.paidCents * 2 >= totalCents ? "confirmed" : "awaiting_prepayment";
 }
+
+/**
+ * The price a registration's payment is measured against: the e-learning price, or for a contact course the group
+ * price (group registration) or the individual price. null when the course has no such price.
+ */
+export function registrationPrice(
+  course: { type: "e_learning" | "contact"; price: number | null; priceGroup: number | null; priceIndividual: number | null },
+  kind: "group" | "individual",
+): number | null {
+  if (course.type === "e_learning") return course.price;
+  return kind === "group" ? course.priceGroup : course.priceIndividual;
+}

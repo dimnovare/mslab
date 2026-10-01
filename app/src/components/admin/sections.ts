@@ -1,0 +1,38 @@
+import { adminEt } from "@/i18n/dict/admin";
+import type { AdminIconName } from "./AdminIcon";
+
+// The admin menu (prototype B sidebar, Maria's A1), in this order. Sections without their editor yet (Task 13) open a
+// "Tulekul" page so the menu already works.
+export type Section =
+  | "overview"
+  | "courses"
+  | "calendar"
+  | "registrations"
+  | "requests"
+  | "practice"
+  | "home"
+  | "trainer"
+  | "news"
+  | "campaign"
+  | "newsletter"
+  | "settings";
+
+export const SECTIONS: readonly { key: Section; href: string; icon: AdminIconName }[] = [
+  { key: "overview", href: "/admin", icon: "grid" },
+  { key: "courses", href: "/admin/koolitused", icon: "book" },
+  { key: "calendar", href: "/admin/kalender", icon: "calendar" },
+  { key: "registrations", href: "/admin/registreerimised", icon: "clipboard" },
+  { key: "requests", href: "/admin/paringud", icon: "inbox" },
+  { key: "practice", href: "/admin/praktika", icon: "flower" },
+  { key: "home", href: "/admin/avaleht", icon: "home" },
+  { key: "trainer", href: "/admin/koolitaja", icon: "user" },
+  { key: "news", href: "/admin/uudised", icon: "edit" },
+  { key: "campaign", href: "/admin/kampaania", icon: "tag" },
+  { key: "newsletter", href: "/admin/uudiskiri", icon: "mail" },
+  { key: "settings", href: "/admin/seaded", icon: "settings" },
+];
+
+export const sectionHref = (key: Section) => SECTIONS.find((s) => s.key === key)!.href;
+
+/** <title> of an admin page: "Registreerimised — Haldus — MS LAB". */
+export const adminTitle = (label: string) => `${label} — ${adminEt.meta.title}`;

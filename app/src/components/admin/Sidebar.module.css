@@ -1,0 +1,268 @@
+/* Prototype B .admin-sidebar: dark column, inverted logo, small label, the menu as rounded rows. */
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: auto;
+  padding: 28px 22px;
+  background: #242124;
+  color: #fff;
+}
+
+.logo {
+  display: block;
+  width: 160px;
+  margin: 0 8px 10px;
+}
+
+.logo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+.label {
+  margin: 20px 12px 22px;
+  color: #a99ba4;
+  font: 400 11px/1.4 var(--font-body);
+  letter-spacing: 0.02em;
+}
+
+.navWrap {
+  display: grid;
+  gap: 18px;
+}
+
+.nav {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.foot {
+  padding-top: 16px;
+  border-top: 1px solid #3a3338;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #ccc0c8;
+  font: 500 13px/1.3 var(--font-body);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.link svg {
+  flex: none;
+}
+
+.link:hover {
+  background: #3a3338;
+  color: #fff;
+}
+
+.link[aria-current="page"] {
+  background: #51434c;
+  color: #fff;
+}
+
+.link:focus-visible {
+  outline: 2px solid #e6dce2;
+  outline-offset: -2px;
+}
+
+.text {
+  min-width: 0;
+}
+
+.badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 99px;
+  background: #e6dce2;
+  color: #242124;
+  font: 600 11px/1 var(--font-body);
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- phone: top bar + drawer ---------- */
+
+.bar {
+  display: none;
+}
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(320px, 88vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #242124;
+  color: #fff;
+  overflow: auto;
+}
+
+.drawer[open] {
+  animation: slide-in 0.25s var(--ease);
+}
+
+.drawer::backdrop {
+  background: rgba(20, 18, 20, 0.5);
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.drawerBody {
+  padding: 16px 16px 32px;
+}
+
+.drawerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawerHead .logo {
+  width: 120px;
+  margin: 0 8px;
+}
+
+.closeButton,
+.menuButton {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.closeButton:hover,
+.menuButton:hover {
+  background: #3a3338;
+}
+
+.closeButton:focus-visible,
+.menuButton:focus-visible {
+  outline: 2px solid #e6dce2;
+  outline-offset: 2px;
+}
+
+.dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: #e6dce2;
+  color: #242124;
+  font: 600 10px/1 var(--font-body);
+}
+
+/* B 641–900px: a narrower sidebar. */
+@media (max-width: 900px) {
+  .sidebar {
+    padding: 24px 14px;
+  }
+
+  .logo {
+    width: 140px;
+    margin: 0 0 16px;
+  }
+
+  .label {
+    margin: 12px 8px 18px;
+  }
+
+  .link {
+    gap: 10px;
+    padding: 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sidebar {
+    display: none;
+  }
+
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 64px;
+    padding: 10px 16px;
+    background: #242124;
+    color: #fff;
+  }
+
+  .barLogo {
+    display: block;
+    width: 112px;
+  }
+
+  .barLogo img {
+    display: block;
+    width: 100%;
+    height: auto;
+    filter: invert(1);
+    mix-blend-mode: screen;
+  }
+
+  .link {
+    font-size: 14px;
+  }
+}

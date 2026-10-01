@@ -202,3 +202,143 @@ export async function expireAuthToken(rawToken: string): Promise<void> {
     await sql.end();
   }
 }
+
+// ---------- admin inbox fixtures ----------
+// The admin inbox tests need registrations, requests and subscribers to look at. Each test inserts its own set, tagged
+// with a unique `tag` (in every e-mail address and in the course slug), and deletes it afterwards; global-setup and
+// global-teardown remove leftovers by pattern. The registration belongs to a fixture course that is NOT published, with
+// its own session, so confirming it never changes the seats a public page shows.
+
+export const ADMIN_FIXTURE_EMAIL_PATTERN = "e2e-admin-%@example.com";
+export const ADMIN_FIXTURE_SLUG_PATTERN = "e2e-admin-%";
+
+export type AdminFixtures = {
+  tag: string;
+  course: { id: number; slug: string; title: string };
+  session: { id: number };
+  registration: { id: number; name: string; email: string };
+  contact: { id: number; name: string };
+  interest: { id: number; email: string };
+  individual: { id: number; name: string };
+  practice: { id: number; name: string };
+  waitlist: { id: number; name: string };
+  subscribers: { confirmed: string; pending: string };
+};
+
+/** Inserts one test's rows (see above). Group price 350 €, so 50% = 175 €. */
+export async function insertAdminFixtures(project: string): Promise<AdminFixtures> {
+  const tag = `${project}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toLowerCase();
+  const email = (label: string) => `e2e-admin-${label}-${tag}@example.com`;
+  const sql = connect();
+  try {
+    const slug = `e2e-admin-${tag}`;
+    const title = `E2E haldus ${tag}`;
+    const [course] = await sql<{ id: number }[]>`
+      insert into courses (slug, type, level, title, summary, body, price_group, price_individual, published)
+      values (${slug}, 'contact', 'basic', ${sql.json({ et: title })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 35000, 45000, false)
+      returning id`;
+    const [session] = await sql<{ id: number }[]>`
+      insert into course_sessions (course_id, starts_at, city, venue, capacity)
+      values (${course.id}, date_trunc('day', now()) + interval '60 days 10 hours', 'Pärnu', 'E2E saal', 4) returning id`;
+    const regName = `E2E Registreerija ${tag}`;
+    const [registration] = await sql<{ id: number }[]>`
+      insert into registrations (course_id, course_session_id, kind, name, email, phone, payment_choice, wants_model_help, wants_account, status)
+      values (${course.id}, ${session.id}, 'group', ${regName}, ${email("reg")}, '+372 5555 0101', 'half', true, false, 'awaiting_prepayment')
+      returning id`;
+    // sql.json: a JSON string cast to jsonb would be stored as one jsonb *string*, which payload->>'…' cannot read.
+    const request = async (kind: string, payload: Record<string, string | number | boolean>) => {
+      const [row] = await sql<{ id: number }[]>`insert into requests (kind, payload) values (${kind}, ${sql.json(payload)}) returning id`;
+      return row.id;
+    };
+    const names = { contact: `E2E Kontakt ${tag}`, individual: `E2E Individuaal ${tag}`, practice: `E2E Praktika ${tag}`, waitlist: `E2E Ootaja ${tag}` };
+    const contact = await request("contact", { name: names.contact, email: email("contact"), message: "Tere! Kas jaanuaris on veel kohti?", locale: "et" });
+    const interest = await request("contact", { course: "kulmumeistri-e-koolitus", intent: "purchase", email: email("interest"), locale: "ru" });
+    const individual = await request("individual", {
+      course: slug,
+      courseId: course.id,
+      name: names.individual,
+      email: email("individual"),
+      phone: "+372 5555 0102",
+      wantsModelHelp: false,
+      wantsAccount: true,
+      locale: "et",
+      preferredPeriod: "Jaanuari teine pool",
+      message: "",
+    });
+    const practice = await request("practice", {
+      package: "MINI",
+      name: names.practice,
+      email: email("practice"),
+      phone: "+372 5555 0103",
+      course: "Kulmumeistri baaskoolitus",
+      times: "Tööpäeviti pärast kella 17",
+      locale: "et",
+    });
+    const waitlist = await request("waitlist", { session: session.id, course: slug, name: names.waitlist, email: email("waitlist"), locale: "et" });
+    const subscribers = { confirmed: email("sub-ok"), pending: email("sub-wait") };
+    await sql`insert into subscribers (email, locale, token, consent_at, confirmed_at)
+              values (${subscribers.confirmed}, 'et', ${`e2e-admin-token-ok-${tag}`}, now() - interval '2 days', now() - interval '1 day')`;
+    // A formula-like value in a column the export writes: the CSV must defuse it.
+    await sql`insert into subscribers (email, locale, token) values (${subscribers.pending}, '=1+1', ${`e2e-admin-token-wait-${tag}`})`;
+    return {
+      tag,
+      course: { id: course.id, slug, title },
+      session: { id: session.id },
+      registration: { id: registration.id, name: regName, email: email("reg") },
+      contact: { id: contact, name: names.contact },
+      interest: { id: interest, email: email("interest") },
+      individual: { id: individual, name: names.individual },
+      practice: { id: practice, name: names.practice },
+      waitlist: { id: waitlist, name: names.waitlist },
+      subscribers,
+    };
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Deletes the admin fixture rows of one tag, or all of them; returns how many are left (0 when clean). */
+export async function removeAdminFixtures(tag?: string): Promise<number> {
+  const mails = tag ? `e2e-admin-%-${tag}@example.com` : ADMIN_FIXTURE_EMAIL_PATTERN;
+  const slugs = tag ? `e2e-admin-${tag}` : ADMIN_FIXTURE_SLUG_PATTERN;
+  const sql = connect();
+  try {
+    await sql`delete from registrations where email like ${mails} or course_id in (select id from courses where slug like ${slugs})`;
+    // Matched on the whole payload text, so a payload stored the wrong way (one jsonb string) is found too.
+    const inPayload = `%${mails}%`;
+    await sql`delete from requests where payload::text like ${inPayload}`;
+    await sql`delete from subscribers where email like ${mails}`;
+    await sql`delete from courses where slug like ${slugs}`; // its sessions go with it (on delete cascade)
+    const [{ n }] = await sql<{ n: number }[]>`
+      select (select count(*) from registrations where email like ${mails})
+           + (select count(*) from requests where payload::text like ${inPayload})
+           + (select count(*) from subscribers where email like ${mails})
+           + (select count(*) from courses where slug like ${slugs})::int as n`;
+    return Number(n);
+  } finally {
+    await sql.end();
+  }
+}
+
+/** A fixture registration as stored. */
+export async function storedAdminRegistration(id: number): Promise<{ status: string; paidCents: number; note: string }> {
+  const sql = connect();
+  try {
+    const [row] = await sql<{ status: string; paidCents: number; note: string }[]>`
+      select status, paid_cents as "paidCents", note from registrations where id = ${id}`;
+    return row;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Is this request marked handled? */
+export async function requestHandled(id: number): Promise<boolean> {
+  const sql = connect();
+  try {
+    const [row] = await sql<{ handled: boolean }[]>`select handled from requests where id = ${id}`;
+    return row.handled;
+  } finally {
+    await sql.end();
+  }
+}

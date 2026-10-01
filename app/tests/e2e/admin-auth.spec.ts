@@ -169,7 +169,7 @@ for (const [address, name] of [
   ["maria@example.test", "Maria"],
   [" dim@example.test ", "Dim"],
 ] as const) {
-  test(`${name}: the link from the e-mail signs in; the session lasts 30 days; logout ends it`, async ({ page, context, request, baseURL }) => {
+  test(`${name}: the link from the e-mail signs in; the session lasts 30 days; logout ends it`, async ({ page, context, request, baseURL, isMobile }) => {
     submitsForms();
     const { headers, body } = await requestLink(page, address);
     expect(headers["cache-control"]).toContain("no-store");
@@ -205,7 +205,9 @@ for (const [address, name] of [
     expect((await asHeader("__Host-mslab_admin")).status()).toBe(200);
     expect([302, 303, 307]).toContain((await asHeader("mslab_admin")).status());
 
-    // logout: POST from the button; the session row is deleted and the cookie cleared
+    // logout: POST from the button (in the sidebar; on a phone in the menu drawer); the session row is deleted and the
+    // cookie cleared
+    if (isMobile) await page.getByRole("button", { name: "Ava menüü" }).click();
     await page.getByRole("button", { name: "Logi välja" }).click();
     await expect(page).toHaveURL(/\/admin\/login$/);
     expect(await sessionCookie(context)).toBeUndefined();

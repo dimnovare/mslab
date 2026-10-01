@@ -1,8 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
-import type { RegStatus } from "@/domain/registration";
+import { registrationPrice, registrationStatusAfterPayment, type RegStatus } from "@/domain/registration";
 import type { I18n } from "@/i18n/field";
 
 // Admin (write) queries. Callers must already have checked the admin session; nothing here does authorization.
@@ -88,6 +88,33 @@ export async function listRegistrations(db: Db, filter: RegistrationFilter = {})
   return rows.map((r) => ({ ...r.registration, course: r.course, courseSession: r.courseSession }));
 }
 
+/** One registration with its course and session, or null. */
+export async function getRegistration(db: Db, id: number): Promise<RegistrationRow | null> {
+  const [row] = await db
+    .select({ registration: registrations, course: courses, courseSession: courseSessions })
+    .from(registrations)
+    .innerJoin(courses, eq(registrations.courseId, courses.id))
+    .leftJoin(courseSessions, eq(registrations.courseSessionId, courseSessions.id))
+    .where(eq(registrations.id, id))
+    .limit(1);
+  return row ? { ...row.registration, course: row.course, courseSession: row.courseSession } : null;
+}
+
+/**
+ * Maria enters the amount that has arrived (bank transfer): stores `paidCents` and recomputes the status against the
+ * price of the registration (group or individual price; e-learning price) — confirmed from 50% (Maria's rule), back
+ * to awaiting_prepayment below it, cancelled stays cancelled. Without a price the status is left as it is.
+ * Returns null when the id does not exist.
+ */
+export async function recordRegistrationPayment(db: Db, id: number, paidCents: number): Promise<Registration | null> {
+  const current = await getRegistration(db, id);
+  if (!current) return null;
+  const total = registrationPrice(current.course, current.kind);
+  const status = total == null ? current.status : registrationStatusAfterPayment({ status: current.status, paidCents }, total);
+  const [row] = await db.update(registrations).set({ paidCents, status }).where(eq(registrations.id, id)).returning();
+  return row ?? null;
+}
+
 export async function listRequests(db: Db, kind?: RequestRow["kind"]): Promise<RequestRow[]> {
   return db
     .select()
@@ -97,8 +124,58 @@ export async function listRequests(db: Db, kind?: RequestRow["kind"]): Promise<R
 }
 
 export async function markRequestHandled(db: Db, id: number): Promise<RequestRow | null> {
-  const [row] = await db.update(requests).set({ handled: true }).where(eq(requests.id, id)).returning();
+  return setRequestHandled(db, id, true);
+}
+
+/** "Märgi tehtuks" / "Märgi tegemata". Returns null when the id does not exist. */
+export async function setRequestHandled(db: Db, id: number, handled: boolean): Promise<RequestRow | null> {
+  const [row] = await db.update(requests).set({ handled }).where(eq(requests.id, id)).returning();
   return row ?? null;
+}
+
+export type RequestKind = RequestRow["kind"];
+export type AdminCounts = {
+  /** Registrations still waiting for their prepayment (the new ones Maria has to look at). */
+  awaitingPrepayment: number;
+  /** Requests not marked handled, per kind. */
+  openRequests: Record<RequestKind, number>;
+  /** Of the open contact requests: e-learning purchase interest (cart "let me know"). */
+  openPurchaseInterest: number;
+  subscribers: number;
+  confirmedSubscribers: number;
+};
+
+/** The numbers of the overview and the menu badges. */
+export async function adminCounts(db: Db): Promise<AdminCounts> {
+  const [[awaiting], byKind, [interest], [subs]] = await Promise.all([
+    db.select({ n: count() }).from(registrations).where(eq(registrations.status, "awaiting_prepayment")),
+    db.select({ kind: requests.kind, n: count() }).from(requests).where(eq(requests.handled, false)).groupBy(requests.kind),
+    db
+      .select({ n: count() })
+      .from(requests)
+      .where(and(eq(requests.kind, "contact"), eq(requests.handled, false), sql`${requests.payload}->>'intent' = 'purchase'`)),
+    db.select({ total: count(), confirmed: count(subscribers.confirmedAt) }).from(subscribers),
+  ]);
+  const openRequests: Record<RequestKind, number> = { contact: 0, individual: 0, practice: 0, waitlist: 0 };
+  for (const row of byKind) openRequests[row.kind] = Number(row.n);
+  return {
+    awaitingPrepayment: Number(awaiting.n),
+    openRequests,
+    openPurchaseInterest: Number(interest.n),
+    subscribers: Number(subs.total),
+    confirmedSubscribers: Number(subs.confirmed),
+  };
+}
+
+/** Course names for the request inbox (requests store the course slug). Drafts included. */
+export async function listCourseNames(db: Db): Promise<Pick<Course, "id" | "slug" | "title" | "type">[]> {
+  return db.select({ id: courses.id, slug: courses.slug, title: courses.title, type: courses.type }).from(courses);
+}
+
+/** Sessions by id (the waitlist requests store the session id). */
+export async function listSessionsByIds(db: Db, ids: number[]): Promise<CourseSession[]> {
+  if (ids.length === 0) return [];
+  return db.select().from(courseSessions).where(inArray(courseSessions.id, ids));
 }
 
 // ---------- practice, home, content ----------

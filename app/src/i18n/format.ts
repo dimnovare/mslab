@@ -29,3 +29,31 @@ export function formatDate(d: Date, l: Locale): string {
 export function formatWeekday(d: Date, l: Locale): string {
   return fmt(l, { weekday: "long" }).format(d);
 }
+
+/** "14:05" (Estonian time) */
+export function formatTime(d: Date, l: Locale): string {
+  const parts = fmt(l, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("hour")}:${get("minute")}`;
+}
+
+/** "Neljapäev, 1. oktoober" / "Четверг, 1 октября" (the admin overview's date line) */
+export function formatLongDate(d: Date, l: Locale): string {
+  const text = `${formatWeekday(d, l)}, ${fmt(l, { day: "numeric", month: "long" }).format(d)}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** "2026-10-01 14:05" in Estonian time (CSV exports: sorts as text, read by spreadsheets and mailing tools). */
+export function formatStamp(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+}

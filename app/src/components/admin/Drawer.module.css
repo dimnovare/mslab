@@ -1,0 +1,70 @@
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(560px, 100vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #fff;
+  color: var(--ink);
+  overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: -20px 0 60px rgba(34, 34, 34, 0.12);
+}
+
+.drawer[open] {
+  animation: slide-in 0.25s var(--ease);
+}
+
+.drawer::backdrop {
+  background: rgba(34, 34, 34, 0.35);
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.body {
+  position: relative;
+  min-height: 100%;
+  padding: 32px 32px 48px;
+  font: 400 14px/1.6 var(--font-body);
+}
+
+.close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--canvas);
+}
+
+@media (max-width: 640px) {
+  .body {
+    padding: 24px 16px 40px;
+  }
+
+  .close {
+    top: 14px;
+    right: 14px;
+  }
+}

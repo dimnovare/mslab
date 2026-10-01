@@ -60,7 +60,19 @@ describe("admin guards are inherited by every admin entry point", () => {
   test("the admin tree is found (the check is not vacuous) and every file in it passes", () => {
     const all = files();
     const admin = all.filter((f) => f.path.startsWith("app/admin/"));
-    expect(admin.map((f) => f.path)).toEqual(expect.arrayContaining(["app/admin/(panel)/layout.tsx", "app/admin/(panel)/page.tsx", "app/admin/login/page.tsx", "app/admin/layout.tsx"]));
+    expect(admin.map((f) => f.path)).toEqual(
+      expect.arrayContaining([
+        "app/admin/(panel)/layout.tsx",
+        "app/admin/(panel)/page.tsx",
+        "app/admin/login/page.tsx",
+        "app/admin/layout.tsx",
+        // Task 12: the inboxes and the "Tulekul" sections of the menu
+        ...["registreerimised", "paringud", "uudiskiri", "koolitused", "kalender", "praktika", "avaleht", "koolitaja", "uudised", "kampaania", "seaded"].map(
+          (dir) => `app/admin/(panel)/${dir}/page.tsx`,
+        ),
+      ]),
+    );
+    expect(all.map((f) => f.path)).toEqual(expect.arrayContaining(["app/api/admin/subscribers.csv/route.ts", "server/actions/admin.ts"]));
     const broken = all.flatMap((f) => violations(f.path, f.source).map((v) => `${f.path}: ${v}`));
     expect(broken).toEqual([]);
   });
@@ -72,9 +84,20 @@ describe("admin guards are inherited by every admin entry point", () => {
     expect(strip(get("app/admin/login/page.tsx"))).not.toMatch(/requireAdmin\(/); // would redirect to itself forever
   });
 
-  test("every route under app/api/admin and app/admin is wrapped (none exist yet: this guards the future ones)", () => {
+  test("every route under app/api/admin and app/admin is wrapped (the CSV export, and the future ones)", () => {
     const routes = files().filter((f) => /^app\/(api\/)?admin\/(.*\/)?route\.tsx?$/.test(f.path));
+    expect(routes.map((r) => r.path)).toContain("app/api/admin/subscribers.csv/route.ts");
     for (const r of routes) expect(violations(r.path, r.source), r.path).toEqual([]);
+  });
+
+  test("every admin page calls requireAdmin() itself and every admin action is wrapped", () => {
+    const pages = files().filter((f) => /^app\/admin\/\(panel\)\/(.*\/)?page\.tsx$/.test(f.path));
+    expect(pages.length).toBeGreaterThanOrEqual(12);
+    for (const p of pages) expect(strip(p.source), p.path).toMatch(/await requireAdmin\(\)/);
+    const actions = files().find((f) => f.path === "server/actions/admin.ts")!;
+    const exported = [...strip(actions.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
+    expect(exported).toEqual(["saveRegistrationPayment", "saveRegistrationStatus", "cancelRegistration", "toggleRequestHandled"]);
+    expect(violations(actions.path, actions.source)).toEqual([]);
   });
 
   describe("the rules themselves catch what they should (so the check cannot rot into a no-op)", () => {

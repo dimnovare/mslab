@@ -1,0 +1,74 @@
+.forms {
+  display: grid;
+  gap: 18px;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.amount {
+  flex: 1 1 160px;
+  width: auto;
+  max-width: 240px;
+}
+
+.fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #d9d2d5;
+  border-radius: 99px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
+  border-color: var(--rose);
+  background: #eee7eb;
+}
+
+.choice input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.fieldset legend {
+  padding: 0;
+}
+
+.form > button {
+  justify-self: start;
+}
