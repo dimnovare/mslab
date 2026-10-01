@@ -4,7 +4,7 @@ import { getDb } from "@/db/client";
 import { logFailure } from "@/server/log";
 import { handleLoginRequest } from "@/server/login";
 import { clientIp } from "@/server/ratelimit";
-import { linkBase, requestOrigin } from "@/server/site";
+import { hostOrigin, linkBase } from "@/server/site";
 
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
@@ -26,7 +26,10 @@ export async function POST(request: Request): Promise<Response> {
         env,
         // `next dev` has no edge address header: one local bucket. Production always has cf-connecting-ip.
         ip: clientIp(h) ?? (process.env.NODE_ENV === "development" ? "local" : null),
-        siteUrl: linkBase(requestOrigin(h), env.SITE_URL),
+        // The link in the e-mail comes from the Host header only (Cloudflare routes by Host), never from Origin or
+        // x-forwarded-host, which a client can set; a Host that is not in the allow-list gives SITE_URL.
+        siteUrl: linkBase(hostOrigin(h), env.SITE_URL),
+        host: h.get("host"),
         now: new Date(),
         // The e-mail goes out after the response (the Worker's waitUntil), so the answer is as quick for a refused address.
         later: (task) => after(() => task().catch((e) => logFailure("[auth] login e-mail failed", e))),

@@ -23,13 +23,48 @@ export async function rateLimit(kv: TextKv, key: string, limit: number, windowSe
 /** KV key of one visitor and form: `rl:<form>:<ip>`. */
 export const rateKey = (form: string, ip: string) => `rl:${form}:${ip}`;
 
+/** The eight 16-bit groups of an IPv6 address (handles "::" and a trailing dotted IPv4); null when it is not one. */
+function ipv6Groups(address: string): number[] | null {
+  let a = address;
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
+  if (v4) {
+    const o = v4.slice(1).map(Number);
+    if (o.some((n) => n > 255)) return null;
+    a = `${a.slice(0, v4.index)}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
+  }
+  const halves = a.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string) => (part === "" ? [] : part.split(":").map((g) => (/^[0-9a-f]{1,4}$/i.test(g) ? parseInt(g, 16) : NaN)));
+  const head = parse(halves[0]);
+  const rest = halves.length === 2 ? parse(halves[1]) : [];
+  if ([...head, ...rest].some(Number.isNaN)) return null;
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const gap = 8 - head.length - rest.length;
+  return gap < 1 ? null : [...head, ...new Array<number>(gap).fill(0), ...rest];
+}
+
 /**
- * The visitor's address. On Cloudflare `cf-connecting-ip` is always set by the edge (clients cannot forge it);
- * `x-forwarded-for` (first hop) is only the fallback for `next dev`. null when neither is there: the caller decides
- * (dev: one "local" bucket; production: no rate limit for that request, rather than one bucket for everybody).
+ * The rate limit bucket of an address. A visitor with IPv6 controls a whole /64 (often far more), so every address in it
+ * must share one bucket: "2001:db8:1:2:aaaa:bbbb:cccc:dddd" becomes "2001:db8:1:2::/64" (written the same however the
+ * address was spelled). An IPv4-mapped IPv6 address ("::ffff:203.0.113.7") is the IPv4 address. IPv4 and anything that
+ * is not an IP address (the dev-only "local" bucket, the tests' made-up ids) stay as they are.
+ */
+export function normalizeIp(raw: string): string {
+  const ip = raw.trim().replace(/^\[|\]$/g, "").replace(/%.*$/, ""); // [::1] brackets, zone id (fe80::1%eth0)
+  if (!ip.includes(":")) return ip;
+  const g = ipv6Groups(ip);
+  if (!g) return ip;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`;
+  return `${g.slice(0, 4).map((x) => x.toString(16)).join(":")}::/64`;
+}
+
+/**
+ * The visitor's rate limit bucket (see normalizeIp). On Cloudflare `cf-connecting-ip` is always set by the edge (clients
+ * cannot forge it); `x-forwarded-for` (first hop) is only the fallback for `next dev`. null when neither is there: the
+ * caller decides (dev: one "local" bucket; production: no rate limit for that request, rather than one bucket for everybody).
  */
 export function clientIp(headers: Pick<Headers, "get">): string | null {
   const cf = headers.get("cf-connecting-ip")?.trim();
   const ip = cf || headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return ip ? ip.slice(0, 64) : null; // an IPv6 address has at most 45 characters; KV keys stay short
+  return ip ? normalizeIp(ip).slice(0, 64) : null; // an IPv6 address has at most 45 characters; KV keys stay short
 }

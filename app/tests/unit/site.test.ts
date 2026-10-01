@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { LINK_ORIGINS, linkBase, requestOrigin } from "@/server/site";
+import { LINK_ORIGINS, hostOrigin, isLocalHost, linkBase, requestOrigin } from "@/server/site";
 
 describe("links in e-mails and Telegram", () => {
   const SITE = "https://mslab.diipsolutions.eu/";
@@ -28,5 +28,36 @@ describe("links in e-mails and Telegram", () => {
     expect(requestOrigin(h({ host: "localhost:3000" }))).toBe("http://localhost:3000");
     expect(requestOrigin(h({ host: "mslab.ee", "x-forwarded-proto": "http" }))).toBe("http://mslab.ee");
     expect(requestOrigin(h({}))).toBeNull();
+  });
+});
+
+describe("the login link base", () => {
+  const SITE = "https://mslab.diipsolutions.eu";
+  const base = (init: Record<string, string>) => linkBase(hostOrigin(new Headers(init)), SITE);
+
+  test("scheme + Host header, nothing else", () => {
+    expect(hostOrigin(new Headers({ host: "mslab.ee" }))).toBe("https://mslab.ee");
+    expect(hostOrigin(new Headers({ host: "localhost:3000" }))).toBe("http://localhost:3000");
+    expect(hostOrigin(new Headers({ host: "127.0.0.1:3000" }))).toBe("http://127.0.0.1:3000");
+    expect(hostOrigin(new Headers({}))).toBeNull();
+  });
+
+  test("an allow-listed Host is used, anything else gives SITE_URL", () => {
+    expect(base({ host: "mslab-web.dim-novare.workers.dev" })).toBe("https://mslab-web.dim-novare.workers.dev");
+    expect(base({ host: "mslab.ee" })).toBe("https://mslab.ee");
+    expect(base({ host: "localhost:3000" })).toBe("http://localhost:3000");
+    for (const host of ["evil.example", "mslab.ee.evil.example", "localhost:3001", "mslab.diipsolutions.eu:8443"]) expect(base({ host }), host).toBe(SITE);
+    expect(linkBase(hostOrigin(new Headers({})), SITE)).toBe(SITE);
+  });
+
+  test("Origin, x-forwarded-host and x-forwarded-proto are ignored (a client can send them)", () => {
+    expect(base({ host: "evil.example", origin: "https://mslab.ee", "x-forwarded-host": "mslab.ee" })).toBe(SITE);
+    expect(base({ host: "mslab.ee", origin: "https://evil.example", "x-forwarded-host": "evil.example", "x-forwarded-proto": "http" })).toBe("https://mslab.ee");
+    expect(base({ origin: "https://mslab.ee" })).toBe(SITE);
+  });
+
+  test("isLocalHost", () => {
+    for (const h of ["localhost", "localhost:3000", "LOCALHOST:8787", "127.0.0.1", "127.0.0.1:3001", "[::1]:3000"]) expect(isLocalHost(h), h).toBe(true);
+    for (const h of ["", null, undefined, "localhost.evil.example", "evil.example:3000", "127.0.0.1.evil.example", "mslab.ee", "xlocalhost", "localhost:abc"]) expect(isLocalHost(h), String(h)).toBe(false);
   });
 });

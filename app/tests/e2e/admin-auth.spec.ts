@@ -67,7 +67,7 @@ async function requestLink(page: Page, address: string): Promise<Answer> {
 }
 
 async function sessionCookie(context: BrowserContext) {
-  const cookie = (await context.cookies()).find((c) => c.name === "mslab_admin");
+  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
   if (cookie) created.sessions.add(cookie.value);
   return cookie;
 }
@@ -97,13 +97,12 @@ test.describe("guard", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Halduse sisselogimine" })).toBeVisible();
   });
 
-  test("a made-up session cookie is not a session", async ({ page, context, baseURL }) => {
-    await context.addCookies([{ name: "mslab_admin", value: "A".repeat(43), url: baseURL! }]);
-    await page.goto("/admin");
-    await expect(page).toHaveURL(/\/admin\/login$/);
-    await context.addCookies([{ name: "mslab_admin", value: "nope", url: baseURL! }]);
-    await page.goto("/admin");
-    await expect(page).toHaveURL(/\/admin\/login$/);
+  test("a made-up session cookie is not a session (sent as a header: a __Host- cookie cannot be planted over http)", async ({ request }) => {
+    for (const value of ["A".repeat(43), "nope", ""]) {
+      const res = await request.get("/admin", { headers: { cookie: `__Host-mslab_admin=${value}` }, maxRedirects: 0 });
+      expect([302, 303, 307], value).toContain(res.status());
+      expect(new URL(res.headers()["location"], "http://x").pathname).toBe("/admin/login");
+    }
   });
 
   test("the admin login endpoints answer with Cache-Control: no-store", async ({ request }) => {
@@ -192,7 +191,7 @@ for (const [address, name] of [
     expect(cookie.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(cookie.expires - Date.now() / 1000).toBeGreaterThan(30 * DAY - 120);
     expect(cookie.expires - Date.now() / 1000).toBeLessThanOrEqual(30 * DAY + 5);
-    expect(await page.evaluate(() => document.cookie)).not.toContain("mslab_admin"); // HttpOnly
+    expect(await page.evaluate(() => document.cookie)).not.toContain("__Host-mslab_admin"); // HttpOnly
     expect(await sessionExists(cookie.value)).toBe(true);
 
     // still signed in after a reload and on the login page, which sends a signed-in admin on to the panel
@@ -200,6 +199,11 @@ for (const [address, name] of [
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Tere, ${name}.`);
     await page.goto("/admin/login");
     await expect(page).toHaveURL(/\/admin$/);
+
+    // the session counts under the __Host- name only (positive control for the replay check after logout)
+    const asHeader = (name: string) => request.get("/admin", { headers: { cookie: `${name}=${cookie.value}` }, maxRedirects: 0 });
+    expect((await asHeader("__Host-mslab_admin")).status()).toBe(200);
+    expect([302, 303, 307]).toContain((await asHeader("mslab_admin")).status());
 
     // logout: POST from the button; the session row is deleted and the cookie cleared
     await page.getByRole("button", { name: "Logi välja" }).click();
@@ -209,7 +213,7 @@ for (const [address, name] of [
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/admin\/login$/);
     // the old cookie value is dead even when presented again
-    const replay = await request.get("/admin", { headers: { cookie: `mslab_admin=${cookie.value}` }, maxRedirects: 0 });
+    const replay = await request.get("/admin", { headers: { cookie: `__Host-mslab_admin=${cookie.value}` }, maxRedirects: 0 });
     expect([302, 303, 307]).toContain(replay.status());
     expect(new URL(replay.headers()["location"], baseURL!).pathname).toBe("/admin/login");
   });
@@ -225,7 +229,7 @@ test.describe("the link", () => {
     await second.goto(pathOf(devLink));
     await expect(second).toHaveURL(/\/admin\/login\?viga=link$/);
     await expect(second.locator("main").getByRole("alert")).toHaveText(LINK_ERROR);
-    expect((await second.context().cookies()).find((c) => c.name === "mslab_admin")).toBeUndefined();
+    expect((await second.context().cookies()).find((c) => c.name === "__Host-mslab_admin")).toBeUndefined();
     await second.context().close();
     expect(await sessionExists(session)).toBe(true); // the first session was not touched
   });
@@ -236,6 +240,20 @@ test.describe("the link", () => {
     const head = await request.head(pathOf(body.devLink!));
     expect(head.status()).toBe(405);
     await page.goto(pathOf(body.devLink!));
+    await expect(page).toHaveURL(/\/admin$/);
+    await sessionCookie(context);
+  });
+
+  test("a prefetch (Sec-Purpose / Purpose) is sent to the login page without using the link up", async ({ page, context, request }) => {
+    submitsForms();
+    const { body } = await requestLink(page, "dim@example.test");
+    for (const header of ["sec-purpose", "purpose"]) {
+      const res = await request.get(pathOf(body.devLink!), { headers: { [header]: "prefetch" }, maxRedirects: 0 });
+      expect(res.status()).toBe(303);
+      expect(new URL(res.headers()["location"]).pathname + new URL(res.headers()["location"]).search).toBe("/admin/login");
+      expect(res.headers()["set-cookie"]).toBeUndefined();
+    }
+    await page.goto(pathOf(body.devLink!)); // the real click still works
     await expect(page).toHaveURL(/\/admin$/);
     await sessionCookie(context);
   });
@@ -257,7 +275,7 @@ test.describe("the link", () => {
     }
     await page.goto("/api/auth/verify");
     await expect(page).toHaveURL(/\/admin\/login\?viga=link$/);
-    expect((await context.cookies()).find((c) => c.name === "mslab_admin")).toBeUndefined();
+    expect((await context.cookies()).find((c) => c.name === "__Host-mslab_admin")).toBeUndefined();
   });
 });
 
@@ -323,6 +341,8 @@ test.describe("limits", () => {
     expect(form.status()).toBe(415);
     const get = await request.get("/api/auth/logout", { maxRedirects: 0 });
     expect(get.status()).toBe(405);
+    const foreign = await request.post("/api/auth/logout", { headers: { origin: "https://evil.example" }, maxRedirects: 0 });
+    expect(foreign.status()).toBe(403); // a POST from another site is refused before anything happens
     const logout = await request.post("/api/auth/logout", { maxRedirects: 0 });
     expect([302, 303, 307]).toContain(logout.status());
     expect(new URL(logout.headers()["location"], "http://x").pathname).toBe("/admin/login");

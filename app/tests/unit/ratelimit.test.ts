@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { clientIp, rateKey, rateLimit, RATE_LIMIT, RATE_WINDOW_SEC } from "@/server/ratelimit";
+import { clientIp, normalizeIp, rateKey, rateLimit, RATE_LIMIT, RATE_WINDOW_SEC } from "@/server/ratelimit";
 import { fakeKv } from "../fakes";
 
 describe("rateLimit", () => {
@@ -32,5 +32,58 @@ describe("clientIp", () => {
     expect(clientIp(h({ "x-forwarded-for": "198.51.100.1, 10.0.0.1" }))).toBe("198.51.100.1");
     expect(clientIp(h({}))).toBeNull();
     expect(clientIp(h({ "cf-connecting-ip": " " }))).toBeNull();
+  });
+});
+
+describe("IPv6 buckets: one per /64", () => {
+  test("every address of a /64 maps to the same bucket, however it is written", () => {
+    const same = [
+      "2001:db8:1:2::1",
+      "2001:db8:1:2:aaaa:bbbb:cccc:dddd",
+      "2001:0DB8:0001:0002:0000:0000:0000:0001",
+      "2001:db8:1:2:ffff:ffff:ffff:ffff",
+      "[2001:db8:1:2::7]",
+      "2001:db8:1:2::7%eth0",
+      " 2001:DB8:1:2::7 ",
+    ];
+    for (const a of same) expect(normalizeIp(a), a).toBe("2001:db8:1:2::/64");
+  });
+
+  test("another /64 is another bucket; the 64-bit boundary is exact", () => {
+    expect(normalizeIp("2001:db8:1:3::1")).toBe("2001:db8:1:3::/64");
+    expect(normalizeIp("2001:db8:2:2::1")).toBe("2001:db8:2:2::/64");
+    expect(normalizeIp("2001:db8:1:2:0:0:0:0")).toBe(normalizeIp("2001:db8:1:2:ffff::"));
+    expect(normalizeIp("2001:db8:1::5")).toBe("2001:db8:1:0::/64"); // "::" spans the 4th group
+    expect(normalizeIp("2001:db8:1::5")).not.toBe(normalizeIp("2001:db8:1:2::5"));
+  });
+
+  test("compressed forms, loopback and the unspecified address", () => {
+    expect(normalizeIp("::1")).toBe("0:0:0:0::/64");
+    expect(normalizeIp("::")).toBe("0:0:0:0::/64");
+    expect(normalizeIp("fe80::1%25eth0")).toBe("fe80:0:0:0::/64");
+    expect(normalizeIp("2a00:1450:4001:81b::200e")).toBe("2a00:1450:4001:81b::/64");
+  });
+
+  test("IPv4-mapped IPv6 is the IPv4 address; IPv4 and non-addresses stay as they are", () => {
+    expect(normalizeIp("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(normalizeIp("::ffff:cb00:7107")).toBe("203.0.113.7");
+    expect(normalizeIp("::ffff:203.0.113.7")).toBe(normalizeIp("203.0.113.7"));
+    expect(normalizeIp("203.0.113.7")).toBe("203.0.113.7");
+    expect(normalizeIp("local")).toBe("local");
+    expect(normalizeIp("e2e-chromium-abc-0-xyz")).toBe("e2e-chromium-abc-0-xyz");
+    for (const bad of ["1:2:3", "1:2:3:4:5:6:7:8:9", "::g", "1::2::3", "12345::1", "::ffff:999.1.1.1", "not:an:ip"]) expect(normalizeIp(bad), bad).toBe(bad);
+  });
+
+  test("clientIp applies it to both headers; a visitor cannot get a fresh bucket by changing the lower 64 bits", async () => {
+    const h = (init: Record<string, string>) => new Headers(init);
+    expect(clientIp(h({ "cf-connecting-ip": "2001:db8:1:2:1234:5678:9abc:def0" }))).toBe("2001:db8:1:2::/64");
+    expect(clientIp(h({ "x-forwarded-for": "2001:db8:1:2::9, 10.0.0.1" }))).toBe("2001:db8:1:2::/64");
+    expect(clientIp(h({ "cf-connecting-ip": "203.0.113.7" }))).toBe("203.0.113.7");
+    const kv = fakeKv();
+    const results = [];
+    for (let i = 0; i < 7; i++) results.push(await rateLimit(kv, rateKey("contact", clientIp(h({ "cf-connecting-ip": `2001:db8:1:2::${i + 1}` }))!), 5, 600));
+    expect(results).toEqual([true, true, true, true, true, false, false]);
+    expect(await rateLimit(kv, rateKey("contact", clientIp(h({ "cf-connecting-ip": "2001:db8:1:3::1" }))!), 5, 600)).toBe(true);
+    expect([...kv.store.keys()]).toEqual(["rl:contact:2001:db8:1:2::/64", "rl:contact:2001:db8:1:3::/64"]);
   });
 });

@@ -2,16 +2,18 @@ import { z } from "zod";
 import type { Db } from "@/db/client";
 import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
-import { createLoginToken, isAllowedAdmin } from "./auth";
+import { isAllowedAdmin, issueLoginToken } from "./auth";
 import { logFailure } from "./log";
 import { sendMail, type Env } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
+import { isLocalHost } from "./site";
 
 // POST /api/auth/request without Next.js: api/auth/request/route.ts builds the dependencies (database, Worker env,
 // visitor IP, after()) and calls handleLoginRequest; the tests call it with PGlite and fakes.
 //
 // The answer never tells whether an address is allowed: an allowed and a not allowed address get the same
-// `{ ok: true }` (the e-mail goes out after the response), and the rate limit counts every well-formed request.
+// `{ ok: true }` (the e-mail goes out after the response), and the rate limit counts every well-formed request. An
+// address that already has 3 unused links from the last 10 minutes gets the same answer and no new token or mail.
 
 export type LoginEnv = Env & { ADMIN_EMAILS: string };
 
@@ -20,8 +22,10 @@ export type LoginDeps = {
   env: LoginEnv;
   /** The visitor's address (rate limit key); null when the request carries none (then it is not rate limited). */
   ip: string | null;
-  /** Base of the link in the e-mail (allow-listed request origin, else SITE_URL). */
+  /** Base of the link in the e-mail: the request's Host when it is one of ours (site.ts hostOrigin + linkBase), else SITE_URL. */
   siteUrl: string;
+  /** The request's Host header; devLink is only ever returned for a local one. */
+  host: string | null;
   now: Date;
   /** Runs work after the response has been sent: next/server after() in production, collected and awaited in tests. */
   later: (task: () => Promise<unknown>) => void;
@@ -63,12 +67,19 @@ export async function handleLoginRequest(deps: LoginDeps, input: unknown): Promi
     return { status: 200, body: { ok: true } };
   }
 
-  const link = verifyUrl(deps.siteUrl, await createLoginToken(deps.db, email, deps.now));
+  const token = await issueLoginToken(deps.db, email, deps.now);
+  if (token === null) {
+    console.info("[auth] login request over the per-address cap: nothing created, nothing sent");
+    return { status: 200, body: { ok: true } };
+  }
+  const link = verifyUrl(deps.siteUrl, token);
   deps.later(async () => {
     const sent = await sendMail(deps.env, { to: email, subject: adminEt.mail.subject, text: fill(adminEt.mail.text, { link }) });
     console.info(`[auth] login link e-mailed: ${sent}`);
   });
-  // Tests and local development have no mailbox to read: the link comes back in the answer. Production builds
-  // replace process.env.NODE_ENV with "production", so this branch is gone from them.
-  return { status: 200, body: process.env.NODE_ENV !== "production" ? { ok: true, devLink: link } : { ok: true } };
+  // Tests and local development have no mailbox to read: the link comes back in the answer. Two gates: a non-production
+  // build (production builds replace process.env.NODE_ENV with "production", so the branch is gone from them) AND a
+  // request that came to localhost / 127.0.0.1, so a preview or staging deploy built in development mode cannot leak it.
+  const dev = process.env.NODE_ENV !== "production" && isLocalHost(deps.host);
+  return { status: 200, body: dev ? { ok: true, devLink: link } : { ok: true } };
 }

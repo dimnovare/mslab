@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import { adminSessions, authTokens } from "@/db/schema";
 import {
+  LOGIN_CAP_WINDOW_MS,
+  LOGIN_TOKEN_CAP,
+  SESSION_COOKIE,
   SESSION_TTL_MS,
   TOKEN_TTL_MS,
   adminFirstName,
@@ -12,6 +15,8 @@ import {
   deleteSession,
   getSessionEmail,
   isAllowedAdmin,
+  issueLoginToken,
+  redeemLoginToken,
 } from "@/server/auth";
 import { sha256 } from "@/server/token";
 
@@ -175,5 +180,98 @@ describe("sessions", () => {
     const hashes = (await db.select().from(adminSessions)).map((r) => r.idHash);
     expect(hashes).toEqual([await sha256(fresh)]);
     expect(hashes).not.toContain(await sha256(old));
+  });
+});
+
+describe("the cookie", () => {
+  test("is a __Host- cookie (Secure, Path=/, no Domain are enforced by the browser)", async () => {
+    const { sessionCookieOptions } = await import("@/server/auth");
+    expect(SESSION_COOKIE).toBe("__Host-mslab_admin");
+    expect(sessionCookieOptions).toEqual({ httpOnly: true, secure: true, sameSite: "lax", path: "/" });
+    expect(sessionCookieOptions).not.toHaveProperty("domain");
+  });
+});
+
+describe("issueLoginToken (per-address cap)", () => {
+  const now = new Date("2026-10-01T10:00:00Z");
+
+  test("3 unused tokens within 10 minutes, then null and nothing stored", async () => {
+    const db = await makeTestDb();
+    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) expect(await issueLoginToken(db, DIM, new Date(now.getTime() + i * 1000))).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(await issueLoginToken(db, DIM, now)).toBeNull();
+    expect(await issueLoginToken(db, " dim@example.test ", now)).toBeNull(); // the same address however it is written
+    expect(await db.select().from(authTokens)).toHaveLength(3);
+    expect(LOGIN_TOKEN_CAP).toBe(3);
+    expect(LOGIN_CAP_WINDOW_MS).toBe(10 * MIN);
+  });
+
+  test("other addresses have their own cap", async () => {
+    const db = await makeTestDb();
+    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) await issueLoginToken(db, DIM, now);
+    expect(await issueLoginToken(db, "maria@example.test", now)).not.toBeNull();
+  });
+
+  test("the window is 10 minutes: older tokens (still alive until 15) stop counting", async () => {
+    const db = await makeTestDb();
+    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) await issueLoginToken(db, DIM, now);
+    expect(await issueLoginToken(db, DIM, new Date(now.getTime() + 10 * MIN - 1))).toBeNull(); // issued 9:59.999 ago
+    expect(await issueLoginToken(db, DIM, new Date(now.getTime() + 10 * MIN + 1))).not.toBeNull();
+  });
+
+  test("used tokens do not count", async () => {
+    const db = await makeTestDb();
+    const tokens = [];
+    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) tokens.push((await issueLoginToken(db, DIM, now))!);
+    expect(await issueLoginToken(db, DIM, now)).toBeNull();
+    await consumeLoginToken(db, tokens[0], now);
+    expect(await issueLoginToken(db, DIM, now)).not.toBeNull();
+  });
+
+  test("simultaneous requests cannot count the same rows: exactly 3 of 10 get a token", async () => {
+    const db = await makeTestDb();
+    const results = await Promise.all(Array.from({ length: 10 }, () => issueLoginToken(db, DIM, now)));
+    expect(results.filter((r) => r !== null)).toHaveLength(LOGIN_TOKEN_CAP);
+    expect(await db.select().from(authTokens)).toHaveLength(LOGIN_TOKEN_CAP);
+  });
+});
+
+describe("redeemLoginToken (one transaction)", () => {
+  const now = new Date("2026-10-01T10:00:00Z");
+  const ALLOW = "dim@example.test,maria@example.test";
+
+  test("uses the token and returns a live session for its address", async () => {
+    const db = await makeTestDb();
+    const t = await createLoginToken(db, DIM, now);
+    const session = await redeemLoginToken(db, t, ALLOW, now);
+    expect(session).not.toBeNull();
+    expect(await getSessionEmail(db, session!, now)).toBe(DIM);
+    expect(await redeemLoginToken(db, t, ALLOW, now)).toBeNull(); // single use
+  });
+
+  test("unknown, expired and malformed tokens give null and no session", async () => {
+    const db = await makeTestDb();
+    const t = await createLoginToken(db, DIM, now);
+    expect(await redeemLoginToken(db, "nope", ALLOW, now)).toBeNull();
+    expect(await redeemLoginToken(db, t, ALLOW, new Date(now.getTime() + 16 * MIN))).toBeNull();
+    expect(await db.select().from(adminSessions)).toHaveLength(0);
+  });
+
+  test("an address that has left the allow-list gets no session (its token is used up)", async () => {
+    const db = await makeTestDb();
+    const t = await createLoginToken(db, DIM, now);
+    expect(await redeemLoginToken(db, t, "maria@example.test", now)).toBeNull();
+    expect(await db.select().from(adminSessions)).toHaveLength(0);
+    expect(await redeemLoginToken(db, t, ALLOW, now)).toBeNull();
+  });
+
+  test("when creating the session fails, the token is not burned and the link still works", async () => {
+    const db = await makeTestDb();
+    const t = await createLoginToken(db, DIM, now);
+    await db.execute(sql`alter table admin_sessions rename to admin_sessions_gone`); // the session insert now fails
+    await expect(redeemLoginToken(db, t, ALLOW, now)).rejects.toThrow();
+    const [row] = await db.select().from(authTokens);
+    expect(row.usedAt).toBeNull();
+    await db.execute(sql`alter table admin_sessions_gone rename to admin_sessions`);
+    expect(await redeemLoginToken(db, t, ALLOW, now)).not.toBeNull();
   });
 });

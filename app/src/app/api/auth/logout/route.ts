@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getDb } from "@/db/client";
-import { SESSION_COOKIE, deleteSession, sessionCookieOptions } from "@/server/auth";
+import { SESSION_COOKIE, deleteSession, isCrossSite, sessionCookieOptions } from "@/server/auth";
 import { logFailure } from "@/server/log";
 
 /**
- * Logout (POST from the button in the admin area): deletes the session row, clears the `mslab_admin` cookie and sends
- * the browser to /admin/login. POST only, so that a link or an image on another site cannot sign anybody out. A
- * request without the cookie (a cross-site POST does not carry it, SameSite=Lax) just gets the redirect.
+ * Logout (POST from the button in the admin area): deletes the session row, clears the `__Host-mslab_admin` cookie and
+ * sends the browser to /admin/login. POST only, so that a link or an image on another site cannot sign anybody out, and a
+ * POST from another site (Origin) is refused with 403.
+ *
+ * Deliberately not wrapped in withAdmin: a session that has expired, or whose address has left the allow-list, must still
+ * be able to clear its cookie and get to the login page instead of a JSON 401. A request without the cookie just gets
+ * the redirect (a cross-site POST does not carry it, SameSite=Lax). The static check in tests/unit/admin-guards.test.ts
+ * covers app/admin and app/api/admin; this route lives under app/api/auth because it is part of signing in and out.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (isCrossSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403, headers: { "cache-control": "no-store" } });
   const raw = (await cookies()).get(SESSION_COOKIE)?.value;
   const res = NextResponse.redirect(new URL("/admin/login", new URL(request.url).origin), 303);
   res.headers.set("cache-control", "no-store");

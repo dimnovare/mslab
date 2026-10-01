@@ -22,6 +22,20 @@ export function requestOrigin(headers: Pick<Headers, "get">): string | null {
   return `${proto}://${host}`;
 }
 
+/** Is `host` (a Host header) this machine: localhost, 127.0.0.1 or [::1], with or without a port? */
+export const isLocalHost = (host: string | null | undefined): boolean => !!host && /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+
+/**
+ * scheme + Host header, nothing else: no Origin and no x-forwarded-host, which a client can send. Cloudflare routes a
+ * request by its Host, so the Host of a request that reached this Worker is one of the zone's own names. The login link
+ * is built from this; null without a Host.
+ */
+export function hostOrigin(headers: Pick<Headers, "get">): string | null {
+  const host = headers.get("host");
+  if (!host) return null;
+  return `${isLocalHost(host) ? "http" : "https"}://${host}`;
+}
+
 /** The base for outgoing links: `origin` when it is allow-listed, otherwise SITE_URL. No trailing slash. */
 export function linkBase(origin: string | null | undefined, siteUrl: string): string {
   if (origin) {
