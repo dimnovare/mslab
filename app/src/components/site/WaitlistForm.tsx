@@ -27,7 +27,7 @@ type State = { status: "idle" } | { status: "sent" } | { status: "error"; errors
 
 /**
  * "Ootenimekirja" on a full calendar session (prototype A, A3): name and e-mail for that session → submitWaitlist
- * (Task 10 stores it as a `waitlist` request). Opens with focus in the name field; after a failed submit focus goes to
+ * (stored as a `waitlist` request). Opens with focus in the name field; after a failed submit focus goes to
  * the first field with an error, after success to the confirmation.
  */
 export function WaitlistForm({ session, context, locale, t }: { session: number; context: string; locale: Locale; t: WaitlistTexts }) {
@@ -124,7 +124,7 @@ export function WaitlistForm({ session, context, locale, t }: { session: number;
       </div>
       <input type="hidden" name="session" value={session} />
       <input type="hidden" name="locale" value={locale} />
-      {/* Honeypot (Task 10): people never see or fill it. */}
+      {/* Honeypot: people never see or fill it. */}
       <div className={styles.honeypot} aria-hidden="true">
         <label>
           Website

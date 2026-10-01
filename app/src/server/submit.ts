@@ -27,6 +27,7 @@ import {
   waitlistSummary,
   type Summary,
 } from "./messages";
+import { logFailure } from "./log";
 import { adminUrl, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
 
@@ -42,8 +43,10 @@ export type ActionResult = { ok: true } | { ok: false; errors: Record<string, st
 export type Deps = {
   db: Db;
   env: Env;
-  /** The visitor's address (rate limit key). */
-  ip: string;
+  /** The visitor's address (rate limit key); null when the request carries none (then it is not rate limited). */
+  ip: string | null;
+  /** Base of the links in outgoing e-mails and Telegram messages (allow-listed request origin, else SITE_URL). */
+  siteUrl: string;
   now: Date;
   /** Runs work after the response has been sent: next/server after() in production, collected and awaited in tests. */
   later: (task: () => Promise<unknown>) => void;
@@ -64,9 +67,24 @@ async function allowed(env: Env, key: string, limit: number, windowSec: number):
   try {
     return await rateLimit(env.KV, key, limit, windowSec);
   } catch (e) {
-    console.error("[forms] rate limit unavailable, allowing:", e instanceof Error ? e.message : e);
+    logFailure("[forms] rate limit unavailable, allowing", e);
     return true;
   }
+}
+
+let warnedNoIp = false;
+
+/** Rate limit per form and visitor. Without a visitor address (never on Cloudflare) the request is let through:
+ *  one shared bucket would lock everybody out after five submissions. */
+async function withinRateLimit(deps: Deps, form: FormName): Promise<boolean> {
+  if (deps.ip === null) {
+    if (!warnedNoIp) {
+      warnedNoIp = true;
+      console.warn("[forms] request without a visitor address (cf-connecting-ip / x-forwarded-for): not rate limited");
+    }
+    return true;
+  }
+  return allowed(deps.env, rateKey(form, deps.ip), RATE_LIMIT, RATE_WINDOW_SEC);
 }
 
 async function submission<T>(
@@ -82,7 +100,7 @@ async function submission<T>(
   }
   const parsed = parse(formData);
   if (!parsed.ok) return fail(parsed.errors);
-  if (!(await allowed(deps.env, rateKey(form, deps.ip), RATE_LIMIT, RATE_WINDOW_SEC))) {
+  if (!(await withinRateLimit(deps, form))) {
     console.info(`[forms] ${form}: rate limited`);
     return fail({ form: "rate" });
   }
@@ -90,7 +108,7 @@ async function submission<T>(
   const { notify, mail } = out;
   if (notify) {
     deps.later(async () => {
-      const r = await notifyMaria(deps.env, notify.subject, notify.text, { short: notify.short, replyTo: notify.replyTo });
+      const r = await notifyMaria(deps.env, notify.subject, notify.text, { short: notify.short, replyTo: notify.replyTo, siteUrl: deps.siteUrl });
       console.info(`[forms] ${form}: stored; Maria notified by e-mail: ${r.mail}, Telegram: ${r.telegram}`);
     });
   }
@@ -103,7 +121,26 @@ async function submission<T>(
   return out.result;
 }
 
-const admin = (deps: Deps) => adminUrl(deps.env);
+const admin = (deps: Deps) => adminUrl(deps.siteUrl);
+
+/**
+ * Runs one form handler with the dependencies from `makeDeps`. Any failure (bindings, database) is logged without
+ * personal data — the error class and SQLSTATE only, never the message, which holds the query parameters — and
+ * answered with form "server" (the forms show their generic error).
+ */
+export async function runSubmission(
+  form: FormName,
+  makeDeps: () => Deps | Promise<Deps>,
+  handler: (deps: Deps, formData: FormData) => Promise<ActionResult>,
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    return await handler(await makeDeps(), formData);
+  } catch (e) {
+    logFailure(`[forms] ${form}: not stored`, e);
+    return fail({ form: "server" });
+  }
+}
 
 // ---------- registrations ----------
 
@@ -261,12 +298,12 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export const confirmUrl = (env: Pick<Env, "SITE_URL">, token: string) =>
-  `${env.SITE_URL.replace(/\/+$/, "")}/api/newsletter/confirm?t=${encodeURIComponent(token)}`;
+export const confirmUrl = (siteUrl: string, token: string) =>
+  `${siteUrl.replace(/\/+$/, "")}/api/newsletter/confirm?t=${encodeURIComponent(token)}`;
 
-function confirmationMail(env: Env, sub: Pick<Subscriber, "email" | "token" | "locale">): Mail {
+function confirmationMail(siteUrl: string, sub: Pick<Subscriber, "email" | "token" | "locale">): Mail {
   const m = getDict(sub.locale === "ru" ? "ru" : "et").mail;
-  return { to: sub.email, subject: m.confirmSubject, text: fill(m.confirmText, { link: confirmUrl(env, sub.token) }) };
+  return { to: sub.email, subject: m.confirmSubject, text: fill(m.confirmText, { link: confirmUrl(siteUrl, sub.token) }) };
 }
 
 /**
@@ -291,7 +328,7 @@ export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionR
       console.info("[forms] subscribe: confirmation e-mails for this address are paused for today");
       return { result: OK };
     }
-    return { result: OK, mail: confirmationMail(deps.env, sub) };
+    return { result: OK, mail: confirmationMail(deps.siteUrl, sub) };
   });
 }
 

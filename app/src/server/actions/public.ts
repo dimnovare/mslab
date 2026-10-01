@@ -4,7 +4,9 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { headers } from "next/headers";
 import { after } from "next/server";
 import { getDb } from "@/db/client";
+import { logFailure } from "../log";
 import { clientIp } from "../ratelimit";
+import { linkBase, requestOrigin } from "../site";
 import {
   handleContact,
   handleIndividual,
@@ -13,6 +15,7 @@ import {
   handleRegistration,
   handleSubscribe,
   handleWaitlist,
+  runSubmission,
   type ActionResult,
   type Deps,
   type FormName,
@@ -24,24 +27,25 @@ import {
 // limited, form "server" when storage failed.
 
 async function run(form: FormName, handler: (deps: Deps, formData: FormData) => Promise<ActionResult>, formData: FormData): Promise<ActionResult> {
-  try {
-    const { env } = getCloudflareContext();
-    const deps: Deps = {
-      db: getDb(),
-      env,
-      ip: clientIp(await headers()),
-      now: new Date(),
-      // Notifications run after the response (the Worker's waitUntil) and never fail or slow the form.
-      later: (task) =>
-        after(() =>
-          task().catch((e) => console.error(`[forms] ${form}: notification failed:`, e instanceof Error ? e.message : e)),
-        ),
-    };
-    return await handler(deps, formData);
-  } catch (e) {
-    console.error(`[forms] ${form}: not stored:`, e instanceof Error ? e.message : e);
-    return { ok: false, errors: { form: "server" } };
-  }
+  return runSubmission(
+    form,
+    async (): Promise<Deps> => {
+      const { env } = getCloudflareContext();
+      const h = await headers();
+      return {
+        db: getDb(),
+        env,
+        // `next dev` has no edge address header: one local bucket. Production always has cf-connecting-ip.
+        ip: clientIp(h) ?? (process.env.NODE_ENV === "development" ? "local" : null),
+        siteUrl: linkBase(requestOrigin(h), env.SITE_URL),
+        now: new Date(),
+        // Notifications run after the response (the Worker's waitUntil) and never fail or slow the form.
+        later: (task) => after(() => task().catch((e) => logFailure(`[forms] ${form}: notification failed`, e))),
+      };
+    },
+    handler,
+    formData,
+  );
 }
 
 /** Home and contact page message to Maria. Fields: name, email, message, locale, website (honeypot). */

@@ -1,4 +1,4 @@
-import { test, expect } from "./test";
+import { submitsForms, test, expect } from "./test";
 import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
 
 // Home page (Task 7): Maria's section decisions H1–H17, G5, K5, K8, K11, K12.
@@ -184,6 +184,7 @@ test.describe("home content from the database", () => {
   });
 
   test("contact form validates and shows the sent state (H15)", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("home-contact", info.project.name);
     await page.goto("/");
     const form = page.locator("[data-contact-form]");

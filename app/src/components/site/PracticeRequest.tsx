@@ -45,7 +45,7 @@ const FIELD_ORDER: Field[] = ["package", "name", "email", "phone", "course", "ti
 
 /**
  * Practice request (prototype B `#registration`, R1): package, name, e-mail, phone, completed course, preferred times
- * → submitPractice (Task 10 stores a `practice` request). It asks for a time; Maria confirms it, nothing is booked.
+ * → submitPractice (stored as a `practice` request). It asks for a time; Maria confirms it, nothing is booked.
  *
  * The package follows ?pakett (the home and panel "Registreeru" links, Back/Forward); picking one here writes it
  * back with history.replaceState, so the card outline in the panel and a reload agree with the form.
@@ -214,7 +214,7 @@ export function PracticeRequest({ packages, locale, t }: { packages: PracticeOpt
         <p className={`${styles.note} ${styles.wide}`}>{t.note}</p>
 
         <input type="hidden" name="locale" value={locale} />
-        {/* Honeypot (Task 10): people never see or fill it. */}
+        {/* Honeypot: people never see or fill it. */}
         <div className={styles.honeypot} aria-hidden="true">
           <label>
             Website

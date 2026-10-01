@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect } from "./test";
+import { submitsForms, test, expect } from "./test";
 import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
 
 // Task 9: calendar (L1–L5), practice (R1–R5), trainer (T1–T4), blog (B1), contact and legal pages.
@@ -139,6 +139,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
   test.skip(!LOCAL_FIXTURES, "the seat fixtures are only inserted into the local dev database");
 
   test("a full session: Täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("waitlist", info.project.name);
     await page.goto("/koolituskalender");
     const full = page.locator("[data-calendar-row][data-state='full']");
@@ -272,6 +273,7 @@ test.describe("practice", () => {
   });
 
   test("request form: focus goes to the first invalid field; a complete request is sent", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("practice", info.project.name);
     await page.goto("/praktika");
     const form = page.locator("[data-practice-form]");
@@ -461,6 +463,7 @@ test.describe("blog", () => {
 
 test.describe("contact and legal", () => {
   test("contact page: details from settings and the D contact form", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("contact", info.project.name);
     await page.goto("/kontakt");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Alustame vestlusest.");

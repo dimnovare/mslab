@@ -399,7 +399,7 @@ export function ContactRegister({
 
           <input type="hidden" name="course" value={course} />
           <input type="hidden" name="locale" value={locale} />
-          {/* Honeypot (Task 10): people never see or fill it. */}
+          {/* Honeypot: people never see or fill it. */}
           <div className={styles.honeypot} aria-hidden="true">
             <label>
               Website

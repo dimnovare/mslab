@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
@@ -14,6 +14,7 @@ import {
   handleRegistration,
   handleSubscribe,
   handleWaitlist,
+  runSubmission,
   type Deps,
 } from "@/server/submit";
 import { fakeKv, stubFetch, type FetchCall } from "../fakes";
@@ -77,7 +78,7 @@ function setup(opts: { secrets?: boolean; ip?: string; kv?: ReturnType<typeof fa
   const kv = opts.kv ?? fakeKv({ "tg:chat": "42" });
   const env: Env = { KV: kv, MAIL_FROM: "MS LAB <info@send.example>", MARIA_EMAIL: "maria@example.com", SITE_URL: "https://mslab.example", ...(opts.secrets ? SECRETS : {}) };
   const tasks: (() => Promise<unknown>)[] = [];
-  const deps: Deps = { db, env, ip: opts.ip ?? "203.0.113.1", now: NOW, later: (task) => void tasks.push(task) };
+  const deps: Deps = { db, env, ip: opts.ip ?? "203.0.113.1", siteUrl: "https://mslab.example", now: NOW, later: (task) => void tasks.push(task) };
   return { deps, kv, flush: () => Promise.all(tasks.splice(0).map((task) => task())) };
 }
 
@@ -218,6 +219,17 @@ describe("honeypot and rate limit", () => {
     expect(await handleContact({ ...deps, ip: "198.51.100.10" }, msg)).toEqual({ ok: true });
   });
 
+  test("a request without a visitor address is not rate limited (no shared bucket); logged once", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps, kv } = setup();
+    const msg = form({ name: "A", email: "a@example.com", message: "Tere" });
+    for (let i = 0; i < 7; i++) expect(await handleContact({ ...deps, ip: null }, msg)).toEqual({ ok: true });
+    expect([...kv.store.keys()].filter((k) => k.startsWith("rl:"))).toEqual([]);
+    expect(warn.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(warn.mock.calls.flat().join(" ")).not.toMatch(/\d+\.\d+\.\d+/);
+  });
+
   test("invalid submissions are not counted", async () => {
     const { deps, kv } = setup();
     for (let i = 0; i < 7; i++) expect((await handleContact(deps, form({ name: "", email: "x", message: "" }))).ok).toBe(false);
@@ -309,6 +321,33 @@ describe("requests", () => {
   });
 });
 
+describe("failures are logged without personal data", () => {
+  test("a failing insert answers form 'server' and logs the error class and SQLSTATE, never field values", async () => {
+    const broken = await makeTestDb();
+    await broken.execute(sql`drop table requests`);
+    const fields = { name: "Mari Maasikas", email: "mari.secret@example.com", message: "Salajane sõnum 5551234", locale: "et" };
+    // Sanity: the driver error message does carry the parameters, so this test would catch them being logged.
+    const direct = await broken.insert(requests).values({ kind: "contact", payload: fields }).catch((e: unknown) => e);
+    expect(String((direct as Error).message)).toContain("mari.secret@example.com");
+
+    const logs = (["error", "warn", "info", "log"] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+    const { deps } = setup();
+    const result = await runSubmission("contact", () => ({ ...deps, db: broken }), handleContact, form(fields));
+    expect(result).toEqual({ ok: false, errors: { form: "server" } });
+    const logged = logs.flatMap((spy) => spy.mock.calls.flat()).map(String).join("\n");
+    expect(logged).toContain("[forms] contact: not stored: DrizzleQueryError (code 42P01)");
+    for (const value of ["Mari", "Maasikas", "mari.secret", "Salajane", "5551234", "insert into"]) expect(logged).not.toContain(value);
+  });
+
+  test("a failure while building the dependencies is answered the same way", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await runSubmission("contact", () => {
+      throw new Error("no Cloudflare context: mari@example.com");
+    }, handleContact, form({}));
+    expect(result).toEqual({ ok: false, errors: { form: "server" } });
+  });
+});
+
 describe("newsletter double opt-in", () => {
   const signUp = (deps: Deps, email = "uus@example.com", locale = "et") => handleSubscribe(deps, form({ email, consent: "on", locale }));
 
@@ -325,6 +364,10 @@ describe("newsletter double opt-in", () => {
     expect(mail.to).toBe("uus@example.com");
     expect(mail.subject).toBe("Подтвердите подписку на рассылку MS LAB");
     expect(mail.text).toContain(`https://mslab.example/api/newsletter/confirm?t=${sub.token}`);
+    // The link base is the allow-listed request origin the action resolved (deps.siteUrl), not always SITE_URL.
+    await signUp({ ...deps, siteUrl: "https://mslab-web.dim-novare.workers.dev" }, "teine@example.com");
+    await flush();
+    expect(mails()[1].text).toContain("https://mslab-web.dim-novare.workers.dev/api/newsletter/confirm?t=");
   });
 
   test("signing up again does not tell whether the address exists: same answer, one row; unconfirmed → link again", async () => {

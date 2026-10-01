@@ -31,7 +31,7 @@ type State = { status: "idle" } | { status: "sent" } | { status: "error"; errors
 
 /**
  * Prototype D contact block (Maria C31 / H15): "Ei tea, milline koolitus sobib?" with Maria's photo and a form
- * that posts to the `submitContact` server action (storage and notification arrive in Task 10). Used on the home page
+ * that posts to the `submitContact` server action (stored as a contact request, then Maria is notified). Used on the home page
  * and on /kontakt. After a failed submit focus goes to the first field with an error, after success to the confirmation.
  */
 export function ContactBlock({ locale, t, person }: { locale: Locale; t: ContactTexts; person: { name: string; photo: string } }) {
@@ -139,7 +139,7 @@ export function ContactBlock({ locale, t, person }: { locale: Locale; t: Contact
                 {fieldError("message")}
               </div>
               <input type="hidden" name="locale" value={locale} />
-              {/* Honeypot (Task 10): people never see or fill it. */}
+              {/* Honeypot: people never see or fill it. */}
               <div className={styles.honeypot} aria-hidden="true">
                 <label>
                   Website

@@ -1,9 +1,11 @@
 import { Resend } from "resend";
+import { errorSummary } from "./log";
 import type { TextKv } from "./ratelimit";
 
-// Outgoing notifications: e-mail through Resend and a Telegram ping to Maria. Both are best effort — callers store
-// the submission first and never fail a request because of a notification. Without the secrets (local `next dev`
-// has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN) nothing is sent and a console note says so.
+// Outgoing notifications: e-mail through Resend and a Telegram ping to Maria (until launch: to Dim, see MARIA_EMAIL in
+// wrangler.jsonc). Both are best effort — callers store the submission first and never fail a request because of a
+// notification. Without the secrets (local `next dev` has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN) nothing is sent
+// and a console note says so. Logs never contain addresses, message text, tokens or provider error messages.
 
 /** The bindings and secrets notifications use (a subset of the Worker env; secrets are optional). */
 export type Env = {
@@ -13,7 +15,7 @@ export type Env = {
   SITE_URL: string;
   RESEND_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
-  /** Optional override; otherwise the chat id remembered in KV under `tg:chat` (shared with the review site worker). */
+  /** Optional override of the chat; otherwise the chat id stored in KV under `tg:chat` (set by the review-site worker). */
   TELEGRAM_CHAT_ID?: string;
 };
 
@@ -21,8 +23,19 @@ export type Mail = { to: string; subject: string; text: string; replyTo?: string
 
 const TELEGRAM_MAX = 3900;
 export const TG_CHAT_KEY = "tg:chat";
+/** A hung provider call must not hold the Worker's waitUntil. */
+export const NOTIFY_TIMEOUT_MS = 8000;
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+class TimeoutError extends Error {}
+
+/** Resolves or rejects like `p`, or rejects with a TimeoutError after `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError()), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
 
 /** Sends one plain-text e-mail. true = Resend accepted it. */
 export async function sendMail(env: Env, mail: Mail): Promise<boolean> {
@@ -31,47 +44,39 @@ export async function sendMail(env: Env, mail: Mail): Promise<boolean> {
     return false;
   }
   try {
-    const { data, error } = await new Resend(env.RESEND_API_KEY).emails.send({
-      from: env.MAIL_FROM,
-      to: mail.to,
-      subject: mail.subject,
-      text: mail.text,
-      ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
-    });
+    const { data, error } = await withTimeout(
+      new Resend(env.RESEND_API_KEY).emails.send({
+        from: env.MAIL_FROM,
+        to: mail.to,
+        subject: mail.subject,
+        text: mail.text,
+        ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
+      }),
+      NOTIFY_TIMEOUT_MS,
+    );
     if (error) {
-      console.error("[notify] Resend rejected the e-mail:", error.name, error.message);
+      // error.message can quote the recipient: only the error name and HTTP status are logged.
+      console.error(`[notify] Resend rejected the e-mail: ${errorSummary(error)}`);
       return false;
     }
-    console.info("[notify] Resend accepted the e-mail:", data?.id);
+    console.info(`[notify] Resend accepted the e-mail: ${data?.id ?? "?"}`);
     return true;
   } catch (e) {
-    console.error("[notify] Resend request failed:", errorText(e));
+    console.error(`[notify] Resend request failed: ${errorSummary(e)}`);
     return false;
   }
 }
 
 /**
- * Maria's chat (ported from worker/index.js): TELEGRAM_CHAT_ID if set; otherwise the id in KV `tg:chat`; otherwise the
- * first private chat that wrote to the bot (getUpdates), remembered in KV.
+ * The chat for notifications: TELEGRAM_CHAT_ID if set, otherwise the id stored in KV `tg:chat`. The app never binds a
+ * chat itself (no getUpdates, no KV writes): whoever writes to the bot must not start receiving submissions.
  */
 export async function chatId(env: Env): Promise<string | null> {
   if (env.TELEGRAM_CHAT_ID) return env.TELEGRAM_CHAT_ID;
-  const known = await env.KV.get(TG_CHAT_KEY);
-  if (known) return known;
-  const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getUpdates`);
-  if (!r.ok) {
-    console.error("[notify] Telegram getUpdates:", r.status, (await r.text()).slice(0, 200));
-    return null;
-  }
-  const d = (await r.json()) as { result?: { message?: { chat?: { id: number; type: string } } }[] };
-  const chat = (d.result ?? []).map((u) => u.message?.chat).find((c) => c?.type === "private");
-  if (!chat) return null;
-  const id = String(chat.id);
-  await env.KV.put(TG_CHAT_KEY, id);
-  return id;
+  return (await env.KV.get(TG_CHAT_KEY)) || null;
 }
 
-/** Sends a plain-text Telegram message to Maria. true = Telegram answered ok. */
+/** Sends a plain-text Telegram message. true = Telegram answered ok. */
 export async function sendTelegram(env: Env, text: string): Promise<boolean> {
   if (!env.TELEGRAM_BOT_TOKEN) {
     console.info("[notify] TELEGRAM_BOT_TOKEN is not set: Telegram skipped");
@@ -80,39 +85,42 @@ export async function sendTelegram(env: Env, text: string): Promise<boolean> {
   try {
     const chat = await chatId(env);
     if (!chat) {
-      console.error("[notify] Telegram: no chat id (nobody has written to the bot yet)");
+      console.info("[notify] no Telegram chat (TELEGRAM_CHAT_ID / KV tg:chat): Telegram skipped");
       return false;
     }
     const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chat_id: chat, text: text.slice(0, TELEGRAM_MAX), disable_web_page_preview: true }),
+      signal: AbortSignal.timeout(NOTIFY_TIMEOUT_MS),
     });
-    if (!r.ok) console.error("[notify] Telegram sendMessage:", r.status, (await r.text()).slice(0, 200));
+    if (!r.ok) console.error(`[notify] Telegram sendMessage failed: status ${r.status}`);
     else console.info("[notify] Telegram accepted the message");
     return r.ok;
   } catch (e) {
-    console.error("[notify] Telegram request failed:", errorText(e));
+    // A fetch error can contain the URL, which holds the bot token: class and code only.
+    console.error(`[notify] Telegram request failed: ${errorSummary(e)}`);
     return false;
   }
 }
 
-/** Link to the admin area in Maria's notifications (the admin itself arrives in a later task). */
-export const adminUrl = (env: Pick<Env, "SITE_URL">) => `${env.SITE_URL.replace(/\/+$/, "")}/admin`;
+/** Link to the admin area in the notifications (the admin itself arrives in a later task). */
+export const adminUrl = (base: string) => `${base.replace(/\/+$/, "")}/admin`;
 
 /**
  * Tells Maria about a new submission: the full plain-text summary by e-mail (reply goes to the visitor when
- * `replyTo` is given) and a short Telegram ping (`short`, default the subject) with the admin link.
+ * `replyTo` is given) and a short Telegram ping (`short`, default the subject) with the admin link under `siteUrl`
+ * (default SITE_URL).
  */
 export async function notifyMaria(
   env: Env,
   subject: string,
   text: string,
-  opts: { short?: string; replyTo?: string } = {},
+  opts: { short?: string; replyTo?: string; siteUrl?: string } = {},
 ): Promise<{ mail: boolean; telegram: boolean }> {
   const [mail, telegram] = await Promise.all([
     sendMail(env, { to: env.MARIA_EMAIL, subject, text, replyTo: opts.replyTo }),
-    sendTelegram(env, `${opts.short ?? subject}\n\n${adminUrl(env)}`),
+    sendTelegram(env, `${opts.short ?? subject}\n\n${adminUrl(opts.siteUrl ?? env.SITE_URL)}`),
   ]);
   return { mail, telegram };
 }

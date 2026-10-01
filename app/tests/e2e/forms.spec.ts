@@ -1,4 +1,4 @@
-import { test, expect } from "./test";
+import { submitsForms, test, expect } from "./test";
 import { LOCAL_FIXTURES, storedRequests, storedSubscriber, testEmail } from "./fixtures";
 
 // Task 10: the forms store what they are sent (local dev DB), double opt-in for the newsletter, honeypot, rate limit,
@@ -10,6 +10,7 @@ const INK = "rgb(34, 34, 34)";
 
 test.describe("newsletter", () => {
   test("a failed attempt keeps the e-mail and the consent; each error is on its own field", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("nl-failed", info.project.name);
     await page.goto("/konto");
     const footer = page.locator("footer");
@@ -40,6 +41,7 @@ test.describe("newsletter", () => {
   });
 
   test("sign-up: announced in the status region, stored unconfirmed; the e-mailed link confirms it", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("nl", info.project.name);
     await page.goto("/koolitused");
     const footer = page.locator("footer");
@@ -70,6 +72,7 @@ test.describe("newsletter", () => {
   });
 
   test("signing up again gives the same answer and keeps one row (does not tell whether the address exists)", async ({ page }, info) => {
+    submitsForms();
     test.skip(!LOCAL_FIXTURES, "checks the local database");
     const addr = testEmail("nl-again", info.project.name);
     for (let i = 0; i < 2; i++) {
@@ -85,6 +88,7 @@ test.describe("newsletter", () => {
   });
 
   test("Russian sign-up confirms to /ru; a wrong link says the link is not valid", async ({ page }, info) => {
+    submitsForms();
     test.skip(!LOCAL_FIXTURES, "reads the confirmation token from the local database");
     const addr = testEmail("nl-ru", info.project.name);
     await page.goto("/ru/koolitused");
@@ -132,6 +136,7 @@ test.describe("newsletter", () => {
 
 test.describe("spam protection", () => {
   test("a filled honeypot looks like success but nothing is stored", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("honeypot", info.project.name);
     await page.goto("/kontakt");
     const form = page.locator("[data-contact-form]");
@@ -145,6 +150,7 @@ test.describe("spam protection", () => {
   });
 
   test("5 submissions per form in 10 minutes; the 6th asks to try again later", async ({ page, isMobile }, info) => {
+    submitsForms();
     test.skip(isMobile, "the limit is per visitor, not per layout: desktop only");
     test.skip(!LOCAL_FIXTURES, "the visitor address comes from x-forwarded-for only under next dev");
     const addr = testEmail("rate", info.project.name);

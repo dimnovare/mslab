@@ -25,10 +25,11 @@ export const rateKey = (form: string, ip: string) => `rl:${form}:${ip}`;
 
 /**
  * The visitor's address. On Cloudflare `cf-connecting-ip` is always set by the edge (clients cannot forge it);
- * `x-forwarded-for` (first hop) is only the fallback for `next dev`, and "local" when neither is there.
+ * `x-forwarded-for` (first hop) is only the fallback for `next dev`. null when neither is there: the caller decides
+ * (dev: one "local" bucket; production: no rate limit for that request, rather than one bucket for everybody).
  */
-export function clientIp(headers: Pick<Headers, "get">): string {
+export function clientIp(headers: Pick<Headers, "get">): string | null {
   const cf = headers.get("cf-connecting-ip")?.trim();
   const ip = cf || headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return ip ? ip.slice(0, 64) : "local"; // an IPv6 address has at most 45 characters; KV keys stay short
+  return ip ? ip.slice(0, 64) : null; // an IPv6 address has at most 45 characters; KV keys stay short
 }

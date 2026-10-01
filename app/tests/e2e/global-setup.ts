@@ -4,7 +4,13 @@ import { applySeatFixtures, LOCAL_FIXTURES, removeFormRows } from "./fixtures";
 // Runs once per `playwright test` run (whatever the file or --grep filter): seat fixtures for the calendar tests, and
 // leftovers of an interrupted run's form submissions removed.
 export default async function globalSetup(): Promise<void> {
-  if (!LOCAL_FIXTURES) return;
+  if (!LOCAL_FIXTURES) {
+    // A deployment has a real database and real notifications. Read-only runs against it need an explicit opt-in;
+    // even then the form tests skip themselves and every POST is blocked (tests/e2e/test.ts).
+    if (process.env.E2E_ALLOW_REMOTE !== "1")
+      throw new Error("e2e: E2E_BASE_URL is not a local server — set E2E_ALLOW_REMOTE=1 for a read-only run (form tests are skipped)");
+    return;
+  }
   refuseMailSecrets();
   await removeFormRows();
   await applySeatFixtures();

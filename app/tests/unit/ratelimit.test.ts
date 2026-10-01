@@ -28,8 +28,9 @@ describe("clientIp", () => {
   test("Cloudflare's cf-connecting-ip wins over x-forwarded-for", () => {
     expect(clientIp(h({ "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "198.51.100.1" }))).toBe("203.0.113.7");
   });
-  test("x-forwarded-for (first hop) is the fallback, then 'local'", () => {
+  test("x-forwarded-for (first hop) is the fallback; no header gives null (the caller decides)", () => {
     expect(clientIp(h({ "x-forwarded-for": "198.51.100.1, 10.0.0.1" }))).toBe("198.51.100.1");
-    expect(clientIp(h({}))).toBe("local");
+    expect(clientIp(h({}))).toBeNull();
+    expect(clientIp(h({ "cf-connecting-ip": " " }))).toBeNull();
   });
 });

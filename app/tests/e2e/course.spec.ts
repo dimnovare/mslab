@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect } from "./test";
+import { submitsForms, test, expect } from "./test";
 import { LOCAL_FIXTURES, storedRegistrations, storedRequests, testEmail } from "./fixtures";
 
 // Course pages (Task 8): Maria's P1–P16. The first two tests are the brief's tests, verbatim except:
@@ -19,6 +19,7 @@ test("e-learning course page", async ({ page }) => {
   await page.locator("[data-gallery-main]").click(); await expect(page.getByRole("dialog")).toBeVisible(); await page.keyboard.press("Escape");
 });
 test("contact course group registration stays awaiting prepayment", async ({ page }, info) => {
+  submitsForms();
   const addr = testEmail("register", info.project.name);
   await page.goto("/koolitused/kulmumeistri-baaskoolitus");
   await expect(page.locator("#main > :not([data-recommendations])").getByText(/E-õpe|Hübriidõpe/)).toHaveCount(0);
@@ -124,6 +125,7 @@ test.describe("contact page", () => {
   });
 
   test("after a failed submit, focus lands on the first invalid field", async ({ page }) => {
+    submitsForms();
     await page.goto("/koolitused/kulmumeistri-baaskoolitus");
     const form = page.locator("[data-register-form]");
     // Group without a date: the date choice comes first.
@@ -187,6 +189,7 @@ test.describe("contact page", () => {
   });
 
   test("form: payment options, models and account checkboxes, prepayment info line (P11, P14, P15, P16)", async ({ page }) => {
+    submitsForms();
     await page.goto("/koolitused/kulmumeistri-baaskoolitus");
     const form = page.locator("[data-register-form]");
     await expect(form.getByRole("radio", { name: "100% kohe" })).toBeChecked();
@@ -207,6 +210,7 @@ test.describe("contact page", () => {
   });
 
   test("individual request is sent", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("individual", info.project.name);
     await page.goto("/koolitused/kulmude-lami");
     await page.getByRole("radio", { name: /Individuaalkoolitus/ }).check();
@@ -351,6 +355,7 @@ test.describe("both types", () => {
 
 test.describe("cart (/ostukorv)", () => {
   test("summarises the e-course, says payment opens soon, takes an e-mail (P9)", async ({ page }, info) => {
+    submitsForms();
     const addr = testEmail("interest", info.project.name);
     await page.goto("/ostukorv?kursus=kulmumeistri-e-koolitus");
     await expect(page.getByRole("heading", { name: "Kulmumeistri e-koolitus" })).toBeVisible();

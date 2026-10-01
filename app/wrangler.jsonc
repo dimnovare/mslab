@@ -7,5 +7,11 @@
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "5004509b7b08431b8a053d9f8fce2335", "localConnectionString": "postgres://postgres:postgres@localhost:5432/mslab" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "mslab-media" }],
   "kv_namespaces": [{ "binding": "KV", "id": "325a989613294fa19c86451afd8f6fa3" }],
-  "vars": { "SITE_URL": "https://mslab.diipsolutions.eu", "ADMIN_EMAILS": "dim@example.test,maria@example.test", "MAIL_FROM": "MS LAB <info@send.diipsolutions.eu>", "MARIA_EMAIL": "maria@example.test" }
+  "vars": {
+    "SITE_URL": "https://mslab.diipsolutions.eu",
+    "ADMIN_EMAILS": "dim@example.test,maria@example.test",
+    "MAIL_FROM": "MS LAB <info@send.diipsolutions.eu>",
+    // Form notifications go to Dim until launch. Switch to maria@example.test at the mslab.ee launch.
+    "MARIA_EMAIL": "dim@example.test"
+  }
 }

@@ -27,7 +27,7 @@ const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
 /**
  * Contact (Task 9): the footer's "Kontakt ja koostöö" / "Võta ühendust" target. Page head with the contact details from
  * the settings (e-mail, phone, address, social links — only those that are filled in), then prototype D's contact
- * block with the message form (submitContact; Task 10 stores and forwards it).
+ * block with the message form (submitContact: stored as a contact request, then Maria is notified).
  */
 export default async function ContactPage({ params }: Props) {
   const { locale } = await params;

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db/client";
+import { logFailure } from "@/server/log";
 import { confirmSubscriber } from "@/server/submit";
 
 /**
@@ -18,7 +19,7 @@ export async function GET(request: Request): Promise<Response> {
       if (sub.locale === "ru") home = "/ru";
     }
   } catch (e) {
-    console.error("[newsletter] confirm failed:", e instanceof Error ? e.message : e);
+    logFailure("[newsletter] confirm failed", e); // never the message: it would contain the token
     outcome = "viga";
   }
   const target = new URL(home, url.origin);
