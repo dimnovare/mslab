@@ -15,7 +15,14 @@ const CONNECT_TIMEOUT = 5;
 /** Seconds that in-flight queries get to finish when the per-request client is closed. */
 const END_TIMEOUT = 5;
 
-const client = (url: string) => postgres(url, { max: 5, fetch_types: false, connect_timeout: CONNECT_TIMEOUT });
+/**
+ * `prepare: false`: Hyperdrive caches read queries for 60 s (+15 s stale) and does not invalidate them on writes, so
+ * after Maria saves a course the catalogue, the calendar and the editor itself could show the old data for a minute.
+ * Hyperdrive does not cache the queries of a postgres.js client without prepared statements (Hyperdrive docs,
+ * "Uncached queries"), so every read sees the latest write. The pooling stays. (Turning caching off on the Hyperdrive
+ * configuration itself, `wrangler hyperdrive update <id> --caching-disabled`, would make the same guarantee explicit.)
+ */
+const client = (url: string) => postgres(url, { max: 5, fetch_types: false, connect_timeout: CONNECT_TIMEOUT, prepare: false });
 
 // `next dev` is one long-lived Node process: a client per request would keep its sockets open until Postgres
 // refuses new clients ("too many clients already"), so dev reuses a single pool (kept across hot reloads).
