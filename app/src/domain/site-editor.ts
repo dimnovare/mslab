@@ -1,0 +1,293 @@
+// The site content editors' model (Task 13B: home page, practice, trainer, news, campaign, settings), shared by the
+// browser (components/admin/*Editor.tsx) and the server (server/admin-site.ts): the drafts the editors hold and send,
+// the stored-value → draft conversions, the limits, and the checks for links and focal points. Pure: no database, no
+// React.
+
+import type { I18n } from "@/i18n/field";
+import { centsToInput } from "./money";
+
+export const SITE_LIMITS = {
+  slides: 8,
+  slideKicker: 80,
+  slideTitle: 120,
+  slideText: 300,
+  ctaLabel: 40,
+  href: 300,
+  statement: 400,
+  faq: 30,
+  question: 200,
+  answer: 2000,
+  packageName: 40,
+  tagline: 160,
+  models: 20,
+  duration: 40,
+  packageItems: 20,
+  item: 300,
+  trainerName: 80,
+  role: 160,
+  stats: 3,
+  statValue: 12,
+  statLabel: 40,
+  bio: 5000,
+  works: 24,
+  alt: 200,
+  storyTitle: 120,
+  story: 10_000,
+  postTitle: 160,
+  excerpt: 400,
+  postBody: 20_000,
+  category: 40,
+  campaignKicker: 60,
+  campaignTitle: 120,
+  campaignText: 300,
+  code: 24,
+  email: 120,
+  phone: 40,
+  address: 200,
+  url: 300,
+  discount: 20,
+  legalTitle: 120,
+  legal: 30_000,
+};
+
+// ---------- links ----------
+
+const UNSAFE_CHARS = /[\s\\<>"'`\u0000-\u001f\u007f]/;
+
+/**
+ * A link an admin may store for a button (hero CTA, campaign CTA): a path on this site ("/koolitused",
+ * "/praktika#taotlus"; not "//host", which a browser reads as another site) or an https:// address. Anything else
+ * (javascript:, data:, http:, mailto:, relative text) is refused.
+ */
+export function isSiteHref(value: string): boolean {
+  if (!value || value.length > SITE_LIMITS.href || UNSAFE_CHARS.test(value)) return false;
+  if (value.startsWith("/")) return !value.startsWith("//");
+  return isHttpsUrl(value);
+}
+
+/** An absolute https:// address with a host and no user name or password in it (social links, outside CTAs). */
+export function isHttpsUrl(value: string): boolean {
+  if (!value || value.length > SITE_LIMITS.url || UNSAFE_CHARS.test(value)) return false;
+  if (!/^https:\/\//i.test(value)) return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" && u.hostname.includes(".") && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+}
+
+/** A stored button link for the page: a site path gets the locale prefix (via `to`), an https address stays; anything else falls back. */
+export function linkFor(value: string, to: (path: string) => string, fallback: string): string {
+  if (!isSiteHref(value)) return to(fallback);
+  return value.startsWith("/") ? to(value) : value;
+}
+
+// ---------- focal points ("x% y%", CSS object-position) ----------
+
+export type Focal = { x: number; y: number };
+export const DEFAULT_FOCAL = "50% 50%";
+const FOCAL = /^(\d{1,3})% (\d{1,3})%$/;
+
+export function parseFocal(value: string | null | undefined): Focal | null {
+  const m = FOCAL.exec((value ?? "").trim());
+  if (!m) return null;
+  const x = Number(m[1]);
+  const y = Number(m[2]);
+  return x <= 100 && y <= 100 ? { x, y } : null;
+}
+
+export const isFocal = (value: string) => parseFocal(value) !== null;
+
+/** Whole percentages, clamped to 0…100. */
+export function formatFocal(f: Focal): string {
+  const c = (n: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(n) ? n : 50)));
+  return `${c(f.x)}% ${c(f.y)}%`;
+}
+
+// ---------- the trainer's portrait ----------
+
+/**
+ * The seed portrait (maria-standing) has much white space around Maria; the public pages zoom into it (Task 9 review).
+ * An uploaded portrait is shown as it is, framed by its focal point only.
+ */
+export const SEED_PORTRAIT = "/seed/maria-standing.jpg";
+/** Where the seed portrait was framed before the focal point existed. */
+export const SEED_PORTRAIT_FOCAL = "50% 20%";
+
+/** How a portrait is framed on the site: its focal point, and the zoom for the seed photo only. */
+export function portraitFraming(key: string, pos: string | null | undefined): { pos: string; zoom: boolean } {
+  const seed = key === SEED_PORTRAIT;
+  return { pos: parseFocal(pos) ? pos!.trim() : seed ? SEED_PORTRAIT_FOCAL : DEFAULT_FOCAL, zoom: seed };
+}
+
+// ---------- drafts ----------
+
+const empty = (): I18n => ({ et: "" });
+/** A copy of a stored text (the RU key only when it exists), or an empty one. */
+export const copyI18n = (f: I18n | null | undefined): I18n => (f && typeof f.et === "string" ? { et: f.et, ...(typeof f.ru === "string" ? { ru: f.ru } : {}) } : empty());
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const i18nOf = (v: unknown): I18n => {
+  const o = obj(v);
+  return typeof o.et === "string" ? copyI18n(o as I18n) : empty();
+};
+
+/** List rows carry a client key (`uid`) so that React keeps a row's fields while rows move; the server ignores it. */
+export type Keyed = { uid: string };
+
+export type SlideDraft = Keyed & {
+  /** The stored slide (kept on save, so the slide keeps its id); null for a new one. */
+  id: number | null;
+  imageKey: string;
+  imagePos: string;
+  imagePosMobile: string;
+  tone: "light" | "dark";
+  kicker: I18n;
+  title: I18n;
+  text: I18n;
+  ctaLabel: I18n;
+  ctaHref: string;
+  active: boolean;
+};
+
+type StoredSlide = Omit<SlideDraft, "uid" | "tone"> & { id: number; tone: string };
+
+export function slideDraft(s: StoredSlide): SlideDraft {
+  return {
+    uid: `s${s.id}`,
+    id: s.id,
+    imageKey: s.imageKey,
+    imagePos: parseFocal(s.imagePos) ? s.imagePos : DEFAULT_FOCAL,
+    imagePosMobile: parseFocal(s.imagePosMobile) ? s.imagePosMobile : DEFAULT_FOCAL,
+    tone: s.tone === "dark" ? "dark" : "light",
+    kicker: copyI18n(s.kicker),
+    title: copyI18n(s.title),
+    text: copyI18n(s.text),
+    ctaLabel: copyI18n(s.ctaLabel),
+    ctaHref: s.ctaHref,
+    active: s.active,
+  };
+}
+
+export function newSlideDraft(uid: string): SlideDraft {
+  return {
+    uid,
+    id: null,
+    imageKey: "",
+    imagePos: DEFAULT_FOCAL,
+    imagePosMobile: DEFAULT_FOCAL,
+    tone: "light",
+    kicker: empty(),
+    title: empty(),
+    text: empty(),
+    ctaLabel: empty(),
+    ctaHref: "/koolitused",
+    active: true,
+  };
+}
+
+export type FaqDraft = Keyed & { q: I18n; a: I18n };
+export const faqDraft = (f: { id: number; q: I18n; a: I18n }): FaqDraft => ({ uid: `f${f.id}`, q: copyI18n(f.q), a: copyI18n(f.a) });
+
+/** An editable text page (statement, trainer bio, stories, legal pages). */
+export type PageDraft = { title: I18n; body: I18n };
+export const pageDraft = (p: { title: I18n; body: I18n } | null): PageDraft => ({ title: copyI18n(p?.title), body: copyI18n(p?.body) });
+
+export type PackageDraft = { name: I18n; tagline: I18n; models: string; durationLabel: I18n; price: string; items: I18n[] };
+export function packageDraft(p: { name: I18n; tagline: I18n; models: number; durationLabel: I18n; price: number; items: I18n[] }): PackageDraft {
+  return {
+    name: copyI18n(p.name),
+    tagline: copyI18n(p.tagline),
+    models: String(p.models),
+    durationLabel: copyI18n(p.durationLabel),
+    price: centsToInput(p.price),
+    items: p.items.map(copyI18n),
+  };
+}
+
+export type StatDraft = Keyed & { value: string; label: I18n };
+export type TrainerDraft = { portraitKey: string; portraitPos: string; name: string; role: I18n; stats: StatDraft[] };
+
+/** settings.trainer → the trainer card's draft (the portrait's focal point defaults as the site frames it). */
+export function trainerDraft(value: unknown): TrainerDraft {
+  const t = obj(value);
+  const portraitKey = str(t.portraitKey);
+  return {
+    portraitKey,
+    portraitPos: portraitFraming(portraitKey, str(t.portraitPos)).pos,
+    name: str(t.name),
+    role: i18nOf(t.role),
+    stats: (Array.isArray(t.stats) ? t.stats : []).map((s, i) => ({ uid: `t${i}`, value: str(obj(s).value), label: i18nOf(obj(s).label) })),
+  };
+}
+
+export type WorkDraft = { key: string; alt: I18n };
+
+export type CampaignDraft = {
+  active: boolean;
+  kicker: I18n;
+  title: I18n;
+  text: I18n;
+  code: string;
+  ctaLabel: I18n;
+  ctaHref: string;
+  imageKey: string;
+};
+
+/** M4: the campaign button says "Leia enda koolitus" unless Maria writes something else. */
+export const CAMPAIGN_CTA = "Leia enda koolitus";
+
+export function campaignDraft(c: CampaignDraft | null): CampaignDraft {
+  if (!c) return { active: false, kicker: empty(), title: empty(), text: empty(), code: "", ctaLabel: { et: CAMPAIGN_CTA }, ctaHref: "/koolitused", imageKey: "" };
+  return {
+    active: c.active,
+    kicker: copyI18n(c.kicker),
+    title: copyI18n(c.title),
+    text: copyI18n(c.text),
+    code: c.code,
+    ctaLabel: c.ctaLabel?.et?.trim() ? copyI18n(c.ctaLabel) : { ...copyI18n(c.ctaLabel), et: CAMPAIGN_CTA },
+    ctaHref: c.ctaHref,
+    imageKey: c.imageKey,
+  };
+}
+
+export type ContactDraft = { email: string; phone: string; address: string; instagram: string; facebook: string };
+export function contactDraft(value: unknown): ContactDraft {
+  const c = obj(value);
+  return { email: str(c.email), phone: str(c.phone), address: str(c.address), instagram: str(c.instagram), facebook: str(c.facebook) };
+}
+
+export type NewsletterDraft = { discountLabel: string };
+export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountLabel: str(obj(value).discountLabel) });
+
+export type PostDraft = {
+  id: number | null;
+  title: I18n;
+  slug: string;
+  excerpt: I18n;
+  body: I18n;
+  category: I18n;
+  coverKey: string;
+  /** Estonian calendar date, YYYY-MM-DD. */
+  publishedAt: string;
+  published: boolean;
+};
+
+export function postDraft(p: { id: number; title: I18n; slug: string; excerpt: I18n; body: I18n; category: I18n; coverKey: string; published: boolean }, date: string): PostDraft {
+  return {
+    id: p.id,
+    title: copyI18n(p.title),
+    slug: p.slug,
+    excerpt: copyI18n(p.excerpt),
+    body: copyI18n(p.body),
+    category: copyI18n(p.category),
+    coverKey: p.coverKey,
+    publishedAt: date,
+    published: p.published,
+  };
+}
+
+export function newPostDraft(today: string): PostDraft {
+  return { id: null, title: empty(), slug: "", excerpt: empty(), body: empty(), category: empty(), coverKey: "", publishedAt: today, published: false };
+}

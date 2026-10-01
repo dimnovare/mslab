@@ -19,6 +19,7 @@ import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { getHomeData, listUpcomingSessions } from "@/db/queries/public";
 import { firstParagraph, nextSessionByCourse, nextSessions, pickHomeCourses } from "@/domain/home";
+import { linkFor } from "@/domain/site-editor";
 import { formatEUR } from "@/domain/money";
 import { pick, pickList } from "@/i18n/field";
 import { fill, formatDate, formatDayMonth, formatWeekday } from "@/i18n/format";
@@ -53,8 +54,8 @@ export default async function Home({ params, searchParams }: Props) {
     title: pick(s.title, locale),
     text: pick(s.text, locale),
     ctaLabel: pick(s.ctaLabel, locale) || d.hero.primaryCta,
-    // Site paths get the locale prefix; anything else (absolute URL) is used as entered. "//host" is not a site path.
-    ctaHref: s.ctaHref.startsWith("/") && !s.ctaHref.startsWith("//") ? to(s.ctaHref) : s.ctaHref,
+    // A site path gets the locale prefix, an https address stays; anything else (the admin refuses it) → the catalogue.
+    ctaHref: linkFor(s.ctaHref, to, "/koolitused"),
   }));
 
   const nextByCourse = nextSessionByCourse(sessions);
@@ -149,6 +150,8 @@ export default async function Home({ params, searchParams }: Props) {
           name: trainerName,
           text: firstParagraph(pick(bio?.body, locale)) || pick(trainer.role, locale),
           portrait: mediaUrl(trainer.portraitKey),
+          portraitPos: trainer.portraitPos,
+          portraitZoom: trainer.portraitZoom,
           portraitAlt: fill(d.trainer.portraitAlt, { name: trainerName }),
           stats: trainer.stats.map((s) => ({ value: s.value, label: pick(s.label, locale) })),
           link: { label: d.trainer.readMore, href: to("/koolitaja") },

@@ -1,8 +1,7 @@
 import { adminEt } from "@/i18n/dict/admin";
 import type { AdminIconName } from "./AdminIcon";
 
-// The admin menu (prototype B sidebar, Maria's A1), in this order. Sections without their editor yet (Task 13) open a
-// "Tulekul" page so the menu already works.
+// The admin menu (prototype B sidebar, Maria's A1), in this order. Every section has its page (Tasks 12 and 13).
 export type Section =
   | "overview"
   | "courses"

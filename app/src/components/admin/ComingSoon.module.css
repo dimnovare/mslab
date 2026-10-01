@@ -1,6 +1,0 @@
-.card {
-  display: grid;
-  justify-items: start;
-  gap: 16px;
-  max-width: 720px;
-}

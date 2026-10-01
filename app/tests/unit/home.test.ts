@@ -56,11 +56,12 @@ describe("trainerSettings", () => {
     });
     expect(t).toEqual({
       name: "Maria Sosnina", role: { et: "Koolitaja", ru: "Преподаватель" }, portraitKey: "/seed/a.jpg", contactPhotoKey: "/seed/b.jpg",
+      portraitPos: "50% 50%", portraitZoom: false, // not the seed portrait: no zoom (Task 13B)
       stats: [{ value: "8+", label: { et: "aastat" } }],
     });
   });
   test("defaults when missing or malformed", () => {
-    expect(trainerSettings({})).toEqual({ name: "", role: null, portraitKey: "", contactPhotoKey: "", stats: [] });
+    expect(trainerSettings({})).toEqual({ name: "", role: null, portraitKey: "", portraitPos: "50% 50%", portraitZoom: false, contactPhotoKey: "", stats: [] });
     expect(trainerSettings({ trainer: { portraitKey: "/p.jpg", stats: "x" } }).contactPhotoKey).toBe("/p.jpg");
   });
 });

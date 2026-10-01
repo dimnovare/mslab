@@ -1,0 +1,56 @@
+"use server";
+
+import { refresh } from "next/cache";
+import { redirect } from "next/navigation";
+import { getDb } from "@/db/client";
+import type { Db } from "@/db/client";
+import { deletePostForm, saveCampaignForm, saveHomeForm, savePostForm, savePracticeForm, saveSettingsForm, saveTrainerForm } from "../admin-site";
+import type { EditResult } from "../edit-check";
+import { adminAction } from "../auth";
+import { logFailure } from "../log";
+
+// The site content editors' server actions (Task 13B): every export is wrapped in adminAction (signed-in admin or a
+// redirect to /admin/login; tests/unit/admin-guards.test.ts fails otherwise). The work is in ../admin-site.ts. Nothing
+// is cached (the pages are dynamic, Hyperdrive's query cache is off and the client bypasses it), so the public site
+// shows a saved change on its next request; refresh() updates the open admin page.
+
+async function run(what: string, work: (db: Db) => Promise<EditResult>): Promise<EditResult> {
+  try {
+    const result = await work(getDb());
+    // not on "stale" or a refusal: the editor keeps the admin's unsaved draft on screen
+    if (result.ok) refresh();
+    return result;
+  } catch (e) {
+    logFailure(`[admin] ${what} failed`, e);
+    return { ok: false, error: "server" };
+  }
+}
+
+/** Avaleht "Salvesta": field data ({ parts: slides | statement | faq }). */
+export const saveHome = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("home save", (db) => saveHomeForm(db, formData)));
+
+/** Praktika "Salvesta": field data ({ parts: <package code> }). */
+export const savePractice = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("practice save", (db) => savePracticeForm(db, formData)));
+
+/** Koolitaja "Salvesta": field data ({ parts: trainer | bio | works | center_story | trainer_journey }). */
+export const saveTrainer = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("trainer save", (db) => saveTrainerForm(db, formData)));
+
+/** Kampaania "Salvesta": field data ({ parts: campaign }). */
+export const saveCampaign = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("campaign save", (db) => saveCampaignForm(db, formData)));
+
+/** Seaded "Salvesta": field data ({ parts: contact | newsletter | privacy | terms }). */
+export const saveSettings = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("settings save", (db) => saveSettingsForm(db, formData)));
+
+/** Post editor "Salvesta": field data ({ parts: post }). A new post continues at its own address. */
+export const savePost = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => {
+  const result = await run("post save", (db) => savePostForm(db, formData));
+  if (result.ok && result.created) redirect(`/admin/uudised/${result.id}?loodud=1`);
+  return result;
+});
+
+/** Post editor "Kustuta postitus": field id. Back to the list with a notice. */
+export const deletePost = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => {
+  const result = await run("post delete", (db) => deletePostForm(db, formData));
+  if (result.ok) redirect("/admin/uudised?kustutatud=1");
+  return result;
+});

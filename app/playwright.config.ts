@@ -7,12 +7,13 @@ const phone = { ...devices["Desktop Chrome"], viewport: { width: 390, height: 84
 
 /**
  * Specs that change the public site's content (a seed course's title, badge, gallery and order; sessions in the
- * calendar). They restore everything afterwards, but while they run another test could see the change (the catalogue
- * counts 6 cards, the calendar 8 rows). So they run after all other tests: "chromium-edit" and "mobile-edit" are the
+ * calendar; hero slides, FAQ, practice packages, the trainer page, posts, the campaign and settings). They restore
+ * everything afterwards, but while they run another test could see the change (the catalogue counts 6 cards, the
+ * calendar 8 rows, the hero 5 slides). So they run after all other tests: "chromium-edit" and "mobile-edit" are the
  * teardown projects of "before-edits-*", on which "chromium" and "mobile" depend, and a teardown starts only when every
  * project depending on its setup has finished. Unlike `dependencies`, a teardown also runs when an earlier test failed.
  */
-const EDITS = /admin-edit\.spec\.ts$/;
+const EDITS = /admin-(edit|site)\.spec\.ts$/;
 const ORDER = /order\.setup\.ts$/;
 
 export default defineConfig({

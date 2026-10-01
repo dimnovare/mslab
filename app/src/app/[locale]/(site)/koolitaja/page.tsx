@@ -109,7 +109,18 @@ export default async function TrainerPage({ params }: Props) {
 
         <div className={styles.media}>
           <div className={styles.portrait} data-portrait="">
-            {portrait && <Image className={styles.portraitImage} src={portrait} alt={fill(d.trainer.portraitAlt, { name })} fill preload unoptimized sizes="(max-width: 860px) 100vw, 45vw" />}
+            {portrait && (
+              <Image
+                className={`${styles.portraitImage} ${trainer.portraitZoom ? styles.seedZoom : ""}`}
+                style={{ objectPosition: trainer.portraitPos }}
+                src={portrait}
+                alt={fill(d.trainer.portraitAlt, { name })}
+                fill
+                preload
+                unoptimized
+                sizes="(max-width: 860px) 100vw, 45vw"
+              />
+            )}
           </div>
           <WorksGallery
             images={images}

@@ -67,7 +67,7 @@ describe("admin guards are inherited by every admin entry point", () => {
         "app/admin/(panel)/page.tsx",
         "app/admin/login/page.tsx",
         "app/admin/layout.tsx",
-        // Task 12: the inboxes and the "Tulekul" sections of the menu
+        // Task 12: the inboxes; Task 13: every content section of the menu
         ...["registreerimised", "paringud", "uudiskiri", "koolitused", "kalender", "praktika", "avaleht", "koolitaja", "uudised", "kampaania", "seaded"].map(
           (dir) => `app/admin/(panel)/${dir}/page.tsx`,
         ),
@@ -81,6 +81,9 @@ describe("admin guards are inherited by every admin entry point", () => {
         "app/admin/(panel)/koolitused/[id]/page.tsx",
         "app/api/admin/upload/route.ts",
         "server/actions/admin-content.ts",
+        // Task 13B: the post editor and the site content editors' actions
+        "app/admin/(panel)/uudised/[id]/page.tsx",
+        "server/actions/admin-site.ts",
       ]),
     );
     const broken = all.flatMap((f) => violations(f.path, f.source).map((v) => `${f.path}: ${v}`));
@@ -102,7 +105,7 @@ describe("admin guards are inherited by every admin entry point", () => {
 
   test("every admin page calls requireAdmin() itself and every admin action is wrapped", () => {
     const pages = files().filter((f) => /^app\/admin\/\(panel\)\/(.*\/)?page\.tsx$/.test(f.path));
-    expect(pages.length).toBeGreaterThanOrEqual(13);
+    expect(pages.length).toBeGreaterThanOrEqual(14);
     for (const p of pages) expect(strip(p.source), p.path).toMatch(/await requireAdmin\(\)/);
     const actions = files().find((f) => f.path === "server/actions/admin.ts")!;
     const exported = [...strip(actions.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
@@ -112,6 +115,10 @@ describe("admin guards are inherited by every admin entry point", () => {
     const contentExports = [...strip(content.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
     expect(contentExports).toEqual(["saveCourse", "moveCourseInList", "saveSession", "deleteSession"]);
     expect(violations(content.path, content.source)).toEqual([]);
+    const site = files().find((f) => f.path === "server/actions/admin-site.ts")!;
+    const siteExports = [...strip(site.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
+    expect(siteExports).toEqual(["saveHome", "savePractice", "saveTrainer", "saveCampaign", "saveSettings", "savePost", "deletePost"]);
+    expect(violations(site.path, site.source)).toEqual([]);
   });
 
   test("the image upload is an admin route; /media only reads (anyone may see a published image)", () => {

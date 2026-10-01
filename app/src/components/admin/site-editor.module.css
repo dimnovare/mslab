@@ -1,0 +1,524 @@
+/* The site content editors (Task 13B): home page slides and FAQ, practice packages, trainer, campaign, settings, posts.
+   Prototype B's admin cards and fields (ui.module.css, editor.module.css) plus what these editors add: a single picture
+   with its focal point and crop previews, the folding slide rows, the D campaign layout. Palette tokens only. */
+
+.stack {
+  display: grid;
+  gap: 25px;
+  min-width: 0;
+}
+
+.cardTitle {
+  margin-bottom: 10px;
+}
+
+.cardLead {
+  max-width: 720px;
+  margin-bottom: 22px;
+  font-size: 14px;
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.fields {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+
+.label {
+  margin: 0;
+  font: 600 12px/1.3 var(--font-body);
+}
+
+.start {
+  justify-self: start;
+}
+
+/* the save bar, as the course editor's: always within reach at the bottom of the screen */
+.saveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 18px;
+  margin-top: 25px;
+  padding: 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  background: var(--paper);
+  box-shadow: 0 -10px 30px rgba(34, 34, 34, 0.06);
+}
+
+.saveBar p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+/* ---------- one picture (SingleImage) ---------- */
+
+.single {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.singleImage,
+.noImage {
+  width: 100%;
+  max-width: 420px;
+  border-radius: 12px;
+  background: var(--first);
+  object-fit: cover;
+}
+
+.noImage {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--iced);
+  text-align: center;
+}
+
+/* ---------- focal point ---------- */
+
+.focal {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pillBtn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--heather);
+  border-radius: 99px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 600 12px/1 var(--font-body);
+  cursor: pointer;
+}
+
+.pillBtn[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.pick {
+  position: relative;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--first);
+  cursor: crosshair;
+  touch-action: manipulation;
+}
+
+.pick img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  user-select: none;
+}
+
+.marker {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ink), 0 2px 8px rgba(34, 34, 34, 0.35);
+  pointer-events: none;
+}
+
+.marker::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.axes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 150px));
+  gap: 12px;
+}
+
+.frames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.frame {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.frameBox {
+  display: block;
+  overflow: hidden;
+  height: 150px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--first);
+}
+
+.frame[data-active] .frameBox {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.frameBox img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* the seed portrait as the site shows it (trainer page, home teaser) */
+.zoom {
+  transform: scale(1.3);
+  transform-origin: 50% 38%;
+}
+
+/* ---------- hero slides ---------- */
+
+.slides {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.slideList {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slide {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+}
+
+.slideHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.slideToggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 4px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slideToggle:hover {
+  background: var(--canvas);
+}
+
+.slideThumb {
+  flex: none;
+  width: 88px;
+  height: 56px;
+  border-radius: 8px;
+  background: var(--first);
+  object-fit: cover;
+}
+
+.slideName {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.slideName strong {
+  font: 600 13px/1.3 var(--font-body);
+}
+
+.slideName span {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slideTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chevron {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  font: 300 22px/1 var(--font-display);
+}
+
+.slideBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 26px;
+  padding: 8px 22px 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+}
+
+.slideMedia,
+.slideFields {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* ---------- FAQ ---------- */
+
+.faqFields {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* ---------- practice packages ---------- */
+
+.packages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 25px;
+  align-items: start;
+}
+
+/* ---------- trainer ---------- */
+
+.trainerGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 30px;
+  align-items: start;
+}
+
+.statRow {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.statRow > :last-child {
+  padding-top: 22px;
+}
+
+/* ---------- campaign (D adminCamp .cols) ---------- */
+
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 25px;
+  align-items: start;
+}
+
+.aside {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 25px;
+  min-width: 0;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px 16px;
+}
+
+.previewHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+
+.previewBox {
+  container-type: inline-size;
+  pointer-events: none;
+}
+
+.previewBox[data-off] {
+  opacity: 0.55;
+}
+
+.previewNote {
+  margin: 14px 0 0;
+}
+
+.rules {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.rules li {
+  position: relative;
+  padding-left: 22px;
+}
+
+.rules li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  left: 2px;
+  width: 10px;
+  height: 1px;
+  background: var(--rose);
+}
+
+/* ---------- settings ---------- */
+
+.admins {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admins li {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--canvas);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- post delete ---------- */
+
+.danger {
+  display: grid;
+  gap: 12px;
+}
+
+.dangerTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 1180px) {
+  .cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aside {
+    position: static;
+  }
+}
+
+@media (max-width: 980px) {
+  .slideBody,
+  .trainerGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .saveBar {
+    padding: 12px 14px;
+  }
+
+  .saveBar button {
+    flex: 1 1 100%;
+  }
+
+  .slideHead {
+    flex-wrap: wrap;
+    padding: 8px;
+  }
+
+  .slideToggle {
+    flex-basis: 100%;
+  }
+
+  .slideHead > :last-child {
+    margin-left: auto;
+  }
+
+  .slideThumb {
+    width: 64px;
+    height: 44px;
+  }
+
+  .slideBody {
+    padding: 18px 14px 20px;
+  }
+
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .statRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .statRow > :last-child {
+    padding-top: 0;
+    justify-self: end;
+  }
+
+  .frameBox {
+    height: 120px;
+  }
+}

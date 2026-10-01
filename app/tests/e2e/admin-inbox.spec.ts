@@ -112,15 +112,25 @@ test.describe("signed in", () => {
     for (const target of await nav.locator("a, button").all()) expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   });
 
-  test("a section that is not built yet opens its 'Tulekul' page from the menu", async ({ page, context, visitorIp, isMobile }) => {
+  test("every content section opens its editor from the menu; none says 'Tulekul' any more", async ({ page, context, visitorIp, isMobile }) => {
     await signIn(page, context, visitorIp);
-    const nav = await menu(page, isMobile);
-    // Koolitused and Kalender have their editors (Task 13A); Seaded is still to come
-    await nav.getByRole("link", { name: "Seaded" }).click();
-    await expect(page).toHaveURL(/\/admin\/seaded$/);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Seaded");
-    await expect(page.locator("[data-coming-soon]")).toContainText("Tulekul");
-    if (isMobile) await expect(page.locator("[data-admin-drawer]")).toBeHidden(); // the link closed the drawer
+    // Task 13B replaced the last "Tulekul" pages with their editors
+    const sections = [
+      ["Praktika", "/admin/praktika", "Praktikapaketid", "[data-practice-editor]"],
+      ["Avaleht", "/admin/avaleht", "Avaleht", "[data-home-editor]"],
+      ["Koolitaja", "/admin/koolitaja", "Koolitaja", "[data-trainer-editor]"],
+      ["Uudised", "/admin/uudised", "Uudised", "[data-add-post]"],
+      ["Kampaania", "/admin/kampaania", "Kampaania hüpikaken", "[data-campaign-editor]"],
+      ["Seaded", "/admin/seaded", "Seaded", "[data-settings-editor]"],
+    ] as const;
+    for (const [label, path, h1, marker] of sections) {
+      await (await menu(page, isMobile)).getByRole("link", { name: label, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(h1);
+      await expect(page.locator(marker)).toBeVisible();
+      await expect(page.getByText("Tulekul", { exact: true })).toHaveCount(0);
+      if (isMobile) await expect(page.locator("[data-admin-drawer]")).toBeHidden(); // the link closed the drawer
+    }
     const again = await menu(page, isMobile);
     await expect(again.locator('[data-nav="settings"]')).toHaveAttribute("aria-current", "page");
   });

@@ -9,6 +9,9 @@ export type TrainerTeaserData = {
   name: string;
   text: string;
   portrait: string;
+  /** The focal point (CSS object-position) and whether to zoom in (the seed portrait only). */
+  portraitPos: string;
+  portraitZoom: boolean;
   portraitAlt: string;
   stats: { value: string; label: string }[];
   link: { label: string; href: string };
@@ -22,7 +25,17 @@ export function TrainerTeaser({ d }: { d: TrainerTeaserData }) {
       <div className={ui.wrap}>
         <div className={styles.trainer}>
           <div className={styles.photo}>
-            {d.portrait && <Image className={styles.image} src={d.portrait} alt={d.portraitAlt} fill unoptimized sizes="(max-width: 860px) 100vw, 50vw" />}
+            {d.portrait && (
+              <Image
+                className={`${styles.image} ${d.portraitZoom ? styles.seedZoom : ""}`}
+                style={{ objectPosition: d.portraitPos }}
+                src={d.portrait}
+                alt={d.portraitAlt}
+                fill
+                unoptimized
+                sizes="(max-width: 860px) 100vw, 50vw"
+              />
+            )}
           </div>
           <div className={styles.text}>
             <p className={ui.caps}>{d.eyebrow}</p>

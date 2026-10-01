@@ -1,0 +1,426 @@
+import { readFileSync } from "node:fs";
+import type { BrowserContext, Page, TestInfo } from "@playwright/test";
+import { submitsForms, test, expect } from "./test";
+import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows } from "./fixtures";
+
+// Task 13B: the site content editors (home page, practice, trainer, news, campaign, settings), each followed through to
+// the public site. They change shared seed content, so they run after every other test (playwright.config.ts: the
+// "chromium-edit" / "mobile-edit" projects) and put it back (fixtures.ts: row snapshots; posts "e2e-uudis-<project>-…").
+// The two projects run side by side, so each changes rows the other does not: desktop MAXI, the hero slides and the
+// statement, the trainer card and works, the contact settings and the campaign; phone MINI, the FAQ, the centre's story
+// and the privacy page. Both make their own post. Local dev server only: they sign in through the devLink, as Maria (the
+// other allowed address; nothing is e-mailed locally): admin-edit.spec.ts signs in as Dim at the same time, and one
+// address may hold at most 3 unused login links at once (server/auth.ts LOGIN_TOKEN_CAP).
+
+const ADMIN = "maria@example.test";
+const created = { tokens: new Set<string>(), sessions: new Set<string>() };
+const undo: (() => Promise<unknown>)[] = [];
+const unique = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+const phone = (info: TestInfo) => info.project.name.startsWith("mobile");
+const jpeg = (name: string) => ({ name, mimeType: "image/jpeg", buffer: readFileSync(`public/seed/${name}`) });
+
+test.beforeEach(({ page }) => {
+  submitsForms();
+  // leaving an editor with unsaved changes asks first (beforeunload): the tests always leave
+  page.on("dialog", (d) => void d.accept());
+});
+
+test.afterEach(async ({}, info) => {
+  for (const step of undo.splice(0).reverse()) await step();
+  await removeAdminRows({ tokens: created.tokens, sessions: created.sessions }).catch(() => {});
+  created.tokens.clear();
+  created.sessions.clear();
+  expect(await removePostRows(info.project.name)).toBe(0);
+});
+
+/** Saves the rows a test is about to change and registers their restore for after the test. */
+async function changing(...snapshots: Parameters<typeof snapshotRows>[]): Promise<void> {
+  for (const s of snapshots) undo.push(await snapshotRows(...s));
+}
+
+async function signIn(page: Page, context: BrowserContext, ip: string): Promise<void> {
+  const res = await page.request.post("/api/auth/request", { data: { email: ADMIN }, headers: { "x-forwarded-for": ip } });
+  expect(res.status()).toBe(200);
+  const { devLink } = (await res.json()) as { devLink?: string };
+  expect(devLink, "devLink in the local answer").toBeTruthy();
+  const link = new URL(devLink!);
+  created.tokens.add(link.searchParams.get("t")!);
+  await page.goto(link.pathname + link.search);
+  await expect(page).toHaveURL(/\/admin$/);
+  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
+  expect(cookie, "session cookie").toBeTruthy();
+  created.sessions.add(cookie!.value);
+}
+
+const status = (page: Page) => page.locator("[data-save-status]");
+const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+async function save(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+  await expect(status(page)).toHaveText("Salvestatud.");
+}
+const one = async <T>(query: (sql: Parameters<Parameters<typeof onLocalDb>[0]>[0]) => Promise<T[]>): Promise<T> => (await onLocalDb(query))[0];
+
+test.describe("practice packages (A8, R3)", () => {
+  test("the package's duration and items are saved; the home practice card and /praktika show them", async ({ page, context, visitorIp }, info) => {
+    // the brief: MAXI "9 ak" → home card "≈ 9 ak" (desktop); the phone project changes MINI the same way
+    const pkg = phone(info) ? { code: "MINI", before: "4 ak", after: "5 ak" } : { code: "MAXI", before: "8 ak", after: "9 ak" };
+    await changing(["practice_packages", { column: "code", value: pkg.code }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/praktika");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Praktikapaketid");
+    const card = page.locator(`[data-practice-editor] [data-package="${pkg.code}"]`);
+    const duration = card.getByRole("textbox", { name: "Kestus (eesti keeles)", exact: true });
+    await expect(duration).toHaveValue(pkg.before);
+    await duration.fill(pkg.after);
+    await expect(status(page)).toHaveText("Salvestamata muudatused");
+    // a new item with its Russian text
+    const items = card.locator(`[data-list-editor="${pkg.code}.items"]`);
+    const rows = items.locator("[data-row]");
+    const count = await rows.count();
+    await items.getByRole("button", { name: "Lisa rida" }).click();
+    await expect(rows.nth(count).locator("[data-lang-field]")).toBeFocused();
+    await page.keyboard.type("E2E punkt");
+    await items.getByRole("button", { name: /^RU/ }).click();
+    await rows.nth(count).locator("[data-lang-field]").fill("E2E пункт");
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    const stored = await one((sql) => sql<{ duration: { et: string }; items: { et: string; ru?: string }[] }[]>`select duration_label as duration, items from practice_packages where code = ${pkg.code}`);
+    expect(stored.duration).toEqual({ et: pkg.after });
+    expect(stored.items.at(-1)).toEqual({ et: "E2E punkt", ru: "E2E пункт" });
+
+    await page.goto("/");
+    const home = page.locator(`[data-practice] [data-package="${pkg.code}"]`);
+    await expect(home.getByText(`≈ ${pkg.after}`)).toBeVisible();
+    await expect(home.getByText("E2E punkt")).toBeVisible();
+    await page.goto("/ru/praktika");
+    await expect(page.locator(`[data-package="${pkg.code}"]`).getByText("E2E пункт")).toBeVisible();
+  });
+
+  test("stale: a package saved elsewhere since the page was loaded is refused and kept as it is", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "the phone project changes MINI at the same time; desktop MAXI shows it");
+    await changing(["practice_packages", { column: "code", value: "MAXI" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/praktika");
+    // another admin saves MAXI in the meantime
+    await onLocalDb((sql) => sql`update practice_packages set duration_label = ${sql.json({ et: "7 ak" })} where code = 'MAXI'`);
+    await page.locator('[data-package="MAXI"]').getByRole("textbox", { name: "Kestus (eesti keeles)", exact: true }).fill("10 ak");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toContainText("salvestati vahepeal mujal");
+    await expect(status(page).getByRole("link", { name: "Laadi uuesti" })).toHaveAttribute("href", "/admin/praktika");
+    const stored = await one((sql) => sql<{ duration: { et: string } }[]>`select duration_label as duration from practice_packages where code = 'MAXI'`);
+    expect(stored.duration).toEqual({ et: "7 ak" });
+    await expect(page.locator('[data-package="MAXI"]').getByRole("textbox", { name: "Kestus (eesti keeles)", exact: true })).toHaveValue("10 ak"); // her draft stays
+  });
+});
+
+test.describe("home page", () => {
+  test("slide 1 turns dark: the header turns white on it (A9); a slide without a picture is refused; the statement", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "desktop changes the hero slides; the phone project the FAQ");
+    await changing(["hero_slides"], ["pages", { column: "key", value: "statement" }]);
+    await page.emulateMedia({ reducedMotion: "reduce" }); // no autoplay: slide 1 stays on screen
+    await page.goto("/");
+    await expect(page.locator("[data-hero]")).toHaveAttribute("data-tone", "light");
+    await expect.poll(() => page.locator("header").evaluate((el) => getComputedStyle(el).color)).not.toBe("rgb(255, 255, 255)");
+
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/avaleht");
+    const slides = page.locator("[data-slide]");
+    await expect(slides).toHaveCount(5);
+    // a new slide without a picture: refused, it is marked and gets the focus; nothing is saved
+    await page.getByRole("button", { name: "+ Lisa slaid" }).click();
+    await expect(slides).toHaveCount(6);
+    await expect(slides.nth(5).getByRole("button", { name: /^Slaid 6/ })).toBeFocused();
+    await slides.nth(5).getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E slaid");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
+    await expect(slides.nth(5).locator("[data-single-image]")).toBeFocused();
+    await expect(slides.nth(5).getByText("Lisa pilt.")).toBeVisible();
+    expect(await one((sql) => sql<{ n: number }[]>`select count(*)::int as n from hero_slides`)).toEqual({ n: 5 });
+    await page.getByRole("button", { name: "Eemalda slaid 6" }).click();
+    await expect(slides).toHaveCount(5);
+
+    // slide 1: dark, with a desktop focal point
+    const first = slides.nth(0);
+    await first.getByRole("button", { name: /^Slaid 1/ }).click();
+    await expect(first.getByRole("button", { name: /^Slaid 1/ })).toHaveAttribute("aria-expanded", "true");
+    await first.getByRole("radio", { name: "Tume" }).check();
+    await expect(first.locator("[data-slide-tone]")).toHaveText("Tume");
+    await first.locator('[data-focal-axis="desktop-x"]').fill("30");
+    await expect(first.locator('[data-focal-preview="desktop"] img')).toHaveCSS("object-position", "30% 50%");
+    // a script link is refused, then a site path is accepted
+    const cta = first.getByRole("combobox", { name: "Nupp viib", exact: true });
+    await cta.fill("javascript:alert(1)");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
+    await expect(cta).toHaveAttribute("aria-invalid", "true");
+    await expect(cta).toBeFocused();
+    await cta.fill("/praktika");
+    const statement = page.getByRole("textbox", { name: "Lause (eesti keeles)", exact: true });
+    await statement.fill("E2E lause, mis on avalehel kohe näha.");
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    const stored = await one((sql) => sql<{ tone: string; pos: string; href: string }[]>`select tone, image_pos as pos, cta_href as href from hero_slides order by sort, id limit 1`);
+    expect(stored).toEqual({ tone: "dark", pos: "30% 50%", href: "/praktika" });
+
+    // the public home page, on its very next request
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await expect(hero).toHaveAttribute("data-tone", "dark");
+    await expect(hero.getByText(/^01 \/ 05$/)).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-hero-tone", "dark");
+    await expect.poll(() => page.locator("header").evaluate((el) => getComputedStyle(el).color)).toBe("rgb(255, 255, 255)");
+    await expect(hero.locator("[data-tone]").first()).toHaveAttribute("style", /--pos:\s*30% 50%/);
+    await expect(hero.getByRole("link", { name: /Leia oma koolitus/ }).first()).toHaveAttribute("href", "/praktika");
+    await expect(page.getByText("E2E lause,")).toBeVisible();
+    await page.goto("/ru");
+    await expect(page.locator("[data-hero] [data-tone]").first().getByRole("link").first()).toHaveAttribute("href", "/ru/praktika");
+  });
+
+  test("FAQ: a new question in ET and RU, moved to the top; the home page shows it first", async ({ page, context, visitorIp }, info) => {
+    test.skip(!phone(info), "the phone project changes the FAQ; desktop the hero slides");
+    await changing(["faq"]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/avaleht");
+    const faq = page.locator("[data-faq-editor]");
+    const rows = faq.locator("[data-faq-row]");
+    const count = await rows.count();
+    await faq.getByRole("button", { name: "+ Lisa küsimus" }).click();
+    await expect(rows).toHaveCount(count + 1);
+    const n = count + 1;
+    await expect(faq.getByRole("textbox", { name: `Küsimus ${n} (eesti keeles)`, exact: true })).toBeFocused();
+    const q = `E2E küsimus ${unique()}?`;
+    await page.keyboard.type(q);
+    await faq.getByRole("textbox", { name: `Vastus ${n} (eesti keeles)`, exact: true }).fill("E2E vastus.");
+    await faq.getByRole("group", { name: /^Keel/ }).getByRole("button", { name: /^RU/ }).click();
+    await faq.getByRole("textbox", { name: `Küsimus ${n} (vene keeles)`, exact: true }).fill("E2E вопрос?");
+    await faq.getByRole("textbox", { name: `Vastus ${n} (vene keeles)`, exact: true }).fill("E2E ответ.");
+    for (let i = n; i > 1; i--) await faq.getByRole("button", { name: `Liiguta küsimus ${i} üles` }).click();
+    await expect(faq.getByRole("button", { name: "Liiguta küsimus 1 üles" })).toHaveAttribute("aria-disabled", "true");
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    expect(await one((sql) => sql<{ q: { et: string; ru?: string } }[]>`select q from faq order by sort, id limit 1`)).toEqual({ q: { et: q, ru: "E2E вопрос?" } });
+
+    await page.goto("/");
+    await expect(page.locator("details").first().locator("summary")).toHaveText(q);
+    await expect(page.getByText("E2E vastus.")).toBeVisible(); // the first one is open
+    await page.goto("/ru");
+    await expect(page.locator("details").first().locator("summary")).toHaveText("E2E вопрос?");
+  });
+});
+
+test.describe("trainer page (T1–T4)", () => {
+  test("an uploaded portrait is framed by its focal point without the seed photo's zoom; the works gallery follows", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "desktop changes the trainer card and works; the phone project a story");
+    await changing(["settings", { column: "key", value: "trainer" }], ["gallery_items", { column: "group", value: "trainer_works" }]);
+    // the seed portrait (maria-standing): zoomed in, as tuned in Task 9
+    await page.goto("/koolitaja");
+    await expect(page.locator("[data-portrait] img")).not.toHaveCSS("transform", "none");
+    const works = await page.locator("[data-works] [data-work]").count();
+
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/koolitaja");
+    const portrait = page.locator('[data-single-image="portrait"]');
+    await portrait.locator('input[type="file"]').setInputFiles([jpeg("maria-seated.jpg")]);
+    await expect(portrait.locator("[data-upload-status]")).toHaveText("Pilt lisatud.");
+    await portrait.locator('[data-focal-axis="portrait-x"]').fill("30");
+    await portrait.locator('[data-focal-axis="portrait-y"]').fill("25");
+    await expect(portrait.locator('[data-focal-preview="portrait-0"] img')).toHaveCSS("object-position", "30% 25%");
+    await expect(portrait.locator('[data-focal-preview="portrait-0"] img')).toHaveCSS("transform", "none"); // an upload: no zoom
+    await page.locator("[data-works-editor]").getByRole("button", { name: `Eemalda pilt ${works}` }).click();
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    const stored = await one((sql) => sql<{ value: Record<string, unknown> }[]>`select value from settings where key = 'trainer'`);
+    expect(stored.value.portraitKey).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
+    expect(stored.value).toMatchObject({ portraitPos: "30% 25%", contactPhotoKey: "/seed/maria-seated.jpg", name: "Maria Sosnina" });
+    const key = stored.value.portraitKey as string;
+
+    await page.goto("/koolitaja");
+    const img = page.locator("[data-portrait] img");
+    await expect(img).toHaveAttribute("src", `/media/${key}`);
+    await expect(img).toHaveCSS("object-position", "30% 25%");
+    await expect(img).toHaveCSS("transform", "none");
+    await expect(page.locator("[data-works] [data-work]")).toHaveCount(works - 1);
+    await page.goto("/");
+    const teaser = page.locator(`img[src="/media/${key}"]`).first();
+    await expect(teaser).toHaveCSS("object-position", "30% 25%");
+    await expect(teaser).toHaveCSS("transform", "none");
+  });
+
+  test("'Koolituskeskuse lugu': title and paragraphs on the trainer page", async ({ page, context, visitorIp }, info) => {
+    test.skip(!phone(info), "the phone project changes the story; desktop the trainer card");
+    await changing(["pages", { column: "key", value: "center_story" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/koolitaja");
+    const story = page.locator('[data-story-editor="center_story"]');
+    await story.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E lugu");
+    await story.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true }).fill("Esimene E2E lõik.\n\nTeine E2E lõik.");
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    await page.goto("/koolitaja");
+    const block = page.locator('[data-story="center_story"]');
+    await expect(block.getByRole("heading")).toHaveText("E2E lugu");
+    await expect(block.locator("p")).toHaveText(["Esimene E2E lõik.", "Teine E2E lõik."]);
+  });
+});
+
+test.describe("news", () => {
+  test("a new post: the address from its title, a draft until published, the cover required to publish; delete", async ({ page, context, visitorIp }, info) => {
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/uudised");
+    await expect(page.locator("[data-post-row]")).not.toHaveCount(0);
+    await page.locator("[data-add-post]").click();
+    await expect(page).toHaveURL(/\/admin\/uudised\/uus$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Uus postitus");
+    const title = `E2E uudis ${info.project.name} ${unique()}`;
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    expect(slug.startsWith(`${POST_SLUG_PREFIX}${info.project.name}-`)).toBe(true);
+    await page.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill(title);
+    await page.getByRole("textbox", { name: "Kategooria (eesti keeles)", exact: true }).fill("Uudis");
+    await page.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true }).fill("Esimene lõik.\n\nTeine lõik.");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/uudised\/\d+\?loodud=1$/);
+    const editor = new URL(page.url()).pathname;
+    await expect(page.getByText("Postitus loodud.")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Aadress", exact: true })).toHaveValue(slug);
+    await expect(page.locator("[data-post-state]")).toHaveText("Mustand");
+    expect((await page.goto(`/uudised/${slug}`))!.status()).toBe(404);
+
+    await page.goto(editor);
+    await page.getByRole("checkbox", { name: "Avaldatud" }).check();
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
+    await expect(page.locator('[data-single-image="cover"]')).toBeFocused();
+    await expect(page.getByText("Lisa pilt.")).toBeVisible();
+    const cover = page.locator('[data-single-image="cover"]');
+    await cover.locator('input[type="file"]').setInputFiles([jpeg("brow-closeup.jpg")]);
+    await expect(cover.locator("[data-upload-status]")).toHaveText("Pilt lisatud.");
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    await expect(page.locator("[data-post-state]")).toHaveText("Avaldatud");
+    const row = await one((sql) => sql<{ cover: string; published: boolean }[]>`select cover_key as cover, published from posts where slug = ${slug}`);
+    expect(row.published).toBe(true);
+    expect(row.cover).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
+
+    await page.goto("/uudised");
+    await expect(page.locator(`[data-news-card][href="/uudised/${slug}"]`)).toContainText(title);
+    await page.goto(`/uudised/${slug}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);
+    await expect(page.locator("[data-article-body] p")).toHaveText(["Esimene lõik.", "Teine lõik."]);
+    await expect(page.locator("[data-article-cover] img")).toHaveAttribute("src", `/media/${row.cover}`);
+
+    await page.goto(editor);
+    await page.getByRole("button", { name: "Kustuta postitus" }).click();
+    await page.getByRole("button", { name: "Jah, kustuta" }).click();
+    await expect(page).toHaveURL(/\/admin\/uudised\?kustutatud=1$/);
+    await expect(page.getByText("Postitus kustutatud.")).toBeVisible();
+    expect((await page.goto(`/uudised/${slug}`))!.status()).toBe(404);
+  });
+});
+
+test.describe("campaign (M2–M5)", () => {
+  test("the uploaded image is stored, /media serves it and the admin preview shows it; a script link is refused", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "one campaign: desktop changes it; the phone project only looks (next test)");
+    await changing(["campaign"]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/kampaania");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kampaania hüpikaken");
+    const preview = page.locator("[data-campaign-preview]");
+    await expect(preview.getByRole("heading")).toHaveText("−15% Lash Lift BOTOX koolitusele");
+    await expect(page.getByText("Mitte praegu")).toHaveCount(0); // M3
+    await expect(preview.locator("[data-campaign-card] a")).toHaveText("Leia enda koolitus"); // M4
+
+    const image = page.locator('[data-single-image="campaign"]');
+    await image.locator('input[type="file"]').setInputFiles([jpeg("gift-bag-serum.jpg")]);
+    await expect(image.locator("[data-upload-status]")).toHaveText("Pilt lisatud.");
+    const src = await image.locator("[data-current-image]").getAttribute("data-current-image");
+    expect(src).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
+    await expect(preview.locator("img")).toHaveAttribute("src", `/media/${src}`);
+    // the texts follow in the preview, ET and RU
+    await page.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E kampaania");
+    await expect(preview.getByRole("heading")).toHaveText("E2E kampaania");
+    await page.getByRole("textbox", { name: "Sooduskood", exact: true }).fill("e2e-10");
+    await expect(preview.locator("[data-campaign-code]")).toHaveText("E2E-10");
+    // a script link: refused, nothing saved
+    const href = page.getByRole("combobox", { name: "Nupp viib", exact: true });
+    await href.fill("javascript:alert(1)");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
+    await expect(href).toBeFocused();
+    expect(await one((sql) => sql<{ image: string }[]>`select image_key as image from campaign where id = 1`)).toEqual({ image: "/seed/lash-editorial.jpg" });
+    await href.fill("/koolitused/lash-lift-botox");
+    await page.getByRole("textbox", { name: "Nupu tekst (eesti keeles)", exact: true }).fill("");
+    await save(page);
+
+    const stored = await one((sql) => sql<{ image: string; code: string; cta: { et: string }; title: { et: string } }[]>`select image_key as image, code, cta_label as cta, title from campaign where id = 1`);
+    expect(stored).toEqual({ image: src, code: "E2E-10", cta: { et: "Leia enda koolitus" }, title: { et: "E2E kampaania" } });
+    const media = await page.request.get(`/media/${src}`);
+    expect(media.status()).toBe(200);
+    expect(media.headers()["content-type"]).toBe("image/jpeg");
+    // after a reload the preview still shows the stored image
+    await page.reload();
+    await expect(page.locator("[data-campaign-preview] img")).toHaveAttribute("src", `/media/${src}`);
+    await expect(page.locator("[data-campaign-preview] [data-campaign-card] a")).toHaveText("Leia enda koolitus");
+  });
+});
+
+test.describe("settings", () => {
+  test("contact links (https only) and the newsletter discount reach the footer and the contact page", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "desktop changes the contact settings; the phone project the privacy page");
+    await changing(["settings", { column: "key", value: "contact" }], ["settings", { column: "key", value: "newsletter" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/seaded");
+    const instagram = page.getByRole("textbox", { name: "Instagram", exact: true });
+    await instagram.fill("javascript:alert(1)");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
+    await expect(instagram).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("Sisesta täielik aadress, mis algab https://.")).toBeVisible();
+    await instagram.fill("https://www.instagram.com/mslab.e2e");
+    await page.getByRole("textbox", { name: "Telefon", exact: true }).fill("+372 5555 0199");
+    await page.getByRole("textbox", { name: "Tervitussoodustus", exact: true }).fill("15%");
+    await save(page);
+
+    await page.goto("/");
+    const footer = page.locator("footer");
+    await expect(footer.getByRole("link", { name: /Instagram/ })).toHaveAttribute("href", "https://www.instagram.com/mslab.e2e");
+    await expect(footer.getByRole("link", { name: "+372 5555 0199" })).toHaveAttribute("href", "tel:+37255550199");
+    await expect(footer.getByText(/15% tervitussoodustus/)).toBeVisible();
+    await page.goto("/kontakt");
+    await expect(page.locator("[data-contact-details]").getByRole("link", { name: /instagram\.com\/mslab\.e2e/ })).toBeVisible();
+  });
+
+  test("the privacy page in two paragraphs; the admin addresses are shown, not editable", async ({ page, context, visitorIp }, info) => {
+    test.skip(!phone(info), "the phone project changes the privacy page; desktop the contact settings");
+    await changing(["pages", { column: "key", value: "privacy" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/seaded");
+    const admins = page.locator("[data-admin-emails] li");
+    await expect(admins).toHaveText(["dim@example.test", "maria@example.test"]);
+    await expect(page.locator("[data-admin-emails] input")).toHaveCount(0);
+    const privacy = page.locator('[data-legal-editor="privacy"]');
+    await privacy.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true }).fill("E2E privaatsus, esimene lõik.\n\nTeine lõik.");
+    expect(await noOverflow(page)).toBe(true);
+    await save(page);
+    await page.goto("/privaatsus");
+    await expect(page.locator("[data-legal-body] p")).toHaveText(["E2E privaatsus, esimene lõik.", "Teine lõik."]);
+  });
+});
+
+test.describe("every editor at phone width", () => {
+  test("no sideways scrolling, every control at least 44 px tall, no 'Tulekul'", async ({ page, context, visitorIp }, info) => {
+    test.skip(!phone(info), "390 px");
+    await signIn(page, context, visitorIp);
+    for (const path of ["/admin/avaleht", "/admin/praktika", "/admin/koolitaja", "/admin/uudised", "/admin/uudised/uus", "/admin/kampaania", "/admin/seaded"]) {
+      await page.goto(path);
+      if (path === "/admin/avaleht") await page.locator("[data-slide]").first().getByRole("button", { name: /^Slaid 1/ }).click();
+      expect(await noOverflow(page), path).toBe(true);
+      await expect(page.getByText("Tulekul", { exact: true })).toHaveCount(0);
+      for (const el of await page.locator("main button:visible, main input:visible:not([type=checkbox]):not([type=radio]):not([type=file]), main select:visible, main textarea:visible").all())
+        expect((await el.boundingBox())!.height, `${path}: ${await el.evaluate((e) => e.outerHTML.slice(0, 80))}`).toBeGreaterThanOrEqual(44);
+    }
+    // the campaign preview: the card, D's wording, no "Mitte praegu"
+    await page.goto("/admin/kampaania");
+    await expect(page.locator("[data-campaign-preview] [data-campaign-card]")).toBeVisible();
+    await expect(page.getByText("Mitte praegu")).toHaveCount(0);
+  });
+});

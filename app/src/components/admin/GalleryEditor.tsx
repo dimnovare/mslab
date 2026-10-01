@@ -44,12 +44,15 @@ export function GalleryEditor({
   onChange,
   error,
   hint,
+  showMain = true,
 }: {
   images: DraftImage[];
   /** Gets an update function (an upload can finish after other changes: it must add to the list as it is then). */
   onChange: (update: (images: DraftImage[]) => DraftImage[]) => void;
   error?: string;
   hint?: string;
+  /** "Põhipilt" on the first image (a course: the card's picture); off for the trainer's works. */
+  showMain?: boolean;
 }) {
   const t = adminEt.courseEditor.fields;
   const fine = usePointerFine();
@@ -131,7 +134,7 @@ export function GalleryEditor({
                 <div className={styles.shotBody}>
                   <span className={styles.shotName}>
                     {fill(t.image, { n })}
-                    {i === 0 && <span className={`${ui.tag} ${ui.dark}`}>{t.main}</span>}
+                    {showMain && i === 0 && <span className={`${ui.tag} ${ui.dark}`}>{t.main}</span>}
                   </span>
                   <I18nInput label={t.alt} value={img.alt} onChange={(alt) => onChange((list) => list.map((x, j) => (j === i ? { ...x, alt } : x)))} maxLength={LIMITS.alt} />
                 </div>

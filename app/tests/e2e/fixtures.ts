@@ -550,3 +550,101 @@ export async function removeEditRows(project?: string): Promise<number> {
     await sql.end();
   }
 }
+
+// ---------- site content rows (admin-site.spec.ts) ----------
+// The site editors' tests change shared content: a practice package, the hero slides, the FAQ, text pages, settings, the
+// campaign, the trainer's works. Before a test changes rows, they are written to a snapshot file (rows-<table>-<key>.json,
+// next to the course snapshots); the test puts them back and deletes the file, and global-setup / global-teardown restore
+// any snapshot an interrupted run left. The two edit projects run side by side, so each test changes rows the other
+// project's tests do not touch (MAXI vs MINI, hero slides vs FAQ, …): a snapshot is by key, not of a whole table, where
+// both projects use the same table. Posts the tests create have a slug starting with "e2e-uudis-<project>-".
+
+export const POST_SLUG_PREFIX = "e2e-uudis-";
+
+type RowMatch = { column: string; value: string | number } | null;
+type RowsSnapshot = { table: string; match: RowMatch; rows: Record<string, unknown>[] };
+
+const SNAPSHOT_TABLES = ["practice_packages", "hero_slides", "faq", "pages", "settings", "campaign", "gallery_items"] as const;
+export type SnapshotTable = (typeof SNAPSHOT_TABLES)[number];
+const rowsFile = (table: string, match: RowMatch) => join(SNAPSHOT_DIR, `rows-${table}-${match ? `${match.column}-${String(match.value).replace(/[^a-z0-9_-]/gi, "_")}` : "all"}.json`);
+
+/** Column name → data type of a table (jsonb and timestamps need their own handling when written back). */
+async function columnTypes(sql: postgres.Sql, table: string): Promise<Record<string, string>> {
+  const cols = await sql<{ column_name: string; data_type: string }[]>`select column_name, data_type from information_schema.columns where table_name = ${table}`;
+  return Object.fromEntries(cols.map((c) => [c.column_name, c.data_type]));
+}
+
+/** Saves rows (all of a table, or those where column = value) before a test changes them; returns the restore function. */
+export async function snapshotRows(table: SnapshotTable, match: RowMatch = null): Promise<() => Promise<void>> {
+  if (!SNAPSHOT_TABLES.includes(table)) throw new Error(`e2e: no snapshots of ${table}`);
+  const sql = connect();
+  try {
+    const rows = match ? await sql`select * from ${sql(table)} where ${sql(match.column)} = ${match.value}` : await sql`select * from ${sql(table)}`;
+    mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    const file = rowsFile(table, match);
+    if (!existsSync(file)) writeFileSync(file, JSON.stringify({ table, match, rows: [...rows] } satisfies RowsSnapshot));
+    return () => restoreRows(file);
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Writes a rows snapshot back (the matching rows are replaced by the saved ones) and deletes its file. */
+async function restoreRows(file: string): Promise<void> {
+  if (!existsSync(file)) return;
+  const s = JSON.parse(readFileSync(file, "utf8")) as RowsSnapshot;
+  if (!SNAPSHOT_TABLES.includes(s.table as SnapshotTable)) throw new Error(`e2e: bad snapshot ${file}`);
+  const sql = connect();
+  try {
+    const types = await columnTypes(sql, s.table);
+    await sql.begin(async (tx) => {
+      if (s.match) await tx`delete from ${tx(s.table)} where ${tx(s.match.column)} = ${s.match.value}`;
+      else await tx`delete from ${tx(s.table)}`;
+      for (const row of s.rows) {
+        const values: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(row)) {
+          const type = types[k] ?? "";
+          values[k] = v === null ? null : type === "jsonb" ? tx.json(v as postgres.JSONValue) : type.startsWith("timestamp") ? new Date(v as string) : v;
+        }
+        await tx`insert into ${tx(s.table)} ${tx(values as Record<string, postgres.ParameterOrJSON<never>>)}`;
+      }
+    });
+    rmSync(file);
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Restores every rows snapshot a run left behind (global-setup / global-teardown); returns how many there were. */
+export async function restoreLeftoverRows(): Promise<number> {
+  if (!existsSync(SNAPSHOT_DIR)) return 0;
+  const files = readdirSync(SNAPSHOT_DIR).filter((f) => /^rows-.+\.json$/.test(f));
+  for (const f of files) await restoreRows(join(SNAPSHOT_DIR, f));
+  return files.length;
+}
+
+/**
+ * Deletes the posts the site editor tests made (of one project, or all); returns how many are left. Not part of
+ * removeEditRows: admin-edit.spec.ts and admin-site.spec.ts run side by side, and each cleans up only its own rows.
+ */
+export async function removePostRows(project?: string): Promise<number> {
+  const sql = connect();
+  const slugs = `${POST_SLUG_PREFIX}${project ?? ""}%`;
+  try {
+    await sql`delete from posts where slug like ${slugs}`;
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from posts where slug like ${slugs}`;
+    return n;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Runs SQL on the local test database (a change "made elsewhere" behind an open editor). */
+export async function onLocalDb<T>(work: (sql: postgres.Sql) => Promise<T>): Promise<T> {
+  const sql = connect();
+  try {
+    return await work(sql);
+  } finally {
+    await sql.end();
+  }
+}

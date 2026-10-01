@@ -1,4 +1,4 @@
-/* Prototype D .trainer (+ the review-fix portrait crop), Jost name and numbers. */
+/* Prototype D .trainer, Jost name and numbers. The portrait's focal point is set in the admin and comes inline. */
 
 .section {
   padding: clamp(24px, 3vw, 40px) 0 clamp(56px, 7vw, 100px);
@@ -21,7 +21,10 @@
 
 .image {
   object-fit: cover;
-  object-position: 50% 20%;
+}
+
+/* the seed portrait only (see the trainer page) */
+.seedZoom {
   transform: scale(1.3);
   transform-origin: 50% 38%;
 }

@@ -1,19 +1,24 @@
 import type { Metadata } from "next";
-import { ComingSoon } from "@/components/admin/ComingSoon";
-import { Shell } from "@/components/admin/Shell";
 import { adminTitle } from "@/components/admin/sections";
+import { Shell } from "@/components/admin/Shell";
+import { TrainerEditor } from "@/components/admin/TrainerEditor";
+import { getDb } from "@/db/client";
 import { adminEt } from "@/i18n/dict/admin";
+import { et } from "@/i18n/dict/et";
+import { loadTrainer } from "@/server/admin-site";
 import { requireAdmin } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: adminTitle(adminEt.nav.trainer) };
 
-// "Tulekul" until the trainer page editor (Task 13) replaces this page.
-export default async function Page() {
+/** Koolitaja: portrait, name, role, stats, bio, works gallery and the two stories (Task 13B, T1–T4). */
+export default async function TrainerEditPage() {
   const email = await requireAdmin();
+  const initial = await loadTrainer(getDb());
   return (
     <Shell email={email} active="trainer">
-      <ComingSoon title={adminEt.nav.trainer} />
+      {/* an empty story title falls back to the site's own heading for it */}
+      <TrainerEditor initial={initial} storyTitles={{ center_story: et.trainer.storyTitle, trainer_journey: et.trainer.journeyTitle }} />
     </Shell>
   );
 }

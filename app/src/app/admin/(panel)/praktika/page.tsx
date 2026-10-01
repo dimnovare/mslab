@@ -1,19 +1,22 @@
 import type { Metadata } from "next";
-import { ComingSoon } from "@/components/admin/ComingSoon";
-import { Shell } from "@/components/admin/Shell";
+import { PracticeEditor } from "@/components/admin/PracticeEditor";
 import { adminTitle } from "@/components/admin/sections";
+import { Shell } from "@/components/admin/Shell";
+import { getDb } from "@/db/client";
 import { adminEt } from "@/i18n/dict/admin";
+import { loadPractice } from "@/server/admin-site";
 import { requireAdmin } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: adminTitle(adminEt.nav.practice) };
 
-// "Tulekul" until the practice package editor (Task 13) replaces this page.
-export default async function Page() {
+/** Praktika: the MINI and MAXI packages (Task 13B, A8, R3). */
+export default async function PracticeEditPage() {
   const email = await requireAdmin();
+  const { codes, ...initial } = await loadPractice(getDb());
   return (
     <Shell email={email} active="practice">
-      <ComingSoon title={adminEt.nav.practice} />
+      <PracticeEditor initial={initial} codes={codes} />
     </Shell>
   );
 }

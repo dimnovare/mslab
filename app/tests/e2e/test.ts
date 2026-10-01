@@ -14,7 +14,9 @@ export const test = base.extend<{ visitorIp: string }>({
       if (!LOCAL_FIXTURES) {
         await context.route("**/*", (route) => (route.request().method() === "POST" ? route.abort("blockedbyclient") : route.fallback()));
       }
-      const ip = `e2e-${info.project.name}-${info.testId}-${info.retry}-${Date.now().toString(36)}`;
+      // the run-unique part first: the server keeps 64 characters of the address, and a key that is the same in every run
+      // would collect the rate limit of repeated runs (5 per 10 minutes)
+      const ip = `e2e-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}-${info.retry}-${info.project.name}-${info.testId}`;
       await context.setExtraHTTPHeaders({ "x-forwarded-for": ip });
       await use(ip);
     },

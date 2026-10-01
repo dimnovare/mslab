@@ -5,42 +5,17 @@ import { inArray } from "drizzle-orm";
 import { courseUsage, deleteUnusedSession, getCourseForEdit, getSession, isSlugTaken, moveCourse, saveCourseWithImages, upsertSession, type CourseFields } from "@/db/queries/admin";
 import { tallinnInstant } from "@/domain/calendar";
 import { BADGE_MAX, badgeOf, COURSE_LANGUAGES, LIMITS, swatchOf, type CourseDraft } from "@/domain/course-editor";
-import { parseEuroCents } from "@/domain/money";
 import type { I18n } from "@/i18n/field";
 import { isSlug, SLUG_MAX, slugify } from "@/lib/slug";
-import { isMediaKey } from "./media";
+import { Check, field, invalid, isStorableImageKey, type EditResult } from "./edit-check";
 
 // The content editors' form handling (courses, calendar sessions). Callers have already checked the admin session
 // (server/actions/admin-content.ts wraps each in adminAction); these take a Db and run without Next.js
 // (tests/db/admin-content.test.ts). Nothing the browser sends is trusted: the draft is parsed and every field checked
 // again here.
 
-/** Why one field was refused (the editor shows the matching text under it). */
-export type FieldError =
-  | "required"
-  | "tooLong"
-  | "slugFormat"
-  | "slugTaken"
-  | "amount"
-  | "whole"
-  | "priceRequired"
-  | "listEt"
-  | "tooMany"
-  | "image"
-  | "badge"
-  | "typeLocked"
-  | "course"
-  | "date"
-  | "time"
-  | "capacity";
-
-/**
- * What a content form gets back. `fields`: the refused fields (with error "invalid"). stale: the course was saved
- * elsewhere since the editor loaded it (nothing saved). inUse: a session with registrations cannot be deleted.
- */
-export type EditResult =
-  | { ok: true; id: number; created?: boolean; deleted?: boolean }
-  | { ok: false; error: "invalid" | "notFound" | "stale" | "inUse" | "server"; fields?: Record<string, FieldError> };
+export type { EditResult, FieldError } from "./edit-check";
+export { isStorableImageKey } from "./edit-check";
 
 const ID_MAX = 2_147_483_647;
 const id = z.coerce.number().int().positive().max(ID_MAX);
@@ -74,67 +49,6 @@ const draftSchema = z.object({
   published: z.boolean(),
   isSample: z.boolean(),
 }) satisfies z.ZodType<CourseDraft>;
-
-/** Static images shipped with the site (the seed's photos); the only image keys besides uploads. */
-const SEED_IMAGE = /^\/seed\/[a-z0-9][a-z0-9._-]*\.(jpe?g|png|webp)$/i;
-export const isStorableImageKey = (key: string) => isMediaKey(key) || SEED_IMAGE.test(key);
-
-const field = (formData: FormData, name: string) => {
-  const v = formData.get(name);
-  return typeof v === "string" ? v : null;
-};
-
-/** Collects field errors while values are normalised. */
-class Check {
-  readonly errors: Record<string, FieldError> = {};
-  fail(name: string, error: FieldError): null {
-    this.errors[name] ??= error;
-    return null;
-  }
-  get ok() {
-    return Object.keys(this.errors).length === 0;
-  }
-
-  /** A text in both languages: trimmed, the Russian one left out when blank. Null when `optional` and empty. */
-  text(name: string, f: I18n, max: number, opts: { required?: boolean } = {}): I18n | null {
-    const et = f.et.trim();
-    const ru = (f.ru ?? "").trim();
-    if (et.length > max || ru.length > max) return this.fail(name, "tooLong");
-    if (!et) return ru ? this.fail(name, "required") : opts.required ? this.fail(name, "required") : null;
-    return ru ? { et, ru } : { et };
-  }
-
-  /** A list of texts: blank rows dropped; a row needs its Estonian text. */
-  list(name: string, items: I18n[], max = LIMITS.item): I18n[] {
-    const out: I18n[] = [];
-    for (const item of items) {
-      const et = item.et.trim();
-      const ru = (item.ru ?? "").trim();
-      if (!et && !ru) continue;
-      if (!et) return this.fail(name, "listEt") ?? [];
-      if (et.length > max || ru.length > max) return this.fail(name, "tooLong") ?? [];
-      out.push(ru ? { et, ru } : { et });
-    }
-    if (out.length > LIMITS.items) return this.fail(name, "tooMany") ?? [];
-    return out;
-  }
-
-  /** Euros as typed → cents; null when blank. */
-  amount(name: string, value: string): number | null {
-    if (!value.trim()) return null;
-    return parseEuroCents(value) ?? this.fail(name, "amount");
-  }
-
-  /** A whole number in min…max; null when blank. */
-  whole(name: string, value: string, min: number, max: number): number | null {
-    const v = value.trim();
-    if (!v) return null;
-    if (!/^\d{1,4}$/.test(v) || Number(v) < min || Number(v) > max) return this.fail(name, "whole");
-    return Number(v);
-  }
-}
-
-const invalid = (errors: Record<string, FieldError>): EditResult => ({ ok: false, error: "invalid", fields: errors });
 
 /**
  * The course editor's save. Field `data`: the editor's draft as JSON (CourseDraft). Only the chosen type's own fields

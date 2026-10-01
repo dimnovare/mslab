@@ -1,19 +1,24 @@
 import type { Metadata } from "next";
-import { ComingSoon } from "@/components/admin/ComingSoon";
-import { Shell } from "@/components/admin/Shell";
+import { HomeEditor } from "@/components/admin/HomeEditor";
 import { adminTitle } from "@/components/admin/sections";
+import { Shell } from "@/components/admin/Shell";
+import { getDb } from "@/db/client";
 import { adminEt } from "@/i18n/dict/admin";
+import { loadHome } from "@/server/admin-site";
 import { requireAdmin } from "@/server/auth";
+import { linkSuggestions } from "@/server/site-links";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: adminTitle(adminEt.nav.home) };
 
-// "Tulekul" until the home page editor (hero slides, statement, FAQ) (Task 13) replaces this page.
-export default async function Page() {
+/** Avaleht: hero slides, the statement and the FAQ (Task 13B, A9). */
+export default async function HomeEditPage() {
   const email = await requireAdmin();
+  const db = getDb();
+  const [initial, links] = await Promise.all([loadHome(db), linkSuggestions(db)]);
   return (
     <Shell email={email} active="home">
-      <ComingSoon title={adminEt.nav.home} />
+      <HomeEditor initial={initial} links={links} />
     </Shell>
   );
 }

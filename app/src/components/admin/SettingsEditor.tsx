@@ -1,0 +1,110 @@
+"use client";
+
+import { useId, useRef } from "react";
+import { SITE_LIMITS, type ContactDraft, type PageDraft } from "@/domain/site-editor";
+import { adminEt } from "@/i18n/dict/admin";
+import { saveSettings } from "@/server/actions/admin-site";
+import type { SettingsValues } from "@/server/admin-site";
+import { I18nInput } from "./I18nInput";
+import { SaveBar } from "./SaveBar";
+import { TextField } from "./TextField";
+import { useSiteDraft, type Loaded } from "./useSiteDraft";
+import ui from "./ui.module.css";
+import ed from "./editor.module.css";
+import styles from "./site-editor.module.css";
+
+/**
+ * Seaded: the contact details and social links (footer, contact page; social links https only), the newsletter's
+ * welcome discount (footer text), the legal pages (privacy, terms) in ET / RU, and the admin addresses, read-only.
+ */
+export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsValues>; admins: string[] }) {
+  const t = adminEt.settings;
+  const uid = useId();
+  const form = useRef<HTMLFormElement>(null);
+  const d = useSiteDraft(initial, saveSettings, form);
+  const contact = d.draft.contact;
+  const setContact = (patch: Partial<ContactDraft>) => d.set("contact", { ...contact, ...patch });
+  const cErr = (f: string) => d.err(`contact.${f}`);
+
+  const legal = (key: "privacy" | "terms", title: string, href: string) => {
+    const page: PageDraft = d.draft[key];
+    return (
+      <section className={ui.card} aria-labelledby={`${uid}-${key}`} data-legal-editor={key}>
+        <div className={styles.cardHead}>
+          <h2 id={`${uid}-${key}`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {title}
+          </h2>
+          <a className={ui.link} href={href} target="_blank" rel="noopener">
+            {adminEt.editor.viewSite} ↗<span className={ui.sr}> ({adminEt.editor.newWindow})</span>
+          </a>
+        </div>
+        <div className={styles.fields}>
+          <I18nInput label={t.pageTitle} value={page.title} onChange={(v) => d.set(key, { ...page, title: v })} maxLength={SITE_LIMITS.legalTitle} error={d.err(`${key}.title`)} name={`${key}.title`} />
+          <I18nInput label={t.pageBody} value={page.body} onChange={(v) => d.set(key, { ...page, body: v })} multiline rows={10} maxLength={SITE_LIMITS.legal} hint={t.pageHint} error={d.err(`${key}.body`)} name={`${key}.body`} />
+        </div>
+      </section>
+    );
+  };
+
+  return (
+    <form ref={form} className={ui.page} onSubmit={d.submit} noValidate data-settings-editor="">
+      <div className={ui.heading}>
+        <div>
+          <p className={ui.eyebrow}>{t.eyebrow}</p>
+          <h1 className={ui.h1}>{t.title}</h1>
+          <p className={ui.lead}>{t.lead}</p>
+        </div>
+      </div>
+
+      <div className={styles.stack}>
+        <section className={ui.card} aria-labelledby={`${uid}-contact`}>
+          <h2 id={`${uid}-contact`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {t.contact}
+          </h2>
+          <p className={`${ui.muted} ${styles.cardLead}`}>{t.contactLead}</p>
+          <div className={ed.grid}>
+            <TextField label={t.email} type="email" inputMode="email" autoComplete="off" value={contact.email} onChange={(email) => setContact({ email })} maxLength={SITE_LIMITS.email} error={cErr("email")} name="contact.email" />
+            <TextField label={t.phone} type="tel" inputMode="tel" value={contact.phone} onChange={(phone) => setContact({ phone })} maxLength={SITE_LIMITS.phone} error={cErr("phone")} name="contact.phone" />
+            <TextField className={ed.wide} label={t.address} value={contact.address} onChange={(address) => setContact({ address })} maxLength={SITE_LIMITS.address} hint={t.addressHint} error={cErr("address")} name="contact.address" />
+            <TextField label={t.instagram} type="url" inputMode="url" value={contact.instagram} onChange={(instagram) => setContact({ instagram })} maxLength={SITE_LIMITS.url} hint={t.socialHint} placeholder="https://" error={cErr("instagram")} name="contact.instagram" />
+            <TextField label={t.facebook} type="url" inputMode="url" value={contact.facebook} onChange={(facebook) => setContact({ facebook })} maxLength={SITE_LIMITS.url} hint={t.socialHint} placeholder="https://" error={cErr("facebook")} name="contact.facebook" />
+          </div>
+        </section>
+
+        <section className={ui.card} aria-labelledby={`${uid}-newsletter`}>
+          <h2 id={`${uid}-newsletter`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {t.newsletter}
+          </h2>
+          <div className={ed.grid}>
+            <TextField
+              label={t.discount}
+              value={d.draft.newsletter.discountLabel}
+              onChange={(discountLabel) => d.set("newsletter", { discountLabel })}
+              maxLength={SITE_LIMITS.discount}
+              hint={t.discountHint}
+              error={d.err("newsletter.discountLabel")}
+              name="newsletter.discountLabel"
+            />
+          </div>
+        </section>
+
+        {legal("privacy", t.privacy, "/privaatsus")}
+        {legal("terms", t.terms, "/tingimused")}
+
+        <section className={ui.card} aria-labelledby={`${uid}-admins`} data-admin-emails="">
+          <h2 id={`${uid}-admins`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {t.admins}
+          </h2>
+          <p className={ui.muted}>{t.adminsLead}</p>
+          <ul className={styles.admins}>
+            {admins.map((a) => (
+              <li key={a}>{a}</li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      <SaveBar status={d.status} pending={d.pending} reloadHref="/admin/seaded" />
+    </form>
+  );
+}

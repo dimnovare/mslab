@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { ContactBlock } from "@/components/site/ContactBlock";
 import { trainerSettings } from "@/components/site/settings";
+import { isHttpsUrl } from "@/domain/site-editor";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { getSettings } from "@/db/queries/public";
@@ -42,7 +43,7 @@ export default async function ContactPage({ params }: Props) {
   const social = [
     ["Instagram", str(c.instagram)],
     ["Facebook", str(c.facebook)],
-  ].filter(([, url]) => /^https?:\/\//i.test(url));
+  ].filter(([, url]) => isHttpsUrl(url)); // the admin stores https addresses only; anything else is not linked
   const trainer = trainerSettings(settings);
 
   return (
