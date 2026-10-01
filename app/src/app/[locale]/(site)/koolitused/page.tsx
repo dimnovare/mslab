@@ -6,14 +6,14 @@ import { courseCardData } from "@/components/site/course-card-data";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
-import { firstSentence, normalizeSearch, parseCatalogueQuery } from "@/domain/catalogue";
+import { firstSentence, normalizeSearch } from "@/domain/catalogue";
 import { nextSessionByCourse } from "@/domain/home";
 import { pick } from "@/i18n/field";
 import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
 import styles from "./catalogue.module.css";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
+type Props = { params: Promise<{ locale: string }> };
 
 export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
   const { locale } = await params;
@@ -25,15 +25,16 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
 /**
  * Catalogue (Task 8, K1–K13). Page head from D with Maria's smaller sizes (K9, K10), then B's filter arrangement
  * with D's explainer. Every course is either e-learning or contact; hybrid is only explained, never a filter.
+ * The filters read the URL themselves (CatalogueFilters), so the server render and the client always agree.
  */
-export default async function CataloguePage({ params, searchParams }: Props) {
+export default async function CataloguePage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   await connection();
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const db = getDb();
-  const [list, sessions, query] = await Promise.all([listPublishedCourses(db), listUpcomingSessions(db, new Date()), searchParams.then(parseCatalogueQuery)]);
+  const [list, sessions] = await Promise.all([listPublishedCourses(db), listUpcomingSessions(db, new Date())]);
 
   const next = nextSessionByCourse(sessions);
   const courses: CatalogueCourse[] = list.map((c) => ({
@@ -55,7 +56,6 @@ export default async function CataloguePage({ params, searchParams }: Props) {
       </header>
       <CatalogueFilters
         courses={courses}
-        initial={query}
         formats={{
           e: { name: f.elearning.name, question: f.elearning.question, definition: f.elearning.definition, card: firstSentence(f.elearning.definition), steps: f.elearning.steps },
           k: { name: f.contact.name, question: f.contact.question, definition: f.contact.definition, card: firstSentence(f.contact.definition), steps: f.contact.steps },

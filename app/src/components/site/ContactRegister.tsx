@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
+import { hasPickableSession } from "@/domain/catalogue";
 import type { SeatState } from "@/domain/sessions";
 import type { Locale } from "@/i18n/locales";
 import { registerContact, submitIndividual } from "@/server/actions/public";
@@ -29,6 +30,7 @@ export type ContactRegisterTexts = {
   individual: string;
   pickSession: string;
   noSessions: string;
+  switchIndividual: string;
   individualNote: string;
   sessionRequired: string;
   name: string;
@@ -61,12 +63,20 @@ type Field = "session" | "name" | "email" | "phone" | "period" | "message" | "pa
 type Errors = Partial<Record<Field, string>>;
 type State = { status: "idle" } | { status: "sent"; kind: Kind } | { status: "error"; kind: Kind; errors: Errors };
 
+/** Where focus goes after a failed submit: the first of these with an error, in page order. */
+const FIELD_ORDER: Field[] = ["session", "name", "email", "phone", "period", "message", "payment", "terms"];
+
 /**
  * Contact course registration (Maria's overview, P10–P16). Only the participation kinds that have a price are offered,
- * each with its own price (P12, P13). Group: pick one of the upcoming sessions (full and cancelled ones are shown but
- * cannot be picked), then the form. Individual: the same form with the preferred period or date; Maria agrees the time.
- * Payment 100% now or 50% + 50% (P14), help finding models (P11), create an account (P16), terms. A registration is
- * never confirmed by the form: the place is confirmed after at least 50% prepayment (P15) — said under the button.
+ * each with its own price (P12, P13).
+ * - Group: pick one of the upcoming sessions (full and cancelled ones are shown but cannot be picked), then the form with
+ *   payment 100% now or 50% + 50% (P14). The form never confirms a place: it is confirmed after at least 50% prepayment
+ *   (P15), said under the button. With no session to pick, the form is replaced by "new dates soon" and, when the course
+ *   has an individual price, a way to ask for the individual course instead.
+ * - Individual: a request with the preferred period or date; Maria agrees the time and the payment afterwards, so there
+ *   is no payment choice and no prepayment line.
+ * Both: help finding models (P11), create an account (P16), terms.
+ * After a failed submit, focus goes to the first field with an error (its message is linked with aria-describedby).
  */
 export function ContactRegister({
   course,
@@ -90,6 +100,9 @@ export function ContactRegister({
   const [values, setValues] = useState({ name: "", email: "", phone: "", period: "", message: "" });
   const [payment, setPayment] = useState<"full" | "half">("full");
   const [checks, setChecks] = useState({ modelHelp: false, account: false, terms: false });
+  const [switched, setSwitched] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
+  const individualRef = useRef<HTMLInputElement>(null);
   const sessionRefs = useRef(new Map<number, HTMLButtonElement>());
   const sentRef = useRef<HTMLDivElement>(null);
 
@@ -112,10 +125,25 @@ export function ContactRegister({
     }
   }, { status: "idle" });
 
-  // Land keyboard and screen-reader users on the confirmation.
+  // Land keyboard and screen-reader users on the confirmation, or on the first field that needs fixing.
   useEffect(() => {
-    if (state.status === "sent") sentRef.current?.focus();
-  }, [state.status]);
+    if (state.status === "sent") {
+      sentRef.current?.focus();
+      return;
+    }
+    if (state.status !== "error") return;
+    const first = FIELD_ORDER.find((f) => state.errors[f]);
+    const target =
+      first === "session"
+        ? formRef.current?.querySelector<HTMLElement>("[data-session]:not([aria-disabled='true'])")
+        : document.getElementById(first ? `${id}-${first}` : `${id}-form-error`);
+    target?.focus();
+  }, [state, id]);
+
+  // "Vali individuaalkoolitus" disappears with the group view: keep focus on the choice that was made.
+  useEffect(() => {
+    if (switched) individualRef.current?.focus();
+  }, [switched]);
 
   if (kinds.length === 0) return null;
 
@@ -150,6 +178,8 @@ export function ContactRegister({
 
   // Sessions are a radio group (WAI-ARIA): arrows move between the dates that can be picked.
   const pickable = sessions.filter((s) => !s.disabled);
+  const groupOpen = hasPickableSession(sessions);
+  const showForm = kind === "individual" || groupOpen;
   const tabStop = session ?? pickable[0]?.id ?? null;
   const onSessionKey = (e: React.KeyboardEvent, current: number) => {
     const dir = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
@@ -165,13 +195,17 @@ export function ContactRegister({
 
   return (
     <form
+      ref={formRef}
       className={styles.register}
+      method="post"
       noValidate
       data-register-form=""
       // Submitted by hand rather than with <form action>: React resets a form after an action, which would clear the
       // checkboxes and radios in the page while their state says otherwise (all fields here are controlled).
+      // method="post" keeps the personal data out of the URL even if the script has not loaded.
       onSubmit={(e) => {
         e.preventDefault();
+        if (pending) return;
         const formData = new FormData(e.currentTarget);
         startTransition(() => formAction(formData));
       }}
@@ -181,7 +215,14 @@ export function ContactRegister({
         <div className={styles.kinds}>
           {kinds.map((k) => (
             <label key={k.kind} className={styles.option}>
-              <input type="radio" name="kind" value={k.kind} checked={kind === k.kind} onChange={() => setKind(k.kind)} />
+              <input
+                ref={k.kind === "individual" ? individualRef : undefined}
+                type="radio"
+                name="kind"
+                value={k.kind}
+                checked={kind === k.kind}
+                onChange={() => setKind(k.kind)}
+              />
               <span className={styles.optionName}>{k.kind === "group" ? t.group : t.individual}</span>
               <span className={styles.optionPrice}>{price(k.kind)}</span>
             </label>
@@ -194,9 +235,7 @@ export function ContactRegister({
           <p id={`${id}-sessions`} className={styles.legend}>
             {t.pickSession}
           </p>
-          {sessions.length === 0 ? (
-            <p className={styles.muted}>{t.noSessions}</p>
-          ) : (
+          {sessions.length > 0 && (
             <div
               className={styles.sessions}
               role="radiogroup"
@@ -240,6 +279,24 @@ export function ContactRegister({
               ))}
             </div>
           )}
+          {!groupOpen && (
+            <div className={styles.noDates} data-no-sessions="">
+              <p>{t.noSessions}</p>
+              {offered.includes("individual") && (
+                <button
+                  type="button"
+                  className={ui.btnOutline}
+                  onClick={() => {
+                    setKind("individual");
+                    setSwitched((n) => n + 1);
+                  }}
+                >
+                  {t.switchIndividual}
+                  <Icon name="arrow" />
+                </button>
+              )}
+            </div>
+          )}
           {err("session")}
           {session !== null && <input type="hidden" name="session" value={session} />}
         </div>
@@ -247,101 +304,110 @@ export function ContactRegister({
         <p className={styles.note}>{t.individualNote}</p>
       )}
 
-      <div className={styles.fields}>
-        <div className={`${styles.field} ${styles.wide}`}>
-          <label htmlFor={`${id}-name`}>{t.name}</label>
-          <input {...text("name")} type="text" required autoComplete="name" maxLength={120} />
-          {err("name")}
-        </div>
-        <div className={styles.field}>
-          <label htmlFor={`${id}-email`}>{t.email}</label>
-          <input {...text("email")} type="email" required autoComplete="email" maxLength={200} />
-          {err("email")}
-        </div>
-        <div className={styles.field}>
-          <label htmlFor={`${id}-phone`}>{t.phone}</label>
-          <input {...text("phone")} type="tel" required autoComplete="tel" maxLength={40} />
-          {err("phone")}
-        </div>
-        {kind === "individual" && (
-          <>
+      {showForm && (
+        <>
+          <div className={styles.fields}>
             <div className={`${styles.field} ${styles.wide}`}>
-              <label htmlFor={`${id}-period`}>{t.preferredPeriod}</label>
-              <input {...text("period")} type="text" required maxLength={200} placeholder={t.preferredPeriodPlaceholder} />
-              {err("period")}
+              <label htmlFor={`${id}-name`}>{t.name}</label>
+              <input {...text("name")} type="text" required autoComplete="name" maxLength={120} />
+              {err("name")}
             </div>
-            <div className={`${styles.field} ${styles.wide}`}>
-              <label htmlFor={`${id}-message`}>
-                {t.message} <span className={styles.optional}>({t.optional})</span>
-              </label>
-              <textarea {...text("message")} rows={3} maxLength={2000} />
-              {err("message")}
+            <div className={styles.field}>
+              <label htmlFor={`${id}-email`}>{t.email}</label>
+              <input {...text("email")} type="email" required autoComplete="email" maxLength={200} />
+              {err("email")}
             </div>
-          </>
-        )}
-      </div>
+            <div className={styles.field}>
+              <label htmlFor={`${id}-phone`}>{t.phone}</label>
+              <input {...text("phone")} type="tel" required autoComplete="tel" maxLength={40} />
+              {err("phone")}
+            </div>
+            {kind === "individual" && (
+              <>
+                <div className={`${styles.field} ${styles.wide}`}>
+                  <label htmlFor={`${id}-period`}>{t.preferredPeriod}</label>
+                  <input {...text("period")} type="text" required maxLength={200} placeholder={t.preferredPeriodPlaceholder} />
+                  {err("period")}
+                </div>
+                <div className={`${styles.field} ${styles.wide}`}>
+                  <label htmlFor={`${id}-message`}>
+                    {t.message} <span className={styles.optional}>({t.optional})</span>
+                  </label>
+                  <textarea {...text("message")} rows={3} maxLength={2000} />
+                  {err("message")}
+                </div>
+              </>
+            )}
+          </div>
 
-      <fieldset className={styles.options}>
-        <legend className={styles.legend}>{t.paymentLabel}</legend>
-        <div className={styles.pay}>
-          {(["full", "half"] as const).map((p) => (
-            <label key={p} className={styles.option}>
-              <input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />
-              <span className={styles.optionName}>{p === "full" ? t.payFull : t.payHalf}</span>
+          {/* Group only: an individual course's time and payment are agreed with Maria afterwards. */}
+          {kind === "group" && (
+            <fieldset className={styles.options}>
+              <legend className={styles.legend}>{t.paymentLabel}</legend>
+              <div className={styles.pay}>
+                {(["full", "half"] as const).map((p) => (
+                  <label key={p} className={styles.option}>
+                    <input id={p === "full" ? `${id}-payment` : undefined} type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />
+                    <span className={styles.optionName}>{p === "full" ? t.payFull : t.payHalf}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          <div className={styles.checks}>
+            <label className={styles.check}>
+              <input type="checkbox" name="modelHelp" checked={checks.modelHelp} onChange={(e) => setChecks((c) => ({ ...c, modelHelp: e.target.checked }))} />
+              <span>{t.modelHelp}</span>
             </label>
-          ))}
-        </div>
-      </fieldset>
+            <label className={styles.check}>
+              <input type="checkbox" name="account" checked={checks.account} onChange={(e) => setChecks((c) => ({ ...c, account: e.target.checked }))} />
+              <span>{t.createAccount}</span>
+            </label>
+            <div>
+              <label className={styles.check}>
+                <input
+                  id={`${id}-terms`}
+                  type="checkbox"
+                  name="terms"
+                  required
+                  checked={checks.terms}
+                  onChange={(e) => setChecks((c) => ({ ...c, terms: e.target.checked }))}
+                  aria-invalid={errors.terms ? true : undefined}
+                  aria-describedby={errors.terms ? `${id}-terms-error` : undefined}
+                />
+                <span>{t.terms}</span>
+              </label>
+              <a className={styles.termsLink} href={t.termsLink.href} target="_blank" rel="noopener">
+                {t.termsLink.label} ↗
+              </a>
+              {err("terms")}
+            </div>
+          </div>
 
-      <div className={styles.checks}>
-        <label className={styles.check}>
-          <input type="checkbox" name="modelHelp" checked={checks.modelHelp} onChange={(e) => setChecks((c) => ({ ...c, modelHelp: e.target.checked }))} />
-          <span>{t.modelHelp}</span>
-        </label>
-        <label className={styles.check}>
-          <input type="checkbox" name="account" checked={checks.account} onChange={(e) => setChecks((c) => ({ ...c, account: e.target.checked }))} />
-          <span>{t.createAccount}</span>
-        </label>
-        <div>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              name="terms"
-              required
-              checked={checks.terms}
-              onChange={(e) => setChecks((c) => ({ ...c, terms: e.target.checked }))}
-              aria-invalid={errors.terms ? true : undefined}
-              aria-describedby={errors.terms ? `${id}-terms-error` : undefined}
-            />
-            <span>{t.terms}</span>
-          </label>
-          <a className={styles.termsLink} href={t.termsLink.href} target="_blank" rel="noopener">
-            {t.termsLink.label} ↗
-          </a>
-          {err("terms")}
-        </div>
-      </div>
+          <input type="hidden" name="course" value={course} />
+          <input type="hidden" name="locale" value={locale} />
+          {/* Honeypot (Task 10): people never see or fill it. */}
+          <div className={styles.honeypot} aria-hidden="true">
+            <label>
+              Website
+              <input name="website" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
+            </label>
+          </div>
 
-      <input type="hidden" name="course" value={course} />
-      <input type="hidden" name="locale" value={locale} />
-      {/* Honeypot (Task 10): people never see or fill it. */}
-      <div className={styles.honeypot} aria-hidden="true">
-        <label>
-          Website
-          <input name="website" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
-        </label>
-      </div>
-
-      {errors.form && (
-        <p className={styles.error} role="alert">
-          {errors.form}
-        </p>
+          {errors.form && (
+            <p id={`${id}-form-error`} className={styles.error} role="alert" tabIndex={-1}>
+              {errors.form}
+            </p>
+          )}
+          {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
+          <button className={`${ui.btn} ${ui.btnFull}`} type="submit" aria-disabled={pending || undefined}>
+            {pending ? t.sending : kind === "group" ? t.register : t.requestSubmit}
+            <Icon name="arrow" />
+          </button>
+          {kind === "group" && <p className={styles.info}>{t.confirmAfterPrepayment}</p>}
+        </>
       )}
-      <button className={`${ui.btn} ${ui.btnFull}`} type="submit" disabled={pending}>
-        {pending ? t.sending : kind === "group" ? t.register : t.requestSubmit}
-        <Icon name="arrow" />
-      </button>
-      <p className={styles.info}>{t.confirmAfterPrepayment}</p>
     </form>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useId, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import type { Locale } from "@/i18n/locales";
 import { submitPurchaseInterest } from "@/server/actions/public";
 import { Icon } from "./Icon";
@@ -22,6 +22,8 @@ export function PurchaseInterest({
   const id = useId();
   const [email, setEmail] = useState("");
   const sentRef = useRef<HTMLDivElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const [state, formAction, pending] = useActionState<State, FormData>(async (_prev, formData) => {
     try {
       const result = await submitPurchaseInterest(formData);
@@ -33,9 +35,11 @@ export function PurchaseInterest({
     }
   }, { status: "idle" });
 
+  // Focus the confirmation, or the field (or message) that needs attention after a failed submit.
   useEffect(() => {
     if (state.status === "sent") sentRef.current?.focus();
-  }, [state.status]);
+    else if (state.status === "error") (state.field ? emailRef.current : errorRef.current)?.focus();
+  }, [state]);
 
   if (state.status === "sent") {
     return (
@@ -50,11 +54,24 @@ export function PurchaseInterest({
 
   const error = state.status === "error" ? state : null;
   return (
-    <form className={styles.form} action={formAction} noValidate data-interest-form="">
+    <form
+      className={styles.form}
+      method="post"
+      noValidate
+      data-interest-form=""
+      // Submitted by hand (as the registration form); method="post" keeps the e-mail out of the URL without the script.
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (pending) return;
+        const formData = new FormData(e.currentTarget);
+        startTransition(() => formAction(formData));
+      }}
+    >
       <label className={styles.label} htmlFor={`${id}-email`}>
         {t.email}
       </label>
       <input
+        ref={emailRef}
         id={`${id}-email`}
         className={styles.input}
         name="email"
@@ -76,11 +93,11 @@ export function PurchaseInterest({
         </label>
       </div>
       {error && (
-        <p id={`${id}-error`} className={styles.error} role="alert">
+        <p ref={errorRef} id={`${id}-error`} className={styles.error} role="alert" tabIndex={-1}>
           {error.message}
         </p>
       )}
-      <button className={`${ui.btn} ${ui.btnFull}`} type="submit" disabled={pending}>
+      <button className={`${ui.btn} ${ui.btnFull}`} type="submit" aria-disabled={pending || undefined}>
         {pending ? t.sending : t.submit}
         <Icon name="arrow" />
       </button>

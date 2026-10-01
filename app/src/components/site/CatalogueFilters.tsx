@@ -1,7 +1,8 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { catalogueSearch, matchesCatalogue, type FormatFilter, type LevelFilter } from "@/domain/catalogue";
+import { catalogueSearch, matchesCatalogue, parseCatalogueQuery, type FormatFilter, type LevelFilter } from "@/domain/catalogue";
 import { fill } from "@/i18n/format";
 import { CourseCard, type CourseCardData } from "./CourseCard";
 import { FormatExplainer, type ExplainerFormat, type ExplainerTexts } from "./FormatExplainer";
@@ -27,68 +28,79 @@ export type CatalogueTexts = ExplainerTexts & {
 
 /**
  * Catalogue filters in prototype B's arrangement (Maria C17 / K3): format chips with the search on the first row,
- * the explainer, then the level chips on their own row (K4), then the course grid. Format and level live in the URL
- * (?vorm=e|k&tase=baas|taiend) so the home page links and a reload land on the same view; the server renders the
- * initial state, so the first paint is already filtered. Search (K13) filters title and summary.
+ * the explainer, then the level chips on their own row (K4), then the course grid.
+ *
+ * The URL is the single source of truth: format, level and search are read from ?vorm=e|k&tase=baas|taiend&otsi=…
+ * (useSearchParams), so the home page links, a reload, Back/Forward and the header "Koolitused" link always show
+ * what the address says. Changes are written with history.replaceState, which Next.js syncs into useSearchParams
+ * without a server round trip (router.replace would re-render the dynamic page on every click and keystroke).
+ * Only the text being typed is held locally, while the search field has focus, so typing never lags behind the URL.
  */
 export function CatalogueFilters({
   courses,
-  initial,
   formats,
   t,
 }: {
   courses: CatalogueCourse[];
-  initial: { vorm: FormatFilter; tase: LevelFilter; hybrid: boolean };
   formats: { e: ExplainerFormat; k: ExplainerFormat; h: ExplainerFormat };
   t: CatalogueTexts;
 }) {
   const id = useId();
-  const [vorm, setVorm] = useState<FormatFilter>(initial.vorm);
-  const [tase, setTase] = useState<LevelFilter>(initial.tase);
-  const [search, setSearch] = useState("");
-  const [hybridOpen, setHybridOpen] = useState(initial.hybrid);
-  const [focusHybrid, setFocusHybrid] = useState(0);
+  const params = useSearchParams();
+  const q = parseCatalogueQuery({ vorm: params.get("vorm") ?? undefined, tase: params.get("tase") ?? undefined, otsi: params.get("otsi") ?? undefined });
+  const { vorm, tase } = q;
+  const [draft, setDraft] = useState<string | null>(null); // the search text while typing; null = follow the URL
+  const search = draft ?? q.otsi;
+  const [hybridOpen, setHybridOpen] = useState(q.hybrid);
+  const focusHybrid = useRef(false); // set by the hybrid note; done once the explanation is on screen
   const hybridHeading = useRef<HTMLHeadingElement>(null);
 
-  // Keep ?vorm / ?tase in the address bar (Next.js syncs native replaceState with its router).
-  const sync = (v: FormatFilter, l: LevelFilter) => {
-    const params = new URLSearchParams(window.location.search);
-    params.delete("vorm");
-    params.delete("tase");
-    const own = new URLSearchParams(catalogueSearch({ vorm: v, tase: l }).slice(1));
-    own.forEach((value, key) => params.set(key, value));
-    const qs = params.toString();
+  // Write the catalogue state into the address bar; other parameters are kept. Reads the live URL, not the render's.
+  const write = (changes: { vorm?: FormatFilter; tase?: LevelFilter; otsi?: string }) => {
+    const live = new URLSearchParams(window.location.search);
+    const cur = parseCatalogueQuery({ vorm: live.get("vorm") ?? undefined, tase: live.get("tase") ?? undefined, otsi: live.get("otsi") ?? undefined });
+    const next = { vorm: changes.vorm ?? cur.vorm, tase: changes.tase ?? cur.tase, otsi: changes.otsi ?? cur.otsi };
+    const merged = new URLSearchParams(catalogueSearch(next).slice(1));
+    live.forEach((value, key) => {
+      if (key !== "vorm" && key !== "tase" && key !== "otsi") merged.append(key, value);
+    });
+    const qs = merged.toString();
     window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
   };
 
   const pickFormat = (v: FormatFilter) => {
-    setVorm(v);
     setHybridOpen(false);
-    sync(v, tase);
+    write({ vorm: v });
   };
-  const pickLevel = (l: LevelFilter) => {
-    setTase(l);
-    sync(vorm, l);
+  const pickLevel = (l: LevelFilter) => write({ tase: l });
+  const onSearch = (value: string) => {
+    setDraft(value);
+    write({ otsi: value });
   };
   // From a format's journey panel: hybrid means combining courses of both formats, so show all of them.
   const openHybridFromNote = () => {
-    setVorm("all");
     setHybridOpen(true);
-    setFocusHybrid((n) => n + 1);
-    sync("all", tase);
+    focusHybrid.current = true;
+    write({ vorm: "all" });
+  };
+  const toggleHybrid = () => {
+    setHybridOpen((o) => !o);
+    if (params.get("vorm") === "h") write({ vorm: "all" }); // drop the old prototype parameter once used
   };
   const reset = () => {
-    setVorm("all");
-    setTase("all");
-    setSearch("");
+    setDraft(null);
     setHybridOpen(false);
-    sync("all", "all");
+    write({ vorm: "all", tase: "all", otsi: "" });
   };
 
-  // The note button disappears with the panel it was in: move focus to the hybrid explanation instead.
+  // The note button disappears with the panel it was in: move focus to the hybrid explanation instead. The format
+  // comes from the URL (a router transition), so wait until the "Kõik" view with the open explanation has rendered.
   useEffect(() => {
-    if (focusHybrid) hybridHeading.current?.focus();
-  }, [focusHybrid]);
+    if (focusHybrid.current && hybridHeading.current) {
+      focusHybrid.current = false;
+      hybridHeading.current.focus();
+    }
+  }, [vorm, hybridOpen]);
 
   const shown = courses.filter((c) => matchesCatalogue({ type: c.card.type, level: c.level, text: c.text }, { vorm, tase, search }));
 
@@ -116,7 +128,15 @@ export function CatalogueFilters({
         <label className={styles.search}>
           <Icon name="search" size={18} />
           <span className={ui.srOnly}>{t.search}</span>
-          <input type="search" value={search} placeholder={t.search} autoComplete="off" onChange={(e) => setSearch(e.target.value)} />
+          <input
+            type="search"
+            value={search}
+            placeholder={t.search}
+            autoComplete="off"
+            maxLength={100}
+            onChange={(e) => onSearch(e.target.value)}
+            onBlur={() => setDraft(null)}
+          />
         </label>
       </div>
 
@@ -126,7 +146,7 @@ export function CatalogueFilters({
         formats={formats}
         t={t}
         onFormat={pickFormat}
-        onHybridToggle={() => setHybridOpen((o) => !o)}
+        onHybridToggle={toggleHybrid}
         onHybridNote={openHybridFromNote}
         hybridHeadingRef={hybridHeading}
       />

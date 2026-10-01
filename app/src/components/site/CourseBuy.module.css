@@ -234,10 +234,26 @@
   color: var(--bad);
 }
 
-.muted {
+/* No group date can be picked: the message and, when offered, the switch to the individual course. */
+.noDates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 20px;
+  margin-top: 4px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--canvas);
+}
+
+.noDates p {
   margin: 0;
-  color: #716a6d;
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.sessions + .noDates {
+  margin-top: 12px;
 }
 
 .note {

@@ -5,8 +5,11 @@ export type LevelFilter = "all" | "baas" | "taiend";
 type CourseType = "e_learning" | "contact";
 type CourseLevel = "basic" | "advanced";
 
-/** Catalogue state in the URL: ?vorm=e|k&tase=baas|taiend. Hybrid is never a filter (K1); ?vorm=h opens its explanation. */
-export type CatalogueQuery = { vorm: FormatFilter; tase: LevelFilter; hybrid: boolean };
+/**
+ * Catalogue state in the URL, the single source of truth: ?vorm=e|k&tase=baas|taiend&otsi=<text>.
+ * Hybrid is never a filter (K1); ?vorm=h (old prototype links) only opens its explanation.
+ */
+export type CatalogueQuery = { vorm: FormatFilter; tase: LevelFilter; otsi: string; hybrid: boolean };
 
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined): string => (Array.isArray(v) ? (v[0] ?? "") : (v ?? ""));
@@ -17,15 +20,17 @@ export function parseCatalogueQuery(params: Params): CatalogueQuery {
   return {
     vorm: vorm === "e" || vorm === "k" ? vorm : "all",
     tase: tase === "baas" || tase === "taiend" ? tase : "all",
+    otsi: first(params.otsi).slice(0, 100),
     hybrid: vorm === "h",
   };
 }
 
-/** The query string for a catalogue state ("" when nothing is filtered). */
-export function catalogueSearch(q: { vorm: FormatFilter; tase: LevelFilter }): string {
+/** The query string for a catalogue state ("" when nothing is filtered); always vorm, tase, otsi in that order. */
+export function catalogueSearch(q: { vorm: FormatFilter; tase: LevelFilter; otsi?: string }): string {
   const p = new URLSearchParams();
   if (q.vorm !== "all") p.set("vorm", q.vorm);
   if (q.tase !== "all") p.set("tase", q.tase);
+  if (q.otsi && q.otsi.trim()) p.set("otsi", q.otsi);
   const s = p.toString();
   return s ? `?${s}` : "";
 }
@@ -53,20 +58,14 @@ export function firstSentence(text: string): string {
   return i < 0 ? t : t.slice(0, i + 1);
 }
 
-/**
- * Courses that may be recommended on a course page: the same type (a contact page stays about contact courses,
- * an e-learning page about e-learning, K2) plus whatever Maria picked by hand, which may be of either type.
- */
-export function recommendationPool<T extends { id: number; type: CourseType }>(
-  current: { type: CourseType; recommendationIds: number[] },
-  all: T[],
-): T[] {
-  return all.filter((c) => c.type === current.type || current.recommendationIds.includes(c.id));
-}
-
 /** Cities of the sessions that can still be booked, in date order, each once. */
 export function bookableCities(sessions: { city: string; status: "scheduled" | "cancelled" }[]): string[] {
   return [...new Set(sessions.filter((s) => s.status !== "cancelled").map((s) => s.city.trim()).filter(Boolean))];
+}
+
+/** A group registration needs at least one session that is neither full nor cancelled. */
+export function hasPickableSession(sessions: { disabled: boolean }[]): boolean {
+  return sessions.some((s) => !s.disabled);
 }
 
 /** "?sessioon=12" preselects session 12 when it belongs to the course and can be picked; otherwise nothing is preselected. */

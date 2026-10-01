@@ -18,14 +18,20 @@ describe("registerContact (group)", () => {
     const r = await registerContact(form({ course: "x", email: "nope", phone: "abc", payment: "all" }));
     expect(r).toEqual({ ok: false, errors: { session: "required", name: "required", email: "invalid", phone: "required", payment: "required", terms: "required" } });
   });
+  test("phone is required", async () => {
+    expect(await registerContact(form({ ...base, session: "3", phone: "" }))).toEqual({ ok: false, errors: { phone: "required" } });
+  });
   test("a course slug is required", async () => {
     expect(await registerContact(form({ ...base, course: "", session: "1" }))).toEqual({ ok: false, errors: { form: "invalid" } });
   });
 });
 
 describe("submitIndividual", () => {
-  test("accepts a request with the preferred period", async () => {
+  test("accepts a request with the preferred period; payment is agreed later, not chosen", async () => {
     expect(await submitIndividual(form({ ...base, period: "Detsembri teine pool" }))).toEqual({ ok: true });
+    const { payment: _payment, ...noPayment } = base;
+    void _payment;
+    expect(await submitIndividual(form({ ...noPayment, period: "12.12" }))).toEqual({ ok: true });
   });
   test("the preferred period is required, the message is limited", async () => {
     expect(await submitIndividual(form({ ...base, message: "x".repeat(2001) }))).toEqual({ ok: false, errors: { period: "required", message: "required" } });

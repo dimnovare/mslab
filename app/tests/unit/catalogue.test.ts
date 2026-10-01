@@ -3,30 +3,33 @@ import {
   bookableCities,
   catalogueSearch,
   firstSentence,
+  hasPickableSession,
   initialSession,
   matchesCatalogue,
   normalizeSearch,
   paragraphs,
   parseCatalogueQuery,
-  recommendationPool,
 } from "@/domain/catalogue";
 import { parseFavourites, toggleFavourite } from "@/lib/favourites";
 
 describe("catalogue query", () => {
   test("parses vorm and tase, ignores anything else", () => {
-    expect(parseCatalogueQuery({})).toEqual({ vorm: "all", tase: "all", hybrid: false });
-    expect(parseCatalogueQuery({ vorm: "e", tase: "baas" })).toEqual({ vorm: "e", tase: "baas", hybrid: false });
-    expect(parseCatalogueQuery({ vorm: "k", tase: "taiend" })).toEqual({ vorm: "k", tase: "taiend", hybrid: false });
-    expect(parseCatalogueQuery({ vorm: ["k", "e"], tase: "x" })).toEqual({ vorm: "k", tase: "all", hybrid: false });
+    expect(parseCatalogueQuery({})).toEqual({ vorm: "all", tase: "all", otsi: "", hybrid: false });
+    expect(parseCatalogueQuery({ vorm: "e", tase: "baas", otsi: "lami" })).toEqual({ vorm: "e", tase: "baas", otsi: "lami", hybrid: false });
+    expect(parseCatalogueQuery({ vorm: "k", tase: "taiend" })).toEqual({ vorm: "k", tase: "taiend", otsi: "", hybrid: false });
+    expect(parseCatalogueQuery({ vorm: ["k", "e"], tase: "x" })).toEqual({ vorm: "k", tase: "all", otsi: "", hybrid: false });
+    expect(parseCatalogueQuery({ otsi: "x".repeat(300) }).otsi).toHaveLength(100);
   });
   test("vorm=h is not a filter: all courses, hybrid explanation open (K1)", () => {
-    expect(parseCatalogueQuery({ vorm: "h" })).toEqual({ vorm: "all", tase: "all", hybrid: true });
+    expect(parseCatalogueQuery({ vorm: "h" })).toEqual({ vorm: "all", tase: "all", otsi: "", hybrid: true });
   });
   test("search string", () => {
     expect(catalogueSearch({ vorm: "all", tase: "all" })).toBe("");
     expect(catalogueSearch({ vorm: "e", tase: "all" })).toBe("?vorm=e");
     expect(catalogueSearch({ vorm: "k", tase: "taiend" })).toBe("?vorm=k&tase=taiend");
     expect(catalogueSearch({ vorm: "all", tase: "baas" })).toBe("?tase=baas");
+    expect(catalogueSearch({ vorm: "e", tase: "all", otsi: "kulmude lami" })).toBe("?vorm=e&otsi=kulmude+lami");
+    expect(catalogueSearch({ vorm: "all", tase: "all", otsi: "  " })).toBe("");
   });
 });
 
@@ -54,16 +57,10 @@ describe("course page rules", () => {
     expect(firstSentence("E-õpe tähendab videokoolitust. Ostuga luuakse konto.")).toBe("E-õpe tähendab videokoolitust.");
     expect(firstSentence("Üks lause ilma punktita")).toBe("Üks lause ilma punktita");
   });
-  test("recommendation pool: same type plus Maria's manual picks", () => {
-    const all = [
-      { id: 1, type: "contact" as const },
-      { id: 2, type: "contact" as const },
-      { id: 3, type: "e_learning" as const },
-      { id: 4, type: "e_learning" as const },
-    ];
-    expect(recommendationPool({ type: "contact", recommendationIds: [] }, all).map((c) => c.id)).toEqual([1, 2]);
-    expect(recommendationPool({ type: "contact", recommendationIds: [4] }, all).map((c) => c.id)).toEqual([1, 2, 4]);
-    expect(recommendationPool({ type: "e_learning", recommendationIds: [] }, all).map((c) => c.id)).toEqual([3, 4]);
+  test("group registration needs a pickable session", () => {
+    expect(hasPickableSession([])).toBe(false);
+    expect(hasPickableSession([{ disabled: true }, { disabled: true }])).toBe(false);
+    expect(hasPickableSession([{ disabled: true }, { disabled: false }])).toBe(true);
   });
   test("bookable cities keep date order, once each, without cancelled sessions", () => {
     expect(

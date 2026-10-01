@@ -163,7 +163,9 @@ export const et = {
     thumbsLabel: "Kõik pildid",
     prevThumbs: "Eelmised pildid",
     nextThumbs: "Järgmised pildid",
-    individualNote: "Individuaalkoolituse aja lepime kokku. Märgi soovitud periood — Maria võtab sinuga ühendust.",
+    individualNote: "Individuaalkoolituse aja ja tasumise lepime kokku. Märgi soovitud periood — Maria võtab sinuga ühendust.",
+    // No group date can be picked (none, all full or cancelled): offer the individual course instead.
+    switchIndividual: "Vali individuaalkoolitus",
     sessionRequired: "Vali sobiv kuupäev.",
     // Contact course registration (P10 - P15)
     participationLabel: "Osalemisviis",

@@ -19,7 +19,7 @@ import { TrainerCard, TrainerLink, type TrainerInfo } from "@/components/site/Tr
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { getCourseBySlug, getPage, getSettings, listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
-import { bookableCities, initialSession, paragraphs, recommendationPool } from "@/domain/catalogue";
+import { bookableCities, initialSession, paragraphs } from "@/domain/catalogue";
 import { priceOptions } from "@/domain/course";
 import { firstParagraph, nextSessionByCourse } from "@/domain/home";
 import { formatEUR } from "@/domain/money";
@@ -131,9 +131,10 @@ export default async function CoursePage({ params, searchParams }: Props) {
   });
   const kinds = priceOptions(course).flatMap((o) => (o.kind === "full" ? [] : [{ kind: o.kind, price: formatEUR(o.cents, locale) }]));
 
-  // Recommendations (P5): Maria's picks first, then the closest courses of the same type.
+  // Recommendations (P5): Maria's picks first, then the closest courses — same type and level preferred, the other
+  // type fills in (hybrid in Maria's sense: an e-learning course plus a different contact course).
   const nextByCourse = nextSessionByCourse(upcoming);
-  const recommended = recommend(course, recommendationPool(course, all), 3).flatMap((r) => {
+  const recommended = recommend(course, all, 3).flatMap((r) => {
     const full = all.find((x) => x.id === r.id);
     return full ? [courseCardData(full, nextByCourse.get(full.id), locale, d, to)] : [];
   });
@@ -218,6 +219,7 @@ export default async function CoursePage({ params, searchParams }: Props) {
                   individual: c.individual,
                   pickSession: c.pickSession,
                   noSessions: c.noSessions,
+                  switchIndividual: c.switchIndividual,
                   individualNote: c.individualNote,
                   sessionRequired: c.sessionRequired,
                   name: d.forms.name,

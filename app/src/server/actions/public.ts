@@ -35,7 +35,7 @@ export async function subscribe(formData: FormData): Promise<ActionResult> {
 const MAX = { name: 120, email: 200, phone: 40, period: 200, message: 2000, slug: 120 } as const;
 const PHONE = /^[+()\d\s-]{5,40}$/;
 
-/** Common checks of the contact-course forms (group registration and individual request). */
+/** Common checks of the contact-course forms (group registration and individual request); payment is group-only. */
 function contactCourseErrors(field: (k: string) => string, formData: FormData): Record<string, string> {
   const errors: Record<string, string> = {};
   const name = field("name");
@@ -45,7 +45,6 @@ function contactCourseErrors(field: (k: string) => string, formData: FormData): 
   if (!name || name.length > MAX.name) errors.name = "required";
   if (!EMAIL.test(email) || email.length > MAX.email) errors.email = "invalid";
   if (!PHONE.test(phone)) errors.phone = "required";
-  if (field("payment") !== "full" && field("payment") !== "half") errors.payment = "required";
   if (formData.get("terms") !== "on") errors.terms = "required";
   return errors;
 }
@@ -60,13 +59,14 @@ export async function registerContact(formData: FormData): Promise<ActionResult>
   const field = (k: string) => String(formData.get(k) ?? "").trim();
   const errors = contactCourseErrors(field, formData);
   if (!/^\d+$/.test(field("session"))) errors.session = "required";
+  if (field("payment") !== "full" && field("payment") !== "half") errors.payment = "required";
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true };
 }
 
 /**
- * Contact course, individual: a request with the preferred period or date; Maria agrees the time (P12).
- * Fields as registerContact without session, plus period (required) and message (optional).
+ * Contact course, individual: a request with the preferred period or date; Maria agrees the time and the payment (P12).
+ * Fields as registerContact without session and payment, plus period (required) and message (optional).
  */
 export async function submitIndividual(formData: FormData): Promise<ActionResult> {
   const field = (k: string) => String(formData.get(k) ?? "").trim();

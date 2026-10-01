@@ -48,6 +48,32 @@ test.describe("catalogue", () => {
     await expect(page.locator("[data-steps]")).toBeVisible();
   });
 
+  test("the URL is the source of truth: Back restores the filters, the header link resets them", async ({ page, isMobile }) => {
+    await page.goto("/koolitused");
+    await page.locator("[data-filter-row='format']").getByRole("button", { name: "Kontaktõpe" }).click();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k$/);
+    const search = page.getByRole("searchbox", { name: "Otsi koolitust" });
+    await search.fill("kulmu");
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k&otsi=kulmu$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(2);
+    await page.locator("[data-course-card]").first().click();
+    await expect(page).toHaveURL(/\/koolitused\/kulmumeistri-baaskoolitus$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k&otsi=kulmu$/);
+    await expect(page.locator("[data-filter-row='format']").getByRole("button", { name: "Kontaktõpe" })).toHaveAttribute("aria-pressed", "true");
+    await expect(search).toHaveValue("kulmu");
+    await expect(page.locator("[data-course-card]")).toHaveCount(2);
+    await expect(page.locator("[data-steps]")).toBeVisible();
+
+    if (isMobile) await page.getByRole("button", { name: "Ava menüü" }).click();
+    await page.locator("header").getByRole("link", { name: "Koolitused", exact: true }).click();
+    await expect(page).toHaveURL(/\/koolitused$/);
+    await expect(page.locator("[data-filter-row='format']").getByRole("button", { name: "Kõik" })).toHaveAttribute("aria-pressed", "true");
+    await expect(search).toHaveValue("");
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    await expect(page.locator("[data-explainer] [data-format-card]")).toHaveCount(3);
+  });
+
   test("home links ?vorm=e and level ?tase=baas are honoured on first render", async ({ page }) => {
     await page.goto("/koolitused?vorm=e&tase=baas");
     await expect(page.locator("[data-course-card]")).toHaveCount(2);

@@ -1,8 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Course pages (Task 8): Maria's P1–P16. The first two tests are the brief's tests (verbatim except one locator:
-// getByLabel("E-post") also matches the footer newsletter's "Sinu e-post", so it is `exact`); the rest cover the
-// remaining checklist items against the seed data. Registration actions are Task 10 placeholders (nothing stored).
+// Course pages (Task 8): Maria's P1–P16. The first two tests are the brief's tests, verbatim except:
+// - getByLabel("E-post") also matches the footer newsletter's "Sinu e-post", so it is `exact`;
+// - the "no E-õpe / Hübriidõpe" check covers the course's own content, not the recommendations at the bottom
+//   (controller ruling: other-type courses may be recommended — hybrid in Maria's sense).
+// The rest cover the remaining checklist items against the seed data. Registration actions are Task 10 placeholders.
 
 test("e-learning course page", async ({ page }) => {
   await page.goto("/koolitused/kulmumeistri-e-koolitus");
@@ -15,7 +17,7 @@ test("e-learning course page", async ({ page }) => {
 });
 test("contact course group registration stays awaiting prepayment", async ({ page }) => {
   await page.goto("/koolitused/kulmumeistri-baaskoolitus");
-  await expect(page.getByText(/E-õpe|Hübriidõpe/)).toHaveCount(0);
+  await expect(page.locator("#main > :not([data-recommendations])").getByText(/E-õpe|Hübriidõpe/)).toHaveCount(0);
   await page.getByRole("radio", { name: /Grupikoolitus/ }).check();
   await page.locator("[data-session]:not([aria-disabled='true'])").first().click();
   await page.getByLabel("Nimi").fill("Test Õpilane"); await page.getByLabel("E-post", { exact: true }).fill("test@example.com"); await page.getByLabel("Telefon").fill("+3725555555");
@@ -71,7 +73,7 @@ test.describe("e-learning page", () => {
   test("recommendations are at the very bottom and lead to other courses (P5)", async ({ page }) => {
     await page.goto("/koolitused/kulmumeistri-e-koolitus");
     const rec = page.locator("[data-recommendations]");
-    await expect(rec.locator("[data-course-card]").first()).toBeVisible();
+    await expect(rec.locator("[data-course-card]")).toHaveCount(3);
     await expect(rec.locator("[data-course-card][href='/koolitused/kulmumeistri-e-koolitus']")).toHaveCount(0);
     const isLast = await rec.evaluate((el) => {
       const main = document.getElementById("main")!;
@@ -83,6 +85,15 @@ test.describe("e-learning page", () => {
 });
 
 test.describe("contact page", () => {
+  test("recommendations prefer the same type and fill in with the other type", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const rec = page.locator("[data-recommendations] [data-course-card]");
+    await expect(rec).toHaveCount(3);
+    await expect(rec.nth(0)).toHaveAttribute("data-type", "contact");
+    await expect(rec.nth(1)).toHaveAttribute("data-type", "contact");
+    await expect(rec.nth(2)).toHaveAttribute("data-type", "e_learning");
+  });
+
   test("participation switch: group lists sessions, individual shows the request form (P12, P13)", async ({ page }) => {
     await page.goto("/koolitused/kulmumeistri-baaskoolitus");
     await expect(page.getByRole("radio", { name: /Grupikoolitus/ })).toHaveAccessibleName(/350 €/);
@@ -94,6 +105,45 @@ test.describe("contact page", () => {
     await expect(page.locator("[data-session]")).toHaveCount(0);
     await expect(page.getByLabel("Soovitud periood või kuupäev")).toBeVisible();
     await expect(page.getByRole("button", { name: "Saada päring" })).toBeVisible();
+    // Time and payment are agreed with Maria afterwards: no payment choice, no prepayment line (no place exists yet).
+    const form = page.locator("[data-register-form]");
+    await expect(form.getByRole("radio", { name: /100% kohe|50% registreerimisel/ })).toHaveCount(0);
+    await expect(form.getByText(/Koht kinnitatakse/)).toHaveCount(0);
+    await expect(form.getByLabel(/modellide leidmisel/)).toBeVisible();
+    await expect(form.getByLabel("Loo mulle kohe konto MS LAB keskkonda")).toBeVisible();
+    await expect(form.getByLabel(/tingimustega/)).toBeVisible();
+  });
+
+  test("after a failed submit, focus lands on the first invalid field", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const form = page.locator("[data-register-form]");
+    // Group without a date: the date choice comes first.
+    await form.getByRole("button", { name: "Registreeru" }).click();
+    await expect(page.locator("[data-session]").first()).toBeFocused();
+    await expect(page.locator("[role='radiogroup']")).toHaveAttribute("aria-invalid", "true");
+    // With a date picked, the first empty field gets focus and describes its error.
+    await page.locator("[data-session]").first().click();
+    await form.getByRole("button", { name: "Registreeru" }).click();
+    const name = form.getByLabel("Nimi");
+    await expect(name).toBeFocused();
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(name).toHaveAccessibleDescription("See väli on kohustuslik.");
+    // Individual request: the name field is first.
+    await page.getByRole("radio", { name: /Individuaalkoolitus/ }).check();
+    await form.getByRole("button", { name: "Saada päring" }).press("Enter");
+    await expect(form.getByLabel("Nimi")).toBeFocused();
+    await form.getByLabel("Nimi").fill("Test");
+    await form.getByLabel("E-post", { exact: true }).fill("vale");
+    await form.getByRole("button", { name: "Saada päring" }).click();
+    await expect(form.getByLabel("E-post", { exact: true })).toBeFocused();
+    await expect(form.getByLabel("E-post", { exact: true })).toHaveAccessibleDescription("Sisesta korrektne e-posti aadress.");
+  });
+
+  test("forms post (personal data never goes into the URL)", async ({ page }) => {
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    await expect(page.locator("[data-register-form]")).toHaveAttribute("method", "post");
+    await page.goto("/ostukorv?kursus=kulmumeistri-e-koolitus");
+    await expect(page.locator("[data-interest-form]")).toHaveAttribute("method", "post");
   });
 
   test("cancelled sessions are shown but cannot be picked", async ({ page }) => {
@@ -287,6 +337,9 @@ test.describe("cart (/ostukorv)", () => {
     await expect(page.locator("[data-cart-summary]")).toContainText("190 €");
     await expect(page.getByText(/Makse lisandub peagi — saad koolituse osta niipea, kui makse on avatud\. Jäta oma e-post, anname teada\./)).toBeVisible();
     const form = page.locator("[data-interest-form]");
+    await form.getByRole("button").click(); // empty: focus goes to the e-mail field with its error
+    await expect(form.getByLabel("E-post")).toBeFocused();
+    await expect(form.getByLabel("E-post")).toHaveAttribute("aria-invalid", "true");
     await form.getByLabel("E-post").fill("test@example.com");
     await form.getByRole("button").click();
     await expect(page.getByText("Aitäh! Anname teada, kui makse on avatud.")).toBeVisible();
