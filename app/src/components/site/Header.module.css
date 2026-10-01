@@ -165,7 +165,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 43px;
+  min-height: 44px; /* touch target */
   padding: 9px 18px;
   border: 1px solid var(--ink);
   border-radius: 99px;

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import { hasPickableSession } from "@/domain/catalogue";
 import type { SeatState } from "@/domain/sessions";
@@ -33,6 +34,8 @@ export type ContactRegisterTexts = {
   switchIndividual: string;
   individualNote: string;
   sessionRequired: string;
+  sessionFull: string;
+  sessionUnavailable: string;
   name: string;
   email: string;
   phone: string;
@@ -61,7 +64,8 @@ export type ContactRegisterTexts = {
 
 type Field = "session" | "name" | "email" | "phone" | "period" | "message" | "payment" | "terms" | "form";
 type Errors = Partial<Record<Field, string>>;
-type State = { status: "idle" } | { status: "sent"; kind: Kind } | { status: "error"; kind: Kind; errors: Errors };
+/** `rejected`: the date the server turned down (filled up or cancelled meanwhile); its error stays while it is picked. */
+type State = { status: "idle" } | { status: "sent"; kind: Kind } | { status: "error"; kind: Kind; errors: Errors; rejected?: number };
 
 /** Where focus goes after a failed submit: the first of these with an error, in page order. */
 const FIELD_ORDER: Field[] = ["session", "name", "email", "phone", "period", "message", "payment", "terms"];
@@ -105,6 +109,7 @@ export function ContactRegister({
   const individualRef = useRef<HTMLInputElement>(null);
   const sessionRefs = useRef(new Map<number, HTMLButtonElement>());
   const sentRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   const [state, formAction, pending] = useActionState<State, FormData>(async (_prev, formData) => {
     const k: Kind = formData.get("kind") === "individual" ? "individual" : "group";
@@ -112,14 +117,20 @@ export function ContactRegister({
       const result = k === "individual" ? await submitIndividual(formData) : await registerContact(formData);
       if (result.ok) return { status: "sent", kind: k };
       const errors: Errors = {};
+      let rejected: number | undefined;
       for (const [f, code] of Object.entries(result.errors)) {
         if (f === "form") errors.form = code === "rate" ? t.errorTooMany : t.errorGeneric;
         else if (f === "email") errors.email = t.errorEmail;
-        else if (f === "session") errors.session = t.sessionRequired;
+        else if (f === "session" && (code === "full" || code === "unavailable")) {
+          errors.session = code === "full" ? t.sessionFull : t.sessionUnavailable;
+          rejected = Number(formData.get("session"));
+        } else if (f === "session") errors.session = t.sessionRequired;
         else errors[f as Field] = t.errorRequired;
       }
       if (Object.keys(errors).length === 0) errors.form = t.errorGeneric;
-      return { status: "error", kind: k, errors };
+      // The date list on the page is out of date: load the current seat states.
+      if (rejected !== undefined) router.refresh();
+      return { status: "error", kind: k, errors, rejected };
     } catch {
       return { status: "error", kind: k, errors: { form: t.errorGeneric } };
     }
@@ -158,9 +169,10 @@ export function ContactRegister({
     );
   }
 
-  // Errors belong to the kind that was submitted; the date error goes away once a date is picked.
+  // Errors belong to the kind that was submitted; the date error goes away once a date (another one, if the server
+  // turned the picked date down) is picked.
   const errors: Errors = state.status === "error" && state.kind === kind ? { ...state.errors } : {};
-  if (session !== null) delete errors.session;
+  if (session !== null && !(state.status === "error" && state.rejected === session)) delete errors.session;
   const err = (f: Field) =>
     errors[f] ? (
       <span id={`${id}-${f}-error`} className={styles.error}>

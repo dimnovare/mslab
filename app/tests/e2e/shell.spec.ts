@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./test";
+import { LOCAL_FIXTURES, storedSubscriber, testEmail } from "./fixtures";
 
 // Site shell (Task 6): B header with Manrope UI font (G3, G4), footer with the lilac newsletter (H13), ET + RU (G8).
 
@@ -71,13 +72,15 @@ test.describe("desktop", () => {
     }
   });
 
-  test("newsletter form shows the sent state", async ({ page }) => {
+  test("newsletter form shows the sent state", async ({ page }, info) => {
+    const addr = testEmail("shell-nl", info.project.name);
     await page.goto("/konto");
     const footer = page.locator("footer");
-    await footer.getByLabel("Sinu e-post").fill("test@example.com");
+    await footer.getByLabel("Sinu e-post").fill(addr);
     await footer.getByRole("checkbox").check();
     await footer.getByRole("button", { name: "Liitu" }).click();
     await expect(footer.getByText("Kontrolli oma postkasti")).toBeVisible();
+    if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
   });
 });
 

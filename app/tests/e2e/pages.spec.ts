@@ -1,5 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
-import { LOCAL_FIXTURES } from "./fixtures";
+import type { Page } from "@playwright/test";
+import { test, expect } from "./test";
+import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
 
 // Task 9: calendar (L1–L5), practice (R1–R5), trainer (T1–T4), blog (B1), contact and legal pages.
 // The first three tests are the brief's tests, verbatim except one locator: `getByText(/ak/)` first matched the header's
@@ -137,7 +138,8 @@ test.describe("calendar", () => {
 test.describe("calendar seat states (test-owned fixtures in the local DB)", () => {
   test.skip(!LOCAL_FIXTURES, "the seat fixtures are only inserted into the local dev database");
 
-  test("a full session: Täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }) => {
+  test("a full session: Täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }, info) => {
+    const addr = testEmail("waitlist", info.project.name);
     await page.goto("/koolituskalender");
     const full = page.locator("[data-calendar-row][data-state='full']");
     await expect(full).toHaveCount(1);
@@ -180,12 +182,14 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(email).toHaveAccessibleDescription("Sisesta korrektne e-posti aadress.");
     await expect(name).not.toHaveAttribute("aria-invalid", "true");
 
-    // A valid request shows the confirmation and moves focus to it.
-    await email.fill("test@example.com");
+    // A valid request shows the confirmation and moves focus to it; it is stored as a waitlist request.
+    await email.fill(addr);
+    const session = Number(await form.locator("input[name='session']").inputValue());
     await submit.click();
     const sent = full.locator("[data-waitlist-sent]");
     await expect(sent).toHaveText("Aitäh! Oled ootenimekirjas.");
     await expect(sent).toBeFocused();
+    expect(await storedRequests(addr)).toEqual([{ kind: "waitlist", payload: { session, course: "kulmude-lami", name: "Test Õpilane", email: addr, locale: "et" } }]);
   });
 
   test("a session with two seats left says Viimased kohad and can still be booked", async ({ page }) => {
@@ -267,7 +271,8 @@ test.describe("practice", () => {
     await expect(page.locator("[data-practice-form]").getByRole("radio", { name: /MAXI/ })).toBeChecked();
   });
 
-  test("request form: focus goes to the first invalid field; a complete request is sent", async ({ page }) => {
+  test("request form: focus goes to the first invalid field; a complete request is sent", async ({ page }, info) => {
+    const addr = testEmail("practice", info.project.name);
     await page.goto("/praktika");
     const form = page.locator("[data-practice-form]");
     await expect(form).toHaveAttribute("method", "post");
@@ -280,13 +285,17 @@ test.describe("practice", () => {
     await expect(nameField).toHaveAttribute("aria-invalid", "true");
     await expect(nameField).toHaveAccessibleDescription("See väli on kohustuslik.");
     await nameField.fill("Test Õpilane");
-    await form.getByLabel("E-post", { exact: true }).fill("test@example.com");
+    await form.getByLabel("E-post", { exact: true }).fill(addr);
     await form.getByLabel("Telefon").fill("+372 5555 5555");
     await form.getByLabel(/Läbitud koolitus/).fill("Kulmumeistri baaskoolitus");
     await form.getByLabel(/Millised ajad/).fill("Tööpäeva õhtud");
     await form.getByRole("button", { name: "Saada taotlus" }).click();
     await expect(page.getByText("Taotlus on saadetud.")).toBeVisible();
     await expect(page.locator("[data-practice-sent]")).toBeFocused();
+    if (LOCAL_FIXTURES)
+      expect(await storedRequests(addr)).toEqual([
+        { kind: "practice", payload: { package: "MINI", name: "Test Õpilane", email: addr, phone: "+372 5555 5555", course: "Kulmumeistri baaskoolitus", times: "Tööpäeva õhtud", locale: "et" } },
+      ]);
   });
 
   test("RU practice", async ({ page }) => {
@@ -451,7 +460,8 @@ test.describe("blog", () => {
 });
 
 test.describe("contact and legal", () => {
-  test("contact page: details from settings and the D contact form", async ({ page }) => {
+  test("contact page: details from settings and the D contact form", async ({ page }, info) => {
+    const addr = testEmail("contact", info.project.name);
     await page.goto("/kontakt");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Alustame vestlusest.");
     await expect(page.locator("[data-contact-details]").getByRole("link", { name: "info@mslab.ee" })).toHaveAttribute("href", "mailto:info@mslab.ee");
@@ -461,10 +471,11 @@ test.describe("contact and legal", () => {
     await expect(form.getByLabel("Nimi")).toBeFocused();
     await expect(form.getByLabel("Nimi")).toHaveAttribute("aria-invalid", "true");
     await form.getByLabel("Nimi").fill("Test Õpilane");
-    await form.getByLabel("E-post", { exact: true }).fill("test@example.com");
+    await form.getByLabel("E-post", { exact: true }).fill(addr);
     await form.getByLabel("Sõnum").fill("Tere! Küsimus praktika kohta.");
     await form.getByRole("button", { name: "Saada" }).click();
     await expect(page.getByText("Aitäh! Sinu sõnum on saadetud.")).toBeVisible();
+    if (LOCAL_FIXTURES) expect((await storedRequests(addr)).map((r) => r.kind)).toEqual(["contact"]);
   });
 
   test("privacy and terms render their stored text; the footer links reach them", async ({ page }) => {

@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./test";
+import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
 
 // Home page (Task 7): Maria's section decisions H1–H17, G5, K5, K8, K11, K12.
 // The first two tests are the brief's tests verbatim; the step-geometry test describes the horizontal row,
@@ -182,14 +183,19 @@ test.describe("home content from the database", () => {
     await expect(page.locator("[data-steps]")).toHaveCount(0);
   });
 
-  test("contact form validates and shows the sent state (H15)", async ({ page }) => {
+  test("contact form validates and shows the sent state (H15)", async ({ page }, info) => {
+    const addr = testEmail("home-contact", info.project.name);
     await page.goto("/");
     const form = page.locator("[data-contact-form]");
     await form.getByLabel("Nimi").fill("Test Õpilane");
-    await form.getByLabel("E-post").fill("test@example.com");
+    await form.getByLabel("E-post").fill(addr);
     await form.getByLabel("Sõnum").fill("Olen algaja ja huvitun kulmudest.");
     await form.getByRole("button", { name: "Saada" }).click();
     await expect(page.getByText("Aitäh! Sinu sõnum on saadetud.")).toBeVisible();
+    if (LOCAL_FIXTURES)
+      expect(await storedRequests(addr)).toEqual([
+        { kind: "contact", payload: { name: "Test Õpilane", email: addr, message: "Olen algaja ja huvitun kulmudest.", locale: "et" } },
+      ]);
   });
 
   test("Russian home", async ({ page }) => {

@@ -222,6 +222,8 @@ export default async function CoursePage({ params, searchParams }: Props) {
                   switchIndividual: c.switchIndividual,
                   individualNote: c.individualNote,
                   sessionRequired: c.sessionRequired,
+                  sessionFull: c.sessionFull,
+                  sessionUnavailable: c.sessionUnavailable,
                   name: d.forms.name,
                   email: d.forms.email,
                   phone: d.forms.phone,

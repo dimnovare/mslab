@@ -1,10 +1,13 @@
-import { test, expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { test, expect } from "./test";
+import { LOCAL_FIXTURES, storedRegistrations, storedRequests, testEmail } from "./fixtures";
 
 // Course pages (Task 8): Maria's P1–P16. The first two tests are the brief's tests, verbatim except:
 // - getByLabel("E-post") also matches the footer newsletter's "Sinu e-post", so it is `exact`;
 // - the "no E-õpe / Hübriidõpe" check covers the course's own content, not the recommendations at the bottom
 //   (controller ruling: other-type courses may be recommended — hybrid in Maria's sense).
-// The rest cover the remaining checklist items against the seed data. Registration actions are Task 10 placeholders.
+// - Task 10: the e-mail is a test-owned address, and the stored row is checked in the local database.
+// The rest cover the remaining checklist items against the seed data.
 
 test("e-learning course page", async ({ page }) => {
   await page.goto("/koolitused/kulmumeistri-e-koolitus");
@@ -15,15 +18,21 @@ test("e-learning course page", async ({ page }) => {
   await expect(page.getByText("Sulle võiksid huvi pakkuda")).toBeVisible();
   await page.locator("[data-gallery-main]").click(); await expect(page.getByRole("dialog")).toBeVisible(); await page.keyboard.press("Escape");
 });
-test("contact course group registration stays awaiting prepayment", async ({ page }) => {
+test("contact course group registration stays awaiting prepayment", async ({ page }, info) => {
+  const addr = testEmail("register", info.project.name);
   await page.goto("/koolitused/kulmumeistri-baaskoolitus");
   await expect(page.locator("#main > :not([data-recommendations])").getByText(/E-õpe|Hübriidõpe/)).toHaveCount(0);
   await page.getByRole("radio", { name: /Grupikoolitus/ }).check();
   await page.locator("[data-session]:not([aria-disabled='true'])").first().click();
-  await page.getByLabel("Nimi").fill("Test Õpilane"); await page.getByLabel("E-post", { exact: true }).fill("test@example.com"); await page.getByLabel("Telefon").fill("+3725555555");
+  await page.getByLabel("Nimi").fill("Test Õpilane"); await page.getByLabel("E-post", { exact: true }).fill(addr); await page.getByLabel("Telefon").fill("+3725555555");
   await page.getByRole("radio", { name: /50%/ }).check(); await page.getByLabel(/modellide leidmisel/).check(); await page.getByLabel(/tingimustega/).check();
+  const session = Number(await page.locator("[data-session][aria-checked='true']").getAttribute("data-session"));
   await page.getByRole("button", { name: "Registreeru" }).click();
   await expect(page.getByText(/koht kinnitub pärast ettemaksu/)).toBeVisible();
+  if (LOCAL_FIXTURES)
+    expect(await storedRegistrations(addr)).toEqual([
+      { kind: "group", status: "awaiting_prepayment", paidCents: 0, paymentChoice: "half", wantsModelHelp: true, locale: "et", course: "kulmumeistri-baaskoolitus", sessionId: session },
+    ]);
 });
 
 const noErrors = (page: Page) => {
@@ -197,17 +206,27 @@ test.describe("contact page", () => {
     await expect(form.getByText("Vali sobiv kuupäev.")).toHaveCount(0);
   });
 
-  test("individual request is sent", async ({ page }) => {
+  test("individual request is sent", async ({ page }, info) => {
+    const addr = testEmail("individual", info.project.name);
     await page.goto("/koolitused/kulmude-lami");
     await page.getByRole("radio", { name: /Individuaalkoolitus/ }).check();
     const form = page.locator("[data-register-form]");
     await form.getByLabel("Nimi").fill("Test Õpilane");
-    await form.getByLabel("E-post").fill("test@example.com");
+    await form.getByLabel("E-post").fill(addr);
     await form.getByLabel("Telefon").fill("+3725555555");
     await form.getByLabel("Soovitud periood või kuupäev").fill("Detsembri teine pool");
     await form.getByLabel(/tingimustega/).check();
     await form.getByRole("button", { name: "Saada päring" }).click();
     await expect(page.getByText("Aitäh! Sinu päring on saadetud.")).toBeVisible();
+    // A request to Maria (kind individual), not a registration; no payment choice.
+    if (LOCAL_FIXTURES) {
+      const [request, ...more] = await storedRequests(addr);
+      expect(more).toEqual([]);
+      expect(request.kind).toBe("individual");
+      expect(request.payload).toMatchObject({ course: "kulmude-lami", name: "Test Õpilane", phone: "+3725555555", preferredPeriod: "Detsembri teine pool", wantsModelHelp: false, wantsAccount: false });
+      expect(request.payload).not.toHaveProperty("paymentChoice");
+      expect(await storedRegistrations(addr)).toEqual([]);
+    }
   });
 
   test("Koolitus sisaldab in Maria's words, models note, programme (P10, P11)", async ({ page }) => {
@@ -331,7 +350,8 @@ test.describe("both types", () => {
 });
 
 test.describe("cart (/ostukorv)", () => {
-  test("summarises the e-course, says payment opens soon, takes an e-mail (P9)", async ({ page }) => {
+  test("summarises the e-course, says payment opens soon, takes an e-mail (P9)", async ({ page }, info) => {
+    const addr = testEmail("interest", info.project.name);
     await page.goto("/ostukorv?kursus=kulmumeistri-e-koolitus");
     await expect(page.getByRole("heading", { name: "Kulmumeistri e-koolitus" })).toBeVisible();
     await expect(page.locator("[data-cart-summary]")).toContainText("190 €");
@@ -340,9 +360,11 @@ test.describe("cart (/ostukorv)", () => {
     await form.getByRole("button").click(); // empty: focus goes to the e-mail field with its error
     await expect(form.getByLabel("E-post")).toBeFocused();
     await expect(form.getByLabel("E-post")).toHaveAttribute("aria-invalid", "true");
-    await form.getByLabel("E-post").fill("test@example.com");
+    await form.getByLabel("E-post").fill(addr);
     await form.getByRole("button").click();
     await expect(page.getByText("Aitäh! Anname teada, kui makse on avatud.")).toBeVisible();
+    if (LOCAL_FIXTURES)
+      expect(await storedRequests(addr)).toEqual([{ kind: "contact", payload: { course: "kulmumeistri-e-koolitus", intent: "purchase", email: addr, locale: "et" } }]);
   });
 
   test("empty cart without a course or for a contact course", async ({ page }) => {

@@ -6,6 +6,7 @@ import { ContactBlock } from "@/components/site/ContactBlock";
 import { CourseCard } from "@/components/site/CourseCard";
 import { courseCardData } from "@/components/site/course-card-data";
 import { Faq } from "@/components/site/Faq";
+import { FlashNotice } from "@/components/site/FlashNotice";
 import { FormatsBlock, type FormatTab } from "@/components/site/FormatsBlock";
 import { Hero, type HeroSlideView } from "@/components/site/Hero";
 import { Icon } from "@/components/site/Icon";
@@ -26,15 +27,15 @@ import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "./home.module.css";
 
-type Props = { params: Promise<{ locale: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 
 /**
  * Home page (Task 7). Section order from the brief: hero → upcoming strip → course cards → "Kuidas soovid õppida?"
  * → statement → trainer → practice → blog → FAQ → contact. The newsletter lives in the footer (layout).
  * The layout provides <main> and the transparent header that the hero slides under.
  */
-export default async function Home({ params }: Props) {
-  const { locale } = await params;
+export default async function Home({ params, searchParams }: Props) {
+  const [{ locale }, query] = await Promise.all([params, searchParams]);
   if (!isLocale(locale)) notFound();
   await connection();
   const d = getDict(locale);
@@ -71,6 +72,17 @@ export default async function Home({ params }: Props) {
   const bio = home.pages.trainer_bio;
   const trainer = trainerSettings(home.settings);
   const trainerName = trainer.name || pick(bio?.title, locale);
+
+  // The newsletter confirmation link (/api/newsletter/confirm) lands here with ?uudiskiri=kinnitatud | vigane | viga.
+  const nl = d.newsletter;
+  const newsletterNotice =
+    query.uudiskiri === "kinnitatud"
+      ? { tone: "ok" as const, title: nl.confirmedTitle, text: nl.confirmedText }
+      : query.uudiskiri === "vigane"
+        ? { tone: "warn" as const, title: nl.linkInvalid }
+        : query.uudiskiri === "viga"
+          ? { tone: "warn" as const, title: d.forms.errorGeneric }
+          : null;
 
   return (
     <>
@@ -206,6 +218,8 @@ export default async function Home({ params }: Props) {
           errorGeneric: d.forms.errorGeneric,
         }}
       />
+
+      {newsletterNotice && <FlashNotice param="uudiskiri" closeLabel={d.common.close} {...newsletterNotice} />}
     </>
   );
 }

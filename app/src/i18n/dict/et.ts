@@ -167,6 +167,9 @@ export const et = {
     // No group date can be picked (none, all full or cancelled): offer the individual course instead.
     switchIndividual: "Vali individuaalkoolitus",
     sessionRequired: "Vali sobiv kuupäev.",
+    // The picked date filled up or was cancelled while the form was open (checked again when the form is sent).
+    sessionFull: "See kuupäev on vahepeal täitunud. Vali teine kuupäev.",
+    sessionUnavailable: "Sellele kuupäevale ei saa enam registreeruda. Vali teine kuupäev.",
     // Contact course registration (P10 - P15)
     participationLabel: "Osalemisviis",
     group: "Grupikoolitus",
@@ -334,6 +337,23 @@ export const et = {
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
     sentTitle: "Kontrolli oma postkasti",
+    // Home page notice after the confirmation link (/?uudiskiri=kinnitatud or =vigane).
+    linkInvalid: "See kinnituslink ei kehti. Liitu uudiskirjaga uuesti lehe allosas.",
+  },
+
+  // E-mails to visitors (plain text). {link} is the confirmation URL.
+  mail: {
+    confirmSubject: "Kinnita MS LABi uudiskirjaga liitumine",
+    confirmText: [
+      "Tere!",
+      "",
+      "Aitäh, et soovid MS LABi uudiskirja. Liitumise kinnitamiseks ava see link:",
+      "{link}",
+      "",
+      "Kui sa ei soovinud uudiskirjaga liituda, jäta see kiri tähelepanuta — ilma kinnituseta me sulle uudiskirju ei saada.",
+      "",
+      "MS LAB Koolituskeskus",
+    ].join("\n"),
   },
 
   // /ostukorv: e-learning purchase placeholder until bank-link payment arrives (P9).

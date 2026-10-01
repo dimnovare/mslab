@@ -103,17 +103,34 @@
   transform: translateY(0) scale(0.98);
 }
 
-.submit:disabled {
+.submit[aria-disabled="true"] {
   opacity: 0.6;
   cursor: progress;
   transform: none;
 }
 
+/* The rose focus ring is below 3:1 on the lilac surface: controls here get the ink ring. */
+.newsletter :focus-visible {
+  outline-color: var(--ink);
+}
+
+.status:focus {
+  outline: none;
+}
+
+.status:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+
+/* The whole label is the hit area: at least 44px high (touch targets). */
 .check {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin-top: 15px;
+  min-height: 44px;
+  margin-top: 3px;
+  padding-block: 12px;
   color: #61555d;
   font-size: 11px;
   line-height: 1.5;

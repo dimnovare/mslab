@@ -1,0 +1,82 @@
+/* Fixed notice at the bottom of the screen (newsletter confirmation). The region itself has no box. */
+
+.region {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  max-width: min(440px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 12px 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgb(34 34 34 / 0.14);
+  font-family: var(--font-body);
+  pointer-events: auto;
+}
+
+.mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: #fff;
+}
+
+.notice[data-tone="warn"] .mark {
+  background: var(--warn);
+}
+
+.text {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-top: 5px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.text b {
+  font-weight: 600;
+}
+
+.close {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -6px 0 -6px auto;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--canvas);
+}
+
+@media (max-width: 640px) {
+  .region {
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    max-width: none;
+  }
+}

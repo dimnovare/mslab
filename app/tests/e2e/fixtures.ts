@@ -16,12 +16,21 @@ export const LOCAL_FIXTURES = !baseURL || /^https?:\/\/(localhost|127\.0\.0\.1|\
 export const FIXTURE_NOTE = "e2e-fixture:seats";
 const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/mslab";
 
+/** Fixtures and test rows are written to and deleted from a local database only, never a shared one. */
+function assertLocalDb(url: string): void {
+  const host = new URL(url).hostname;
+  if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) throw new Error(`e2e: refusing to use a non-local database (${host})`);
+}
+
 export const FIXTURES = {
   full: { slug: "kulmude-lami", city: "Pärnu", leave: 0 },
   few: { slug: "lash-lift-botox", city: "Viljandi", leave: 2 },
 } as const;
 
-const connect = () => postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
+const connect = () => {
+  assertLocalDb(DB_URL);
+  return postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
+};
 
 /** Removes this suite's rows; returns how many are left afterwards (0 when clean). */
 async function clear(sql: postgres.Sql): Promise<number> {
@@ -58,6 +67,73 @@ export async function removeSeatFixtures(): Promise<void> {
   try {
     const left = await clear(sql);
     if (left !== 0) throw new Error(`e2e fixtures: ${left} fixture registrations are still in the database`);
+  } finally {
+    await sql.end();
+  }
+}
+
+// ---------- rows the form tests create ----------
+// Every e-mail a test submits is `e2e-form-…@example.com` (see testEmail); the tests read the stored rows back from the
+// local database, and global-setup / global-teardown delete them.
+
+export const TEST_EMAIL_PATTERN = "e2e-form-%@example.com";
+
+/** A unique address for one submission: e2e-form-<label>-<project>-<time><random>@example.com (lowercase). */
+export function testEmail(label: string, project: string): string {
+  const unique = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `e2e-form-${label}-${project}-${unique}@example.com`.toLowerCase();
+}
+
+/** Deletes the form tests' rows; returns how many are left (0 when clean). */
+export async function removeFormRows(): Promise<number> {
+  const sql = connect();
+  try {
+    await sql`delete from registrations where email like ${TEST_EMAIL_PATTERN}`;
+    await sql`delete from requests where payload->>'email' like ${TEST_EMAIL_PATTERN}`;
+    await sql`delete from subscribers where email like ${TEST_EMAIL_PATTERN}`;
+    const [{ n }] = await sql<{ n: number }[]>`
+      select (select count(*) from registrations where email like ${TEST_EMAIL_PATTERN})
+           + (select count(*) from requests where payload->>'email' like ${TEST_EMAIL_PATTERN})
+           + (select count(*) from subscribers where email like ${TEST_EMAIL_PATTERN})::int as n`;
+    return Number(n);
+  } finally {
+    await sql.end();
+  }
+}
+
+export type StoredRegistration = { kind: string; status: string; paidCents: number; paymentChoice: string; wantsModelHelp: boolean; locale: string; course: string; sessionId: number | null };
+export type StoredRequest = { kind: string; payload: Record<string, unknown> };
+export type StoredSubscriber = { email: string; locale: string; confirmed: boolean; token: string };
+
+/** The registrations stored for one test address. */
+export async function storedRegistrations(email: string): Promise<StoredRegistration[]> {
+  const sql = connect();
+  try {
+    return await sql<StoredRegistration[]>`
+      select r.kind, r.status, r.paid_cents as "paidCents", r.payment_choice as "paymentChoice",
+             r.wants_model_help as "wantsModelHelp", r.locale, c.slug as course, r.course_session_id as "sessionId"
+      from registrations r join courses c on c.id = r.course_id where r.email = ${email} order by r.id`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** The requests stored for one test address. */
+export async function storedRequests(email: string): Promise<StoredRequest[]> {
+  const sql = connect();
+  try {
+    return await sql<StoredRequest[]>`select kind, payload from requests where payload->>'email' = ${email} order by id`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** The newsletter subscriber of one test address, if any. */
+export async function storedSubscriber(email: string): Promise<StoredSubscriber | null> {
+  const sql = connect();
+  try {
+    const [row] = await sql<StoredSubscriber[]>`select email, locale, confirmed_at is not null as confirmed, token from subscribers where email = ${email}`;
+    return row ?? null;
   } finally {
     await sql.end();
   }
