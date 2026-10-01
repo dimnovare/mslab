@@ -61,3 +61,41 @@ export function startOfDayTallinn(now: Date): Date {
   const offset = Date.UTC(y, m - 1, d, get("hour"), get("minute"), get("second")) - (now.getTime() - now.getUTCMilliseconds());
   return new Date(Date.UTC(y, m - 1, d) - offset);
 }
+
+/** Estonian wall-clock parts of an instant. */
+function tallinnWall(instant: Date): { y: number; m: number; d: number; h: number; mi: number; s: number } {
+  const parts = TALLINN_PARTS.formatToParts(instant);
+  const get = (t: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return { y: get("year"), m: get("month"), d: get("day"), h: get("hour") % 24, mi: get("minute"), s: get("second") };
+}
+
+/** How far Estonian time is ahead of UTC at `instant`, in ms (2 h in winter, 3 h in summer). */
+function tallinnOffset(instant: Date): number {
+  const w = tallinnWall(instant);
+  return Date.UTC(w.y, w.m - 1, w.d, w.h, w.mi, w.s) - (instant.getTime() - instant.getUTCMilliseconds());
+}
+
+/**
+ * The instant of an Estonian date and time as the admin types them ("2026-11-14", "10:00" → 08:00 UTC in winter,
+ * "2027-06-05", "10:00" → 07:00 UTC in summer). Null when either is not a real date / time.
+ */
+export function tallinnInstant(date: string, time: string): Date | null {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const tm = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!dm || !tm) return null;
+  const [y, m, d, h, mi] = [Number(dm[1]), Number(dm[2]), Number(dm[3]), Number(tm[1]), Number(tm[2])];
+  if (h > 23 || mi > 59) return null;
+  const wall = Date.UTC(y, m - 1, d, h, mi);
+  const check = new Date(wall);
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) return null;
+  // The offset depends on the instant itself: guess with the offset at the wall time, then correct once.
+  const guess = wall - tallinnOffset(new Date(wall));
+  return new Date(wall - tallinnOffset(new Date(guess)));
+}
+
+/** An instant as the session form shows it: Estonian date "2026-11-14" and time "10:00". */
+export function tallinnFormParts(instant: Date): { date: string; time: string } {
+  const w = tallinnWall(instant);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return { date: `${w.y}-${two(w.m)}-${two(w.d)}`, time: `${two(w.h)}:${two(w.mi)}` };
+}

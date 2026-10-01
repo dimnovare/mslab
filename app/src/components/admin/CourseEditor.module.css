@@ -1,0 +1,102 @@
+/* Prototype B editor: breadcrumb, Jost title, .editor-grid (main column + side column), a save bar that stays at the
+   bottom of the screen. */
+
+.headText {
+  min-width: 0;
+}
+
+/* B .breadcrumb */
+.crumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+
+.crumb a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  text-underline-offset: 3px;
+}
+
+.title {
+  overflow-wrap: anywhere;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.sample {
+  border: 0;
+  background: var(--orchid);
+  color: var(--ink);
+}
+
+/* B .editor-grid */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);
+  gap: 25px;
+  align-items: start;
+}
+
+.main,
+.side {
+  display: grid;
+  gap: 25px;
+  min-width: 0;
+}
+
+.cardTitle {
+  margin-bottom: 22px;
+}
+
+.typeSwitch {
+  margin-bottom: 22px;
+}
+
+/* Always within reach: the status of the draft and "Salvesta". */
+.saveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 18px;
+  margin-top: 25px;
+  padding: 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  background: var(--paper);
+  box-shadow: 0 -10px 30px rgba(34, 34, 34, 0.06);
+}
+
+.saveBar p {
+  flex: 1 1 260px;
+}
+
+@media (max-width: 1180px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .saveBar {
+    padding: 12px 14px;
+  }
+
+  .saveBar button {
+    flex: 1 1 100%;
+  }
+}

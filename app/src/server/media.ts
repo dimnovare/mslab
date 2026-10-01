@@ -1,0 +1,106 @@
+// Uploaded images in the R2 bucket `mslab-media` (binding MEDIA). The admin's browser shrinks and re-encodes every image
+// before it is sent (components/admin/ImageUpload.tsx), but the server trusts none of that: putImage checks the declared
+// type, the size and the file's first bytes itself. Keys are img/<random uuid>.<ext>, never the visitor's file name, and
+// /media serves nothing else (isMediaKey).
+
+/** Largest upload accepted (bytes). The browser sends images of at most 2400 px, far below this. */
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+export const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as const;
+export type ImageType = keyof typeof IMAGE_TYPES;
+const CONTENT_TYPE_OF: Record<string, ImageType> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+
+/** Why an upload was refused: not JPEG/PNG/WebP, over 8 MB, empty, or bytes that are not the declared image type. */
+export type UploadReason = "type" | "size" | "empty" | "content";
+
+export class UploadError extends Error {
+  constructor(readonly reason: UploadReason) {
+    super(`upload refused: ${reason}`);
+    this.name = "UploadError";
+  }
+}
+
+/** The part of the R2 binding putImage uses (tests pass an in-memory fake). */
+export type ImageBucket = {
+  put(key: string, value: ArrayBuffer, options: { httpMetadata: { contentType: string } }): Promise<unknown>;
+};
+
+const MEDIA_KEY = /^img\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/;
+
+/** Is this a key putImage could have made? The only keys /media serves. */
+export function isMediaKey(key: string): boolean {
+  return MEDIA_KEY.test(key);
+}
+
+/** The content type that belongs to a media key's extension. */
+export function contentTypeOfKey(key: string): ImageType {
+  return CONTENT_TYPE_OF[key.slice(key.lastIndexOf(".") + 1)];
+}
+
+const startsWith = (bytes: Uint8Array, sig: number[], at = 0) => bytes.length >= at + sig.length && sig.every((b, i) => bytes[at + i] === b);
+
+/** Do the first bytes look like the declared type? JPEG FF D8 FF, PNG 89 50 4E 47 0D 0A 1A 0A, WebP "RIFF" <size> "WEBP". */
+export function hasImageSignature(type: ImageType, head: Uint8Array): boolean {
+  switch (type) {
+    case "image/jpeg":
+      return startsWith(head, [0xff, 0xd8, 0xff]);
+    case "image/png":
+      return startsWith(head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    case "image/webp":
+      return startsWith(head, [0x52, 0x49, 0x46, 0x46]) && startsWith(head, [0x57, 0x45, 0x42, 0x50], 8);
+  }
+}
+
+const isImageType = (type: string): type is ImageType => Object.hasOwn(IMAGE_TYPES, type);
+
+/**
+ * Stores an uploaded image in R2 and returns its key (img/<uuid>.<ext>). Throws UploadError when the declared type is
+ * not JPEG/PNG/WebP, the file is empty or over 8 MB, or its first bytes are not that type. The content type is kept in
+ * the object's httpMetadata, so /media answers with it.
+ */
+export async function putImage(env: { MEDIA: ImageBucket }, file: File): Promise<{ key: string }> {
+  const type = file.type;
+  if (!isImageType(type)) throw new UploadError("type");
+  if (file.size === 0) throw new UploadError("empty");
+  if (file.size > MAX_IMAGE_BYTES) throw new UploadError("size");
+  const bytes = await file.arrayBuffer();
+  if (!hasImageSignature(type, new Uint8Array(bytes, 0, Math.min(16, bytes.byteLength)))) throw new UploadError("content");
+  const key = `img/${crypto.randomUUID()}.${IMAGE_TYPES[type]}`;
+  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: type } });
+  return { key };
+}
+
+// ---------- GET /media/<key> ----------
+
+/** The part of the R2 binding serveMedia uses. */
+export type MediaSource = {
+  get(key: string): Promise<{ body: ReadableStream; httpEtag: string; httpMetadata?: { contentType?: string } } | null>;
+};
+
+/** A key never changes its bytes (a new upload gets a new key), so browsers and the edge may keep it for a year. */
+export const MEDIA_CACHE = "public, max-age=31536000, immutable";
+
+const notFound = () => new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+
+/**
+ * The answer for /media/<key>: 404 unless the key is one putImage makes and the object exists; otherwise the bytes with
+ * the stored image type (or the one of the extension when the stored one is not an image type we allow), nosniff, and
+ * the immutable cache header.
+ */
+export async function serveMedia(bucket: MediaSource, key: string): Promise<Response> {
+  if (!isMediaKey(key)) return notFound();
+  const object = await bucket.get(key);
+  if (!object) return notFound();
+  const stored = object.httpMetadata?.contentType ?? "";
+  const contentType = isImageType(stored) && stored === contentTypeOfKey(key) ? stored : contentTypeOfKey(key);
+  return new Response(object.body, {
+    headers: {
+      "content-type": contentType,
+      "cache-control": MEDIA_CACHE,
+      etag: object.httpEtag,
+      "x-content-type-options": "nosniff",
+      // An image is only ever shown inside our pages; this keeps a stray SVG-like payload from running as a document.
+      "content-security-policy": "default-src 'none'; sandbox",
+    },
+  });
+}

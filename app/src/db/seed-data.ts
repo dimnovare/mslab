@@ -1,4 +1,5 @@
 import type { I18n } from "@/i18n/field";
+import { slugify } from "@/lib/slug";
 import type { Badge } from "./schema";
 import type { CampaignInput, CourseInput, HeroSlideInput, PostInput, PracticePackageInput, SessionInput } from "./queries/admin";
 
@@ -13,18 +14,7 @@ const t = (et: string, ru?: string): I18n => (ru === undefined ? { et } : { et, 
 /** Static image paths under app/public/seed (see mediaUrl). */
 const img = (name: string) => `/seed/${name}`;
 
-/** Lowercase ASCII slug for post URLs ("Kuidas valida ...?" -> "kuidas-valida-..."). */
-export function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[õöô]/g, "o")
-    .replace(/ä/g, "a")
-    .replace(/ü/g, "u")
-    .replace(/š/g, "s")
-    .replace(/ž/g, "z")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+export { slugify }; // moved to src/lib/slug.ts (the admin editors use it too)
 
 // ---------- shared texts (prototype B, ET + RU) ----------
 

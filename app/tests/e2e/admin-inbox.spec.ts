@@ -115,13 +115,14 @@ test.describe("signed in", () => {
   test("a section that is not built yet opens its 'Tulekul' page from the menu", async ({ page, context, visitorIp, isMobile }) => {
     await signIn(page, context, visitorIp);
     const nav = await menu(page, isMobile);
-    await nav.getByRole("link", { name: "Koolitused" }).click();
-    await expect(page).toHaveURL(/\/admin\/koolitused$/);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Koolitused");
+    // Koolitused and Kalender have their editors (Task 13A); Seaded is still to come
+    await nav.getByRole("link", { name: "Seaded" }).click();
+    await expect(page).toHaveURL(/\/admin\/seaded$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Seaded");
     await expect(page.locator("[data-coming-soon]")).toContainText("Tulekul");
     if (isMobile) await expect(page.locator("[data-admin-drawer]")).toBeHidden(); // the link closed the drawer
     const again = await menu(page, isMobile);
-    await expect(again.locator('[data-nav="courses"]')).toHaveAttribute("aria-current", "page");
+    await expect(again.locator('[data-nav="settings"]')).toHaveAttribute("aria-current", "page");
   });
 
   test("registrations: the fixture is under Kontaktõpe as 'Ootab ettemaksu'; 50% paid confirms it", async ({ page, context, visitorIp }, info) => {

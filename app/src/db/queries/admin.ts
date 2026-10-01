@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
@@ -52,6 +52,167 @@ export async function replaceCourseImages(db: Db, courseId: number, images: Imag
       .insert(courseImages)
       .values(images.map((img, i) => ({ courseId, key: img.key, alt: img.alt ?? null, sort: i })))
       .returning();
+  });
+}
+
+export type AdminCourse = Course & { images: CourseImage[] };
+
+const imageOrder = [asc(courseImages.sort), asc(courseImages.id)];
+
+/** Every course, drafts included, in the public order (sort, then id), with its images. */
+export async function listAllCourses(db: Db): Promise<AdminCourse[]> {
+  return db.query.courses.findMany({ orderBy: [asc(courses.sort), asc(courses.id)], with: { images: { orderBy: imageOrder } } });
+}
+
+/** One course for the editor (drafts included), or null. */
+export async function getCourseForEdit(db: Db, id: number): Promise<AdminCourse | null> {
+  return (await db.query.courses.findFirst({ where: eq(courses.id, id), with: { images: { orderBy: imageOrder } } })) ?? null;
+}
+
+/** Is `slug` used by a course other than `exceptId`? */
+export async function isSlugTaken(db: Db, slug: string, exceptId?: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: courses.id })
+    .from(courses)
+    .where(and(eq(courses.slug, slug), exceptId != null ? ne(courses.id, exceptId) : undefined))
+    .limit(1);
+  return row !== undefined;
+}
+
+/** The course fields the editor writes (everything but id, sort and updatedAt). */
+export type CourseFields = Omit<CourseInput, "id" | "sort">;
+
+/**
+ * The course editor's save: the course and its whole image list in ONE transaction.
+ * - `id` null: a new course, placed after the others (sort = last + 1).
+ * - `id` set: an update, refused as "stale" when `expected` (the updatedAt the editor loaded) is no longer the stored
+ *   one — someone saved the course in another window meanwhile — so a save never overwrites changes it did not see.
+ *   Compared to the millisecond, as JavaScript dates carry no microseconds.
+ * `updatedAt` is set on every save. Returns the saved course with its images, "notFound" or "stale".
+ */
+export async function saveCourseWithImages(
+  db: Db,
+  target: { id: number | null; expected?: Date },
+  fields: CourseFields,
+  images: ImageInput[],
+): Promise<AdminCourse | "notFound" | "stale"> {
+  return db.transaction(async (tx) => {
+    const values = { ...fields, updatedAt: new Date() };
+    let course: Course;
+    if (target.id == null) {
+      const [{ last }] = await tx.select({ last: sql<number | null>`max(${courses.sort})` }).from(courses);
+      [course] = await tx.insert(courses).values({ ...values, sort: (last ?? 0) + 1 }).returning();
+    } else {
+      const same = target.expected ? sql`date_trunc('milliseconds', ${courses.updatedAt}) = ${target.expected.toISOString()}::timestamptz` : undefined;
+      const [row] = await tx.update(courses).set(values).where(and(eq(courses.id, target.id), same)).returning();
+      if (!row) {
+        const [exists] = await tx.select({ id: courses.id }).from(courses).where(eq(courses.id, target.id));
+        return exists ? "stale" : "notFound";
+      }
+      course = row;
+      await tx.delete(courseImages).where(eq(courseImages.courseId, course.id));
+    }
+    const saved = images.length
+      ? await tx
+          .insert(courseImages)
+          .values(images.map((img, i) => ({ courseId: course.id, key: img.key, alt: img.alt ?? null, sort: i })))
+          .returning()
+      : [];
+    return { ...course, images: saved };
+  });
+}
+
+/** Moves a course one place up (-1) or down (+1) in the public order; renumbers all sorts 1…n. False when it cannot move. */
+export async function moveCourse(db: Db, id: number, dir: -1 | 1): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const list = await tx.select({ id: courses.id }).from(courses).orderBy(asc(courses.sort), asc(courses.id)).for("update");
+    const i = list.findIndex((c) => c.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return false;
+    [list[i], list[j]] = [list[j], list[i]];
+    for (const [n, c] of list.entries()) await tx.update(courses).set({ sort: n + 1 }).where(eq(courses.id, c.id));
+    return true;
+  });
+}
+
+// ---------- calendar (course sessions) ----------
+
+export type AdminSessionRow = CourseSession & {
+  course: Pick<Course, "id" | "slug" | "title" | "type" | "published">;
+  /** Registrations by status (cancelled ones are not counted). */
+  confirmed: number;
+  awaiting: number;
+  /** Open waitlist requests for this session. */
+  waitlist: number;
+};
+
+/**
+ * Sessions for the admin calendar, drafts' sessions included. `upcoming`: starting from `from`, soonest first;
+ * otherwise the ones before `from`, latest first. With the registration and waitlist counts per session.
+ */
+export async function listAdminSessions(db: Db, opts: { from: Date; upcoming: boolean }): Promise<AdminSessionRow[]> {
+  const rows = await db
+    .select({ session: courseSessions, course: { id: courses.id, slug: courses.slug, title: courses.title, type: courses.type, published: courses.published } })
+    .from(courseSessions)
+    .innerJoin(courses, eq(courseSessions.courseId, courses.id))
+    .where(opts.upcoming ? gte(courseSessions.startsAt, opts.from) : lt(courseSessions.startsAt, opts.from))
+    .orderBy(opts.upcoming ? asc(courseSessions.startsAt) : desc(courseSessions.startsAt), asc(courseSessions.id));
+  const ids = rows.map((r) => r.session.id);
+  if (ids.length === 0) return [];
+  const [regs, waits] = await Promise.all([
+    db
+      .select({
+        sessionId: registrations.courseSessionId,
+        confirmed: sql<number>`count(*) filter (where ${registrations.status} = 'confirmed')`.mapWith(Number),
+        awaiting: sql<number>`count(*) filter (where ${registrations.status} = 'awaiting_prepayment')`.mapWith(Number),
+      })
+      .from(registrations)
+      .where(inArray(registrations.courseSessionId, ids))
+      .groupBy(registrations.courseSessionId),
+    db
+      .select({ session: sql<string>`${requests.payload}->>'session'`, n: count() })
+      .from(requests)
+      .where(and(eq(requests.kind, "waitlist"), eq(requests.handled, false), inArray(sql`${requests.payload}->>'session'`, ids.map(String))))
+      .groupBy(sql`${requests.payload}->>'session'`),
+  ]);
+  const reg = new Map(regs.map((r) => [r.sessionId, r]));
+  const wait = new Map(waits.map((w) => [Number(w.session), Number(w.n)]));
+  return rows.map((r) => ({
+    ...r.session,
+    course: r.course,
+    confirmed: reg.get(r.session.id)?.confirmed ?? 0,
+    awaiting: reg.get(r.session.id)?.awaiting ?? 0,
+    waitlist: wait.get(r.session.id) ?? 0,
+  }));
+}
+
+/** One session, or null. */
+export async function getSession(db: Db, id: number): Promise<CourseSession | null> {
+  const [row] = await db.select().from(courseSessions).where(eq(courseSessions.id, id)).limit(1);
+  return row ?? null;
+}
+
+/** Contact courses (the only ones with sessions), drafts included, in the public order. */
+export async function listContactCourses(db: Db): Promise<Pick<Course, "id" | "title" | "published">[]> {
+  return db
+    .select({ id: courses.id, title: courses.title, published: courses.published })
+    .from(courses)
+    .where(eq(courses.type, "contact"))
+    .orderBy(asc(courses.sort), asc(courses.id));
+}
+
+/**
+ * Deletes a session that nobody has registered for. "inUse" when registrations point to it (they keep their history:
+ * cancel the session instead), "notFound" when it does not exist.
+ */
+export async function deleteUnusedSession(db: Db, id: number): Promise<"deleted" | "inUse" | "notFound"> {
+  return db.transaction(async (tx) => {
+    const [session] = await tx.select({ id: courseSessions.id }).from(courseSessions).where(eq(courseSessions.id, id)).for("update");
+    if (!session) return "notFound";
+    const [{ n }] = await tx.select({ n: count() }).from(registrations).where(eq(registrations.courseSessionId, id));
+    if (Number(n) > 0) return "inUse";
+    await tx.delete(courseSessions).where(eq(courseSessions.id, id));
+    return "deleted";
   });
 }
 
@@ -274,6 +435,11 @@ export async function upsertFaq(db: Db, input: FaqInput): Promise<FaqItem> {
 
 export async function deleteFaq(db: Db, id: number): Promise<void> {
   await db.delete(faq).where(eq(faq.id, id));
+}
+
+/** Every post, drafts included, newest first (the admin list; the public listPosts stays published-only). */
+export async function listAllPosts(db: Db): Promise<Post[]> {
+  return db.select().from(posts).orderBy(desc(posts.publishedAt), desc(posts.id));
 }
 
 /** Creates or updates a post (by `id` when given, otherwise by unique `slug`). */

@@ -1,0 +1,52 @@
+"use server";
+
+import { refresh } from "next/cache";
+import { redirect } from "next/navigation";
+import { getDb } from "@/db/client";
+import type { Db } from "@/db/client";
+import { deleteSessionForm, moveCourseForm, saveCourseForm, saveSessionForm, type EditResult } from "../admin-content";
+import { adminAction } from "../auth";
+import { logFailure } from "../log";
+
+// The content editors' server actions (courses, calendar): every export is wrapped in adminAction (signed-in admin or a
+// redirect to /admin/login; tests/unit/admin-guards.test.ts fails otherwise). The work is in ../admin-content.ts.
+// Nothing is cached anywhere (the pages are dynamic and the database client bypasses Hyperdrive's query cache), so the
+// public site shows a saved change on its next request; refresh() updates the open admin page.
+
+async function run(what: string, work: (db: Db) => Promise<EditResult>): Promise<EditResult> {
+  try {
+    const result = await work(getDb());
+    // not on "stale": the editor keeps the admin's unsaved draft on screen (reloading is her choice)
+    if (result.ok) refresh();
+    return result;
+  } catch (e) {
+    logFailure(`[admin] ${what} failed`, e);
+    return { ok: false, error: "server" };
+  }
+}
+
+/** Course editor "Salvesta": field data (the draft as JSON). A new course continues at its own address. */
+export const saveCourse = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => {
+  const result = await run("course save", (db) => saveCourseForm(db, formData));
+  if (result.ok && result.created) redirect(`/admin/koolitused/${result.id}?loodud=1`);
+  return result;
+});
+
+/** Course list ↑ / ↓: fields id, dir ("up" | "down"). */
+export const moveCourseInList = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) =>
+  run("course move", (db) => moveCourseForm(db, formData)),
+);
+
+/** Calendar drawer "Salvesta" / "Lisa toimumine". A new session closes the drawer and is highlighted in the list. */
+export const saveSession = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => {
+  const result = await run("session save", (db) => saveSessionForm(db, formData));
+  if (result.ok && result.created) redirect(`/admin/kalender?lisatud=${result.id}`);
+  return result;
+});
+
+/** Calendar drawer "Kustuta toimumine": field id. Back to the list with a notice. */
+export const deleteSession = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => {
+  const result = await run("session delete", (db) => deleteSessionForm(db, formData));
+  if (result.ok) redirect(`/admin/kalender?kustutatud=1`);
+  return result;
+});

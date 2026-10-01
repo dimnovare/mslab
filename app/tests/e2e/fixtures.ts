@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import postgres from "postgres";
 
 // Test-owned seat fixtures for the calendar e2e tests. The seed never contains registrations (the real database will
@@ -364,6 +367,185 @@ export async function requestHandled(id: number): Promise<boolean> {
   try {
     const [row] = await sql<{ handled: boolean }[]>`select handled from requests where id = ${id}`;
     return row.handled;
+  } finally {
+    await sql.end();
+  }
+}
+
+// ---------- content editor rows (admin-edit.spec.ts) ----------
+// The content tests change real seed courses (a title, a badge, the gallery, the order) and add sessions to a seed
+// course, then put everything back. They run after all other tests (playwright.config.ts), so no other test sees the
+// changes. Before a course is changed its row and images are written to a snapshot file outside the project; the test
+// restores it and deletes the file, and global-setup restores any snapshot an interrupted run left behind. Sessions the
+// tests add have a city starting with "E2E "; the course "Lisa koolitus" creates has a slug starting with "e2e-uus-".
+
+export const EDIT_CITY_PREFIX = "E2E ";
+export const NEW_COURSE_SLUG_PREFIX = "e2e-uus-";
+const EDIT_EMAIL_PATTERN = "e2e-edit-%@example.com";
+const SNAPSHOT_DIR = join(tmpdir(), "mslab-e2e-course-snapshots");
+
+const JSON_COLUMNS = ["title", "summary", "body", "outcomes", "includes", "modules", "duration_label", "next_discount", "badge", "recommendation_ids"] as const;
+const PLAIN_COLUMNS = ["slug", "type", "level", "language", "price", "price_group", "price_individual", "access_months", "video_count", "published", "sort", "is_sample", "updated_at"] as const;
+
+type CourseSnapshot = { id: number; row: Record<string, unknown>; images: { key: string; alt: unknown; sort: number }[] };
+
+async function readSnapshot(sql: postgres.Sql, slug: string): Promise<CourseSnapshot> {
+  const [row] = await sql`select * from courses where slug = ${slug}`;
+  if (!row) throw new Error(`e2e: course ${slug} not found — is the local DB seeded?`);
+  const images = await sql<{ key: string; alt: unknown; sort: number }[]>`select key, alt, sort from course_images where course_id = ${row.id} order by sort, id`;
+  return { id: row.id as number, row: Object.fromEntries([...JSON_COLUMNS, ...PLAIN_COLUMNS].map((c) => [c, row[c]])), images: [...images] };
+}
+
+async function writeBack(sql: postgres.Sql, s: CourseSnapshot): Promise<void> {
+  await sql.begin(async (tx) => {
+    const values: Record<string, unknown> = {};
+    for (const c of PLAIN_COLUMNS) values[c] = c === "updated_at" ? new Date(s.row[c] as string) : s.row[c];
+    // tx.json: a JSON string cast to jsonb would be stored as one jsonb *string* (see insertAdminFixtures)
+    for (const c of JSON_COLUMNS) values[c] = s.row[c] === null ? null : tx.json(s.row[c] as postgres.JSONValue);
+    await tx`update courses set ${tx(values as Record<string, postgres.ParameterOrJSON<never>>)} where id = ${s.id}`;
+    await tx`delete from course_images where course_id = ${s.id}`;
+    for (const img of s.images)
+      await tx`insert into course_images (course_id, key, alt, sort) values (${s.id}, ${img.key}, ${img.alt === null ? null : tx.json(img.alt as postgres.JSONValue)}, ${img.sort})`;
+  });
+}
+
+const snapshotFile = (id: number) => join(SNAPSHOT_DIR, `course-${id}.json`);
+
+/** Saves a seed course (row + images) before a test changes it; returns its id. Call restoreCourse(id) afterwards. */
+export async function snapshotCourse(slug: string): Promise<number> {
+  const sql = connect();
+  try {
+    const s = await readSnapshot(sql, slug);
+    mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    if (!existsSync(snapshotFile(s.id))) writeFileSync(snapshotFile(s.id), JSON.stringify(s));
+    return s.id;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Puts a snapshotted course back exactly as it was and deletes its snapshot file. */
+export async function restoreCourse(id: number): Promise<void> {
+  const file = snapshotFile(id);
+  if (!existsSync(file)) return;
+  const sql = connect();
+  try {
+    await writeBack(sql, JSON.parse(readFileSync(file, "utf8")) as CourseSnapshot);
+    rmSync(file);
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Restores every course a run left changed (global-setup / global-teardown); returns how many there were. */
+export async function restoreLeftoverCourses(): Promise<number> {
+  if (!existsSync(SNAPSHOT_DIR)) return 0;
+  const files = readdirSync(SNAPSHOT_DIR).filter((f) => /^course-\d+\.json$/.test(f));
+  for (const f of files) await restoreCourse(Number(f.match(/\d+/)![0]));
+  return files.length;
+}
+
+export type StoredCourse = { id: number; title: { et: string; ru?: string }; badge: { label: string; bg: string; fg: string } | null; sort: number; updatedAt: Date; images: string[] };
+
+/** The course as stored, for assertions. */
+export async function storedCourse(slug: string): Promise<StoredCourse> {
+  const sql = connect();
+  try {
+    const [c] = await sql<Omit<StoredCourse, "images">[]>`select id, title, badge, sort, updated_at as "updatedAt" from courses where slug = ${slug}`;
+    const images = await sql<{ key: string }[]>`select key from course_images where course_id = ${c.id} order by sort, id`;
+    return { ...c, images: images.map((i) => i.key) };
+  } finally {
+    await sql.end();
+  }
+}
+
+/** The slugs of all courses in their order. */
+export async function courseOrder(): Promise<string[]> {
+  const sql = connect();
+  try {
+    return (await sql<{ slug: string }[]>`select slug from courses order by sort, id`).map((r) => r.slug);
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Saves the sort of every course; the returned function puts it back. */
+export async function snapshotOrder(): Promise<() => Promise<void>> {
+  const sql = connect();
+  let rows: { id: number; sort: number }[];
+  try {
+    rows = [...(await sql<{ id: number; sort: number }[]>`select id, sort from courses`)];
+  } finally {
+    await sql.end();
+  }
+  return async () => {
+    const back = connect();
+    try {
+      for (const r of rows) await back`update courses set sort = ${r.sort} where id = ${r.id}`;
+    } finally {
+      await back.end();
+    }
+  };
+}
+
+/** A session a test added (found by its city), or null. */
+export async function storedSession(city: string): Promise<{ id: number; capacity: number; status: string; startsAt: Date; venue: string } | null> {
+  const sql = connect();
+  try {
+    const [row] = await sql<{ id: number; capacity: number; status: string; startsAt: Date; venue: string }[]>`
+      select id, capacity, status, starts_at as "startsAt", venue from course_sessions where city = ${city}`;
+    return row ?? null;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** A registration on a test session (so that it cannot be deleted). */
+export async function registerOnSession(sessionId: number, project: string): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`insert into registrations (course_id, course_session_id, kind, name, email, payment_choice, status)
+              select course_id, id, 'group', 'E2E Registreerija', ${`e2e-edit-${project}-${Date.now().toString(36)}@example.com`}, 'half', 'awaiting_prepayment'
+              from course_sessions where id = ${sessionId}`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** A session for a test, written directly (city "E2E <project> …"); returns its id. */
+export async function insertEditSession(slug: string, city: string): Promise<number> {
+  const sql = connect();
+  try {
+    const [row] = await sql<{ id: number }[]>`
+      insert into course_sessions (course_id, starts_at, city, venue, capacity)
+      select id, date_trunc('day', now()) + interval '200 days 10 hours', ${city}, 'E2E saal', 4 from courses where slug = ${slug}
+      returning id`;
+    return row.id;
+  } finally {
+    await sql.end();
+  }
+}
+
+/**
+ * Deletes the sessions (with their registrations) and the new course the content tests made — of one project
+ * ("chromium-edit" and "mobile-edit" run side by side), or all — and returns how many are left.
+ */
+export async function removeEditRows(project?: string): Promise<number> {
+  const sql = connect();
+  const city = `${EDIT_CITY_PREFIX}${project ?? ""}%`;
+  const slug = `${NEW_COURSE_SLUG_PREFIX}${project ?? ""}%`;
+  const emails = project ? `e2e-edit-${project}-%@example.com` : EDIT_EMAIL_PATTERN;
+  try {
+    await sql`delete from registrations where email like ${emails}
+              or course_session_id in (select id from course_sessions where city like ${city})
+              or course_id in (select id from courses where slug like ${slug})`;
+    await sql`delete from course_sessions where city like ${city}`;
+    await sql`delete from courses where slug like ${slug}`;
+    const [{ n }] = await sql<{ n: number }[]>`
+      select (select count(*) from course_sessions where city like ${city})
+           + (select count(*) from courses where slug like ${slug})
+           + (select count(*) from registrations where email like ${emails})::int as n`;
+    return Number(n);
   } finally {
     await sql.end();
   }

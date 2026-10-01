@@ -10,7 +10,8 @@ import { describe, expect, test } from "vitest";
 //  - pages under app/admin/**: call requireAdmin() (a layout does not run again when the visitor moves between pages),
 //    except the login page, which is public by design;
 //  - layouts under app/admin/**: the (panel) layout calls requireAdmin(); the root admin layout and nothing else is public;
-//  - server action files server/actions/admin*.ts (and server/actions/admin/**): "use server", every export is
+//  - server action files server/actions/admin*.ts (admin.ts, admin-content.ts, adminX.ts …, and server/actions/admin/**):
+//    "use server", every export is
 //    `export const name = adminAction(…)` (types excepted).
 //
 // Not covered, on purpose: app/api/auth/** (request, verify and logout are the sign-in itself; logout must also work with
@@ -38,7 +39,7 @@ export function violations(path: string, raw: string): string[] {
   const isRoute = /^app\/(api\/)?admin\/(.*\/)?route\.tsx?$/.test(path);
   const isAdminPage = /^app\/admin\/(.*\/)?page\.tsx$/.test(path) && !PUBLIC_PAGES.includes(path);
   const isAdminLayout = /^app\/admin\/(.*\/)?layout\.tsx$/.test(path) && !PUBLIC_LAYOUTS.includes(path);
-  const isActions = /^server\/actions\/admin([./-]|$)/.test(path);
+  const isActions = /^server\/actions\/admin/.test(path);
 
   if (isRoute) {
     if (new RegExp(`export\\s+(async\\s+)?function\\s+(${METHODS})\\b`).test(source)) out.push("a route handler is exported without withAdmin(): use `export const POST = withAdmin(…)`");
@@ -72,7 +73,16 @@ describe("admin guards are inherited by every admin entry point", () => {
         ),
       ]),
     );
-    expect(all.map((f) => f.path)).toEqual(expect.arrayContaining(["app/api/admin/subscribers.csv/route.ts", "server/actions/admin.ts"]));
+    expect(all.map((f) => f.path)).toEqual(
+      expect.arrayContaining([
+        "app/api/admin/subscribers.csv/route.ts",
+        "server/actions/admin.ts",
+        // Task 13: the course editor page, the image upload and the content editors' actions
+        "app/admin/(panel)/koolitused/[id]/page.tsx",
+        "app/api/admin/upload/route.ts",
+        "server/actions/admin-content.ts",
+      ]),
+    );
     const broken = all.flatMap((f) => violations(f.path, f.source).map((v) => `${f.path}: ${v}`));
     expect(broken).toEqual([]);
   });
@@ -86,18 +96,30 @@ describe("admin guards are inherited by every admin entry point", () => {
 
   test("every route under app/api/admin and app/admin is wrapped (the CSV export, and the future ones)", () => {
     const routes = files().filter((f) => /^app\/(api\/)?admin\/(.*\/)?route\.tsx?$/.test(f.path));
-    expect(routes.map((r) => r.path)).toContain("app/api/admin/subscribers.csv/route.ts");
+    expect(routes.map((r) => r.path)).toEqual(expect.arrayContaining(["app/api/admin/subscribers.csv/route.ts", "app/api/admin/upload/route.ts"]));
     for (const r of routes) expect(violations(r.path, r.source), r.path).toEqual([]);
   });
 
   test("every admin page calls requireAdmin() itself and every admin action is wrapped", () => {
     const pages = files().filter((f) => /^app\/admin\/\(panel\)\/(.*\/)?page\.tsx$/.test(f.path));
-    expect(pages.length).toBeGreaterThanOrEqual(12);
+    expect(pages.length).toBeGreaterThanOrEqual(13);
     for (const p of pages) expect(strip(p.source), p.path).toMatch(/await requireAdmin\(\)/);
     const actions = files().find((f) => f.path === "server/actions/admin.ts")!;
     const exported = [...strip(actions.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
     expect(exported).toEqual(["saveRegistrationPayment", "saveRegistrationStatus", "cancelRegistration", "toggleRequestHandled"]);
     expect(violations(actions.path, actions.source)).toEqual([]);
+    const content = files().find((f) => f.path === "server/actions/admin-content.ts")!;
+    const contentExports = [...strip(content.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
+    expect(contentExports).toEqual(["saveCourse", "moveCourseInList", "saveSession", "deleteSession"]);
+    expect(violations(content.path, content.source)).toEqual([]);
+  });
+
+  test("the image upload is an admin route; /media only reads (anyone may see a published image)", () => {
+    const upload = files().find((f) => f.path === "app/api/admin/upload/route.ts")!;
+    expect(strip(upload.source)).toMatch(/export\s+const\s+POST\s*=\s*withAdmin\(/);
+    const media = files().find((f) => f.path === "app/media/[...key]/route.ts")!;
+    expect(strip(media.source)).toMatch(/serveMedia\(/);
+    expect(strip(media.source)).not.toMatch(/\.put\(|putImage|POST|DELETE/);
   });
 
   describe("the rules themselves catch what they should (so the check cannot rot into a no-op)", () => {
@@ -134,6 +156,8 @@ describe("admin guards are inherited by every admin entry point", () => {
       expect(violations(file, `"use server";\nexport const save = async () => {};`)).not.toEqual([]);
       expect(violations(file, `export const save = adminAction(async () => {});`)).not.toEqual([]); // not a "use server" file
       expect(violations("server/actions/admin-courses.ts", `"use server";\nexport async function save() {}`)).not.toEqual([]);
+      expect(violations("server/actions/adminContent.ts", `"use server";\nexport const save = async () => {};`)).not.toEqual([]); // any admin* file
+      expect(violations("server/actions/admin-content.ts", `"use server";\nexport const save = adminAction(async () => {});`)).toEqual([]);
       expect(violations("server/actions/public.ts", `"use server";\nexport async function submitContact() {}`)).toEqual([]); // public actions: out of scope
     });
   });
