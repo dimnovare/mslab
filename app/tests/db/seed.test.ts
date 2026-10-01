@@ -88,14 +88,14 @@ describe("prototype seed", () => {
     }
     const contact = await getCourseBySlug(db, "kulmumeistri-baaskoolitus");
     expect(contact?.includes.map((i) => i.et)).toEqual([
-      "Teooria",
-      "Praktika modellidel (nt kahel modellil)",
-      "Õppematerjalid, mis jäävad sulle",
-      "Koolitaja juhendamine ja personaalne tugi",
+      "Teooriaosa",
+      "Praktiline osa, nt töö kahel modellil",
+      "Õppematerjal, mis jääb peale koolitust õpilasele",
+      "Koolitaja juhendamine ja personaalne tugi koolituse ajal",
       "Teadmiste test",
       "Praktilise töö hindamine",
-      "Kõik töövahendid on olemas",
-      "Tunnistus pärast edukat lõpetamist",
+      "Kõik vajalikud töövahendid koolituskeskuse poolt",
+      "Eduka koolituse läbimise korral tunnistus",
     ]);
   });
 
@@ -119,11 +119,12 @@ describe("prototype seed", () => {
     ]);
   });
 
-  test("home data: five slides (first is the flower, tones light/dark/dark/light/light), faq, posts, campaign without a 'not now' button", async () => {
+  test("home data: five slides (first is the flower, tones light/dark/dark/light/dark as in prototype B), faq, posts, campaign without a 'not now' button", async () => {
     const home = await getHomeData(db);
-    expect(home.slides.map((s) => s.tone)).toEqual(["light", "dark", "dark", "light", "light"]);
+    expect(home.slides.map((s) => s.tone)).toEqual(["light", "dark", "dark", "light", "dark"]);
     expect(home.slides[0].imageKey).toBe("/seed/flower-hero.png");
     expect(home.slides[0].title.ru).toBeTruthy();
+    expect(home.slides[4].imageKey).toBe("/seed/brow-editorial.jpg");
     expect(home.faq).toHaveLength(6);
     expect(home.posts).toHaveLength(6);
     expect(home.campaign?.ctaLabel.et).toBe("Leia enda koolitus");

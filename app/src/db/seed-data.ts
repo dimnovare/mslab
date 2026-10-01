@@ -48,16 +48,16 @@ const programme: I18n[] = [
   t("Töövahendid ja protseduur", "Инструменты и процедура"),
   t("Praktika, test ja tagasiside", "Практика, тест и обратная связь"),
 ];
-// Checklist P10, "Koolitus sisaldab" (contact courses).
+// "Koolitus sisaldab" (checklist P10), Maria's wording from docs/feedback/2026-10-01-maria-overview.md (first letter capitalised).
 const contactIncludes: I18n[] = [
-  t("Teooria"),
-  t("Praktika modellidel (nt kahel modellil)"),
-  t("Õppematerjalid, mis jäävad sulle"),
-  t("Koolitaja juhendamine ja personaalne tugi"),
+  t("Teooriaosa"),
+  t("Praktiline osa, nt töö kahel modellil"),
+  t("Õppematerjal, mis jääb peale koolitust õpilasele"),
+  t("Koolitaja juhendamine ja personaalne tugi koolituse ajal"),
   t("Teadmiste test"),
   t("Praktilise töö hindamine"),
-  t("Kõik töövahendid on olemas"),
-  t("Tunnistus pärast edukat lõpetamist"),
+  t("Kõik vajalikud töövahendid koolituskeskuse poolt"),
+  t("Eduka koolituse läbimise korral tunnistus"),
 ];
 
 const badgePopular: Badge = { label: "Populaarne", bg: "#222222", fg: "#ffffff" };
@@ -303,7 +303,7 @@ export const heroSeeds: HeroSlideInput[] = [
   },
   {
     imageKey: img("brow-editorial.jpg"),
-    tone: "light",
+    tone: "dark",
     kicker: t("E-õpe", "Онлайн-обучение"),
     title: t("Sinu tempo.\nSinu järgmine samm.", "Ваш темп.\nВаш следующий шаг."),
     text: onlineLead,
@@ -349,7 +349,7 @@ const postBody = (excerpt: string) =>
     [
       `${excerpt} See on näidispostitus, mis näitab, kuidas täismahus artikkel lehel välja näeb: pealkiri, kaanepilt, loetav tekstilaius ja lõpus soovitused.`,
       "Mõtle, kas soovid alustada täiesti uue teenusega või täiendada seda, mida juba teed. Baaskoolitused on mahukamad ja põhjalikumad, täiendkoolitused keskenduvad ühele tehnikale või teemale.",
-      "E-õpe sobib, kui soovid õppida omas tempos. Kontaktõpe annab kohese praktika koolitaja kõrval. Soovi korral saad kahte õppevormi ka kombineerida: teooria veebis ja praktika kohapeal.",
+      "E-õpe sobib, kui soovid õppida omas tempos. Kontaktõpe annab kohese praktika koolitaja kõrval. E-õpet ja kontaktõpet saab omavahel kombineerida, valides endale sobivad koolitused.",
     ].join("\n\n"),
   );
 
