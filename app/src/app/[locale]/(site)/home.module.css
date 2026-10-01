@@ -1,0 +1,48 @@
+/* Home: course cards section (B .courses-home / .section-heading / .course-grid, four cards). */
+
+.courses {
+  padding: clamp(56px, 6vw, 85px) 0 clamp(64px, 7vw, 100px);
+}
+
+.heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 38px;
+}
+
+.eyebrow {
+  margin-bottom: 18px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 27px;
+}
+
+@media (max-width: 1180px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 35px 27px;
+  }
+}
+
+@media (max-width: 640px) {
+  .heading {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 18px;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    margin-bottom: 15px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 35px;
+  }
+}

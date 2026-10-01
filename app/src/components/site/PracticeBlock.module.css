@@ -1,0 +1,177 @@
+/* Prototype B .practice-panel / .practice-card (styles.css + journey.css), re-ordered for Maria C07–C09:
+   "Praktika" first and largest, slogan and text secondary, duration chip, Jost 400 28px price. */
+
+.section {
+  padding: clamp(24px, 3vw, 40px) 0 clamp(56px, 7vw, 100px);
+}
+
+.panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 45px;
+  align-items: start;
+  padding: 58px;
+  border-radius: 28px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-body);
+}
+
+.eyebrow {
+  color: #c9b6c0;
+}
+
+.title {
+  margin: 18px 0 0;
+  font: 400 clamp(40px, 5vw, 64px) / 1.02 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* B's h2 slogan, now secondary (H11). */
+.slogan {
+  margin: 16px 0 0;
+  color: #e4dcdf;
+  font: 400 clamp(20px, 1.8vw, 24px) / 1.25 var(--font-display);
+  letter-spacing: -0.005em;
+}
+
+.text {
+  margin: 18px 0 0;
+  color: #bcb5b9;
+  font-size: 13px;
+  line-height: 1.85;
+}
+
+.protocol {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #655860;
+}
+
+.protocolTitle {
+  margin: 0;
+  font: 400 22px/1.2 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.protocol .text {
+  margin-top: 12px;
+}
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px;
+  border-radius: 18px;
+  background: #faf8f8;
+  color: var(--ink);
+  box-shadow: 0 3px 14px #34232d03;
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.cardEyebrow {
+  color: #776770;
+}
+
+.flower {
+  flex: none;
+}
+
+.name {
+  margin: 0;
+  font: 400 37px/1.05 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.tagline {
+  margin: -6px 0 0;
+  color: #716a6d;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.items {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 2;
+  list-style: none;
+}
+
+.items li::before {
+  content: "✓";
+  margin-right: 10px;
+  color: var(--rose);
+}
+
+.priceRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+}
+
+/* H12: Jost 400 28px (B used 34px in its display font). */
+.price {
+  font: 400 28px/1.1 var(--font-display);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* H10: approximate duration chip. */
+.duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: var(--first);
+  color: #3a3437;
+  font: 500 13px/1 var(--font-body);
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .panel {
+    grid-template-columns: 1fr;
+    gap: 35px;
+    padding: 38px;
+  }
+
+  .card {
+    padding: 23px;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel {
+    gap: 28px;
+    padding: 28px 22px;
+    border-radius: 22px;
+  }
+
+  .options {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .card {
+    gap: 15px;
+    padding: 26px;
+  }
+}

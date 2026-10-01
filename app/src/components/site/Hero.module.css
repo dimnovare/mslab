@@ -1,0 +1,291 @@
+/* Prototype B hero (site/p/b styles.css .hero…, journey.css .journey-hero…) with A's slide control.
+   Fonts: Jost for the title, Manrope for the rest (G2). The hero starts under the transparent header
+   (Header.module.css .overHero) and pads its content by --header-h. */
+
+.hero {
+  --fg: var(--ink);
+  --inv: #fff;
+  position: relative;
+  height: max(720px, clamp(620px, calc(100svh - 170px), 820px));
+  overflow: hidden;
+  background: #f6f3f1;
+  color: var(--fg);
+  font-family: var(--font-body);
+  touch-action: pan-y;
+}
+
+.hero[data-tone="dark"] {
+  --fg: #fff;
+  --inv: var(--ink);
+  background: #292522;
+}
+
+.empty {
+  height: var(--header-h);
+}
+
+/* ---- Slides (stacked; the current one fades in) ---- */
+
+.slide {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  opacity: 0;
+  background: #f6f3f1;
+  color: var(--ink);
+  transition:
+    opacity 0.6s var(--ease),
+    visibility 0s linear 0.6s;
+}
+
+.slide[data-tone="dark"] {
+  background: #292522;
+  color: #fff;
+}
+
+.active {
+  z-index: 1;
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.6s var(--ease);
+}
+
+/* B .hero-visual: light slides from 24% to the right edge, dark slides from 20%. */
+.visual {
+  position: absolute;
+  inset: 0 0 0 24%;
+  overflow: hidden;
+  background: inherit;
+}
+
+.slide[data-tone="dark"] .visual {
+  inset: 0 0 0 20%;
+}
+
+.image {
+  object-fit: cover;
+  object-position: var(--pos, 50% 50%);
+}
+
+.slide[data-tone="dark"] .image {
+  opacity: 0.94;
+}
+
+.visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #f6f3f1 0%, rgba(246, 243, 241, 0.98) 24%, rgba(246, 243, 241, 0.68) 42%, transparent 66%);
+}
+
+.slide[data-tone="dark"] .visual::after {
+  background: linear-gradient(90deg, #292522 0%, rgba(41, 37, 34, 0.65) 37%, rgba(41, 37, 34, 0.04));
+}
+
+/* ---- Text (B .hero-content, journey padding) ---- */
+
+.content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 1600px;
+  height: 100%;
+  margin: 0 auto;
+  padding: calc(var(--header-h) + 4px) var(--page) 60px;
+}
+
+.kicker {
+  margin-bottom: 27px;
+  color: #776770;
+  font-size: 15px;
+}
+
+.slide[data-tone="dark"] .kicker {
+  color: #ece2dc;
+}
+
+/* Jost 300: keeps the light look of B's title (B: weight 300) in A's typeface (G2). */
+.title {
+  max-width: 770px;
+  margin: 0;
+  font: 300 clamp(58px, 5.4vw, 92px) / 1.02 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.text {
+  max-width: 400px;
+  margin: 26px 0 0;
+  color: #5d5559;
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.slide[data-tone="dark"] .text {
+  color: #ece2dc;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 31px;
+}
+
+/* Dark slide: light primary pill (B .dark-hero .btn), white outline pill. */
+.slide[data-tone="dark"] .primary {
+  border-color: #f6f3f1;
+  background: #f6f3f1;
+  color: var(--ink);
+}
+
+.slide[data-tone="dark"] .primary:hover {
+  border-color: #fff;
+  background: #fff;
+}
+
+.slide[data-tone="dark"] .secondary:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* B .hero-caption: the small vertical "BROW & LASH ACADEMY" (H4). */
+.caption {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--header-h) + 40px);
+  right: var(--page);
+  color: #7a6b6c;
+  font: 400 10px/1 var(--font-body);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  opacity: 0.8;
+  writing-mode: vertical-rl;
+  pointer-events: none;
+}
+
+.hero[data-tone="dark"] .caption {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* A's control, aligned with the text column. */
+.controls {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 22px;
+  left: 0;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 var(--page);
+}
+
+/* ---- Responsive (B breakpoints) ---- */
+
+@media (min-width: 1800px) {
+  .content,
+  .controls {
+    max-width: 1740px;
+  }
+
+  .title {
+    font-size: 96px;
+  }
+
+  .text {
+    font-size: 16px;
+  }
+
+  .kicker {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .title {
+    font-size: clamp(58px, 7vw, 80px);
+  }
+}
+
+@media (max-width: 900px) {
+  .slide[data-tone="dark"] .visual {
+    left: 34%;
+  }
+
+  .text {
+    max-width: 300px;
+  }
+
+  .visual::after {
+    background: linear-gradient(90deg, #f6f3f1 0%, #f6f3f1eb 35%, #f6f3f150 70%, transparent);
+  }
+}
+
+@media (max-width: 640px) {
+  .hero {
+    height: 790px;
+  }
+
+  .visual {
+    inset: 190px 0 0 0;
+  }
+
+  .image {
+    object-position: var(--pos-m, 50% 50%);
+  }
+
+  .visual::after {
+    background: linear-gradient(180deg, #f6f3f1 0%, #f6f3f1b8 24%, transparent 65%);
+  }
+
+  .slide[data-tone="dark"] .visual {
+    inset: 0 -80% 0 0;
+  }
+
+  .slide[data-tone="dark"] .visual::after {
+    background: linear-gradient(90deg, #292522dd, #29252255);
+  }
+
+  .content {
+    justify-content: flex-start;
+    padding-top: calc(var(--header-h) + 44px);
+    padding-bottom: 0;
+  }
+
+  .kicker {
+    margin-bottom: 22px;
+    font-size: 12px;
+  }
+
+  .title {
+    max-width: 410px;
+    font-size: clamp(44px, 12.1vw, 58px);
+    line-height: 1.05;
+  }
+
+  .text {
+    max-width: 310px;
+    margin-top: 22px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  /* B hides the caption on phones; Maria wants to keep it (H4), so it moves to the right edge. */
+  .caption {
+    top: calc(var(--header-h) + 24px);
+    right: 8px;
+    font-size: 9px;
+  }
+
+  .controls {
+    bottom: 18px;
+  }
+}

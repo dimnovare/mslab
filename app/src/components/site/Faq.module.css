@@ -1,0 +1,67 @@
+/* Prototype D .faq */
+
+.section {
+  padding: clamp(56px, 7vw, 100px) 0;
+}
+
+.faq {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 32px 64px;
+  align-items: start;
+}
+
+.list {
+  border-top: 1px solid var(--line);
+}
+
+.item {
+  border-bottom: 1px solid var(--line);
+}
+
+.q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  padding: 14px 0;
+  font: 400 19px/1.35 var(--font-display);
+  list-style: none;
+  cursor: pointer;
+}
+
+.q::-webkit-details-marker {
+  display: none;
+}
+
+.q::after {
+  content: "+";
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font: 400 20px/1 var(--font-body);
+  transition: transform 0.3s var(--ease);
+}
+
+.item[open] .q::after {
+  transform: rotate(45deg);
+}
+
+.a {
+  max-width: 620px;
+  margin: 0 0 20px;
+  color: #3a3437;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+@media (max-width: 860px) {
+  .faq {
+    grid-template-columns: 1fr;
+  }
+}

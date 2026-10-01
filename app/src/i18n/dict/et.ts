@@ -30,6 +30,7 @@ export const et = {
     secondaryCta: "Vaata koolituskalendrit",
     caption: "BROW & LASH ACADEMY",
     carouselLabel: "Esiletõstetud koolitused",
+    carousel: "karussell",
     slide: "Slaid",
     prevSlide: "Eelmine slaid",
     nextSlide: "Järgmine slaid",
@@ -189,6 +190,8 @@ export const et = {
     title: "Praktika",
     eyebrow: "Individuaalpraktika",
     onlyParnuShort: "Ainult Pärnus",
+    // Home practice block eyebrow above the big "Praktika" heading (H11, C22).
+    eyebrowParnu: "Individuaalpraktika · ainult Pärnus",
     onlyParnu: "Praktika toimub ainult Pärnus.",
     slogan: "Teadmised muutuvad oskusteks.",
     lead: "Harjuta, küsi ja katseta. Üks-ühele juhendamine aitab leida sinu käekirja ja järgmise arengusammu.",

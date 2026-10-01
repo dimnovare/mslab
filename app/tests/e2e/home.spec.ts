@@ -1,0 +1,214 @@
+import { test, expect } from "@playwright/test";
+
+// Home page (Task 7): Maria's section decisions H1–H17, G5, K5, K8, K11, K12.
+// The first two tests are the brief's tests verbatim; the step-geometry test describes the horizontal row,
+// so it runs on desktop. Below 860px the steps are a vertical list (brief) and get their own geometry test.
+
+test("home sections and Maria's hero changes", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("BROW & LASH ACADEMY")).toBeVisible();
+  await expect(page.getByText(/^01 \/ 0\d$/)).toBeVisible();                                   // A slide counter
+  const cal = page.getByRole("link", { name: /Vaata koolituskalendrit/ });
+  const s = await cal.evaluate((el) => { const c = getComputedStyle(el); return { bg: c.backgroundColor, bw: c.borderTopWidth, r: c.borderTopLeftRadius }; });
+  expect(s.bg).toBe("rgba(0, 0, 0, 0)"); expect(s.bw).toBe("1px"); expect(parseFloat(s.r)).toBeGreaterThan(20);
+  await expect(page.getByRole("heading", { name: "Kuidas soovid õppida?" })).toBeVisible();
+  await page.getByRole("tab", { name: "Hübriidõpe" }).click();
+  await expect(page.locator("[data-steps]")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Praktika", exact: true })).toBeVisible();
+  await expect(page.getByText(/ak$/).first()).toBeVisible();
+  await expect(page.getByText("Korduma kippuvad küsimused")).toBeVisible();
+  await expect(page.getByText("Ei tea, milline koolitus sobib?")).toBeVisible();
+});
+
+test.describe("horizontal steps (860px and wider)", () => {
+  test.skip(({ isMobile }) => isMobile, "below 860px the steps are a vertical list: see the next test");
+
+  test("steps are centred and the line passes through circle centres", async ({ page }) => {
+    await page.goto("/");
+    const geo = await page.locator("[data-steps] li").evaluateAll((lis) => lis.map((li) => {
+      const n = li.querySelector("[data-step-num]")!.getBoundingClientRect(); const l = li.getBoundingClientRect();
+      const line = li.querySelector("[data-step-line]")?.getBoundingClientRect();
+      return { cx: n.left + n.width / 2, lc: l.left + l.width / 2, cy: n.top + n.height / 2, ly: line ? line.top + line.height / 2 : null };
+    }));
+    for (const g of geo) { expect(Math.abs(g.cx - g.lc)).toBeLessThan(1.5); if (g.ly !== null) expect(Math.abs(g.ly - g.cy)).toBeLessThan(1.5); }
+    const box = await page.locator("[data-steps]").boundingBox(); const parent = await page.locator("[data-steps]").evaluate((e) => e.parentElement!.getBoundingClientRect().toJSON());
+    expect(Math.abs((box!.x + box!.width / 2) - (parent.x + parent.width / 2))).toBeLessThan(2);   // row centred in its box
+  });
+
+  test("the connector runs from circle edge to circle edge (K5)", async ({ page }) => {
+    await page.goto("/");
+    const geo = await page.locator("[data-steps] li").evaluateAll((lis) => lis.map((li) => {
+      const n = li.querySelector("[data-step-num]")!.getBoundingClientRect();
+      const line = li.querySelector("[data-step-line]")?.getBoundingClientRect();
+      return { left: n.left, right: n.right, line: line ? { left: line.left, right: line.right } : null };
+    }));
+    expect(geo).toHaveLength(5);
+    for (let i = 0; i < 4; i++) {
+      expect(Math.abs(geo[i].line!.left - geo[i].right)).toBeLessThan(1.5);
+      expect(Math.abs(geo[i].line!.right - geo[i + 1].left)).toBeLessThan(1.5);
+    }
+    expect(geo[4].line).toBeNull();
+  });
+});
+
+test.describe("vertical steps (below 860px)", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone layout only");
+
+  test("the line runs down through the circle centres from circle to circle", async ({ page }) => {
+    await page.goto("/");
+    const geo = await page.locator("[data-steps] li").evaluateAll((lis) => lis.map((li) => {
+      const n = li.querySelector("[data-step-num]")!.getBoundingClientRect();
+      const line = li.querySelector("[data-step-line]")?.getBoundingClientRect();
+      return { cx: n.left + n.width / 2, top: n.top, bottom: n.bottom, line: line ? { cx: line.left + line.width / 2, top: line.top, bottom: line.bottom } : null };
+    }));
+    expect(geo).toHaveLength(5);
+    for (let i = 0; i < 4; i++) {
+      const line = geo[i].line!;
+      expect(Math.abs(line.cx - geo[i].cx)).toBeLessThan(1.5);
+      expect(Math.abs(line.top - geo[i].bottom)).toBeLessThan(1.5);
+      expect(Math.abs(line.bottom - geo[i + 1].top)).toBeLessThan(1.5);
+      expect(Math.abs(geo[i].cx - geo[i + 1].cx)).toBeLessThan(1);
+    }
+    const box = await page.locator("[data-steps]").boundingBox(); const parent = await page.locator("[data-steps]").evaluate((e) => e.parentElement!.getBoundingClientRect().toJSON());
+    expect(Math.abs((box!.x + box!.width / 2) - (parent.x + parent.width / 2))).toBeLessThan(2);
+  });
+});
+
+test.describe("hero behaviour", () => {
+  test("slide control changes the slide, the counter and the header tone (H2, G5)", async ({ page }) => {
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await expect(hero).toHaveAttribute("data-tone", "light");
+    await expect(page.locator("html")).toHaveAttribute("data-hero-tone", "light");
+    await hero.getByRole("button", { name: "Järgmine slaid" }).click();
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    await expect(hero).toHaveAttribute("data-tone", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-hero-tone", "dark");
+    await expect.poll(() => page.locator("header").evaluate((el) => getComputedStyle(el).color)).toBe("rgb(255, 255, 255)");
+    // the outline button follows the tone: white border on a dark slide (H3)
+    const cal = page.getByRole("link", { name: /Vaata koolituskalendrit/ });
+    await expect.poll(() => cal.evaluate((el) => getComputedStyle(el).borderTopColor)).toBe("rgb(255, 255, 255)");
+    await hero.getByRole("button", { name: "Eelmine slaid" }).click();
+    await expect(hero.getByText(/^01 \/ 05$/)).toBeVisible();
+    await hero.getByRole("button", { name: "Slaid 5" }).click();
+    await expect(hero.getByText(/^05 \/ 05$/)).toBeVisible();
+  });
+
+  test("arrow keys move the slides when the hero has focus", async ({ page, isMobile }) => {
+    test.skip(isMobile, "keyboard");
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await hero.getByRole("button", { name: "Slaid 1" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await expect(hero.getByText(/^05 \/ 05$/)).toBeVisible();
+  });
+
+  test("autoplay advances after 6.5 s and pauses while hovered", async ({ page, isMobile }) => {
+    test.skip(isMobile, "hover");
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await page.mouse.move(5, 899); // outside the hero
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible({ timeout: 9000 });
+    await hero.hover();
+    await page.waitForTimeout(7500);
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+  });
+
+  test("swipe changes the slide", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "touch");
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await hero.dispatchEvent("touchstart", { touches: [{ identifier: 1, clientX: 300, clientY: 400 }], changedTouches: [{ identifier: 1, clientX: 300, clientY: 400 }] });
+    await hero.dispatchEvent("touchend", { touches: [], changedTouches: [{ identifier: 1, clientX: 120, clientY: 410 }] });
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+  });
+
+  test("autoplay is off with reduced motion", async ({ browser }) => {
+    const ctx = await browser.newContext({ reducedMotion: "reduce", viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto("/");
+    await page.waitForTimeout(7500);
+    await expect(page.locator("[data-hero]").getByText(/^01 \/ 05$/)).toBeVisible();
+    await ctx.close();
+  });
+});
+
+test.describe("home content from the database", () => {
+  test("upcoming strip, course cards with badges, practice, blog and FAQ", async ({ page }) => {
+    await page.goto("/");
+    // Upcoming strip: next three sessions that are not cancelled (contact courses only).
+    const upcoming = page.getByRole("region", { name: "Tulevased koolitused" });
+    await expect(upcoming.getByRole("link")).toHaveCount(3);
+    await expect(upcoming.getByRole("link").first()).toContainText("Kulmumeistri baaskoolitus");
+    await expect(upcoming.getByRole("link").first()).toContainText("Pärnu");
+    // Four course cards, both types, badges set by Maria (K12).
+    const cards = page.locator("[data-course-card]");
+    await expect(cards).toHaveCount(4);
+    await expect(page.locator("[data-course-card][data-type='contact']").first()).toBeVisible();
+    await expect(page.locator("[data-course-card][data-type='e_learning']").first()).toBeAttached();
+    await expect(cards.getByText("Populaarne")).toBeVisible();
+    await expect(page.locator("[data-course-card][data-type='e_learning']").first()).toContainText("Veebis · alusta kohe");
+    // Practice: "Praktika" first, Pärnu only, duration chips, Jost price, link to the request form.
+    const practice = page.locator("[data-practice]");
+    await expect(practice.getByText("Individuaalpraktika · ainult Pärnus")).toBeVisible();
+    await expect(practice.getByText("≈ 4 ak")).toBeVisible();
+    await expect(practice.getByText("≈ 8 ak")).toBeVisible();
+    const price = await practice.locator("[data-price]").first().evaluate((el) => { const c = getComputedStyle(el); return { f: c.fontFamily, z: c.fontSize, w: c.fontWeight }; });
+    expect(price.f).toMatch(/Jost/i); expect(price.z).toBe("28px"); expect(price.w).toBe("400");
+    await expect(practice.getByRole("link", { name: /Registreeru/ }).first()).toHaveAttribute("href", "/praktika?pakett=MINI#taotlus");
+    // Blog carousel: cards open the full post (H16).
+    const blog = page.getByRole("region", { name: "Uudised ja nõuanded" });
+    await expect(blog.getByRole("link", { name: /Kuidas valida endale sobiv kulmukoolitus/ })).toHaveAttribute("href", "/uudised/kuidas-valida-endale-sobiv-kulmukoolitus");
+    // FAQ: first answer open, others toggle.
+    await expect(page.getByText(/Baaskoolitused on mõeldud alustajatele/)).toBeVisible();
+    await page.getByText("Kas modellid tuleb ise leida?").click();
+    await expect(page.getByText(/Võid tulla oma modellidega/)).toBeVisible();
+  });
+
+  test("formats tabs: e-learning steps verbatim, contact steps, hybrid text only (K8, K11)", async ({ page }) => {
+    await page.goto("/");
+    const steps = page.locator("[data-steps] li");
+    await expect(steps).toHaveCount(5);
+    await expect(steps.nth(3)).toContainText("Sulle luuakse automaatselt õpilase konto");
+    await page.getByRole("tab", { name: "Kontaktõpe" }).click();
+    await expect(steps.first()).toContainText("Vali koolitus ja kuupäev");
+    await page.getByRole("tab", { name: "Hübriidõpe" }).click();
+    const panel = page.getByRole("tabpanel");
+    await expect(panel).toContainText("ühendab kaks erinevat õppevormi");
+    await expect(panel.getByRole("link")).toHaveCount(0);
+    await expect(page.locator("[data-steps]")).toHaveCount(0);
+  });
+
+  test("contact form validates and shows the sent state (H15)", async ({ page }) => {
+    await page.goto("/");
+    const form = page.locator("[data-contact-form]");
+    await form.getByLabel("Nimi").fill("Test Õpilane");
+    await form.getByLabel("E-post").fill("test@example.com");
+    await form.getByLabel("Sõnum").fill("Olen algaja ja huvitun kulmudest.");
+    await form.getByRole("button", { name: "Saada" }).click();
+    await expect(page.getByText("Aitäh! Sinu sõnum on saadetud.")).toBeVisible();
+  });
+
+  test("Russian home", async ({ page }) => {
+    await page.goto("/ru");
+    await expect(page.getByRole("heading", { name: "Как вы хотите учиться?" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Расписание курсов/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Практика", exact: true })).toBeVisible();
+  });
+
+  test("no horizontal overflow and no console errors", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    page.on("pageerror", (e) => errors.push(e.message));
+    for (const p of ["/", "/ru"]) {
+      await page.goto(p);
+      await page.waitForLoadState("networkidle");
+      const w = await page.evaluate(() => window.innerWidth);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), p).toBeLessThanOrEqual(w);
+    }
+    expect(errors).toEqual([]);
+  });
+});

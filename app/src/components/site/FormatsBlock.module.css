@@ -1,0 +1,128 @@
+/* Prototype D .fmt (learning formats block): canvas section, centred head, segmented tabs, white panel. */
+
+.fmt {
+  padding: clamp(72px, 8vw, 120px) 0;
+  background: var(--canvas);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.head > :first-child {
+  margin-bottom: 14px;
+}
+
+.lead {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+/* D .seg */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  max-width: 100%;
+  margin-top: 28px;
+  padding: 4px;
+  overflow-x: auto;
+  border-radius: 999px;
+  background: var(--first);
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  display: none;
+}
+
+.seg button {
+  min-height: 44px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #3a3437;
+  font: 500 15px/1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.3s var(--ease),
+    color 0.3s var(--ease),
+    box-shadow 0.3s var(--ease);
+}
+
+.seg button[aria-selected="true"] {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(34, 34, 34, 0.12);
+}
+
+.panel {
+  margin-top: 44px;
+  padding: clamp(28px, 4vw, 56px);
+  border-radius: var(--r-tile);
+  background: #fff;
+}
+
+.def {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 24px 56px;
+  align-items: start;
+}
+
+.question {
+  margin: 0;
+  font: 400 clamp(26px, 2.6vw, 36px) / 1.2 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* D .tag */
+.fact {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--first);
+  color: #3a3437;
+  font: 500 12px/1.1 var(--font-body);
+}
+
+/* K6: the explainer text a little smaller than D's 17px. */
+.definition {
+  margin: 0;
+  color: #3a3437;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.linkRow {
+  margin: 14px 0 0;
+}
+
+@media (max-width: 800px) {
+  .def {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .seg button {
+    padding: 0 16px;
+    font-size: 14px;
+  }
+
+  .panel {
+    margin-top: 32px;
+  }
+}

@@ -1,16 +1,232 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDict, isLocale } from "@/i18n/locales";
+import { connection } from "next/server";
+import { BlogCarousel } from "@/components/site/BlogCarousel";
+import { ContactBlock } from "@/components/site/ContactBlock";
+import { CourseCard, type CourseCardData } from "@/components/site/CourseCard";
+import { Faq } from "@/components/site/Faq";
+import { FormatsBlock, type FormatTab } from "@/components/site/FormatsBlock";
+import { Hero, type HeroSlideView } from "@/components/site/Hero";
+import { Icon } from "@/components/site/Icon";
+import { PracticeBlock } from "@/components/site/PracticeBlock";
+import { trainerSettings } from "@/components/site/settings";
+import { Statement } from "@/components/site/Statement";
+import { TrainerTeaser } from "@/components/site/TrainerTeaser";
+import { UpcomingStrip } from "@/components/site/UpcomingStrip";
+import ui from "@/components/site/ui.module.css";
+import { getDb } from "@/db/client";
+import { getHomeData, listUpcomingSessions, type CourseWithImages, type UpcomingSession } from "@/db/queries/public";
+import { fromPrice, priceOptions } from "@/domain/course";
+import { firstParagraph, nextSessionByCourse, nextSessions, pickHomeCourses } from "@/domain/home";
+import { formatEUR } from "@/domain/money";
+import { pick, pickList } from "@/i18n/field";
+import { fill, formatDate, formatDayMonth, formatWeekday } from "@/i18n/format";
+import { href } from "@/i18n/href";
+import { getDict, isLocale, type Dict, type Locale } from "@/i18n/locales";
+import { mediaUrl } from "@/lib/media";
+import styles from "./home.module.css";
 
-// Placeholder until the real home page (Task 7); it only proves that the locale reaches the page.
-// The layout provides <main>; the transparent home header overlaps the top by --header-h (the hero goes there).
-export default async function Home({ params }: { params: Promise<{ locale: string }> }) {
+type Props = { params: Promise<{ locale: string }> };
+
+/**
+ * Home page (Task 7). Section order from the brief: hero → upcoming strip → course cards → "Kuidas soovid õppida?"
+ * → statement → trainer → practice → blog → FAQ → contact. The newsletter lives in the footer (layout).
+ * The layout provides <main> and the transparent header that the hero slides under.
+ */
+export default async function Home({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  const dict = getDict(locale);
+  await connection();
+  const d = getDict(locale);
+  const to = (path: string) => href(locale, path);
+  const db = getDb();
+  const [home, sessions] = await Promise.all([getHomeData(db), listUpcomingSessions(db, new Date())]);
+
+  const slides: HeroSlideView[] = home.slides.map((s) => ({
+    id: s.id,
+    image: mediaUrl(s.imageKey),
+    pos: s.imagePos,
+    posMobile: s.imagePosMobile,
+    tone: s.tone === "dark" ? "dark" : "light",
+    kicker: pick(s.kicker, locale),
+    title: pick(s.title, locale),
+    text: pick(s.text, locale),
+    ctaLabel: pick(s.ctaLabel, locale) || d.hero.primaryCta,
+    // Site paths get the locale prefix; anything else (absolute URL) is used as entered. "//host" is not a site path.
+    ctaHref: s.ctaHref.startsWith("/") && !s.ctaHref.startsWith("//") ? to(s.ctaHref) : s.ctaHref,
+  }));
+
+  const nextByCourse = nextSessionByCourse(sessions);
+  const cards = pickHomeCourses(home.courses).map((c) => courseCard(c, nextByCourse.get(c.id), locale, d, to));
+
+  const f = d.formats;
+  const formatTabs: FormatTab[] = [
+    { key: "e", name: f.elearning.name, question: f.elearning.question, definition: f.elearning.definition, facts: f.elearning.facts, steps: f.elearning.steps, link: { label: f.elearning.link, href: to("/koolitused?vorm=e") } },
+    { key: "k", name: f.contact.name, question: f.contact.question, definition: f.contact.definition, facts: f.contact.facts, steps: f.contact.steps, link: { label: f.contact.link, href: to("/koolitused?vorm=k") } },
+    // Hybrid is an explanation only: no steps, no facts, no link (Maria C16, K8; controller ruling).
+    { key: "h", name: f.hybrid.name, question: f.hybrid.question, definition: f.hybrid.definition },
+  ];
+
+  const statement = home.pages.statement;
+  const bio = home.pages.trainer_bio;
+  const trainer = trainerSettings(home.settings);
+  const trainerName = trainer.name || pick(bio?.title, locale);
+
   return (
-    <section style={{ padding: "calc(var(--header-h) + 60px) var(--page) 60px", background: "var(--canvas)" }}>
-      <h1>{dict.common.siteName}</h1>
-      <p>{dict.meta.description}</p>
-    </section>
+    <>
+      <Hero
+        slides={slides}
+        t={{
+          caption: d.hero.caption,
+          carousel: d.hero.carousel,
+          carouselLabel: d.hero.carouselLabel,
+          slide: d.hero.slide,
+          prevSlide: d.hero.prevSlide,
+          nextSlide: d.hero.nextSlide,
+          calendarLabel: d.hero.secondaryCta,
+          calendarHref: to("/koolituskalender"),
+        }}
+      />
+
+      <UpcomingStrip
+        label={d.home.upcomingLabel}
+        items={nextSessions(sessions, 3).map((s) => ({
+          id: s.id,
+          // The course page (Task 8) can preselect the session, as the calendar does (?sessioon=id).
+          href: to(`/koolitused/${s.course.slug}?sessioon=${s.id}`),
+          day: formatDayMonth(s.startsAt, locale),
+          weekday: formatWeekday(s.startsAt, locale),
+          title: pick(s.course.title, locale),
+          city: s.city,
+          format: f.contact.name,
+          language: s.language,
+        }))}
+      />
+
+      {cards.length > 0 && (
+        <section className={styles.courses} aria-labelledby="home-courses-title">
+          <div className={ui.wrap}>
+            <div className={styles.heading}>
+              <div>
+                <p className={`${ui.eyebrow} ${styles.eyebrow}`}>{d.home.coursesEyebrow}</p>
+                <h2 id="home-courses-title" className={ui.h2}>
+                  {d.home.coursesTitle}
+                </h2>
+              </div>
+              <Link className={ui.link} href={to("/koolitused")}>
+                {d.home.allCourses}
+                <Icon name="up" />
+              </Link>
+            </div>
+            <div className={styles.grid}>
+              {cards.map((c) => (
+                <CourseCard key={c.id} c={c} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      <FormatsBlock t={{ eyebrow: f.eyebrow, title: f.title, lead: f.lead, tabsLabel: f.tabsLabel, stepsLabel: f.eyebrow }} tabs={formatTabs} />
+
+      {statement && <Statement eyebrow={d.home.statementEyebrow} text={pick(statement.body, locale)} />}
+
+      <TrainerTeaser
+        d={{
+          eyebrow: d.trainer.eyebrow,
+          name: trainerName,
+          text: firstParagraph(pick(bio?.body, locale)) || pick(trainer.role, locale),
+          portrait: mediaUrl(trainer.portraitKey),
+          portraitAlt: fill(d.trainer.portraitAlt, { name: trainerName }),
+          stats: trainer.stats.map((s) => ({ value: s.value, label: pick(s.label, locale) })),
+          link: { label: d.trainer.readMore, href: to("/koolitaja") },
+        }}
+      />
+
+      {home.practice.length > 0 && (
+        <PracticeBlock
+          t={{
+            eyebrow: d.practice.eyebrowParnu,
+            title: d.practice.title,
+            slogan: d.practice.slogan,
+            text: d.practice.panelText,
+            protocolTitle: d.practice.protocolTitle,
+            protocolText: d.practice.protocolText,
+            packageLabel: d.practice.package,
+            durationLabel: d.practice.duration,
+            register: d.practice.register,
+          }}
+          packages={home.practice.map((p) => ({
+            code: p.code,
+            name: pick(p.name, locale),
+            tagline: pick(p.tagline, locale),
+            items: pickList(p.items, locale),
+            duration: pick(p.durationLabel, locale),
+            price: formatEUR(p.price, locale),
+            // The practice page (Task 9) preselects the package from ?pakett and scrolls to the form (#taotlus).
+            href: `${to("/praktika")}?pakett=${encodeURIComponent(p.code)}#taotlus`,
+          }))}
+        />
+      )}
+
+      <BlogCarousel
+        t={{ eyebrow: d.news.eyebrow, title: d.news.title, lead: d.news.lead, all: d.news.all, carouselLabel: d.news.carouselLabel, prev: d.common.previous, next: d.common.next }}
+        allHref={to("/uudised")}
+        posts={home.posts.map((p) => ({
+          slug: p.slug,
+          href: to(`/uudised/${p.slug}`),
+          title: pick(p.title, locale),
+          excerpt: pick(p.excerpt, locale),
+          date: formatDate(p.publishedAt, locale),
+          category: pick(p.category, locale),
+          cover: mediaUrl(p.coverKey),
+        }))}
+      />
+
+      <Faq eyebrow={d.home.faqEyebrow} title={d.home.faqTitle} items={home.faq.map((x) => ({ q: pick(x.q, locale), a: pick(x.a, locale) }))} />
+
+      <ContactBlock
+        locale={locale}
+        person={{ name: trainerName, photo: mediaUrl(trainer.contactPhotoKey) }}
+        t={{
+          eyebrow: d.home.contactEyebrow,
+          title: d.home.contactTitle,
+          lead: d.home.contactLead,
+          reply: d.home.contactReply,
+          name: d.forms.name,
+          email: d.forms.email,
+          message: d.forms.message,
+          messagePlaceholder: d.forms.messagePlaceholder,
+          submit: d.forms.submit,
+          sending: d.forms.sending,
+          sent: d.forms.contactSent,
+          errorRequired: d.forms.errorRequired,
+          errorEmail: d.forms.errorEmail,
+          errorTooMany: d.forms.errorTooMany,
+          errorGeneric: d.forms.errorGeneric,
+        }}
+      />
+    </>
   );
+}
+
+/** Card data for a course: B card with the type's chip, level, D meta line (next date + city, or "Veebis · alusta kohe"). */
+function courseCard(c: CourseWithImages, next: UpcomingSession | undefined, l: Locale, d: Dict, to: (path: string) => string): CourseCardData {
+  const title = pick(c.title, l);
+  const image = c.images[0];
+  const from = fromPrice(c);
+  const online = c.type === "e_learning";
+  return {
+    id: c.id,
+    type: c.type,
+    href: to(`/koolitused/${c.slug}`),
+    title,
+    summary: pick(c.summary, l),
+    image: image ? mediaUrl(image.key) : "",
+    imageAlt: pick(image?.alt, l) || title,
+    badge: c.badge,
+    tags: [online ? d.formats.elearning.name : d.formats.contact.name, c.level === "basic" ? d.course.levelBasic : d.course.levelAdvanced],
+    meta: online ? { text: d.catalogue.onlineStart } : next ? { lead: formatDayMonth(next.startsAt, l), text: next.city } : { text: d.formats.contact.short },
+    price: from == null ? "" : priceOptions(c).length > 1 ? `${d.catalogue.from} ${formatEUR(from, l)}` : formatEUR(from, l),
+  };
 }

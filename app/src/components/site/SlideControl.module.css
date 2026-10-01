@@ -1,0 +1,109 @@
+/* Prototype A hero control (site/p/a/index.html): counter, segment bar, prev/next.
+   Colours come from the hero: --fg is the text colour of the slide, --inv the opposite. */
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  color: var(--fg, var(--ink));
+}
+
+.count {
+  flex: none;
+  font: 400 13px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.segments {
+  display: grid;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The button is 44px tall (touch target); the visible segment is a 2px line in the middle. */
+.segment {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.segment::after {
+  content: "";
+  height: 2px;
+  background: currentColor;
+  opacity: 0.25;
+  transition: opacity 0.3s var(--ease);
+}
+
+.segment:hover::after {
+  opacity: 0.55;
+}
+
+.segment[aria-current="true"]::after {
+  opacity: 1;
+}
+
+.buttons {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.prev,
+.next {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    transform 0.2s;
+}
+
+.prev {
+  background: transparent;
+  color: inherit;
+}
+
+.prev:hover {
+  background: var(--fg, var(--ink));
+  color: var(--inv, #fff);
+}
+
+.next {
+  border-color: var(--fg, var(--ink));
+  background: var(--fg, var(--ink));
+  color: var(--inv, #fff);
+}
+
+.next:hover {
+  transform: translateX(2px);
+}
+
+.prev:active,
+.next:active {
+  transform: scale(0.96);
+}
+
+@media (max-width: 640px) {
+  .control {
+    gap: 14px;
+  }
+
+  .segments {
+    gap: 6px;
+  }
+}
