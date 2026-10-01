@@ -133,6 +133,11 @@
   accent-color: var(--ink);
 }
 
+.choice:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .fieldset {
   min-width: 0;
   margin: 0;

@@ -257,7 +257,6 @@ export const adminEt = {
     remove: "Eemalda rida {n}",
     up: "Liiguta rida {n} üles",
     down: "Liiguta rida {n} alla",
-    row: "Rida {n}",
     empty: "Ridu veel pole.",
   },
 
@@ -268,6 +267,7 @@ export const adminEt = {
     hint: "JPEG, PNG või WebP. Enne üleslaadimist vähendatakse pilt kuni 2400 pikslini ja kaamera andmed (asukoht jm) eemaldatakse.",
     preparing: "Valmistan pilti ette…",
     uploading: "Laen üles… ({n}/{total})",
+    queued: "Lisasin järjekorda {n} pilti (kokku {total}).",
     doneOne: "Pilt lisatud.",
     doneMany: "Lisatud {n} pilti.",
     type: "Seda faili ei saa kasutada. Vali JPEG-, PNG- või WebP-pilt.",
@@ -328,7 +328,6 @@ export const adminEt = {
     sections: {
       basics: "Põhiinfo",
       type: "Õppevorm ja hind",
-      texts: "Kirjeldus",
       outcomes: "Õpiväljundid",
       modulesE: "Moodulid",
       modulesC: "Programm",
@@ -373,7 +372,6 @@ export const adminEt = {
       main: "Põhipilt",
       image: "Pilt {n}",
       alt: "Pildi kirjeldus",
-      altHint: "Ekraanilugejale. Tühjaks jättes kasutatakse koolituse nime.",
       imageUp: "Liiguta pilt {n} ettepoole",
       imageDown: "Liiguta pilt {n} tahapoole",
       imageRemove: "Eemalda pilt {n}",
@@ -390,8 +388,6 @@ export const adminEt = {
     saving: "Salvestan…",
     saved: "Salvestatud.",
     dirty: "Salvestamata muudatused",
-    clean: "Kõik muudatused on salvestatud.",
-    leave: "Sul on salvestamata muudatusi. Kas lahkud lehelt?",
     invalid: "Kontrolli märgitud välju.",
     stale: "Seda koolitust salvestati vahepeal mujal (nt teises aknas). Laadi leht uuesti, et näha kehtivat seisu; sinu siinsed muudatused jäävad siis salvestamata.",
     reload: "Laadi uuesti",
@@ -411,6 +407,7 @@ export const adminEt = {
       date: "Sisesta kuupäev.",
       time: "Sisesta kellaaeg, näiteks 10:00.",
       capacity: "Kohtade arv peab olema 1–99.",
+      typeLocked: "Sellel koolitusel on toimumisi või registreerimisi, seega õppevormi muuta ei saa. Vajadusel loo uus koolitus.",
     },
   },
 

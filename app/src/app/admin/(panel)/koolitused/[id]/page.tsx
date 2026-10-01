@@ -5,7 +5,7 @@ import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { getCourseForEdit, listAllCourses } from "@/db/queries/admin";
+import { courseUsage, getCourseForEdit, listAllCourses } from "@/db/queries/admin";
 import { getCourseBySlug } from "@/db/queries/public";
 import { draftFromCourse, newCourseDraft } from "@/domain/course-editor";
 import { adminEt } from "@/i18n/dict/admin";
@@ -34,7 +34,11 @@ export default async function CourseEditPage({ params, searchParams }: Props) {
   const [{ id: raw }, sp] = await Promise.all([params, searchParams]);
   const id = parseId(raw);
   const db = getDb();
-  const [course, all] = await Promise.all([typeof id === "number" ? getCourseForEdit(db, id) : null, listAllCourses(db)]);
+  const [course, all, usage] = await Promise.all([
+    typeof id === "number" ? getCourseForEdit(db, id) : null,
+    listAllCourses(db),
+    typeof id === "number" ? courseUsage(db, id) : null,
+  ]);
   const t = adminEt.courseEditor;
 
   if (id === null || (id !== "new" && !course)) {
@@ -70,6 +74,7 @@ export default async function CourseEditPage({ params, searchParams }: Props) {
         next={next ? { startsAt: next.startsAt.toISOString(), city: next.city } : null}
         publicHref={course?.published ? `/koolitused/${course.slug}` : null}
         created={sp.loodud === "1"}
+        typeLocked={Boolean(usage && (usage.sessions > 0 || usage.registrations > 0))}
       />
     </Shell>
   );

@@ -178,6 +178,8 @@ test.describe("course editor", () => {
     // an own text in Ploom, then none at all
     await page.goto(`/admin/koolitused/${id}`);
     await own.fill("Sügise hitt");
+    await editor.getByRole("button", { name: "Tuhkroos" }).click();
+    await expect(preview.getByText("Sügise hitt", { exact: true })).toHaveCSS("color", "rgb(34, 34, 34)"); // ink on rose: AA
     await editor.getByRole("button", { name: "Ploom" }).click();
     await expect(preview.getByText("Sügise hitt", { exact: true })).toHaveCSS("background-color", "rgb(107, 79, 92)");
     await expect(editor.getByRole("button", { name: "Uus", exact: true })).toHaveAttribute("aria-pressed", "false");
@@ -226,6 +228,25 @@ test.describe("course editor", () => {
     await expect(page.getByText("Avaldatud koolitusel peab olema hind.")).toBeVisible();
     const after = await storedCourse(c.slug);
     expect(after.updatedAt.getTime()).toBe(before.updatedAt.getTime());
+  });
+
+  test("a contact course with sessions keeps its type: E-õpe is disabled and explained; every radio and checkbox has a name", async ({ page, context, visitorIp }) => {
+    const booked = await storedCourse("kulmumeistri-baaskoolitus"); // seed sessions point to it
+    await signIn(page, context, visitorIp);
+    await page.goto(`/admin/koolitused/${booked.id}`);
+    const typeSwitch = page.locator("[data-type-switch]");
+    await expect(typeSwitch.getByRole("radio", { name: "Kontaktõpe", exact: true })).toBeChecked();
+    await expect(typeSwitch.getByRole("radio", { name: "E-õpe", exact: true })).toBeDisabled();
+    await expect(page.locator("[data-type-hint]")).toHaveText(/Sellel koolitusel on toimumisi või registreerimisi/);
+    // names from the visible text, never the input's value ("on")
+    const tree = await page.locator("[data-course-editor]").ariaSnapshot();
+    expect(tree).not.toMatch(/(radio|checkbox) "on"/);
+    for (const name of ['radio "Baaskoolitus"', 'radio "Täiendkoolitus"', 'radio "E-õpe"', 'radio "Kontaktõpe"', 'checkbox "Avaldatud"', 'checkbox "Näidissisu"', 'checkbox "Lash Lift BOTOX baaskoolitus"'])
+      expect(tree, name).toContain(name);
+    await expect(page.getByRole("checkbox", { name: "Avaldatud", exact: true })).toHaveAccessibleDescription(/Avaldatud koolitus on avalikul lehel nähtav/);
+    // the badge's presets and swatches are named buttons
+    for (const name of ["Puudub", "Uus", "Tint", "Orhidee", "Tuhkroos", "Ploom", "Hele"])
+      await expect(page.locator("[data-badge-editor]").getByRole("button", { name, exact: true })).toHaveCount(1);
   });
 
   test("lists (ET/RU rows, ↑ ↓, add, remove) are saved in their order", async ({ page, context, visitorIp }, info) => {
@@ -335,6 +356,33 @@ test.describe("course editor", () => {
     await expect(page.locator("[data-gallery-main]")).toHaveAttribute("aria-label", /E2E õppematerjal/);
     await page.goto("/koolitused");
     await expect(publicCard(page, c.slug).locator("img")).toHaveAttribute("src", `/media/${jpgKey}`);
+  });
+
+  test("a second pick while an upload runs is queued and announced, not dropped; the file field is reset", async ({ page, context, visitorIp }, info) => {
+    const c = mine(info);
+    const id = await changing(c.slug);
+    await signIn(page, context, visitorIp);
+    await page.goto(`/admin/koolitused/${id}`);
+    // every upload answer waits a little, so the second pick surely comes while the first is still running
+    await page.route("**/api/admin/upload", async (route) => {
+      await new Promise((r) => setTimeout(r, 700));
+      await route.continue();
+    });
+    const gallery = page.locator("[data-gallery-editor]");
+    const items = gallery.locator("[data-gallery-item]");
+    const before = await items.count();
+    const input = gallery.locator('input[type="file"]');
+    const jpeg = (name: string) => ({ name, mimeType: "image/jpeg", buffer: readFileSync(`public/seed/${name}`) });
+    await input.setInputFiles([jpeg("certificate-white.jpg")]);
+    await expect(gallery.locator('[data-upload-status="busy"]')).toBeVisible();
+    await input.setInputFiles([jpeg("gift-bag-serum.jpg")]);
+    await expect(gallery.locator("[data-upload-status]")).toHaveText("Lisasin järjekorda 1 pilti (kokku 2).");
+    await expect(input).toHaveValue("");
+    await expect(gallery.locator("[data-upload-status]")).toHaveText("Lisatud 2 pilti.", { timeout: 15_000 });
+    await expect(items).toHaveCount(before + 2);
+    const keys = await items.evaluateAll((els) => els.map((e) => e.getAttribute("data-gallery-item")!));
+    for (const key of keys.slice(before)) expect(key).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
+    await expect(input).toHaveValue("");
   });
 
   test("upload API: only signed-in, same-site requests with a real JPEG / PNG / WebP of at most 8 MB", async ({ page, context, visitorIp, playwright }) => {
@@ -497,8 +545,14 @@ test.describe("calendar", () => {
     const id = await insertEditSession(COURSE.slug, city);
     await registerOnSession(id, info.project.name);
     await signIn(page, context, visitorIp);
-    await page.goto(`/admin/kalender?id=${id}`);
+    // an upcoming session opened from the "Möödunud" list still shows its registrations
+    await page.goto(`/admin/kalender?aeg=moodunud&id=${id}`);
     const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(COURSE.title);
+    await expect(dialog.locator("[data-session-registrations]")).toHaveText("Registreerimisi: 0 kinnitatud, 1 ootab ettemaksu.");
+    await dialog.getByRole("button", { name: "Sulge" }).click();
+    await expect(page).toHaveURL(/\/admin\/kalender\?aeg=moodunud$/);
+    await page.goto(`/admin/kalender?id=${id}`);
     await expect(dialog.locator("[data-session-registrations]")).toHaveText("Registreerimisi: 0 kinnitatud, 1 ootab ettemaksu.");
     await dialog.getByRole("button", { name: "Kustuta toimumine" }).click();
     await dialog.getByRole("button", { name: "Jah, kustuta" }).click();
@@ -507,5 +561,25 @@ test.describe("calendar", () => {
     await dialog.getByRole("button", { name: "Sulge" }).click();
     await expect(page).toHaveURL(/\/admin\/kalender$/);
     await expect(page.locator("[data-session-row]", { hasText: city })).toContainText("1 ootab ettemaksu");
+  });
+
+  test("a session row of a non-contact course: not in the public calendar; its drawer keeps its own course, never another", async ({ page, context, visitorIp }, info) => {
+    // Such a row cannot be made any more (a course with sessions keeps its type); one is written directly here.
+    const online = mine(info);
+    const city = `${EDIT_CITY_PREFIX}${info.project.name} ${unique()}`;
+    const id = await insertEditSession(online.slug, city);
+    await page.goto("/koolituskalender");
+    await expect(page.locator("[data-calendar-row]", { hasText: city })).toHaveCount(0);
+
+    await signIn(page, context, visitorIp);
+    await page.goto(`/admin/kalender?id=${id}`);
+    const dialog = page.getByRole("dialog", { name: new RegExp(`^Toimumine: ${online.title},`) });
+    await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(online.title);
+    const course = dialog.getByLabel("Koolitus");
+    await expect(course).toHaveValue(String((await storedCourse(online.slug)).id)); // its own course, not the first contact course
+    await dialog.getByLabel("Kohti").fill("3");
+    await dialog.getByRole("button", { name: "Salvesta toimumine" }).click();
+    await expect(dialog.getByText("Vali koolitus.")).toBeVisible(); // saving it under an e-learning course is refused
+    expect(await storedSession(city)).toMatchObject({ capacity: 4 }); // and nothing moved or changed
   });
 });

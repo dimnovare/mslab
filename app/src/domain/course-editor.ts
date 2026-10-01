@@ -18,12 +18,13 @@ export const BADGE_MAX = 18;
 
 /**
  * D's colour swatches, each a background from the palette with its readable text colour. Only these can be stored
- * (D's free colour picker is left out: every badge stays in the site palette).
+ * (D's free colour picker is left out: every badge stays in the site palette). Every pair reaches WCAG AA for small
+ * text (4.5:1; tests/unit/admin-content.test.ts): D's white text on Tuhkroos was 3.25:1, so Tuhkroos takes ink text.
  */
 export const BADGE_SWATCHES = [
   { id: "tint", bg: "#222222", fg: "#ffffff" },
   { id: "orchid", bg: "#DDD4DC", fg: "#222222" },
-  { id: "rose", bg: "#9E8993", fg: "#ffffff" },
+  { id: "rose", bg: "#9E8993", fg: "#222222" },
   { id: "plum", bg: "#6B4F5C", fg: "#ffffff" },
   { id: "light", bg: "#FFFFFF", fg: "#222222" },
 ] as const;

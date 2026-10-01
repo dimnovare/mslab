@@ -6,7 +6,7 @@ import { SessionForm, type SessionValues } from "@/components/admin/SessionForm"
 import { Shell } from "@/components/admin/Shell";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { getSession, listAdminSessions, listContactCourses, type AdminSessionRow } from "@/db/queries/admin";
+import { listAdminSessions, listContactCourses, type AdminSessionRow } from "@/db/queries/admin";
 import { startOfDayTallinn, tallinnFormParts } from "@/domain/calendar";
 import { seatsLeft } from "@/domain/sessions";
 import { adminEt } from "@/i18n/dict/admin";
@@ -52,14 +52,18 @@ export default async function CalendarAdminPage({ searchParams }: Props) {
   const openId = rawId === "uus" ? "uus" : parseId(rawId);
   const added = parseId(one(sp.lisatud));
   const db = getDb();
-  const [sessions, courses, open] = await Promise.all([
+  const [sessions, courses, [open]] = await Promise.all([
     listAdminSessions(db, { from: startOfDayTallinn(new Date()), upcoming: !past }),
     listContactCourses(db),
-    typeof openId === "number" ? getSession(db, openId) : null,
+    // the drawer's session with its counts, also when it is in the other list (upcoming / past)
+    typeof openId === "number" ? listAdminSessions(db, { ids: [openId] }) : [],
   ]);
   const t = adminEt.calendar;
   const courseOptions = courses.map((c) => ({ id: c.id, title: pick(c.title, "et"), published: c.published }));
-  const courseName = (id: number) => courseOptions.find((c) => c.id === id)?.title ?? "";
+  // the session's own course is always an option (even one that is no longer a contact course), so opening and saving
+  // the form can never move the session to another course by default
+  if (open && !courseOptions.some((c) => c.id === open.courseId))
+    courseOptions.push({ id: open.course.id, title: pick(open.course.title, "et"), published: open.course.published });
 
   let drawer: React.ReactNode = null;
   if (openId === "uus" && courses.length > 0) {
@@ -73,19 +77,19 @@ export default async function CalendarAdminPage({ searchParams }: Props) {
       </Drawer>
     );
   } else if (typeof openId === "number") {
-    const row = sessions.find((s) => s.id === openId);
-    const label = open ? fill(t.drawer.editLabel, { name: `${courseName(open.courseId)}, ${formatDate(open.startsAt, "et")}` }) : t.drawer.notFound;
+    const name = open ? pick(open.course.title, "et") : "";
+    const label = open ? fill(t.drawer.editLabel, { name: `${name}, ${formatDate(open.startsAt, "et")}` }) : t.drawer.notFound;
     drawer = (
       <Drawer label={label} closeHref={href(past)} closeLabel={t.drawer.close} returnFocus={`session-${openId}`}>
         <div className={styles.drawer}>
           {open ? (
             <>
-              <h2 className={ui.h2}>{courseName(open.courseId)}</h2>
+              <h2 className={ui.h2}>{name}</h2>
               <SessionForm
                 key={open.id}
                 initial={{ id: open.id, courseId: open.courseId, ...tallinnFormParts(open.startsAt), city: open.city, venue: open.venue, language: open.language, capacity: open.capacity, status: open.status }}
                 courses={courseOptions}
-                registrations={row ? { confirmed: row.confirmed, awaiting: row.awaiting } : undefined}
+                registrations={{ confirmed: open.confirmed, awaiting: open.awaiting }}
               />
             </>
           ) : (

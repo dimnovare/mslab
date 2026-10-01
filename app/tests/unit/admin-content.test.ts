@@ -47,10 +47,24 @@ describe("badges (prototype D)", () => {
     expect(BADGE_SWATCHES.map((s) => [adminEt.badge.swatch[s.id], s.bg, s.fg])).toEqual([
       ["Tint", "#222222", "#ffffff"],
       ["Orhidee", "#DDD4DC", "#222222"],
-      ["Tuhkroos", "#9E8993", "#ffffff"],
+      ["Tuhkroos", "#9E8993", "#222222"],
       ["Ploom", "#6B4F5C", "#ffffff"],
       ["Hele", "#FFFFFF", "#222222"],
     ]);
+  });
+
+  test("every swatch's text colour on its background reaches WCAG AA for small text (4.5:1)", () => {
+    // WCAG 2.x relative luminance and contrast ratio
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a: string, b: string) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    expect(ratio("#ffffff", "#9E8993")).toBeLessThan(4.5); // D's original Tuhkroos pair, which is why it changed
+    for (const s of BADGE_SWATCHES) expect(ratio(s.fg, s.bg), `${s.id}: ${s.fg} on ${s.bg}`).toBeGreaterThanOrEqual(4.5);
   });
 
   test("badgeOf trims and uses the swatch's colours; swatchOf finds it by background in any case", () => {

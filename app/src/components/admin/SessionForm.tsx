@@ -7,6 +7,7 @@ import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
 import type { EditResult, FieldError } from "@/server/admin-content";
 import { deleteSession, saveSession } from "@/server/actions/admin-content";
+import { Choice } from "./Choice";
 import ui from "./ui.module.css";
 import styles from "./editor.module.css";
 
@@ -212,10 +213,7 @@ export function SessionForm({
           <legend className={ui.legend}>{t.form.status}</legend>
           <div className={styles.choices}>
             {(["scheduled", "cancelled"] as const).map((s) => (
-              <label key={s} className={styles.choice}>
-                <input type="radio" name="status" value={s} defaultChecked={initial.status === s} />
-                {t.status[s]}
-              </label>
+              <Choice key={s} className={styles.choice} label={t.status[s]} type="radio" name="status" value={s} defaultChecked={initial.status === s} />
             ))}
           </div>
           <p className={ui.hint}>{t.form.statusHint}</p>

@@ -13,6 +13,7 @@ import { fill } from "@/i18n/format";
 import type { EditResult, FieldError } from "@/server/admin-content";
 import { saveCourse } from "@/server/actions/admin-content";
 import { BadgeEditor } from "./BadgeEditor";
+import { Choice } from "./Choice";
 import { GalleryEditor } from "./GalleryEditor";
 import { I18nInput } from "./I18nInput";
 import { ListEditor } from "./ListEditor";
@@ -53,6 +54,8 @@ type Props = {
   publicHref: string | null;
   /** Just created (?loodud=1). */
   created: boolean;
+  /** The course has sessions or registrations: its type cannot change. */
+  typeLocked: boolean;
 };
 
 /**
@@ -61,7 +64,7 @@ type Props = {
  * (e-learning: price, access, videos, modules, next-course discount; contact: group and individual price, duration,
  * programme, "Koolitus sisaldab"). After a save the page reloads the stored course and the draft follows it.
  */
-export function CourseEditor({ initial, others, next, publicHref, created }: Props) {
+export function CourseEditor({ initial, others, next, publicHref, created, typeLocked }: Props) {
   const t = adminEt.courseEditor;
   const f = t.fields;
   const uid = useId();
@@ -213,10 +216,7 @@ export function CourseEditor({ initial, others, next, publicHref, created }: Pro
                 <legend className={ui.legend}>{f.level}</legend>
                 <div className={ed.choices}>
                   {(["basic", "advanced"] as CourseLevel[]).map((l) => (
-                    <label key={l} className={ed.choice}>
-                      <input type="radio" name={`${uid}-level`} checked={draft.level === l} onChange={() => set("level", l)} />
-                      {adminEt.courses.level[l]}
-                    </label>
+                    <Choice key={l} className={ed.choice} label={adminEt.courses.level[l]} type="radio" name={`${uid}-level`} value={l} checked={draft.level === l} onChange={() => set("level", l)} />
                   ))}
                 </div>
               </fieldset>
@@ -243,17 +243,37 @@ export function CourseEditor({ initial, others, next, publicHref, created }: Pro
             <h2 id={`${uid}-type`} className={`${ui.h2} ${styles.cardTitle}`}>
               {t.sections.type}
             </h2>
-            <fieldset className={`${ed.fieldset} ${styles.typeSwitch}`}>
+            <fieldset
+              className={`${ed.fieldset} ${styles.typeSwitch}`}
+              aria-describedby={err("type") ? `${uid}-type-hint ${uid}-type-error` : `${uid}-type-hint`}
+              data-invalid={err("type") ? "" : undefined}
+              tabIndex={err("type") ? -1 : undefined}
+            >
               <legend className={ui.legend}>{f.type}</legend>
               <div className={ed.choices} data-type-switch="">
                 {(["e_learning", "contact"] as CourseType[]).map((ty) => (
-                  <label key={ty} className={ed.choice}>
-                    <input type="radio" name={`${uid}-type`} value={ty} checked={draft.type === ty} onChange={() => set("type", ty)} />
-                    {adminEt.courses.type[ty]}
-                  </label>
+                  <Choice
+                    key={ty}
+                    className={ed.choice}
+                    label={adminEt.courses.type[ty]}
+                    type="radio"
+                    name={`${uid}-type`}
+                    value={ty}
+                    checked={draft.type === ty}
+                    // a course with sessions or registrations keeps its type (the server refuses the change too)
+                    disabled={typeLocked && base.type !== ty}
+                    onChange={() => set("type", ty)}
+                  />
                 ))}
               </div>
-              <p className={ui.hint}>{f.typeHint}</p>
+              <p id={`${uid}-type-hint`} className={ui.hint} data-type-hint="">
+                {typeLocked ? t.errors.typeLocked : f.typeHint}
+              </p>
+              {err("type") && (
+                <p id={`${uid}-type-error`} className={ui.error}>
+                  {err("type")}
+                </p>
+              )}
             </fieldset>
             {online ? (
               <div className={ed.grid} data-fields="e_learning">
@@ -315,14 +335,21 @@ export function CourseEditor({ initial, others, next, publicHref, created }: Pro
               <ul className={ed.picks}>
                 {others.map((c) => (
                   <li key={c.id}>
-                    <label className={ed.pick}>
-                      <input type="checkbox" checked={draft.recommendationIds.includes(c.id)} onChange={() => toggleRecommendation(c.id)} data-recommend={c.id} />
-                      <span className={ed.pickName}>{c.title}</span>
+                    <Choice
+                      className={ed.pick}
+                      label={c.title}
+                      labelClassName={ed.pickName}
+                      type="checkbox"
+                      value={c.id}
+                      checked={draft.recommendationIds.includes(c.id)}
+                      onChange={() => toggleRecommendation(c.id)}
+                      data-recommend={c.id}
+                    >
                       <span className={ed.pickTags}>
                         <span className={`${ui.tag} ${c.type === "e_learning" ? ui.dark : ""}`}>{adminEt.courses.type[c.type]}</span>
                         {!c.published && <span className={`${ui.tag} ${ui.warn}`}>{adminEt.courses.draft}</span>}
                       </span>
-                    </label>
+                    </Choice>
                   </li>
                 ))}
               </ul>
@@ -338,20 +365,28 @@ export function CourseEditor({ initial, others, next, publicHref, created }: Pro
             <h2 id={`${uid}-publish`} className={`${ui.h3} ${styles.cardTitle}`}>
               {t.sections.publish}
             </h2>
-            <label className={ed.check}>
-              <input type="checkbox" checked={draft.published} onChange={(e) => set("published", e.target.checked)} data-field="published" />
-              <span>
-                <strong>{f.published}</strong>
-                <span className={`${ui.muted} ${ui.small}`}>{f.publishedHint}</span>
-              </span>
-            </label>
-            <label className={ed.check}>
-              <input type="checkbox" checked={draft.isSample} onChange={(e) => set("isSample", e.target.checked)} data-field="isSample" />
-              <span>
-                <strong>{f.sample}</strong>
-                <span className={`${ui.muted} ${ui.small}`}>{f.sampleHint}</span>
-              </span>
-            </label>
+            <Choice
+              className={ed.check}
+              label={f.published}
+              hint={f.publishedHint}
+              hintClassName={`${ui.muted} ${ui.small}`}
+              type="checkbox"
+              value="1"
+              checked={draft.published}
+              onChange={(e) => set("published", e.target.checked)}
+              data-field="published"
+            />
+            <Choice
+              className={ed.check}
+              label={f.sample}
+              hint={f.sampleHint}
+              hintClassName={`${ui.muted} ${ui.small}`}
+              type="checkbox"
+              value="1"
+              checked={draft.isSample}
+              onChange={(e) => set("isSample", e.target.checked)}
+              data-field="isSample"
+            />
           </section>
 
           <section className={ui.card} aria-label={adminEt.badge.title}>

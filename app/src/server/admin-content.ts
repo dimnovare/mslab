@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Db } from "@/db/client";
 import { courses } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { deleteUnusedSession, getCourseForEdit, getSession, isSlugTaken, moveCourse, saveCourseWithImages, upsertSession, type CourseFields } from "@/db/queries/admin";
+import { courseUsage, deleteUnusedSession, getCourseForEdit, getSession, isSlugTaken, moveCourse, saveCourseWithImages, upsertSession, type CourseFields } from "@/db/queries/admin";
 import { tallinnInstant } from "@/domain/calendar";
 import { BADGE_MAX, badgeOf, COURSE_LANGUAGES, LIMITS, swatchOf, type CourseDraft } from "@/domain/course-editor";
 import { parseEuroCents } from "@/domain/money";
@@ -28,6 +28,7 @@ export type FieldError =
   | "tooMany"
   | "image"
   | "badge"
+  | "typeLocked"
   | "course"
   | "date"
   | "time"
@@ -156,6 +157,12 @@ export async function saveCourseForm(db: Db, formData: FormData): Promise<EditRe
   if (d.id != null && (!expected || Number.isNaN(expected.getTime()))) return { ok: false, error: "invalid" };
 
   const c = new Check();
+  // A course with sessions or registrations keeps its type: an e-learning course with dated sessions would put them in
+  // the public calendar (K1/K2), and the sessions could no longer be edited under a contact course.
+  if (d.id != null) {
+    const usage = await courseUsage(db, d.id);
+    if (usage && usage.type !== d.type && (usage.sessions > 0 || usage.registrations > 0)) c.fail("type", "typeLocked");
+  }
   const title = c.text("title", d.title, LIMITS.title, { required: true });
   const summary = c.text("summary", d.summary, LIMITS.summary) ?? { et: "" };
   const body = c.text("body", d.body, LIMITS.body) ?? { et: "" };

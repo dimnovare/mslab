@@ -79,6 +79,16 @@ export async function isSlugTaken(db: Db, slug: string, exceptId?: number): Prom
   return row !== undefined;
 }
 
+/** A stored course's type and how many sessions and registrations point to it (a type change is refused then). */
+export async function courseUsage(db: Db, id: number): Promise<{ type: Course["type"]; sessions: number; registrations: number } | null> {
+  const [[course], [sessions], [regs]] = await Promise.all([
+    db.select({ type: courses.type }).from(courses).where(eq(courses.id, id)),
+    db.select({ n: count() }).from(courseSessions).where(eq(courseSessions.courseId, id)),
+    db.select({ n: count() }).from(registrations).where(eq(registrations.courseId, id)),
+  ]);
+  return course ? { type: course.type, sessions: Number(sessions.n), registrations: Number(regs.n) } : null;
+}
+
 /** The course fields the editor writes (everything but id, sort and updatedAt). */
 export type CourseFields = Omit<CourseInput, "id" | "sort">;
 
@@ -147,16 +157,20 @@ export type AdminSessionRow = CourseSession & {
 };
 
 /**
- * Sessions for the admin calendar, drafts' sessions included. `upcoming`: starting from `from`, soonest first;
- * otherwise the ones before `from`, latest first. With the registration and waitlist counts per session.
+ * Sessions for the admin calendar, drafts' sessions included, with the registration and waitlist counts per session.
+ * `upcoming`: starting from `from`, soonest first; otherwise the ones before `from`, latest first. `{ ids }`: those
+ * sessions, wherever they are in time (the drawer of a session opened from either list).
  */
-export async function listAdminSessions(db: Db, opts: { from: Date; upcoming: boolean }): Promise<AdminSessionRow[]> {
+export async function listAdminSessions(db: Db, opts: { from: Date; upcoming: boolean } | { ids: number[] }): Promise<AdminSessionRow[]> {
+  if ("ids" in opts && opts.ids.length === 0) return [];
+  const where = "ids" in opts ? inArray(courseSessions.id, opts.ids) : opts.upcoming ? gte(courseSessions.startsAt, opts.from) : lt(courseSessions.startsAt, opts.from);
+  const newestFirst = "upcoming" in opts && !opts.upcoming;
   const rows = await db
     .select({ session: courseSessions, course: { id: courses.id, slug: courses.slug, title: courses.title, type: courses.type, published: courses.published } })
     .from(courseSessions)
     .innerJoin(courses, eq(courseSessions.courseId, courses.id))
-    .where(opts.upcoming ? gte(courseSessions.startsAt, opts.from) : lt(courseSessions.startsAt, opts.from))
-    .orderBy(opts.upcoming ? asc(courseSessions.startsAt) : desc(courseSessions.startsAt), asc(courseSessions.id));
+    .where(where)
+    .orderBy(newestFirst ? desc(courseSessions.startsAt) : asc(courseSessions.startsAt), asc(courseSessions.id));
   const ids = rows.map((r) => r.session.id);
   if (ids.length === 0) return [];
   const [regs, waits] = await Promise.all([

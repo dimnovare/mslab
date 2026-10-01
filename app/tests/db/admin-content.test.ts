@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { courseImages, courses, courseSessions, posts, registrations, requests } from "@/db/schema";
-import { getCourseForEdit, listAdminSessions, listAllCourses, listAllPosts, listContactCourses } from "@/db/queries/admin";
+import { courseUsage, getCourseForEdit, listAdminSessions, listAllCourses, listAllPosts, listContactCourses } from "@/db/queries/admin";
+import { listUpcomingSessions } from "@/db/queries/public";
 import { draftFromCourse, newCourseDraft, type CourseDraft } from "@/domain/course-editor";
 import { deleteSessionForm, moveCourseForm, saveCourseForm, saveSessionForm, type EditResult } from "@/server/admin-content";
 
@@ -113,13 +114,14 @@ describe("saveCourseForm: a new course", () => {
 
 describe("saveCourseForm: editing", () => {
   test("saves the draft, refreshes updatedAt, keeps the order and the Näidis mark unless it is cleared", async () => {
+    await db.execute(sql`update courses set updated_at = '2026-01-01T00:00:00Z' where id = ${contact.id}`);
     const before = (await getCourseForEdit(db, contact.id))!;
     const draft = await load(contact.id);
     const r = await save({ ...draft, title: { et: "Kulmude LAMI (uus)" }, badge: { label: "Uus", bg: "#DDD4DC", fg: "#222222" } });
     expect(r).toEqual({ ok: true, id: contact.id, created: false });
     const after = (await getCourseForEdit(db, contact.id))!;
     expect(after).toMatchObject({ title: { et: "Kulmude LAMI (uus)" }, badge: { label: "Uus", bg: "#DDD4DC" }, sort: 1, isSample: true, slug: "kulmude-lami" });
-    expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(before.updatedAt.getTime());
+    expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
     expect(after.images.map((i) => i.key)).toEqual(["/seed/brow-closeup.jpg"]);
     expect(await save({ ...(await load(contact.id)), isSample: false })).toMatchObject({ ok: true });
     expect((await getCourseForEdit(db, contact.id))!.isSample).toBe(false);
@@ -139,6 +141,30 @@ describe("saveCourseForm: editing", () => {
       durationLabel: null,
       includes: [],
     });
+  });
+
+  test("a course with sessions or registrations keeps its type (K1/K2); without them it may change", async () => {
+    // two sessions, so session ids and course ids do not line up by chance
+    const [session, other] = await db
+      .insert(courseSessions)
+      .values([
+        { courseId: contact.id, startsAt: new Date("2026-11-14T08:00:00Z"), city: "Pärnu" },
+        { courseId: contact.id, startsAt: new Date("2026-12-14T08:00:00Z"), city: "Tartu" },
+      ])
+      .returning();
+    expect(await courseUsage(db, contact.id)).toEqual({ type: "contact", sessions: 2, registrations: 0 });
+    expect(await courseUsage(db, online.id)).toEqual({ type: "e_learning", sessions: 0, registrations: 0 });
+    const draft = await load(contact.id);
+    expect(await save({ ...draft, type: "e_learning", price: "150" })).toEqual({ ok: false, error: "invalid", fields: { type: "typeLocked" } });
+    expect((await getCourseForEdit(db, contact.id))!).toMatchObject({ type: "contact", priceGroup: 22000 }); // nothing changed
+    expect(await save({ ...draft, title: { et: "Kulmude LAMI 2" } })).toMatchObject({ ok: true }); // the same type saves as usual
+
+    // registrations lock it too, also once the sessions are gone (and an e-learning course with buyers stays e-learning)
+    await db.insert(registrations).values({ courseId: online.id, kind: "group", name: "Liis", email: "liis@example.com", paymentChoice: "full" });
+    expect(fieldsOf(await save({ ...(await load(online.id)), type: "contact", priceGroup: "100" }))).toEqual({ type: "typeLocked" });
+    await db.delete(courseSessions).where(inArray(courseSessions.id, [session.id, other.id]));
+    expect(await save({ ...(await load(contact.id)), type: "e_learning", price: "150" })).toMatchObject({ ok: true }); // nothing points to it now
+    expect(await courseUsage(db, 999_999)).toBeNull();
   });
 
   test("stale: a save based on an older version changes nothing", async () => {
@@ -242,6 +268,15 @@ describe("calendar sessions", () => {
     expect((await db.select().from(courseSessions)).map((s) => s.id)).toEqual([booked]);
   });
 
+  test("the public calendar lists contact courses' sessions only, even if a session row of an e-learning course exists", async () => {
+    await db.insert(courseSessions).values([
+      { courseId: contact.id, startsAt: new Date("2026-11-14T08:00:00Z"), city: "Pärnu" },
+      { courseId: online.id, startsAt: new Date("2026-11-15T08:00:00Z"), city: "Vale" }, // cannot be made in the editor any more
+    ]);
+    const list = await listUpcomingSessions(db, new Date("2026-10-01T00:00:00Z"));
+    expect(list.map((s) => [s.city, s.course.type])).toEqual([["Pärnu", "contact"]]);
+  });
+
   test("listAdminSessions: upcoming soonest first, past latest first, drafts' sessions too, with the counts", async () => {
     const [draft] = await db.insert(courses).values({ ...base, slug: "mustand", type: "contact", title: { et: "Mustand" } }).returning();
     const at = (iso: string) => new Date(iso);
@@ -268,5 +303,12 @@ describe("calendar sessions", () => {
     ]);
     expect(upcoming[0].course.published).toBe(false);
     expect((await listAdminSessions(db, { from, upcoming: false })).map((s) => s.id)).toEqual([old.id]);
+    // by id, wherever it is in time (the drawer opened from either list), with the same counts
+    const byId = await listAdminSessions(db, { ids: [a.id, old.id] });
+    expect(byId.map((s) => [s.id, s.confirmed, s.awaiting, s.waitlist])).toEqual([
+      [old.id, 0, 0, 0],
+      [a.id, 2, 1, 1],
+    ]);
+    expect(await listAdminSessions(db, { ids: [] })).toEqual([]);
   });
 });

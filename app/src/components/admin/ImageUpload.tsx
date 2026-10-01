@@ -85,41 +85,57 @@ type Status = { kind: "idle" } | { kind: "busy"; text: string } | { kind: "done"
 export function ImageUpload({ onUploaded, multiple = false, label }: { onUploaded: (keys: string[]) => void; multiple?: boolean; label?: string }) {
   const t = adminEt.upload;
   const uid = useId();
-  const input = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const busy = status.kind === "busy";
+  // Files picked while others are still uploading wait their turn (nothing is dropped): one queue, one counter.
+  const queue = useRef<File[]>([]);
+  const progress = useRef({ running: false, done: 0, total: 0, added: 0, problem: null as Problem | null });
 
-  const pick = async (files: File[]) => {
-    if (files.length === 0 || busy) return;
-    const keys: string[] = [];
-    try {
-      for (const [i, file] of files.entries()) {
-        setStatus({ kind: "busy", text: files.length > 1 ? fill(t.uploading, { n: i + 1, total: files.length }) : t.preparing });
-        const small = await shrinkImage(file);
-        if (files.length === 1) setStatus({ kind: "busy", text: fill(t.uploading, { n: 1, total: 1 }) });
-        keys.push(await send(small));
+  const run = async () => {
+    const p = progress.current;
+    p.running = true;
+    while (queue.current.length) {
+      const file = queue.current.shift()!;
+      setStatus({ kind: "busy", text: p.total > 1 ? fill(t.uploading, { n: p.done + 1, total: p.total }) : t.preparing });
+      try {
+        const key = await send(await shrinkImage(file));
+        p.added++;
+        onUploaded([key]); // one by one, in the order picked; the gallery adds to its list as it is by then
+      } catch (e) {
+        p.problem = e instanceof UploadProblem ? e.problem : "server";
       }
-      setStatus({ kind: "done", text: keys.length === 1 ? t.doneOne : fill(t.doneMany, { n: keys.length }) });
-    } catch (e) {
-      setStatus({ kind: "error", text: t[e instanceof UploadProblem ? e.problem : "server"] });
-    } finally {
-      if (keys.length) onUploaded(keys);
-      if (input.current) input.current.value = "";
+      p.done++;
     }
+    // the last problem is said; the images that did upload are already in the list
+    if (p.problem) setStatus({ kind: "error", text: t[p.problem] });
+    else setStatus({ kind: "done", text: p.added === 1 ? t.doneOne : fill(t.doneMany, { n: p.added }) });
+    progress.current = { running: false, done: 0, total: 0, added: 0, problem: null };
   };
+
+  const pick = (files: File[]) => {
+    if (files.length === 0) return;
+    queue.current.push(...files);
+    progress.current.total += files.length;
+    if (progress.current.running) setStatus({ kind: "busy", text: fill(t.queued, { n: files.length, total: progress.current.total }) });
+    else void run();
+  };
+  const busy = status.kind === "busy";
 
   return (
     <div className={styles.upload} data-image-upload="" aria-busy={busy || undefined}>
       <input
-        ref={input}
         id={`${uid}-file`}
         type="file"
         accept={ACCEPT.join(",")}
         multiple={multiple}
         aria-describedby={`${uid}-hint ${uid}-status`}
-        onChange={(e) => void pick(Array.from(e.target.files ?? []))}
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          // reset at once, so the same file can be picked again (and a pick during an upload is not lost)
+          e.target.value = "";
+          pick(files);
+        }}
       />
-      <label htmlFor={`${uid}-file`} className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`} aria-disabled={busy || undefined}>
+      <label htmlFor={`${uid}-file`} className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`}>
         {label ?? (multiple ? t.choose : t.chooseOne)}
       </label>
       <p id={`${uid}-hint`} className={`${ui.muted} ${styles.uploadHint}`}>

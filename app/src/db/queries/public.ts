@@ -71,13 +71,17 @@ export async function getCourseBySlug(
   return { ...course, sessions: course.sessions.map((s) => ({ ...s, confirmed: counts.get(s.id) ?? 0 })) };
 }
 
-/** Sessions of published courses starting on or after `fromDate`, soonest first. Cancelled sessions are included (the calendar shows them as cancelled). */
+/**
+ * Sessions of published contact courses starting on or after `fromDate`, soonest first. Cancelled sessions are included
+ * (the calendar shows them as cancelled). Only contact courses have dates (K1/K2): a session row of an e-learning course
+ * (none can be made: the editor refuses a type change while sessions exist) is never shown.
+ */
 export async function listUpcomingSessions(db: Db, fromDate: Date): Promise<UpcomingSession[]> {
   const rows = await db
     .select({ session: courseSessions, course: courses })
     .from(courseSessions)
     .innerJoin(courses, eq(courseSessions.courseId, courses.id))
-    .where(and(eq(courses.published, true), gte(courseSessions.startsAt, fromDate)))
+    .where(and(eq(courses.published, true), eq(courses.type, "contact"), gte(courseSessions.startsAt, fromDate)))
     .orderBy(asc(courseSessions.startsAt), asc(courseSessions.id));
   const counts = await confirmedBySession(db, rows.map((r) => r.session.id));
   return rows.map((r) => ({ ...r.session, course: r.course, confirmed: counts.get(r.session.id) ?? 0 }));

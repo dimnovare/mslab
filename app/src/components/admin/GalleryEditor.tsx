@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { moveItem, type DraftImage } from "@/domain/course-editor";
+import { LIMITS, moveItem, type DraftImage } from "@/domain/course-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
 import { mediaUrl } from "@/lib/media";
@@ -133,7 +133,7 @@ export function GalleryEditor({
                     {fill(t.image, { n })}
                     {i === 0 && <span className={`${ui.tag} ${ui.dark}`}>{t.main}</span>}
                   </span>
-                  <I18nInput label={t.alt} value={img.alt} onChange={(alt) => onChange((list) => list.map((x, j) => (j === i ? { ...x, alt } : x)))} maxLength={200} />
+                  <I18nInput label={t.alt} value={img.alt} onChange={(alt) => onChange((list) => list.map((x, j) => (j === i ? { ...x, alt } : x)))} maxLength={LIMITS.alt} />
                 </div>
                 <span className={styles.shotTools}>
                   <button
