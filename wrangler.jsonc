@@ -1,0 +1,14 @@
+{
+  // Design-review site for Maria: hub at /guide, prototypes under /p/, comment API at /api/feedback.
+  // Secrets (set with `npx wrangler secret put <NAME>`): ADMIN_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+  "name": "mslab-guide",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "kv_namespaces": [{ "binding": "FEEDBACK", "id": "325a989613294fa19c86451afd8f6fa3" }],
+  "routes": [{ "pattern": "mslab.diipsolutions.eu", "custom_domain": true }]
+}

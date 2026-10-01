@@ -1,0 +1,41 @@
+// End-to-end check of the comment widget: node tools/fb-test.cjs <baseUrl> <outDir> <adminKey>
+// Marks an element on Studio's practice page, sends a comment, lists it, then opens its "Näita kohta" link.
+const { chromium } = require("C:/Users/Dmitri.MARKIT/source/repos/rempire-web/node_modules/playwright");
+(async () => {
+  const [base, out, key] = process.argv.slice(2);
+  const b = await chromium.launch();
+  const p = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  const errs = []; p.on("pageerror", (e) => errs.push(String(e)));
+  await p.goto(base + "/p/d/#/praktika", { waitUntil: "networkidle" });
+  await p.waitForTimeout(800);
+  await p.click("#mslab-fb .fb-fab");
+  await p.fill("#mslab-fb input[type=text]", "Test");
+  await p.click("#mslab-fb .fb-chip >> text=Muuta");
+  await p.click("#mslab-fb .fb-pick");
+  await p.evaluate(() => document.querySelector("#pk h2").scrollIntoView({ block: "center" }));
+  await p.waitForTimeout(300);
+  const box = await p.locator("#pk h2").boundingBox();
+  await p.mouse.move(box.x + 20, box.y + 10);
+  await p.waitForTimeout(200);
+  await p.screenshot({ path: out + "/fb-1-picking.jpg", type: "jpeg", quality: 70 });
+  await p.mouse.click(box.x + 20, box.y + 10);
+  await p.fill("#mslab-fb textarea", "Pealkiri võiks olla suurem.");
+  await p.screenshot({ path: out + "/fb-2-panel.jpg", type: "jpeg", quality: 70 });
+  await p.click("#mslab-fb .fb-send");
+  await p.waitForSelector("#mslab-fb .fb-ok", { timeout: 5000 });
+  await p.screenshot({ path: out + "/fb-3-sent.jpg", type: "jpeg", quality: 70 });
+  const list = await (await fetch(base + "/api/feedback", { headers: { "x-key": key } })).json();
+  const c = list.items[0];
+  console.log("stored:", c.name, c.dir, c.route, c.device, c.mood, "|", c.el.label, "|", c.text);
+  console.log("link:", c.link);
+  const unauth = await fetch(base + "/api/feedback");
+  console.log("list without key ->", unauth.status);
+  await p.goto(c.link.replace(/^https?:\/\/[^/]+/, base), { waitUntil: "networkidle" });
+  await p.waitForTimeout(3000);
+  await p.screenshot({ path: out + "/fb-4-show.jpg", type: "jpeg", quality: 70 });
+  await p.goto(base + "/guide/tagasiside/#key=" + key, { waitUntil: "networkidle" });
+  await p.waitForTimeout(800);
+  await p.screenshot({ path: out + "/fb-5-list.jpg", type: "jpeg", quality: 70 });
+  console.log(errs.length ? "PAGE ERRORS " + errs.join(" | ") : "no page errors");
+  await b.close();
+})().catch((e) => { console.error(e); process.exit(1); });

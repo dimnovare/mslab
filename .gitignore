@@ -1,0 +1,8 @@
+.dev.vars
+.env*
+.next/
+.open-next/
+.playwright-mcp/
+.wrangler/
+/Assets/
+node_modules/

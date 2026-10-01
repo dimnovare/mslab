@@ -1,0 +1,40 @@
+
+/* Direction B: make the learning journey visible before purchase. */
+:root{--paper:#fcfafb;--panel:#eee9ed;--rose:#9e8993}
+.over-hero{margin-bottom:-92px;background:transparent!important;border-bottom-color:#81747c26;backdrop-filter:none}
+.over-hero.light-ink{color:#fff}.over-hero.light-ink .logo img{filter:invert(1);mix-blend-mode:screen}
+.over-hero.light-ink .btn{background:white;color:#222;border-color:white}
+.over-hero.light-ink .desktop-nav a.active:after{background:#fff}
+.over-hero.scrolled{background:#fcfafbf5!important;backdrop-filter:blur(18px);color:#222}
+.over-hero.scrolled .logo img{filter:none;mix-blend-mode:multiply}.over-hero.scrolled .btn{background:#222;color:white}
+.journey-hero{min-height:720px}.journey-hero .hero-content{padding-top:96px}.journey-hero .hero-caption{top:132px}
+.hero .eyebrow,.hero p{font-size:15px}.hero-controls{font-size:13px}
+.session-row .session-place{display:block!important;font-size:16px;font-weight:600}.session-place small{font-size:12px;font-weight:400}
+.course-badge{position:absolute;top:18px;right:18px;z-index:2;color:white;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600}
+.course-photo .tags{right:18px;top:auto;bottom:18px;max-width:calc(100% - 70px)}
+.journey-panel{background:#eee8ed;border-radius:24px;padding:38px 40px;margin:0 0 30px}
+.journey-copy{display:grid;grid-template-columns:1fr 1.1fr;gap:50px;align-items:start}
+.journey-copy h2{font-size:36px;line-height:1.15}.journey-copy p{font-size:15px;color:#5e535a}
+.learning-steps{list-style:none;padding:0;margin:38px 0 26px;display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+.learning-steps li{position:relative}.learning-steps li:not(:last-child):after{content:"";position:absolute;top:23px;left:61px;right:0;height:1px;background:#bfb0b9}
+.learning-steps span{display:grid;place-items:center;width:46px;height:46px;border:1px solid #89707e;border-radius:50%;font-size:14px;background:#fcfafb}
+.learning-steps p{margin-top:16px;font-size:13px;max-width:150px;color:#40383d}.journey-note{font-size:12px;color:#67545f;border-top:1px solid #d3c6ce;padding-top:18px;max-width:none}
+.format-intro{padding:6px 0 32px}.format-intro h2{font-size:30px;margin-bottom:12px}.format-intro p{color:var(--muted)}
+.level-filter{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 30px}.level-filter .pill{font-size:12px}
+.practice-panel{grid-template-columns:1fr 1.4fr;gap:45px}.practice-intro p{line-height:1.85}
+.protocol-note{border-top:1px solid #655860;margin-top:28px;padding-top:24px}.protocol-note h3{font-size:25px;line-height:1.2;letter-spacing:-.02em}.protocol-note p{margin:14px 0 0!important}.practice-flower{display:none}
+.course-library{margin:52px 0 36px}.course-library h2{font-size:34px;margin-bottom:12px}.owned-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.owned-card{background:white;border:1px solid var(--line);border-radius:18px;overflow:hidden;display:grid;grid-template-columns:140px 1fr}
+.owned-card>img{width:100%;height:100%;min-height:255px;object-fit:cover}.owned-card>div{padding:24px}.owned-card h3{font-size:24px;line-height:1.18;margin:16px 0 10px}.owned-card p{font-size:12px;color:var(--muted)}.owned-card .progress{margin:24px 0 6px}
+.student-protocol{background:#eee8ed;padding:28px 32px;border-radius:18px;display:flex;justify-content:space-between;align-items:center;gap:25px;margin-bottom:32px}.student-protocol p{font-size:13px;color:var(--muted);margin-top:10px}
+.badge-editor{padding:24px 0;border-bottom:1px solid var(--line)}.badge-editor h3{font-size:23px;margin-bottom:18px}
+#experience-form h2{font-size:32px;margin-bottom:16px}#experience-form .form-grid{grid-template-columns:1fr 1fr}#experience-form input[type=color]{width:90px;padding:5px;cursor:pointer}
+@media(max-width:1180px){.over-hero{margin-bottom:-84px}.journey-hero .hero-content{padding-top:84px}.practice-panel{grid-template-columns:1fr}.practice-intro{display:block}.owned-card{grid-template-columns:100px 1fr}}
+@media(max-width:900px){.journey-copy{grid-template-columns:1fr;gap:18px}.journey-panel{padding:30px}.owned-grid{grid-template-columns:1fr}.session-row{grid-template-columns:78px 1fr auto}.session-row .session-place{grid-column:2}.session-row>.btn{grid-column:3;grid-row:1/3}.practice-intro{display:block}}
+@media(max-width:640px){.over-hero{margin-bottom:-78px}.journey-hero{min-height:790px;height:790px;max-height:none}.journey-hero .hero-content{padding-top:122px}.hero h1{font-size:clamp(44px,12.1vw,58px)}.hero .eyebrow{font-size:12px}.hero p{font-size:14px}
+.journey-panel{padding:26px 22px}.journey-copy h2{font-size:32px}.learning-steps{display:flex;flex-direction:column;gap:0;margin:28px 0}
+.learning-steps li{display:grid;grid-template-columns:46px 1fr;gap:18px;align-items:center;padding-bottom:22px}.learning-steps p{margin:0;max-width:none;font-size:14px}.learning-steps li:not(:last-child):after{left:23px;top:46px;width:1px;height:22px;right:auto}
+.learning-steps li:last-child{padding-bottom:0}.session-row{grid-template-columns:62px 1fr}.session-row .session-place{grid-column:2;grid-row:auto;margin-top:-4px}.session-row>.btn{grid-column:2;grid-row:auto}
+.owned-card{grid-template-columns:88px 1fr}.owned-card>div{padding:20px}.owned-card h3{font-size:22px}.student-protocol{display:block;padding:24px}.student-protocol .btn{margin-top:20px;white-space:normal}
+.practice-panel{padding:28px 22px}.course-library .section-heading{display:block}.course-library .pills{margin-top:20px}#experience-form .form-grid{grid-template-columns:1fr}
+}
