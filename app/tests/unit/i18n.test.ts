@@ -5,6 +5,7 @@ import { fill } from "@/i18n/format";
 import { LOCALES, getDict } from "@/i18n/locales";
 import { et } from "@/i18n/dict/et";
 import { ru } from "@/i18n/dict/ru";
+import { adminEt } from "@/i18n/dict/admin";
 
 const keys = (o: object, p = ""): string[] =>
   Object.entries(o).flatMap(([k, v]) => (typeof v === "object" ? keys(v, p + k + ".") : [p + k]));
@@ -71,5 +72,21 @@ describe("fill", () => {
     expect(fill("© {year} MS LAB", { year: 2026 })).toBe("© 2026 MS LAB");
     expect(fill("{a}-{b}", { a: "x" })).toBe("x-{b}");
     expect(fill("no placeholders", {})).toBe("no placeholders");
+  });
+});
+
+describe("admin dictionary (Estonian only)", () => {
+  test("no empty strings, no AI tool names, and the placeholders the code fills are there", () => {
+    for (const [k, v] of leaves(adminEt)) {
+      expect(v.trim(), k).not.toBe("");
+      expect(v, k).not.toMatch(/claude|anthropic|gpt|openai|lovable|chatgpt/i);
+    }
+    expect(adminEt.mail.text).toContain("{link}");
+    expect(adminEt.panel.hello).toBe("Tere, {name}.");
+  });
+  test("the login e-mail and the neutral answer say what the brief says", () => {
+    expect(adminEt.mail.subject).toBe("MS LAB — sisselogimislink");
+    expect(adminEt.login.sent).toBe("Kui see aadress on lubatud, saatsime sisselogimislingi.");
+    expect(adminEt.login.submit).toBe("Saada sisselogimislink");
   });
 });

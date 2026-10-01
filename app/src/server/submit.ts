@@ -30,6 +30,7 @@ import {
 import { logFailure } from "./log";
 import { adminUrl, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
+import { isTokenShape, newToken, sha256 } from "./token";
 
 // The public form submissions without Next.js: actions/public.ts builds the dependencies (database, Worker env,
 // visitor IP, after()) and calls these, and the tests call them with PGlite and fakes.
@@ -287,17 +288,6 @@ export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionRe
 
 // ---------- newsletter (double opt-in) ----------
 
-/** 32 random bytes, base64url (43 characters). */
-export function newToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 export const confirmUrl = (siteUrl: string, token: string) =>
   `${siteUrl.replace(/\/+$/, "")}/api/newsletter/confirm?t=${encodeURIComponent(token)}`;
 
@@ -334,7 +324,7 @@ export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionR
 
 /** The confirmation link: sets `confirmedAt` once (later clicks keep the first time). null = unknown token. */
 export async function confirmSubscriber(db: Db, token: string, now: Date): Promise<Subscriber | null> {
-  if (!/^[A-Za-z0-9_-]{20,100}$/.test(token)) return null;
+  if (!isTokenShape(token)) return null;
   const [row] = await db.select().from(subscribers).where(eq(subscribers.token, token)).limit(1);
   if (!row) return null;
   if (row.confirmedAt) return row;

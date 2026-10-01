@@ -1,0 +1,162 @@
+/* Admin login: a white card on the canvas colour, the public site's tokens and fonts. */
+
+.page {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 32px var(--gutter);
+  background: var(--canvas);
+}
+
+.card {
+  width: 100%;
+  max-width: 460px;
+  padding: clamp(28px, 6vw, 48px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  background: var(--paper);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  width: 140px;
+  height: 55px;
+  margin: -8px 0 20px -2px;
+}
+
+.logo img {
+  display: block;
+  width: 138px;
+  height: auto;
+  mix-blend-mode: multiply;
+}
+
+.title {
+  margin: 0;
+  font: 400 clamp(28px, 6vw, 36px) / 1.1 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.lead {
+  margin: 12px 0 28px;
+  color: #3a3437;
+  font: 400 15px/1.55 var(--font-body);
+}
+
+.label {
+  display: block;
+  margin-bottom: 8px;
+  font: 500 13px/1.4 var(--font-body);
+  letter-spacing: 0.01em;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  min-height: 49px;
+  padding: 14px 20px;
+  border: 1px solid #c6b8c0;
+  border-radius: 99px;
+  background: #f9f6f8;
+  color: var(--ink);
+  font: 400 16px/1.2 var(--font-body); /* 16px: iOS does not zoom into the field */
+}
+
+.input:focus {
+  border-color: var(--rose);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 49px;
+  margin-top: 16px;
+  padding: 13px 24px;
+  border: 1px solid var(--ink);
+  border-radius: 99px;
+  background: var(--ink);
+  color: #fff;
+  font: 600 14px/1.2 var(--font-body);
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+
+.submit:hover {
+  background: #40383c;
+  transform: translateY(-2px);
+}
+
+.submit:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.submit[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+
+.error {
+  margin: 14px 0 0;
+  color: var(--bad);
+  font: 500 14px/1.45 var(--font-body);
+}
+
+/* The "link did not work" notice above the form. */
+.notice {
+  margin: 0 0 22px;
+  color: var(--bad);
+  font: 500 14px/1.45 var(--font-body);
+}
+
+.error:focus {
+  outline: none;
+}
+
+.status:focus {
+  outline: none;
+}
+
+.status:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 6px;
+  border-radius: 6px;
+}
+
+.sentTitle {
+  margin: 0;
+  font: 400 24px/1.15 var(--font-display);
+}
+
+.sent {
+  margin: 12px 0 0;
+  font: 400 16px/1.55 var(--font-body);
+}
+
+.hint {
+  margin: 8px 0 0;
+  color: #61555d;
+  font: 400 14px/1.5 var(--font-body);
+}
+
+.again {
+  min-height: 44px;
+  margin-top: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 500 14px/1.2 var(--font-body);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}

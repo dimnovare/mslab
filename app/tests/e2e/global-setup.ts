@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { applySeatFixtures, LOCAL_FIXTURES, removeFormRows } from "./fixtures";
+import { applySeatFixtures, LOCAL_FIXTURES, removeAdminRows, removeFormRows } from "./fixtures";
 
 // Runs once per `playwright test` run (whatever the file or --grep filter): seat fixtures for the calendar tests, and
 // leftovers of an interrupted run's form submissions removed.
@@ -13,6 +13,7 @@ export default async function globalSetup(): Promise<void> {
   }
   refuseMailSecrets();
   await removeFormRows();
+  await removeAdminRows(); // e2e-auth-… leftovers of an interrupted run
   await applySeatFixtures();
 }
 

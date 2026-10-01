@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import postgres from "postgres";
 
 // Test-owned seat fixtures for the calendar e2e tests. The seed never contains registrations (the real database will
@@ -134,6 +135,69 @@ export async function storedSubscriber(email: string): Promise<StoredSubscriber 
   try {
     const [row] = await sql<StoredSubscriber[]>`select email, locale, confirmed_at is not null as confirmed, token from subscribers where email = ${email}`;
     return row ?? null;
+  } finally {
+    await sql.end();
+  }
+}
+
+// ---------- admin sign-in rows ----------
+// Signing in needs an allow-listed address, so these tests sign in as the real admins on the LOCAL dev database (nothing is
+// e-mailed: there is no RESEND_API_KEY, and the request answer carries a devLink). Each test deletes exactly the token and
+// session rows it created (found by the hash of the link token / session cookie), so a session of a developer who is
+// signed in to the dev server at the same time is untouched. Addresses outside the allow-list are `e2e-auth-…@example.com`.
+
+export const AUTH_TEST_EMAIL_PATTERN = "e2e-auth-%@example.com";
+
+/** A unique address for a test that must NOT be allowed to sign in. */
+export function authTestEmail(project: string): string {
+  return `e2e-auth-${project}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@example.com`.toLowerCase();
+}
+
+export const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
+
+/** Deletes the token rows and session rows of the given raw values (and every row of an e2e-auth address). */
+export async function removeAdminRows(rows: { tokens?: Iterable<string>; sessions?: Iterable<string> } = {}): Promise<number> {
+  const sql = connect();
+  try {
+    for (const t of rows.tokens ?? []) await sql`delete from auth_tokens where hash = ${sha256Hex(t)}`;
+    for (const s of rows.sessions ?? []) await sql`delete from admin_sessions where id_hash = ${sha256Hex(s)}`;
+    await sql`delete from auth_tokens where email like ${AUTH_TEST_EMAIL_PATTERN}`;
+    await sql`delete from admin_sessions where email like ${AUTH_TEST_EMAIL_PATTERN}`;
+    const [{ n }] = await sql<{ n: number }[]>`
+      select (select count(*) from auth_tokens where email like ${AUTH_TEST_EMAIL_PATTERN})
+           + (select count(*) from admin_sessions where email like ${AUTH_TEST_EMAIL_PATTERN})::int as n`;
+    return Number(n);
+  } finally {
+    await sql.end();
+  }
+}
+
+/** The token rows stored for one address. */
+export async function storedAuthTokens(email: string): Promise<{ used: boolean }[]> {
+  const sql = connect();
+  try {
+    return await sql<{ used: boolean }[]>`select used_at is not null as used from auth_tokens where email = ${email}`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Is there a session row for this raw session id? */
+export async function sessionExists(rawSession: string): Promise<boolean> {
+  const sql = connect();
+  try {
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from admin_sessions where id_hash = ${sha256Hex(rawSession)}`;
+    return n > 0;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Makes a login token expire a minute ago (the 15 minutes cannot be waited out). */
+export async function expireAuthToken(rawToken: string): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`update auth_tokens set expires_at = now() - interval '1 minute' where hash = ${sha256Hex(rawToken)}`;
   } finally {
     await sql.end();
   }
