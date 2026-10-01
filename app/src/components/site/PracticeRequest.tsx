@@ -98,6 +98,9 @@ export function PracticeRequest({ packages, locale, t }: { packages: PracticeOpt
     window.history.replaceState(null, "", `${window.location.pathname}?${live.toString()}${window.location.hash}`);
   };
 
+  // Nothing to request without a package (the page does not render the form then either).
+  if (packages.length === 0) return null;
+
   if (state.status === "sent") {
     return (
       <div ref={sentRef} className={styles.sent} role="status" tabIndex={-1} data-practice-sent="">

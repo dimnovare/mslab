@@ -40,7 +40,9 @@ export function WorksGallery({ images, t }: { images: LightboxImage[]; t: WorksT
     };
   }, [measure]);
 
+  // The arrows stay focusable at the ends (aria-disabled, not disabled), so keyboard focus is never dropped to the page.
   const scroll = (dir: 1 | -1) => {
+    if (dir === -1 ? ends.start : ends.end) return;
     const el = track.current;
     const item = el?.firstElementChild as HTMLElement | null;
     if (!el || !item) return;
@@ -60,10 +62,10 @@ export function WorksGallery({ images, t }: { images: LightboxImage[]; t: WorksT
         </h2>
         {scrolls && (
           <div className={styles.arrows}>
-            <button type="button" className={styles.arrow} onClick={() => scroll(-1)} disabled={ends.start} aria-label={t.previous}>
+            <button type="button" className={styles.arrow} onClick={() => scroll(-1)} aria-disabled={ends.start || undefined} aria-label={t.previous}>
               <Icon name="chevronLeft" size={18} />
             </button>
-            <button type="button" className={styles.arrow} onClick={() => scroll(1)} disabled={ends.end} aria-label={t.next}>
+            <button type="button" className={styles.arrow} onClick={() => scroll(1)} aria-disabled={ends.end || undefined} aria-label={t.next}>
               <Icon name="chevronRight" size={18} />
             </button>
           </div>

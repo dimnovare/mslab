@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Icon } from "@/components/site/Icon";
@@ -77,39 +78,49 @@ export default async function PracticePage({ params }: Props) {
         />
       )}
 
-      <section id="taotlus" className={`${ui.wrap} ${styles.request}`} aria-labelledby="taotlus-title">
-        <div className={styles.requestInner}>
-          <h2 id="taotlus-title" className={styles.requestTitle}>
-            {p.requestTitle}
-          </h2>
-          <PracticeRequest
-            packages={views.map((v) => ({ code: v.code, name: v.name, duration: v.duration, price: v.price }))}
-            locale={locale}
-            t={{
-              selectedPackage: p.selectedPackage,
-              packageLabel: p.package,
-              packageRequired: p.packageRequired,
-              durationLabel: p.duration,
-              name: d.forms.name,
-              email: d.forms.email,
-              phone: d.forms.phone,
-              completedCourse: p.completedCourse,
-              optional: d.forms.optional,
-              preferredTimes: p.preferredTimes,
-              preferredTimesPlaceholder: p.preferredTimesPlaceholder,
-              note: p.requestNote,
-              submit: p.requestSubmit,
-              sending: d.forms.sending,
-              sent: p.requestSent,
-              sentText: p.requestSentText,
-              errorRequired: d.forms.errorRequired,
-              errorEmail: d.forms.errorEmail,
-              errorTooMany: d.forms.errorTooMany,
-              errorGeneric: d.forms.errorGeneric,
-            }}
-          />
+      {/* No packages (none set up in admin): no panel and no request form; the contact page takes questions instead. */}
+      {views.length === 0 ? (
+        <div className={`${ui.wrap} ${styles.request}`}>
+          <Link className={ui.btnOutline} href={to("/kontakt")}>
+            {d.footer.contactCta}
+            <Icon name="arrow" />
+          </Link>
         </div>
-      </section>
+      ) : (
+        <section id="taotlus" className={`${ui.wrap} ${styles.request}`} aria-labelledby="taotlus-title">
+          <div className={styles.requestInner}>
+            <h2 id="taotlus-title" className={styles.requestTitle}>
+              {p.requestTitle}
+            </h2>
+            <PracticeRequest
+              packages={views.map((v) => ({ code: v.code, name: v.name, duration: v.duration, price: v.price }))}
+              locale={locale}
+              t={{
+                selectedPackage: p.selectedPackage,
+                packageLabel: p.package,
+                packageRequired: p.packageRequired,
+                durationLabel: p.duration,
+                name: d.forms.name,
+                email: d.forms.email,
+                phone: d.forms.phone,
+                completedCourse: p.completedCourse,
+                optional: d.forms.optional,
+                preferredTimes: p.preferredTimes,
+                preferredTimesPlaceholder: p.preferredTimesPlaceholder,
+                note: p.requestNote,
+                submit: p.requestSubmit,
+                sending: d.forms.sending,
+                sent: p.requestSent,
+                sentText: p.requestSentText,
+                errorRequired: d.forms.errorRequired,
+                errorEmail: d.forms.errorEmail,
+                errorTooMany: d.forms.errorTooMany,
+                errorGeneric: d.forms.errorGeneric,
+              }}
+            />
+          </div>
+        </section>
+      )}
     </>
   );
 }

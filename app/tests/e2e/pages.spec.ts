@@ -1,10 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
+import { LOCAL_FIXTURES } from "./fixtures";
 
 // Task 9: calendar (L1–L5), practice (R1–R5), trainer (T1–T4), blog (B1), contact and legal pages.
 // The first three tests are the brief's tests, verbatim except one locator: `getByText(/ak/)` first matched the header's
 // "Praktika" menu link (pr-AK-tika), which is hidden on phones, so the duration check is `/\d+\s*ak\b/` ("≈ 4 ak").
 // The rest cover the remaining checklist items against the seed data (8 contact-course sessions, the Tartu one
-// cancelled; MINI/MAXI; 7 trainer works; 6 posts).
+// cancelled; MINI/MAXI; 7 trainer works; 6 posts). Against the local server, global-setup also makes the LAMI Pärnu
+// session full and the Lash Lift Viljandi one "few" with test-owned registrations (see fixtures.ts).
 
 test("calendar puts course name first and shows language", async ({ page }) => {
   await page.goto("/koolituskalender");
@@ -129,6 +131,91 @@ test.describe("calendar", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Расписание");
     await expect(page.locator("[data-city-filter] button").first()).toHaveText("Все");
     await expect(page.locator("[data-calendar-row]").first().getByRole("link", { name: /Записаться/ })).toHaveAttribute("href", /^\/ru\/koolitused\/.+\?sessioon=\d+$/);
+  });
+});
+
+test.describe("calendar seat states (test-owned fixtures in the local DB)", () => {
+  test.skip(!LOCAL_FIXTURES, "the seat fixtures are only inserted into the local dev database");
+
+  test("a full session: Täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }) => {
+    await page.goto("/koolituskalender");
+    const full = page.locator("[data-calendar-row][data-state='full']");
+    await expect(full).toHaveCount(1);
+    await expect(full.locator("[data-course-name]")).toHaveText("Kulmude LAMI");
+    await expect(full.locator("[data-city]")).toHaveText("Pärnu");
+    await expect(full).toContainText("23.01");
+    await expect(full).toContainText("Täis");
+    expect(await full.locator("[data-seat-state]").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(94, 85, 89)");
+    await expect(full.getByRole("link", { name: /Registreeru/ })).toHaveCount(0);
+
+    // Disclosure: opens the form under the row with focus in the name field, and closes again.
+    const toggle = full.getByRole("button", { name: /Ootenimekirja/ });
+    const form = full.locator("[data-waitlist-form]");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(form).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(`[id="${await toggle.getAttribute("aria-controls")}"]`)).toBeVisible();
+    await expect(form.getByLabel("Nimi")).toBeFocused();
+    await expect(form).toContainText("Kulmude LAMI · 23.01 · Pärnu");
+    await expect(form).toHaveAttribute("method", "post");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(form).toBeHidden();
+    await toggle.click();
+    await expect(form.getByLabel("Nimi")).toBeFocused();
+
+    // Errors: focus goes to the first invalid field, which describes its error.
+    const submit = form.getByRole("button", { name: "Liitu ootenimekirjaga" });
+    await submit.click();
+    const name = form.getByLabel("Nimi");
+    await expect(name).toBeFocused();
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(name).toHaveAccessibleDescription("See väli on kohustuslik.");
+    await name.fill("Test Õpilane");
+    const email = form.getByLabel("E-post", { exact: true });
+    await email.fill("vale-aadress");
+    await submit.click();
+    await expect(email).toBeFocused();
+    await expect(email).toHaveAccessibleDescription("Sisesta korrektne e-posti aadress.");
+    await expect(name).not.toHaveAttribute("aria-invalid", "true");
+
+    // A valid request shows the confirmation and moves focus to it.
+    await email.fill("test@example.com");
+    await submit.click();
+    const sent = full.locator("[data-waitlist-sent]");
+    await expect(sent).toHaveText("Aitäh! Oled ootenimekirjas.");
+    await expect(sent).toBeFocused();
+  });
+
+  test("a session with two seats left says Viimased kohad and can still be booked", async ({ page }) => {
+    await page.goto("/koolituskalender");
+    const few = page.locator("[data-calendar-row][data-state='few']");
+    await expect(few).toHaveCount(1);
+    await expect(few.locator("[data-course-name]")).toHaveText("Lash Lift BOTOX baaskoolitus");
+    await expect(few.locator("[data-city]")).toHaveText("Viljandi");
+    await expect(few).toContainText("Viimased kohad · 2");
+    expect(await few.locator("[data-seat-state]").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(107, 79, 92)");
+    await expect(few.getByRole("link", { name: /Registreeru/ })).toHaveAttribute("href", /^\/koolitused\/lash-lift-botox\?sessioon=\d+$/);
+    await expect(few.getByRole("button", { name: /Ootenimekirja/ })).toHaveCount(0);
+  });
+
+  test("the course page shows the full date but it cannot be picked", async ({ page }) => {
+    await page.goto("/koolitused/kulmude-lami");
+    const full = page.locator("[data-session][data-state='full']");
+    await expect(full).toHaveCount(1);
+    await expect(full).toHaveAttribute("aria-disabled", "true");
+    await expect(full).toContainText("Täis");
+    await full.click({ force: true });
+    await expect(full).toHaveAttribute("aria-checked", "false");
+  });
+
+  test("RU: full and few rows", async ({ page }) => {
+    await page.goto("/ru/koolituskalender");
+    const full = page.locator("[data-calendar-row][data-state='full']");
+    await expect(full).toContainText("Мест нет");
+    await expect(full.getByRole("button", { name: /В лист ожидания/ })).toBeVisible();
+    await expect(page.locator("[data-calendar-row][data-state='few']")).toContainText("Последние места · 2");
   });
 });
 
@@ -261,6 +348,37 @@ test.describe("trainer", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(second).toBeFocused();
+  });
+
+  test("carousel arrows keep keyboard focus at the ends (aria-disabled, not disabled)", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/koolitaja");
+    const works = page.locator("[data-works]");
+    const track = works.locator("[data-works-track]");
+    const prev = works.getByRole("button", { name: "Eelmine" });
+    const next = works.getByRole("button", { name: "Järgmine" });
+    await expect(prev).toHaveAttribute("aria-disabled", "true");
+    await expect(next).not.toHaveAttribute("aria-disabled", "true");
+    await next.focus();
+    for (let i = 0; i < 10 && (await next.getAttribute("aria-disabled")) !== "true"; i++) {
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(100);
+    }
+    await expect(next).toHaveAttribute("aria-disabled", "true");
+    await expect(next).toBeFocused();
+    const end = await track.evaluate((e) => e.scrollLeft);
+    await page.keyboard.press("Enter"); // nothing to scroll at the end
+    await page.waitForTimeout(100);
+    expect(await track.evaluate((e) => e.scrollLeft)).toBe(end);
+    await expect(prev).not.toHaveAttribute("aria-disabled", "true");
+    await prev.focus();
+    for (let i = 0; i < 10 && (await prev.getAttribute("aria-disabled")) !== "true"; i++) {
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(100);
+    }
+    await expect(prev).toHaveAttribute("aria-disabled", "true");
+    await expect(prev).toBeFocused();
+    expect(await track.evaluate((e) => e.scrollLeft)).toBe(0);
   });
 
   test("Koolituskeskuse lugu and Koolitaja teekond are editorial blocks with a thin rose rule (T3, T4)", async ({ page }) => {

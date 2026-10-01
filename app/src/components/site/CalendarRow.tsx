@@ -77,7 +77,7 @@ export function CalendarRow({ row, locale, t }: { row: CalendarRowData; locale: 
             {row.language}
           </span>
         </p>
-        <p className={styles.state}>
+        <p className={styles.state} data-seat-state="">
           <i aria-hidden="true" />
           {row.stateLabel}
         </p>

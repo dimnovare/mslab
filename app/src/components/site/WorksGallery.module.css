@@ -44,11 +44,11 @@
     opacity 0.2s;
 }
 
-.arrow:hover:not(:disabled) {
+.arrow:hover:not([aria-disabled="true"]) {
   border-color: var(--ink);
 }
 
-.arrow:disabled {
+.arrow[aria-disabled="true"] {
   opacity: 0.35;
   cursor: default;
 }
