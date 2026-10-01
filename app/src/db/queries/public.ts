@@ -1,0 +1,137 @@
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import type { Db } from "../client";
+import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "../schema";
+import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "../schema";
+
+// Public (read-only) queries. Every function takes the Db as its first argument and never creates one itself.
+
+export type CourseWithImages = Course & { images: CourseImage[] };
+export type SessionWithSeats = CourseSession & { confirmed: number };
+export type CourseDetail = CourseWithImages & { sessions: SessionWithSeats[] };
+export type UpcomingSession = SessionWithSeats & { course: Course };
+export type HomeData = {
+  slides: HeroSlide[];
+  courses: CourseWithImages[];
+  faq: FaqItem[];
+  posts: Post[];
+  practice: PracticePackage[];
+  pages: Record<string, Page>;
+  settings: Record<string, unknown>;
+  campaign: Campaign | null;
+};
+
+/** Number of newest posts shown in the home page blog carousel. */
+const HOME_POSTS_LIMIT = 8;
+
+const imageOrder = [asc(courseImages.sort), asc(courseImages.id)];
+
+/** Confirmed registrations per session id (`count(*) filter (where status = 'confirmed')`). Sessions without any are absent from the map. */
+async function confirmedBySession(db: Db, sessionIds: number[]): Promise<Map<number, number>> {
+  if (sessionIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      sessionId: registrations.courseSessionId,
+      confirmed: sql<number>`count(*) filter (where ${registrations.status} = 'confirmed')`.mapWith(Number),
+    })
+    .from(registrations)
+    .where(inArray(registrations.courseSessionId, sessionIds))
+    .groupBy(registrations.courseSessionId);
+  return new Map(rows.flatMap((r) => (r.sessionId == null ? [] : [[r.sessionId, r.confirmed] as const])));
+}
+
+export async function listPublishedCourses(db: Db): Promise<CourseWithImages[]> {
+  return db.query.courses.findMany({
+    where: eq(courses.published, true),
+    orderBy: [asc(courses.sort), asc(courses.id)],
+    with: { images: { orderBy: imageOrder } },
+  });
+}
+
+/**
+ * A course page. Drafts are hidden unless `includeUnpublished` is set (admin preview).
+ * Sessions are ordered by start; pass `sessionsFrom` to drop sessions that started before that date.
+ */
+export async function getCourseBySlug(
+  db: Db,
+  slug: string,
+  opts: { includeUnpublished?: boolean; sessionsFrom?: Date } = {},
+): Promise<CourseDetail | null> {
+  const course = await db.query.courses.findFirst({
+    where: opts.includeUnpublished ? eq(courses.slug, slug) : and(eq(courses.slug, slug), eq(courses.published, true)),
+    with: {
+      images: { orderBy: imageOrder },
+      sessions: {
+        where: opts.sessionsFrom ? gte(courseSessions.startsAt, opts.sessionsFrom) : undefined,
+        orderBy: [asc(courseSessions.startsAt), asc(courseSessions.id)],
+      },
+    },
+  });
+  if (!course) return null;
+  const counts = await confirmedBySession(db, course.sessions.map((s) => s.id));
+  return { ...course, sessions: course.sessions.map((s) => ({ ...s, confirmed: counts.get(s.id) ?? 0 })) };
+}
+
+/** Sessions of published courses starting on or after `fromDate`, soonest first. Cancelled sessions are included (the calendar shows them as cancelled). */
+export async function listUpcomingSessions(db: Db, fromDate: Date): Promise<UpcomingSession[]> {
+  const rows = await db
+    .select({ session: courseSessions, course: courses })
+    .from(courseSessions)
+    .innerJoin(courses, eq(courseSessions.courseId, courses.id))
+    .where(and(eq(courses.published, true), gte(courseSessions.startsAt, fromDate)))
+    .orderBy(asc(courseSessions.startsAt), asc(courseSessions.id));
+  const counts = await confirmedBySession(db, rows.map((r) => r.session.id));
+  return rows.map((r) => ({ ...r.session, course: r.course, confirmed: counts.get(r.session.id) ?? 0 }));
+}
+
+export async function getPracticePackages(db: Db): Promise<PracticePackage[]> {
+  return db.select().from(practicePackages).orderBy(asc(practicePackages.sort), asc(practicePackages.code));
+}
+
+/** Published posts, newest first. */
+export async function listPosts(db: Db, limit?: number): Promise<Post[]> {
+  const q = db.select().from(posts).where(eq(posts.published, true)).orderBy(desc(posts.publishedAt), desc(posts.id));
+  return limit ? q.limit(limit) : q;
+}
+
+export async function getPost(db: Db, slug: string): Promise<Post | null> {
+  const [row] = await db.select().from(posts).where(and(eq(posts.slug, slug), eq(posts.published, true))).limit(1);
+  return row ?? null;
+}
+
+export async function getPage(db: Db, key: string): Promise<Page | null> {
+  const [row] = await db.select().from(pages).where(eq(pages.key, key)).limit(1);
+  return row ?? null;
+}
+
+export async function getGallery(db: Db, group: string): Promise<GalleryItem[]> {
+  return db.select().from(galleryItems).where(eq(galleryItems.group, group)).orderBy(asc(galleryItems.sort), asc(galleryItems.id));
+}
+
+export async function getSettings(db: Db): Promise<Record<string, unknown>> {
+  const rows = await db.select().from(settings);
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+/** Everything the home page needs in one call. The campaign is null when it is switched off. */
+export async function getHomeData(db: Db): Promise<HomeData> {
+  const [slides, courseList, faqItems, postList, practice, pageRows, settingsMap, campaignRow] = await Promise.all([
+    db.select().from(heroSlides).where(eq(heroSlides.active, true)).orderBy(asc(heroSlides.sort), asc(heroSlides.id)),
+    listPublishedCourses(db),
+    db.select().from(faq).orderBy(asc(faq.sort), asc(faq.id)),
+    listPosts(db, HOME_POSTS_LIMIT),
+    getPracticePackages(db),
+    db.select().from(pages),
+    getSettings(db),
+    db.select().from(campaign).where(eq(campaign.id, 1)).limit(1),
+  ]);
+  return {
+    slides,
+    courses: courseList,
+    faq: faqItems,
+    posts: postList,
+    practice,
+    pages: Object.fromEntries(pageRows.map((p) => [p.key, p])),
+    settings: settingsMap,
+    campaign: campaignRow[0]?.active ? campaignRow[0] : null,
+  };
+}

@@ -1,9 +1,10 @@
 # Losslessly remove provenance/text metadata from site images.
 # JPEG: drop APP11 (JUMBF/C2PA) and APP1 XMP; keep EXIF (orientation) and ICC.
 # PNG: drop caBX (C2PA) and tEXt/iTXt/zTXt chunks.
+# Usage: python tools/strip_provenance.py [ROOT_FOLDER]   (default: ../site, relative to this script)
 import os, re, struct, sys, zlib
 
-ROOT = os.path.join(os.path.dirname(__file__), "..", "site")
+ROOT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "site")
 PAT = re.compile(rb"(?i)claude|anthropic|lovable|openai|gemini|midjourney|dall-e")
 
 def strip_jpeg(d):
