@@ -6,3 +6,4 @@
 .wrangler/
 /Assets/
 node_modules/
+.superpowers/

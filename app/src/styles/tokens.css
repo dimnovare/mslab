@@ -1,0 +1,29 @@
+:root {
+  /* Palette */
+  --ink: #222222;
+  --rose: #9e8993;
+  --iced: #ad9fa6;
+  --fog: #c0b7bb;
+  --heather: #d5d0d3;
+  --first: #ebe8e9; /* first-light */
+  --orchid: #ddd4dc;
+  --paper: #ffffff;
+  --canvas: #f6f4f5;
+  --line: #e6e1e3;
+  --lilac: #e8e0e5; /* newsletter surface (prototype B .newsletter) */
+  --ok: #2f5d46;
+  --warn: #6b4f5c;
+  --bad: #8a3b3b;
+
+  /* Type */
+  --font-display: var(--font-jost), "Jost", system-ui, sans-serif;
+  --font-body: var(--font-manrope), "Manrope", system-ui, sans-serif;
+  --font-mono: var(--font-jbmono), ui-monospace, monospace;
+
+  /* Layout */
+  --gutter: clamp(16px, 4vw, 56px);
+  --max: 1280px;
+  --r-card: 20px;
+  --r-tile: 28px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
