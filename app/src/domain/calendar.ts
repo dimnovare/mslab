@@ -38,21 +38,24 @@ export function contactSessions<S extends { course: { type: "e_learning" | "cont
   return sessions.filter((s) => s.course.type === "contact");
 }
 
+/** Built once: an Intl formatter per call is slow. */
+const TALLINN_PARTS = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Tallinn",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 /**
  * Midnight at the start of `now`'s day in Estonian time, so the calendar still lists a session later today.
  * (On the two DST change days the boundary can be an hour off; sessions never start around midnight.)
  */
 export function startOfDayTallinn(now: Date): Date {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Tallinn",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
+  const parts = TALLINN_PARTS.formatToParts(now);
   const get = (t: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === t)?.value ?? 0);
   const [y, m, d] = [get("year"), get("month"), get("day")];
   const offset = Date.UTC(y, m - 1, d, get("hour"), get("minute"), get("second")) - (now.getTime() - now.getUTCMilliseconds());

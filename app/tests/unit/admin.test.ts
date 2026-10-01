@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { SECTIONS } from "@/components/admin/sections";
 import { centsToInput, MAX_PAYMENT_CENTS, parseEuroCents } from "@/domain/money";
+import { MAX_PAGE, pageInfo, PAGE_SIZE, parsePage } from "@/domain/paging";
 import { registrationPrice, registrationStatusAfterPayment } from "@/domain/registration";
 import { adminEt } from "@/i18n/dict/admin";
-import { formatLongDate, formatStamp, formatTime } from "@/i18n/format";
+import { formatDate, formatDayMonth, formatLongDate, formatStamp, formatTime, formatWeekday } from "@/i18n/format";
 import { csvCell, toCsv } from "@/server/csv";
 
 // Task 12: the pure parts of the admin inbox — the amount field, the price a payment is measured against, the CSV
@@ -16,7 +17,7 @@ describe("parseEuroCents (Laekunud summa)", () => {
     expect(parseEuroCents("175,50")).toBe(17550);
     expect(parseEuroCents("175.05")).toBe(17505);
     expect(parseEuroCents(" 1 175 € ")).toBe(117500);
-    expect(parseEuroCents("1 175,00")).toBe(117500);
+    expect(parseEuroCents("1\u00A0175,00")).toBe(117500);
     expect(parseEuroCents("0")).toBe(0);
   });
   test("anything else is not an amount", () => {
@@ -72,8 +73,33 @@ describe("CSV", () => {
     expect(csvCell(12)).toBe("12");
   });
   test("a file: BOM, header, CRLF lines", () => {
-    expect(toCsv(["E-post", "Keel"], [["a@b.ee", "ET"], ["=x", "RU"]])).toBe("﻿E-post,Keel\r\na@b.ee,ET\r\n'=x,RU\r\n");
-    expect(toCsv(["E-post"], [])).toBe("﻿E-post\r\n");
+    expect(toCsv(["E-post", "Keel"], [["a@b.ee", "ET"], ["=x", "RU"]])).toBe("\uFEFFE-post,Keel\r\na@b.ee,ET\r\n'=x,RU\r\n");
+    expect(toCsv(["E-post"], [])).toBe("\uFEFFE-post\r\n");
+  });
+});
+
+describe("paging (?leht=, 50 a page)", () => {
+  test("parsePage: plain positive numbers only, capped", () => {
+    expect(parsePage("2")).toBe(2);
+    expect(parsePage("1")).toBe(1);
+    for (const bad of [undefined, "", "0", "-1", "1.5", "abc", "2x", " 2", "1e3"]) expect(parsePage(bad), String(bad)).toBe(1);
+    expect(parsePage(["2", "3"])).toBe(1);
+    expect(parsePage("999999")).toBe(MAX_PAGE);
+    expect(parsePage("1234567")).toBe(1); // more than 6 digits is not a page number
+  });
+  test("pageInfo boundaries: empty, exactly full, one more, beyond the end, below 1", () => {
+    expect(PAGE_SIZE).toBe(50);
+    expect(pageInfo(1, 0)).toEqual({ page: 1, pages: 1, size: 50, offset: 0, total: 0 });
+    expect(pageInfo(1, 50)).toMatchObject({ page: 1, pages: 1, offset: 0 });
+    expect(pageInfo(2, 50)).toMatchObject({ page: 1, pages: 1, offset: 0 });
+    expect(pageInfo(2, 51)).toMatchObject({ page: 2, pages: 2, offset: 50 });
+    expect(pageInfo(1, 51)).toMatchObject({ page: 1, pages: 2, offset: 0 });
+    expect(pageInfo(99, 120)).toMatchObject({ page: 3, pages: 3, offset: 100 });
+    expect(pageInfo(0, 120)).toMatchObject({ page: 1, offset: 0 });
+    expect(pageInfo(-5, 120)).toMatchObject({ page: 1 });
+    expect(pageInfo(Number.NaN, 120)).toMatchObject({ page: 1 });
+    expect(pageInfo(3, 7, 2)).toMatchObject({ page: 3, pages: 4, offset: 4 });
+    expect(pageInfo(7, Number.POSITIVE_INFINITY)).toMatchObject({ page: 7, offset: 300 });
   });
 });
 
@@ -84,6 +110,15 @@ describe("admin date formats (Estonian time)", () => {
     expect(formatLongDate(d, "et")).toBe("Neljapäev, 1. oktoober");
     expect(formatStamp(d)).toBe("2026-10-01 14:05");
     expect(formatStamp(new Date("2026-12-31T22:30:00Z"))).toBe("2027-01-01 00:30"); // winter time, next day
+  });
+  test("the cached formatters keep locales and options apart", () => {
+    for (let i = 0; i < 3; i++) {
+      expect(formatDate(d, "et")).toBe("01.10.2026");
+      expect(formatDayMonth(d, "et")).toBe("01.10");
+      expect(formatWeekday(d, "et")).toBe("neljapäev");
+      expect(formatWeekday(d, "ru")).toBe("четверг");
+      expect(formatTime(d, "ru")).toBe("14:05");
+    }
   });
 });
 

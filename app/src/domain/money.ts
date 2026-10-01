@@ -22,7 +22,7 @@ export const MAX_PAYMENT_CENTS = 100_000_000;
  * "1 175" (spaces, also non-breaking ones) and a "€" sign; no negative amounts, at most two decimals.
  */
 export function parseEuroCents(input: string): number | null {
-  const s = input.replace(/[\s  €]/g, "");
+  const s = input.replace(/[\s\u00A0\u202F€]/g, "");
   const m = /^(\d{1,9})(?:[.,](\d{1,2}))?$/.exec(s);
   if (!m) return null;
   const cents = Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));

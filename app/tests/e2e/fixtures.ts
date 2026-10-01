@@ -225,8 +225,11 @@ export type AdminFixtures = {
   subscribers: { confirmed: string; pending: string };
 };
 
-/** Inserts one test's rows (see above). Group price 350 €, so 50% = 175 €. */
-export async function insertAdminFixtures(project: string): Promise<AdminFixtures> {
+/**
+ * Inserts one test's rows (see above). Group price 350 €, so 50% = 175 €. `extraSubscribers`: that many more
+ * unconfirmed subscribers (for the page-by-page list).
+ */
+export async function insertAdminFixtures(project: string, opts: { extraSubscribers?: number } = {}): Promise<AdminFixtures> {
   const tag = `${project}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toLowerCase();
   const email = (label: string) => `e2e-admin-${label}-${tag}@example.com`;
   const sql = connect();
@@ -280,6 +283,9 @@ export async function insertAdminFixtures(project: string): Promise<AdminFixture
               values (${subscribers.confirmed}, 'et', ${`e2e-admin-token-ok-${tag}`}, now() - interval '2 days', now() - interval '1 day')`;
     // A formula-like value in a column the export writes: the CSV must defuse it.
     await sql`insert into subscribers (email, locale, token) values (${subscribers.pending}, '=1+1', ${`e2e-admin-token-wait-${tag}`})`;
+    for (let i = 0; i < (opts.extraSubscribers ?? 0); i++)
+      await sql`insert into subscribers (email, locale, token, consent_at)
+                values (${email(`bulk${i}`)}, 'et', ${`e2e-admin-token-bulk${i}-${tag}`}, now() - interval '3 days')`;
     return {
       tag,
       course: { id: course.id, slug, title },
@@ -327,6 +333,26 @@ export async function storedAdminRegistration(id: number): Promise<{ status: str
     const [row] = await sql<{ status: string; paidCents: number; note: string }[]>`
       select status, paid_cents as "paidCents", note from registrations where id = ${id}`;
     return row;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Another admin (another tab) changes a fixture registration's status behind the open page. */
+export async function setStoredStatus(id: number, status: "awaiting_prepayment" | "confirmed" | "cancelled"): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`update registrations set status = ${status} where id = ${id}`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** A fixture request disappears behind the open page (to make "Märgi tehtuks" fail). */
+export async function deleteStoredRequest(id: number): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`delete from requests where id = ${id}`;
   } finally {
     await sql.end();
   }

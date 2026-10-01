@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import { AdminIcon } from "@/components/admin/AdminIcon";
+import { getAdminCounts } from "@/components/admin/data";
+import { Pager } from "@/components/admin/Pager";
 import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { listSubscribers } from "@/db/queries/admin";
+import { pageSubscribers } from "@/db/queries/admin";
+import { parsePage } from "@/domain/paging";
 import { adminEt } from "@/i18n/dict/admin";
 import { fill, formatDate, formatTime } from "@/i18n/format";
 import { requireAdmin } from "@/server/auth";
@@ -13,16 +16,18 @@ import styles from "./newsletter.module.css";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: adminTitle(adminEt.nav.newsletter) };
 
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
 const stamp = (d: Date) => `${formatDate(d, "et")} ${formatTime(d, "et")}`;
 
 /**
  * Newsletter subscribers (double opt-in): e-mail, language, consent time, confirmed or not, newest first, and the CSV
- * downloads (confirmed only — the addresses a newsletter may go to — or all).
+ * downloads (confirmed only — the addresses a newsletter may go to — or all). 50 a page (?leht=); the CSV has all.
  */
-export default async function NewsletterPage() {
+export default async function NewsletterPage({ searchParams }: Props) {
   const email = await requireAdmin();
-  const rows = await listSubscribers(getDb());
-  const confirmed = rows.filter((r) => r.confirmedAt).length;
+  const [list, counts] = await Promise.all([pageSubscribers(getDb(), parsePage((await searchParams).leht)), getAdminCounts()]);
+  const rows = list.rows;
   const t = adminEt.newsletter;
 
   return (
@@ -46,7 +51,7 @@ export default async function NewsletterPage() {
         </div>
 
         <section className={`${ui.card} ${styles.card}`} aria-label={t.title}>
-          <p className={`${ui.muted} ${ui.small}`}>{fill(t.count, { n: rows.length, confirmed })}</p>
+          <p className={`${ui.muted} ${ui.small}`}>{fill(t.count, { n: counts.subscribers, confirmed: counts.confirmedSubscribers })}</p>
           {rows.length === 0 ? (
             <p className={ui.empty}>{t.empty}</p>
           ) : (
@@ -81,6 +86,7 @@ export default async function NewsletterPage() {
               </tbody>
             </table>
           )}
+          <Pager info={list} href={(n) => `/admin/uudiskiri${n > 1 ? `?leht=${n}` : ""}`} />
         </section>
       </div>
     </Shell>

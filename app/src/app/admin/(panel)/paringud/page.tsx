@@ -3,15 +3,16 @@ import Link from "next/link";
 import { getAdminCounts } from "@/components/admin/data";
 import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
-import { SubmitButton } from "@/components/admin/SubmitButton";
+import { Pager } from "@/components/admin/Pager";
+import { RequestToggle } from "@/components/admin/RequestToggle";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { listCourseNames, listRequests, listSessionsByIds, type RequestKind } from "@/db/queries/admin";
+import { listCourseNames, listSessionsByIds, pageRequests, type RequestKind } from "@/db/queries/admin";
 import type { CourseSession, Request as RequestRow } from "@/db/schema";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick, type I18n } from "@/i18n/field";
 import { fill, formatDate, formatTime } from "@/i18n/format";
-import { toggleRequestHandled } from "@/server/actions/admin";
+import { parsePage } from "@/domain/paging";
 import { requireAdmin } from "@/server/auth";
 import styles from "./requests.module.css";
 
@@ -21,6 +22,7 @@ export const metadata: Metadata = { title: adminTitle(adminEt.nav.requests) };
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
 // ?liik=kontakt|individuaal|praktika|ootenimekiri (A3: the waitlist has its own tab). Kontakt is the default.
+// ?leht=<n>: 50 requests a page, open ones first (the order comes from the query, across pages).
 const TABS = ["kontakt", "individuaal", "praktika", "ootenimekiri"] as const;
 type Tab = (typeof TABS)[number];
 const KIND: Record<Tab, RequestKind> = { kontakt: "contact", individuaal: "individual", praktika: "practice", ootenimekiri: "waitlist" };
@@ -73,15 +75,14 @@ function value(r: RequestRow, key: string, lookup: Lookup): React.ReactNode {
 /** Requests (A3): tabs Kontakt / Individuaal / Praktika / Ootenimekiri, open ones first, "Märgi tehtuks" toggles. */
 export default async function RequestsPage({ searchParams }: Props) {
   const email = await requireAdmin();
-  const liik = (await searchParams).liik;
-  const tab: Tab = TABS.find((x) => x === liik) ?? "kontakt";
+  const sp = await searchParams;
+  const tab: Tab = TABS.find((x) => x === sp.liik) ?? "kontakt";
   const db = getDb();
-  const [rows, counts, courses] = await Promise.all([listRequests(db, KIND[tab]), getAdminCounts(), listCourseNames(db)]);
+  const [list, counts, courses] = await Promise.all([pageRequests(db, KIND[tab], parsePage(sp.leht)), getAdminCounts(), listCourseNames(db)]);
+  const rows = list.rows;
   const sessionIds = tab === "ootenimekiri" ? rows.map((r) => Number(r.payload.session)).filter((n) => Number.isInteger(n) && n > 0) : [];
   const sessions = await listSessionsByIds(db, [...new Set(sessionIds)]);
   const lookup: Lookup = { courses: new Map(courses.map((c) => [c.slug, c.title])), sessions: new Map(sessions.map((s) => [s.id, s])) };
-  // Open requests first, each group newest first (the query's order).
-  const sorted = [...rows].sort((a, b) => Number(a.handled) - Number(b.handled));
   const t = adminEt.requests;
 
   return (
@@ -113,13 +114,13 @@ export default async function RequestsPage({ searchParams }: Props) {
         </nav>
 
         <h2 className={ui.sr}>{t.tabs[tab]}</h2>
-        {sorted.length === 0 ? (
+        {rows.length === 0 ? (
           <section className={ui.card}>
             <p className={ui.empty}>{t.empty}</p>
           </section>
         ) : (
           <ul className={styles.list}>
-            {sorted.map((r) => {
+            {rows.map((r) => {
               const interest = isInterest(r);
               const fields = FIELDS[interest ? "interest" : r.kind];
               const shown = new Set(fields.map(([k]) => k));
@@ -160,15 +161,11 @@ export default async function RequestsPage({ searchParams }: Props) {
                       ))}
                     </dl>
                     <div className={styles.actions}>
-                      <form action={toggleRequestHandled}>
-                        <input type="hidden" name="id" value={r.id} />
-                        <input type="hidden" name="handled" value={r.handled ? "0" : "1"} />
-                        <SubmitButton
-                          className={`${ui.btn} ${ui.smallBtn} ${r.handled ? ui.secondary : ""}`}
-                          label={r.handled ? t.markOpen : t.markDone}
-                          pending={adminEt.common.saving}
-                        />
-                      </form>
+                      <RequestToggle
+                        id={r.id}
+                        handled={r.handled}
+                        t={{ markDone: t.markDone, markOpen: t.markOpen, saving: adminEt.common.saving, error: adminEt.common.saveError }}
+                      />
                       {address && (
                         <a className={ui.link} href={`mailto:${address}`}>
                           {t.reply}
@@ -181,6 +178,7 @@ export default async function RequestsPage({ searchParams }: Props) {
             })}
           </ul>
         )}
+        <Pager info={list} href={(n) => `/admin/paringud?liik=${tab}${n > 1 ? `&leht=${n}` : ""}`} />
       </div>
     </Shell>
   );

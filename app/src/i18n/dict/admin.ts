@@ -84,6 +84,14 @@ export const adminEt = {
     back: "Tagasi ülevaatesse",
   },
 
+  // Long lists (registrations, requests, subscribers) come 50 rows a page: ?leht=<n>.
+  pager: {
+    label: "Lehekülgede valik",
+    prev: "Eelmine",
+    next: "Järgmine",
+    page: "Lehekülg {page} / {pages}",
+  },
+
   common: {
     yes: "Jah",
     no: "Ei",
@@ -141,6 +149,7 @@ export const adminEt = {
     col: {
       date: "Kuupäev",
       name: "Nimi ja kontakt",
+      kind: "Liik",
       course: "Koolitus",
       session: "Toimumine",
       payment: "Makse",
@@ -149,6 +158,9 @@ export const adminEt = {
       status: "Staatus",
     },
     individual: "Individuaal",
+    group: "Grupp",
+    // An individual contact course has no session: Maria agrees the time with the student.
+    agreed: "Aeg kokkuleppel",
     payment: { full: "100%", half: "50% ettemaks" },
     open: "Ava {name}",
     drawer: {
@@ -160,6 +172,7 @@ export const adminEt = {
       phone: "Telefon",
       course: "Koolitus",
       session: "Toimumine",
+      type: "Õppevorm",
       kind: "Osalemine",
       group: "Grupp",
       individual: "Individuaal",
@@ -190,6 +203,7 @@ export const adminEt = {
       noteTooLong: "Märkus on liiga pikk (kuni 2000 märki).",
       statusSave: "Salvesta staatus",
       statusSaved: "Staatus salvestatud.",
+      stale: "Staatus muutus vahepeal (näed nüüd kehtivat). Vaata üle ja salvesta uuesti.",
       cancel: "Tühista registreerimine",
       cancelled: "Registreerimine on tühistatud.",
     },

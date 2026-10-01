@@ -9,7 +9,17 @@ export function fill(template: string, vars: Record<string, string | number>): s
 const TIME_ZONE = "Europe/Tallinn";
 const INTL_LOCALE: Record<Locale, string> = { et: "et-EE", ru: "ru-RU" };
 
-const fmt = (l: Locale, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(INTL_LOCALE[l], { timeZone: TIME_ZONE, ...opts });
+/**
+ * Intl.DateTimeFormat instances are expensive to build (locale data is resolved each time), and a long admin list
+ * formats hundreds of dates; so one instance per locale + options, kept for the life of the module.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+const fmt = (l: Locale, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
+  const key = `${l}|${JSON.stringify(opts)}`;
+  let f = formatters.get(key);
+  if (!f) formatters.set(key, (f = new Intl.DateTimeFormat(INTL_LOCALE[l], { timeZone: TIME_ZONE, ...opts })));
+  return f;
+};
 
 /** "14.11" */
 export function formatDayMonth(d: Date, l: Locale): string {
@@ -44,16 +54,18 @@ export function formatLongDate(d: Date, l: Locale): string {
 }
 
 /** "2026-10-01 14:05" in Estonian time (CSV exports: sorts as text, read by spreadsheets and mailing tools). */
+const STAMP = new Intl.DateTimeFormat("en-GB", {
+  timeZone: TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
 export function formatStamp(d: Date): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(d);
+  const parts = STAMP.formatToParts(d);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
 }

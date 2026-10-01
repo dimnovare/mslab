@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { getAdminCounts } from "@/components/admin/data";
 import { Drawer } from "@/components/admin/Drawer";
+import { Pager } from "@/components/admin/Pager";
 import { RegistrationForms } from "@/components/admin/RegistrationForms";
 import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
 import { StatusPill } from "@/components/admin/StatusPill";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { getRegistration, listRegistrations, type RegistrationFilter, type RegistrationRow } from "@/db/queries/admin";
+import { getRegistration, pageRegistrations, type RegistrationFilter, type RegistrationRow } from "@/db/queries/admin";
 import { formatEUR } from "@/domain/money";
+import { parsePage } from "@/domain/paging";
 import { prepaymentDue, registrationPrice, type RegStatus } from "@/domain/registration";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick } from "@/i18n/field";
@@ -22,12 +25,13 @@ export const metadata: Metadata = { title: adminTitle(adminEt.nav.registrations)
 type Search = Record<string, string | string[] | undefined>;
 type Props = { searchParams: Promise<Search> };
 
-// Addresses: ?vorm=e|k (as the public catalogue), ?staatus=ootab|kinnitatud|tuhistatud, ?id=<registration> (drawer).
+// Addresses: ?vorm=e|k (as the public catalogue), ?staatus=ootab|kinnitatud|tuhistatud, ?leht=<n> (50 a page),
+// ?id=<registration> (drawer). A new filter starts again at page 1; the drawer keeps the page it was opened from.
 const FORMS = { e: "e_learning", k: "contact" } as const;
 const STATUS_PARAM: Record<string, RegStatus> = { ootab: "awaiting_prepayment", kinnitatud: "confirmed", tuhistatud: "cancelled" };
 const PARAM_OF: Record<RegStatus, string> = { awaiting_prepayment: "ootab", confirmed: "kinnitatud", cancelled: "tuhistatud" };
 
-type View = { vorm: "e" | "k" | null; staatus: RegStatus | null };
+type View = { vorm: "e" | "k" | null; staatus: RegStatus | null; leht: number };
 
 const one = (v: string | string[] | undefined) => (typeof v === "string" ? v : undefined);
 
@@ -38,6 +42,7 @@ function parse(sp: Search): View & { id: number | null } {
   return {
     vorm: vorm === "e" || vorm === "k" ? vorm : null,
     staatus: staatus && staatus in STATUS_PARAM ? STATUS_PARAM[staatus] : null,
+    leht: parsePage(sp.leht),
     id: Number.isInteger(id) && id > 0 && id <= 2_147_483_647 ? id : null,
   };
 }
@@ -46,6 +51,7 @@ function href(view: View, id?: number): string {
   const q = new URLSearchParams();
   if (view.vorm) q.set("vorm", view.vorm);
   if (view.staatus) q.set("staatus", PARAM_OF[view.staatus]);
+  if (view.leht > 1) q.set("leht", String(view.leht));
   if (id) q.set("id", String(id));
   const s = q.toString();
   return `/admin/registreerimised${s ? `?${s}` : ""}`;
@@ -53,9 +59,13 @@ function href(view: View, id?: number): string {
 
 const tel = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
 
+/** Where and when: the session of a group registration; an individual one has its time agreed; e-learning has none. */
 function sessionText(r: RegistrationRow, withTime = false): string {
-  if (!r.courseSession) return adminEt.registrations.individual;
+  const t = adminEt.registrations;
+  if (r.course.type === "e_learning") return adminEt.common.none;
+  if (r.kind === "individual") return t.agreed;
   const s = r.courseSession;
+  if (!s) return adminEt.common.none;
   return [formatDate(s.startsAt, "et") + (withTime ? ` ${formatTime(s.startsAt, "et")}` : ""), s.city, withTime ? s.venue : ""].filter(Boolean).join(", ");
 }
 
@@ -68,7 +78,9 @@ export default async function RegistrationsPage({ searchParams }: Props) {
   const view = parse(await searchParams);
   const db = getDb();
   const filter: RegistrationFilter = { type: view.vorm ? FORMS[view.vorm] : undefined, status: view.staatus ?? undefined };
-  const [rows, open] = await Promise.all([listRegistrations(db, filter), view.id ? getRegistration(db, view.id) : null]);
+  // the shell's counts are read here too (memoised), so the page does not wait for the list before asking for them
+  const [list, open] = await Promise.all([pageRegistrations(db, filter, view.leht), view.id ? getRegistration(db, view.id) : null, getAdminCounts()]);
+  const rows = list.rows;
   const t = adminEt.registrations;
   const filtered = view.vorm !== null || view.staatus !== null;
 
@@ -97,7 +109,7 @@ export default async function RegistrationsPage({ searchParams }: Props) {
 
         <nav className={ui.filters} aria-label={t.typeLabel} data-type-filter="">
           {typeLinks.map((l) => (
-            <Link key={l.label} className={ui.pill} href={href({ ...view, vorm: l.key })} aria-current={view.vorm === l.key ? "true" : undefined}>
+            <Link key={l.label} className={ui.pill} href={href({ ...view, vorm: l.key, leht: 1 })} aria-current={view.vorm === l.key ? "true" : undefined}>
               {l.label}
             </Link>
           ))}
@@ -110,7 +122,7 @@ export default async function RegistrationsPage({ searchParams }: Props) {
             <Link
               key={l.label}
               className={`${ui.pill} ${ui.pillSmall}`}
-              href={href({ ...view, staatus: l.key })}
+              href={href({ ...view, staatus: l.key, leht: 1 })}
               aria-current={view.staatus === l.key ? "true" : undefined}
             >
               {l.label}
@@ -125,7 +137,7 @@ export default async function RegistrationsPage({ searchParams }: Props) {
         )}
 
         <section className={`${ui.card} ${styles.card}`} aria-label={t.title}>
-          <p className={`${ui.muted} ${ui.small} ${styles.count}`}>{fill(t.count, { n: rows.length })}</p>
+          <p className={`${ui.muted} ${ui.small} ${styles.count}`}>{fill(t.count, { n: list.total })}</p>
           {rows.length === 0 ? (
             <p className={ui.empty}>{filtered ? t.emptyFiltered : t.empty}</p>
           ) : (
@@ -134,6 +146,7 @@ export default async function RegistrationsPage({ searchParams }: Props) {
                 <tr>
                   <th scope="col">{t.col.date}</th>
                   <th scope="col">{t.col.name}</th>
+                  <th scope="col">{t.col.kind}</th>
                   <th scope="col">{t.col.course}</th>
                   <th scope="col">{t.col.session}</th>
                   <th scope="col">{t.col.payment}</th>
@@ -166,6 +179,12 @@ export default async function RegistrationsPage({ searchParams }: Props) {
                         )}
                       </div>
                     </td>
+                    <td data-label={t.col.kind}>
+                      <span className={styles.kind}>
+                        <span className={`${ui.tag} ${r.course.type === "e_learning" ? ui.dark : ""}`}>{r.course.type === "e_learning" ? t.type.e : t.type.k}</span>
+                        {r.course.type === "contact" && <span className={styles.participation}>{r.kind === "group" ? t.group : t.individual}</span>}
+                      </span>
+                    </td>
                     <td data-label={t.col.course}>{pick(r.course.title, "et")}</td>
                     <td data-label={t.col.session}>{sessionText(r)}</td>
                     <td data-label={t.col.payment} className={ui.nowrap}>
@@ -181,6 +200,7 @@ export default async function RegistrationsPage({ searchParams }: Props) {
               </tbody>
             </table>
           )}
+          <Pager info={list} href={(n) => href({ ...view, leht: n })} />
         </section>
       </div>
 
@@ -208,7 +228,8 @@ function RegistrationDetail({ r }: { r: RegistrationRow }) {
     [t.phone, r.phone ? <a key="p" href={tel(r.phone)}>{r.phone}</a> : adminEt.common.none],
     [t.course, pick(r.course.title, "et")],
     [t.session, sessionText(r, true)],
-    [t.kind, r.kind === "group" ? t.group : t.individual],
+    [t.type, r.course.type === "e_learning" ? adminEt.registrations.type.e : adminEt.registrations.type.k],
+    [t.kind, r.course.type === "e_learning" ? adminEt.common.none : r.kind === "group" ? t.group : t.individual],
     [t.created, `${formatDate(r.createdAt, "et")} ${formatTime(r.createdAt, "et")}`],
     [t.locale, r.locale === "ru" ? adminEt.common.locale.ru : adminEt.common.locale.et],
     [t.payment, r.paymentChoice === "full" ? t.paymentFull : t.paymentHalf],
@@ -268,6 +289,7 @@ function RegistrationDetail({ r }: { r: RegistrationRow }) {
           noteTooLong: t.noteTooLong,
           statusSave: t.statusSave,
           statusSaved: t.statusSaved,
+          stale: t.stale,
           cancel: t.cancel,
           cancelled: t.cancelled,
           saving: adminEt.common.saving,

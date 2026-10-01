@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
-import { insertAdminFixtures, removeAdminFixtures, removeAdminRows, requestHandled, storedAdminRegistration, type AdminFixtures } from "./fixtures";
+import {
+  deleteStoredRequest,
+  insertAdminFixtures,
+  removeAdminFixtures,
+  removeAdminRows,
+  requestHandled,
+  setStoredStatus,
+  storedAdminRegistration,
+  type AdminFixtures,
+} from "./fixtures";
 
 // Task 12: the admin shell (prototype B sidebar), the overview and the inboxes (registrations, requests, newsletter).
 // The signed-in tests run against the local dev server only: they sign in as Dim through the devLink (no e-mail: global
@@ -24,8 +33,8 @@ test.afterEach(async () => {
 });
 
 /** Inserts this test's rows. */
-async function fixtures(project: string): Promise<AdminFixtures> {
-  fx = await insertAdminFixtures(project);
+async function fixtures(project: string, opts: { extraSubscribers?: number } = {}): Promise<AdminFixtures> {
+  fx = await insertAdminFixtures(project, opts);
   return fx;
 }
 
@@ -131,6 +140,8 @@ test.describe("signed in", () => {
     await expect(row).toContainText(f.course.title);
     await expect(row).toContainText("Pärnu");
     await expect(row).toContainText("50% ettemaks");
+    await expect(row.locator('[data-label="Liik"]')).toContainText("Kontaktõpe");
+    await expect(row.locator('[data-label="Liik"]')).toContainText("Grupp");
     await expect(row.locator("[data-reg-status]")).toHaveText("Ootab ettemaksu");
     expect(await noOverflow(page)).toBe(true);
 
@@ -145,6 +156,7 @@ test.describe("signed in", () => {
 
     const amount = drawer.getByLabel("Laekunud summa (€)");
     const save = drawer.getByRole("button", { name: "Salvesta summa" });
+    await expect(amount).toHaveValue(""); // nothing paid yet: an empty field, not "0"
     // not an amount: an error on the field, nothing stored
     await amount.fill("palju");
     await save.click();
@@ -215,6 +227,26 @@ test.describe("signed in", () => {
     await expect(page.locator(`[data-registration="${f.registration.id}"] [data-reg-status]`)).toHaveText("Tühistatud");
   });
 
+  test("registrations: a status form that saw an old status does not overwrite the change made meanwhile", async ({ page, context, visitorIp }, info) => {
+    const f = await fixtures(info.project.name);
+    await signIn(page, context, visitorIp);
+    await page.goto(`/admin/registreerimised?vorm=k&id=${f.registration.id}`);
+    const drawer = page.getByRole("dialog", { name: `Registreerimine: ${f.registration.name}` });
+    await expect(drawer.locator("[data-reg-status]")).toHaveText("Ootab ettemaksu");
+    await setStoredStatus(f.registration.id, "cancelled"); // e.g. Maria cancelled it in another tab
+    await drawer.getByRole("radio", { name: "Kinnitatud" }).check();
+    await drawer.getByRole("button", { name: "Salvesta staatus" }).click();
+    await expect(drawer.getByText("Staatus muutus vahepeal (näed nüüd kehtivat). Vaata üle ja salvesta uuesti.")).toBeVisible();
+    await expect(drawer.locator("[data-reg-status]")).toHaveText("Tühistatud");
+    await expect(drawer.getByRole("radio", { name: "Tühistatud" })).toBeChecked();
+    expect((await storedAdminRegistration(f.registration.id)).status).toBe("cancelled");
+    // now that it shows the stored status, a change goes through
+    await drawer.getByRole("radio", { name: "Kinnitatud" }).check();
+    await drawer.getByRole("button", { name: "Salvesta staatus" }).click();
+    await expect(drawer.getByText("Staatus salvestatud.")).toBeVisible();
+    expect((await storedAdminRegistration(f.registration.id)).status).toBe("confirmed");
+  });
+
   test("requests: tabs Kontakt / Individuaal / Praktika / Ootenimekiri, the practice request, 'Märgi tehtuks'", async ({ page, context, visitorIp }, info) => {
     const f = await fixtures(info.project.name);
     await signIn(page, context, visitorIp);
@@ -262,6 +294,37 @@ test.describe("signed in", () => {
     await expect(waitlist).toContainText(/\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}, Pärnu/);
   });
 
+  test("requests: a failed 'Märgi tehtuks' says so instead of failing silently", async ({ page, context, visitorIp }, info) => {
+    const f = await fixtures(info.project.name);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/paringud?liik=praktika");
+    const practice = page.locator(`[data-request="${f.practice.id}"]`);
+    await expect(practice).toBeVisible();
+    await deleteStoredRequest(f.practice.id); // gone behind the open page
+    await practice.getByRole("button", { name: "Märgi tehtuks" }).click();
+    await expect(practice.getByRole("status")).toHaveText("Salvestamine ei õnnestunud. Proovi uuesti.");
+  });
+
+  test("newsletter: 50 subscribers a page, Järgmine / Eelmine, an out-of-range ?leht= shows the last page", async ({ page, context, visitorIp }, info) => {
+    await fixtures(info.project.name, { extraSubscribers: 55 });
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/uudiskiri");
+    const pager = page.locator("[data-pager]");
+    await expect(pager).toContainText(/Lehekülg 1 \/ \d+/);
+    const pages = Number((await pager.textContent())!.match(/Lehekülg 1 \/ (\d+)/)![1]);
+    expect(pages).toBeGreaterThanOrEqual(2);
+    await expect(page.locator("[data-subscriber]")).toHaveCount(50);
+    await expect(pager.getByRole("link", { name: /Eelmine/ })).toHaveCount(0);
+    await pager.getByRole("link", { name: /Järgmine/ }).click();
+    await expect(page).toHaveURL(/\/admin\/uudiskiri\?leht=2$/);
+    await expect(pager).toContainText(`Lehekülg 2 / ${pages}`);
+    await expect(pager.getByRole("link", { name: /Eelmine/ })).toHaveAttribute("href", "/admin/uudiskiri");
+    await page.goto("/admin/uudiskiri?leht=9999");
+    await expect(pager).toContainText(`Lehekülg ${pages} / ${pages}`);
+    await expect(pager.getByRole("link", { name: /Järgmine/ })).toHaveCount(0);
+    expect(await noOverflow(page)).toBe(true);
+  });
+
   test("newsletter: the subscribers and the CSV downloads (formula cells defused)", async ({ page, context, visitorIp }, info) => {
     const f = await fixtures(info.project.name);
     await signIn(page, context, visitorIp);
@@ -276,7 +339,7 @@ test.describe("signed in", () => {
     const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Lae alla kõik (CSV)" }).click()]);
     expect(download.suggestedFilename()).toMatch(/^mslab-uudiskiri-\d{4}-\d{2}-\d{2}\.csv$/);
     const all = readFileSync((await download.path())!, "utf8");
-    expect(all.startsWith("﻿E-post,Keel,Nõusolek,Kinnitatud,Kinnitamise aeg\r\n")).toBe(true);
+    expect(all.startsWith("\uFEFFE-post,Keel,Nõusolek,Kinnitatud,Kinnitamise aeg\r\n")).toBe(true);
     expect(all).toContain(`${f.subscribers.confirmed},ET,`);
     expect(all).toContain(`${f.subscribers.pending},'=1+1,`); // a formula-like cell gets an apostrophe
 

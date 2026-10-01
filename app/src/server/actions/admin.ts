@@ -14,7 +14,8 @@ import { logFailure } from "../log";
 async function run(what: string, work: (db: Db) => Promise<AdminResult>): Promise<AdminResult> {
   try {
     const result = await work(getDb());
-    if (result.ok) refresh();
+    // stale: nothing was saved, but the page must show what is stored now
+    if (result.ok || result.error === "stale") refresh();
     return result;
   } catch (e) {
     logFailure(`[admin] ${what} failed`, e);
@@ -27,7 +28,7 @@ export const saveRegistrationPayment = adminAction(async (_admin, _prev: AdminRe
   run("payment", (db) => savePayment(db, formData)),
 );
 
-/** Registration drawer, status + note: fields id, status, note. */
+/** Registration drawer, status + note: fields id, status, note, expected (the status the form showed). */
 export const saveRegistrationStatus = adminAction(async (_admin, _prev: AdminResult | null, formData: FormData) =>
   run("status", (db) => saveStatus(db, formData)),
 );
@@ -37,7 +38,7 @@ export const cancelRegistration = adminAction(async (_admin, _prev: AdminResult 
   run("cancel", (db) => cancel(db, formData)),
 );
 
-/** Request inbox, "Märgi tehtuks" / "Märgi tegemata": fields id, handled ("1" | "0"). A plain form action. */
-export const toggleRequestHandled = adminAction(async (_admin, formData: FormData): Promise<void> => {
-  await run("request", (db) => saveHandled(db, formData));
-});
+/** Request inbox, "Märgi tehtuks" / "Märgi tegemata": fields id, handled ("1" | "0"). */
+export const toggleRequestHandled = adminAction(async (_admin, _prev: AdminResult | null, formData: FormData) =>
+  run("request", (db) => saveHandled(db, formData)),
+);

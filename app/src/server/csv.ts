@@ -18,5 +18,5 @@ export function csvCell(value: CsvValue): string {
 
 /** A whole file: header and rows, BOM first, every line ending in CRLF. */
 export function toCsv(header: readonly string[], rows: readonly (readonly CsvValue[])[]): string {
-  return "﻿" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return "\uFEFF" + [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

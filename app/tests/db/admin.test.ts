@@ -2,8 +2,20 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { courses, courseSessions, registrations, requests, subscribers } from "@/db/schema";
-import { adminCounts, getRegistration, listCourseNames, listSessionsByIds, recordRegistrationPayment, setRequestHandled } from "@/db/queries/admin";
-import { cancel, NOTE_MAX, saveHandled, savePayment, saveStatus, subscribersCsv, subscribersCsvName } from "@/server/admin";
+import {
+  adminCounts,
+  getRegistration,
+  listCourseNames,
+  listRequests,
+  listSessionsByIds,
+  pageRegistrations,
+  pageRequests,
+  pageSubscribers,
+  recordRegistrationPayment,
+  setRequestHandled,
+} from "@/db/queries/admin";
+import { NOTE_MAX } from "@/domain/registration";
+import { cancel, saveHandled, savePayment, saveStatus, subscribersCsv, subscribersCsvName } from "@/server/admin";
 
 // Task 12: the admin inbox's queries and form handling on a real (PGlite) database.
 
@@ -75,12 +87,33 @@ describe("recordRegistrationPayment / savePayment", () => {
 describe("saveStatus / cancel", () => {
   test("Maria sets any status by hand with a note; the note is trimmed and limited", async () => {
     const r = await register();
-    expect(await saveStatus(db, form({ id: String(r.id), status: "confirmed", note: "  sularahas  " }))).toEqual({ ok: true });
+    const save = (fields: Record<string, string>) => saveStatus(db, form({ id: String(r.id), expected: "awaiting_prepayment", ...fields }));
+    expect(await save({ status: "confirmed", note: "  sularahas  " })).toEqual({ ok: true });
     expect(await getRegistration(db, r.id)).toMatchObject({ status: "confirmed", note: "sularahas" });
-    expect(await saveStatus(db, form({ id: String(r.id), status: "maybe", note: "" }))).toEqual({ ok: false, error: "invalid" });
-    expect(await saveStatus(db, form({ id: String(r.id), status: "cancelled", note: "x".repeat(NOTE_MAX + 1) }))).toEqual({ ok: false, error: "note" });
-    expect(await saveStatus(db, form({ id: "9999", status: "cancelled" }))).toEqual({ ok: false, error: "notFound" });
-    expect((await getRegistration(db, r.id))?.status).toBe("confirmed");
+    expect(await save({ status: "maybe", note: "", expected: "confirmed" })).toEqual({ ok: false, error: "invalid" });
+    expect(await save({ status: "cancelled", note: "x".repeat(NOTE_MAX + 1), expected: "confirmed" })).toEqual({ ok: false, error: "note" });
+    expect(await save({ status: "cancelled", note: "x".repeat(NOTE_MAX), expected: "confirmed" })).toEqual({ ok: true });
+    expect(await saveStatus(db, form({ id: "9999", status: "cancelled", expected: "confirmed" }))).toEqual({ ok: false, error: "notFound" });
+    expect((await getRegistration(db, r.id))?.status).toBe("cancelled");
+  });
+
+  test("a status form that saw an old status is refused (stale) and changes nothing; without `expected` it is invalid", async () => {
+    const r = await register({ note: "algne" });
+    // another tab cancels it meanwhile
+    expect(await cancel(db, form({ id: String(r.id) }))).toEqual({ ok: true });
+    expect(await saveStatus(db, form({ id: String(r.id), status: "confirmed", note: "uus", expected: "awaiting_prepayment" }))).toEqual({ ok: false, error: "stale" });
+    expect(await getRegistration(db, r.id)).toMatchObject({ status: "cancelled", note: "algne" });
+    expect(await saveStatus(db, form({ id: String(r.id), status: "confirmed", note: "uus" }))).toEqual({ ok: false, error: "invalid" });
+    // with the status it shows now, the change goes through
+    expect(await saveStatus(db, form({ id: String(r.id), status: "confirmed", note: "uus", expected: "cancelled" }))).toEqual({ ok: true });
+    // a payment confirms it meanwhile: a form that still shows "awaiting" is refused
+    const p = await register();
+    await recordRegistrationPayment(db, p.id, 17500);
+    expect(await saveStatus(db, form({ id: String(p.id), status: "awaiting_prepayment", note: "", expected: "awaiting_prepayment" }))).toEqual({
+      ok: false,
+      error: "stale",
+    });
+    expect((await getRegistration(db, p.id))?.status).toBe("confirmed");
   });
 
   test("Tühista cancels and keeps the note", async () => {
@@ -118,6 +151,66 @@ describe("requests", () => {
     expect((await listCourseNames(db)).map((c) => c.slug).sort()).toEqual(["e", "kulm"]);
     expect((await listSessionsByIds(db, [session.id, 9999])).map((s) => s.id)).toEqual([session.id]);
     expect(await listSessionsByIds(db, [])).toEqual([]);
+  });
+});
+
+describe("pages of 50 (?leht=)", () => {
+  test("registrations: 51 rows are two pages; an out-of-range page shows the last one; filters count too", async () => {
+    await db.insert(registrations).values(
+      Array.from({ length: 51 }, (_, i) => ({
+        courseId: contact.id,
+        courseSessionId: session.id,
+        kind: "group" as const,
+        name: `R${String(i).padStart(2, "0")}`,
+        email: `r${i}@example.com`,
+        paymentChoice: "half" as const,
+        createdAt: new Date(Date.UTC(2026, 9, 1, 0, i)),
+      })),
+    );
+    const first = await pageRegistrations(db, {}, 1);
+    expect(first).toMatchObject({ page: 1, pages: 2, total: 51, size: 50, offset: 0 });
+    expect(first.rows).toHaveLength(50);
+    expect(first.rows[0].name).toBe("R50"); // newest first
+    expect(first.rows[49].name).toBe("R01");
+    const second = await pageRegistrations(db, {}, 2);
+    expect(second).toMatchObject({ page: 2, pages: 2, total: 51, offset: 50 });
+    expect(second.rows.map((r) => r.name)).toEqual(["R00"]);
+    const beyond = await pageRegistrations(db, {}, 99);
+    expect(beyond).toMatchObject({ page: 2, pages: 2 });
+    expect(beyond.rows.map((r) => r.name)).toEqual(["R00"]);
+    expect(beyond.rows[0].course.slug).toBe("kulm");
+    const none = await pageRegistrations(db, { type: "e_learning" }, 3);
+    expect(none).toMatchObject({ page: 1, pages: 1, total: 0, rows: [] });
+    expect((await pageRegistrations(db, { status: "awaiting_prepayment" }, 1, 20)).pages).toBe(3);
+  });
+
+  test("requests: open ones first across the page boundary, each group newest first; only the tab's kind", async () => {
+    const at = (h: number) => new Date(Date.UTC(2026, 9, 1, h));
+    await db.insert(requests).values([
+      { kind: "practice", payload: { name: "open-old" }, createdAt: at(1) },
+      { kind: "practice", payload: { name: "done-new" }, handled: true, createdAt: at(9) },
+      { kind: "practice", payload: { name: "open-new" }, createdAt: at(5) },
+      { kind: "practice", payload: { name: "done-old" }, handled: true, createdAt: at(2) },
+      { kind: "practice", payload: { name: "open-mid" }, createdAt: at(3) },
+      { kind: "contact", payload: { name: "other kind" }, createdAt: at(10) },
+    ]);
+    const names = async (page: number) => (await pageRequests(db, "practice", page, 2)).rows.map((r) => r.payload.name);
+    expect(await names(1)).toEqual(["open-new", "open-mid"]);
+    expect(await names(2)).toEqual(["open-old", "done-new"]);
+    expect(await names(3)).toEqual(["done-old"]);
+    expect(await pageRequests(db, "practice", 3, 2)).toMatchObject({ page: 3, pages: 3, total: 5 });
+    expect(await names(4)).toEqual(["done-old"]); // clamped
+    // the plain list keeps its newest-first order
+    expect((await listRequests(db, "practice")).map((r) => r.payload.name)).toEqual(["done-new", "open-new", "open-mid", "done-old", "open-old"]);
+  });
+
+  test("subscribers: pages of the given size, newest consent first; empty is one empty page", async () => {
+    expect(await pageSubscribers(db, 5)).toMatchObject({ page: 1, pages: 1, total: 0, rows: [] });
+    await db.insert(subscribers).values(Array.from({ length: 5 }, (_, i) => ({ email: `s${i}@example.com`, token: `t${i}`, consentAt: new Date(Date.UTC(2026, 9, 1, i)) })));
+    const p1 = await pageSubscribers(db, 1, 2);
+    expect(p1.rows.map((r) => r.email)).toEqual(["s4@example.com", "s3@example.com"]);
+    expect((await pageSubscribers(db, 3, 2)).rows.map((r) => r.email)).toEqual(["s0@example.com"]);
+    expect(await pageSubscribers(db, 0, 2)).toMatchObject({ page: 1 });
   });
 });
 
@@ -165,7 +258,7 @@ describe("subscriber export", () => {
     const rows = await db.select().from(subscribers);
     const all = subscribersCsv(rows, { confirmedOnly: false });
     expect(all.split("\r\n")).toEqual([
-      "﻿E-post,Keel,Nõusolek,Kinnitatud,Kinnitamise aeg",
+      "\uFEFFE-post,Keel,Nõusolek,Kinnitatud,Kinnitamise aeg",
       "ok@example.com,RU,2026-09-30 12:00,jah,2026-09-30 12:10",
       "wait@example.com,'=CMD,2026-10-01 14:05,ei,",
       "",

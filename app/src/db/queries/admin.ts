@@ -1,7 +1,8 @@
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
+import { pageInfo, PAGE_SIZE, type PageInfo } from "@/domain/paging";
 import { registrationPrice, registrationStatusAfterPayment, type RegStatus } from "@/domain/registration";
 import type { I18n } from "@/i18n/field";
 
@@ -66,26 +67,66 @@ export async function upsertSession(db: Db, input: SessionInput): Promise<Course
 
 // ---------- registrations and requests ----------
 
-/** Manual status change by Maria (e.g. confirm after the prepayment arrived). Returns null when the id does not exist. */
-export async function setRegistrationStatus(db: Db, id: number, status: RegStatus, note?: string): Promise<Registration | null> {
+/** A slice of a list: `limit` rows from `offset` on. Without one the whole list is returned (the CSV export). */
+export type Range = { limit: number; offset: number };
+/** One page of an admin list: its rows and where it is (page, pages, total). */
+export type Paged<T> = PageInfo & { rows: T[] };
+
+/**
+ * Page `requested` (clamped to 1…last) of a list. The count and the rows are read together; only when the requested
+ * page lies beyond the end (an old link, a typed ?leht=) are the rows of the last page read once more.
+ */
+async function paged<T>(requested: number, size: number, total: () => Promise<number>, rows: (range: Range) => Promise<T[]>): Promise<Paged<T>> {
+  const guess = pageInfo(requested, Number.POSITIVE_INFINITY, size);
+  const [n, first] = await Promise.all([total(), rows({ limit: size, offset: guess.offset })]);
+  const info = pageInfo(requested, n, size);
+  return { ...info, rows: info.offset === guess.offset ? first : await rows({ limit: size, offset: info.offset }) };
+}
+
+/**
+ * Manual status change by Maria (e.g. confirm after the prepayment arrived). Returns null when the id does not exist,
+ * or, with `expected`, when the status is no longer the one she saw (someone else changed it meanwhile): one
+ * UPDATE ... WHERE status = expected, so it cannot overwrite a change it did not see.
+ */
+export async function setRegistrationStatus(
+  db: Db,
+  id: number,
+  status: RegStatus,
+  note?: string,
+  opts: { expected?: RegStatus } = {},
+): Promise<Registration | null> {
   const [row] = await db
     .update(registrations)
     .set(note === undefined ? { status } : { status, note })
-    .where(eq(registrations.id, id))
+    .where(and(eq(registrations.id, id), opts.expected ? eq(registrations.status, opts.expected) : undefined))
     .returning();
   return row ?? null;
 }
 
+const registrationWhere = (filter: RegistrationFilter) =>
+  and(filter.type ? eq(courses.type, filter.type) : undefined, filter.status ? eq(registrations.status, filter.status) : undefined);
+
 /** Registrations with their course and session, newest first. `type` filters by the course type. */
-export async function listRegistrations(db: Db, filter: RegistrationFilter = {}): Promise<RegistrationRow[]> {
-  const rows = await db
+export async function listRegistrations(db: Db, filter: RegistrationFilter = {}, range?: Range): Promise<RegistrationRow[]> {
+  const q = db
     .select({ registration: registrations, course: courses, courseSession: courseSessions })
     .from(registrations)
     .innerJoin(courses, eq(registrations.courseId, courses.id))
     .leftJoin(courseSessions, eq(registrations.courseSessionId, courseSessions.id))
-    .where(and(filter.type ? eq(courses.type, filter.type) : undefined, filter.status ? eq(registrations.status, filter.status) : undefined))
+    .where(registrationWhere(filter))
     .orderBy(desc(registrations.createdAt), desc(registrations.id));
+  const rows = await (range ? q.limit(range.limit).offset(range.offset) : q);
   return rows.map((r) => ({ ...r.registration, course: r.course, courseSession: r.courseSession }));
+}
+
+export async function countRegistrations(db: Db, filter: RegistrationFilter = {}): Promise<number> {
+  const [{ n }] = await db.select({ n: count() }).from(registrations).innerJoin(courses, eq(registrations.courseId, courses.id)).where(registrationWhere(filter));
+  return Number(n);
+}
+
+/** One page of registrations (newest first), PAGE_SIZE rows. */
+export async function pageRegistrations(db: Db, filter: RegistrationFilter, page: number, size: number = PAGE_SIZE): Promise<Paged<RegistrationRow>> {
+  return paged(page, size, () => countRegistrations(db, filter), (range) => listRegistrations(db, filter, range));
 }
 
 /** One registration with its course and session, or null. */
@@ -107,20 +148,42 @@ export async function getRegistration(db: Db, id: number): Promise<RegistrationR
  * Returns null when the id does not exist.
  */
 export async function recordRegistrationPayment(db: Db, id: number, paidCents: number): Promise<Registration | null> {
-  const current = await getRegistration(db, id);
-  if (!current) return null;
-  const total = registrationPrice(current.course, current.kind);
-  const status = total == null ? current.status : registrationStatusAfterPayment({ status: current.status, paidCents }, total);
-  const [row] = await db.update(registrations).set({ paidCents, status }).where(eq(registrations.id, id)).returning();
-  return row ?? null;
+  // One transaction with the registration row locked (FOR UPDATE): a cancel or status change saved at the same moment
+  // either happens before (and is seen here) or waits until this is done; it is never overwritten with a stale status.
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ registration: registrations, course: courses })
+      .from(registrations)
+      .innerJoin(courses, eq(registrations.courseId, courses.id))
+      .where(eq(registrations.id, id))
+      .for("update", { of: registrations });
+    if (!current) return null;
+    const { registration: r, course } = current;
+    const total = registrationPrice(course, r.kind);
+    const status = total == null ? r.status : registrationStatusAfterPayment({ status: r.status, paidCents }, total);
+    const [row] = await tx.update(registrations).set({ paidCents, status }).where(eq(registrations.id, id)).returning();
+    return row ?? null;
+  });
 }
 
-export async function listRequests(db: Db, kind?: RequestRow["kind"]): Promise<RequestRow[]> {
-  return db
+/** Requests newest first, optionally of one kind. `openFirst`: not handled ones before handled ones (the inbox). */
+export async function listRequests(db: Db, kind?: RequestRow["kind"], opts: { openFirst?: boolean; range?: Range } = {}): Promise<RequestRow[]> {
+  const q = db
     .select()
     .from(requests)
     .where(kind ? eq(requests.kind, kind) : undefined)
-    .orderBy(desc(requests.createdAt), desc(requests.id));
+    .orderBy(...(opts.openFirst ? [asc(requests.handled)] : []), desc(requests.createdAt), desc(requests.id));
+  return opts.range ? q.limit(opts.range.limit).offset(opts.range.offset) : q;
+}
+
+export async function countRequests(db: Db, kind?: RequestRow["kind"]): Promise<number> {
+  const [{ n }] = await db.select({ n: count() }).from(requests).where(kind ? eq(requests.kind, kind) : undefined);
+  return Number(n);
+}
+
+/** One page of the request inbox of one kind: open requests first, each group newest first. */
+export async function pageRequests(db: Db, kind: RequestRow["kind"], page: number, size: number = PAGE_SIZE): Promise<Paged<RequestRow>> {
+  return paged(page, size, () => countRequests(db, kind), (range) => listRequests(db, kind, { openFirst: true, range }));
 }
 
 export async function markRequestHandled(db: Db, id: number): Promise<RequestRow | null> {
@@ -251,6 +314,18 @@ export async function setSetting(db: Db, key: string, value: unknown): Promise<v
   await db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
-export async function listSubscribers(db: Db): Promise<Subscriber[]> {
-  return db.select().from(subscribers).orderBy(desc(subscribers.consentAt), desc(subscribers.id));
+/** Newsletter subscribers, newest consent first; the whole list unless a range is given (the CSV export takes all). */
+export async function listSubscribers(db: Db, range?: Range): Promise<Subscriber[]> {
+  const q = db.select().from(subscribers).orderBy(desc(subscribers.consentAt), desc(subscribers.id));
+  return range ? q.limit(range.limit).offset(range.offset) : q;
+}
+
+export async function countSubscribers(db: Db): Promise<number> {
+  const [{ n }] = await db.select({ n: count() }).from(subscribers);
+  return Number(n);
+}
+
+/** One page of the subscriber list. */
+export async function pageSubscribers(db: Db, page: number, size: number = PAGE_SIZE): Promise<Paged<Subscriber>> {
+  return paged(page, size, () => countSubscribers(db), (range) => listSubscribers(db, range));
 }

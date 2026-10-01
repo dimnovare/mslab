@@ -21,3 +21,6 @@ export function registrationPrice(
   if (course.type === "e_learning") return course.price;
   return kind === "group" ? course.priceGroup : course.priceIndividual;
 }
+
+/** Longest admin note on a registration (the drawer's "Märkus"). */
+export const NOTE_MAX = 2000;

@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useEffect, useId, useRef, useState, type FormEvent } from "react";
-import type { RegStatus } from "@/domain/registration";
+import { NOTE_MAX, type RegStatus } from "@/domain/registration";
 import { centsToInput } from "@/domain/money";
 import type { AdminResult } from "@/server/admin";
 import { cancelRegistration, saveRegistrationPayment, saveRegistrationStatus } from "@/server/actions/admin";
@@ -20,6 +20,7 @@ export type RegistrationFormTexts = {
   noteTooLong: string;
   statusSave: string;
   statusSaved: string;
+  stale: string;
   cancel: string;
   cancelled: string;
   saving: string;
@@ -28,6 +29,9 @@ export type RegistrationFormTexts = {
 };
 
 const STATUSES: RegStatus[] = ["awaiting_prepayment", "confirmed", "cancelled"];
+
+/** The amount field: empty while nothing has been paid (Maria types the first amount), otherwise "175" / "175,50". */
+const amountText = (cents: number) => (cents > 0 ? centsToInput(cents) : "");
 
 /**
  * The registration drawer's forms: the amount that has arrived (status recomputed on the server), status + note, and
@@ -49,13 +53,13 @@ export function RegistrationForms({
   t: RegistrationFormTexts;
 }) {
   const uid = useId();
-  const [paid, setPaid] = useState(centsToInput(paidCents));
+  const [paid, setPaid] = useState(amountText(paidCents));
   const [chosen, setChosen] = useState<RegStatus>(status);
   const [text, setText] = useState(note);
   const [seen, setSeen] = useState({ paidCents, status, note });
   if (seen.paidCents !== paidCents || seen.status !== status || seen.note !== note) {
     setSeen({ paidCents, status, note });
-    if (seen.paidCents !== paidCents) setPaid(centsToInput(paidCents));
+    if (seen.paidCents !== paidCents) setPaid(amountText(paidCents));
     if (seen.status !== status) setChosen(status);
     if (seen.note !== note) setText(note);
   }
@@ -79,7 +83,8 @@ export function RegistrationForms({
   }, [cancelState, status]);
 
   const payError = payState && !payState.ok ? (payState.error === "amount" ? t.paidInvalid : t.error) : null;
-  const statusError = statusState && !statusState.ok ? (statusState.error === "note" ? t.noteTooLong : t.error) : null;
+  const statusError =
+    statusState && !statusState.ok ? (statusState.error === "note" ? t.noteTooLong : statusState.error === "stale" ? t.stale : t.error) : null;
   const cancelError = cancelState && !cancelState.ok ? t.error : null;
 
   return (
@@ -115,6 +120,8 @@ export function RegistrationForms({
 
       <form className={styles.form} onSubmit={submit(statusAction, statusPending)} data-status-form="">
         <input type="hidden" name="id" value={id} />
+        {/* the status this form shows: the server refuses the change if the stored one is different by now */}
+        <input type="hidden" name="expected" value={status} />
         <fieldset className={styles.fieldset}>
           <legend className={ui.legend}>{t.statusLabel}</legend>
           <div className={styles.choices}>
@@ -132,7 +139,7 @@ export function RegistrationForms({
             id={`${uid}-note`}
             name="note"
             className={ui.textarea}
-            maxLength={2000}
+            maxLength={NOTE_MAX}
             value={text}
             onChange={(e) => setText(e.target.value)}
             aria-describedby={`${uid}-note-hint`}

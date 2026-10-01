@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { Db } from "@/db/client";
 import type { Subscriber } from "@/db/schema";
-import { recordRegistrationPayment, setRegistrationStatus, setRequestHandled } from "@/db/queries/admin";
+import { getRegistration, recordRegistrationPayment, setRegistrationStatus, setRequestHandled } from "@/db/queries/admin";
 import { parseEuroCents } from "@/domain/money";
+import { NOTE_MAX } from "@/domain/registration";
 import { adminEt } from "@/i18n/dict/admin";
 import { formatStamp } from "@/i18n/format";
 import { toCsv } from "./csv";
@@ -11,10 +12,11 @@ import { toCsv } from "./csv";
 // the admin session (server/actions/admin.ts wraps each in adminAction, the CSV route is wrapped in withAdmin); these
 // take a Db and run without Next.js (tests/db/admin.test.ts).
 
-/** What an admin form gets back. `error`: invalid (bad id / status), notFound, amount (not a euro amount), note (too long). */
-export type AdminResult = { ok: true } | { ok: false; error: "invalid" | "notFound" | "amount" | "note" | "server" };
-
-export const NOTE_MAX = 2000;
+/**
+ * What an admin form gets back. `error`: invalid (bad id / status), notFound, amount (not a euro amount), note (too
+ * long), stale (the status changed since the form was loaded: nothing saved, the page shows the current one).
+ */
+export type AdminResult = { ok: true } | { ok: false; error: "invalid" | "notFound" | "amount" | "note" | "stale" | "server" };
 
 const OK: AdminResult = { ok: true };
 const fail = (error: Exclude<AdminResult, { ok: true }>["error"]): AdminResult => ({ ok: false, error });
@@ -36,14 +38,20 @@ export async function savePayment(db: Db, formData: FormData): Promise<AdminResu
   return (await recordRegistrationPayment(db, reg.data, cents)) ? OK : fail("notFound");
 }
 
-/** Fields: id, status (awaiting_prepayment | confirmed | cancelled), note (≤ 2000 characters). Maria's manual change. */
+/**
+ * Fields: id, status (awaiting_prepayment | confirmed | cancelled), note (at most NOTE_MAX characters), expected (the
+ * status the form was showing). Maria's manual change; refused as `stale` when the stored status is no longer
+ * `expected` (e.g. cancelled or confirmed by a payment in another tab), so it never overwrites a change she did not see.
+ */
 export async function saveStatus(db: Db, formData: FormData): Promise<AdminResult> {
   const reg = id.safeParse(field(formData, "id"));
   const next = status.safeParse(field(formData, "status"));
-  if (!reg.success || !next.success) return fail("invalid");
+  const expected = status.safeParse(field(formData, "expected"));
+  if (!reg.success || !next.success || !expected.success) return fail("invalid");
   const note = (field(formData, "note") ?? "").trim();
   if (note.length > NOTE_MAX) return fail("note");
-  return (await setRegistrationStatus(db, reg.data, next.data, note)) ? OK : fail("notFound");
+  if (await setRegistrationStatus(db, reg.data, next.data, note, { expected: expected.data })) return OK;
+  return (await getRegistration(db, reg.data)) ? fail("stale") : fail("notFound");
 }
 
 /** Field: id. "Tühista": status cancelled, the note is kept. */
