@@ -7,9 +7,11 @@ import type { Page } from "@playwright/test";
  * the old URL (useSearchParams, and the list filtered from it, stayed on the old query), and the history entry lost
  * Next.js's state (Back to it did nothing).
  *
- * The page's own patch is held back until the first replaceState after the first pointer press, then put in place in
- * a microtask: before React renders again, as React flushes the hydration effects (the patch among them) before its
- * next render. The tap's own replaceState call therefore reaches the browser unpatched, exactly as in the race.
+ * The page's own patch is held back until the first replaceState after the first pointer press, and put in place as
+ * soon as that call returns: the tap's own replaceState reaches the browser unpatched, exactly as in the race, and the
+ * patch is there before anything React does next, as on a real page (React flushes the hydration effects, the patch
+ * among them, before its next render). Putting it in place a microtask later was not faithful: React may render and
+ * run the tap's effects at the end of the click, before that microtask.
  */
 export async function holdBackRouterHistoryPatch(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -25,7 +27,7 @@ export async function holdBackRouterHistoryPatch(page: Page): Promise<void> {
     };
     function beforeRouterPatch(this: History, data: unknown, unused: string, url?: string | URL | null) {
       native.call(window.history, data, unused, url);
-      if (armed) queueMicrotask(release);
+      if (armed) release();
     }
     Object.defineProperty(window.history, "replaceState", {
       configurable: true,
