@@ -1,10 +1,9 @@
-import { cache } from "react";
-import { after } from "next/server";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import postgres from "postgres";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { perRequest } from "../server/per-request";
 import * as schema from "./schema";
 
 /** Query functions take a Db as their first parameter. Production passes the Hyperdrive client; tests pass PGlite. */
@@ -16,8 +15,6 @@ export type Q = Db | Tx;
 
 /** Seconds to wait for a connection, so a slow or unreachable database cannot hang the page (it fails, then shows the error page). */
 const CONNECT_TIMEOUT = 5;
-/** Seconds that in-flight queries get to finish when the per-request client is closed. */
-const END_TIMEOUT = 5;
 
 /**
  * `prepare: false`: Hyperdrive caches read queries for 60 s (+15 s stale) and does not invalidate them on writes, so
@@ -34,18 +31,20 @@ const client = (url: string) => postgres(url, { max: 5, fetch_types: false, conn
 const devGlobal = globalThis as typeof globalThis & { __mslabDevDb?: Db };
 
 /**
- * One database client per request (React cache() memoises per render/request); Hyperdrive pools the real connections.
- * In production the client is closed once the response has been sent: next/server `after()` runs the callback through
- * the Worker's `ctx.waitUntil` (OpenNext provides the request context), so the Worker stays alive until `end()` resolves.
- * `end()` cannot be handed to `ctx.waitUntil` directly at creation time: postgres.js rejects every query issued after
- * `end()` has been called, so the request's own queries would fail.
+ * The client of this Worker request, one per request (server/per-request.ts; not React's cache(), which after a CPU-limit
+ * kill handed requests a client that another request had already closed). Hyperdrive pools the real connections.
+ *
+ * The app does not close it: the Workers runtime closes a request's sockets when the request is over (response sent,
+ * waitUntil work done), as in Cloudflare's Hyperdrive + postgres.js examples, which never call end(). An explicit end()
+ * makes postgres.js reject every later query (CONNECTION_ENDED), and a request's last query may come after its response
+ * (OpenNext storing the rendered page, `after()` work).
  */
-export const getDb = cache((): Db => {
-  const { env } = getCloudflareContext();
+const requestClient = perRequest((): Db => drizzle(client(getCloudflareContext().env.HYPERDRIVE.connectionString), { schema }));
+
+/** The database: this Worker request's client (production), or the one pool of `next dev`. */
+export function getDb(): Db {
   if (process.env.NODE_ENV === "development") {
-    return (devGlobal.__mslabDevDb ??= drizzle(client(env.HYPERDRIVE.connectionString), { schema }));
+    return (devGlobal.__mslabDevDb ??= drizzle(client(getCloudflareContext().env.HYPERDRIVE.connectionString), { schema }));
   }
-  const sql = client(env.HYPERDRIVE.connectionString);
-  after(() => sql.end({ timeout: END_TIMEOUT }));
-  return drizzle(sql, { schema });
-});
+  return requestClient();
+}

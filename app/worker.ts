@@ -17,7 +17,9 @@ const worker = {
     // An uploaded image: from the edge cache or R2, without OpenNext and Next.js (src/worker/media-front.ts)
     const media = await mediaAnswer(request, env, { cache: caches.default, waitUntil: (p) => ctx.waitUntil(p) });
     if (media) return media;
-    // Before any I/O: a page rendered by this request is dated by it (src/server/page-store.ts).
+    // Each request in a scope of its own (src/server/request-scope.ts): its start, taken before any I/O (a page rendered
+    // by this request is dated by it: src/server/page-store.ts), and its per-request values (src/server/per-request.ts:
+    // its database client, its signed-in admin).
     return runAsRequest(Date.now(), async () => {
       // OPEN_NEXT_BUILD_ID is set when OpenNext's bundle loads (imported above)
       const answer = await frontAnswer(request, env, process.env.OPEN_NEXT_BUILD_ID);
