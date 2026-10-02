@@ -335,7 +335,8 @@ test.describe("home content from the database", () => {
     await expect(steps.first()).toContainText("Vali koolitus ja kuupäev");
     await page.getByRole("tab", { name: "Hübriidõpe" }).click();
     const panel = page.getByRole("tabpanel");
-    await expect(panel).toContainText("ühendab kaks erinevat õppevormi");
+    await expect(panel).toContainText("Hübriidõpe ei ole eraldi valik"); // Maria's sense (K1): combine two courses yourself
+    await expect(panel).not.toContainText("Teooria"); // not "theory online + practice on site"
     await expect(panel.getByRole("link")).toHaveCount(0);
     await expect(page.locator("[data-steps]")).toHaveCount(0);
   });

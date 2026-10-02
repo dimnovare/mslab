@@ -26,7 +26,7 @@ type Errors = Partial<Record<Field, string>>;
 type State = { status: "idle" } | { status: "sent" } | { status: "error"; errors: Errors };
 
 /**
- * "Ootenimekirja" on a full calendar session (prototype A, A3): name and e-mail for that session → submitWaitlist
+ * "Liitu ootenimekirjaga" on a full calendar session (prototype A, A3): name and e-mail for that session → submitWaitlist
  * (stored as a `waitlist` request). Opens with focus in the name field; after a failed submit focus goes to
  * the first field with an error, after success to the confirmation.
  */

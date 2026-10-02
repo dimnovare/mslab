@@ -155,7 +155,7 @@ test.describe("calendar", () => {
 test.describe("calendar seat states (test-owned fixtures in the local DB)", () => {
   test.skip(!LOCAL_FIXTURES, "the seat fixtures are only inserted into the local dev database");
 
-  test("a full session: Kohad täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }, info) => {
+  test("a full session: Kohad täis, the Liitu ootenimekirjaga disclosure and the waitlist form (L3, A3)", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("waitlist", info.project.name);
     await page.goto("/koolituskalender");
@@ -170,7 +170,9 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(full.getByRole("link", { name: /Registreeru/ })).toHaveCount(0);
 
     // Disclosure: opens the form under the row with focus in the name field, and closes again.
-    const toggle = full.getByRole("button", { name: /Ootenimekirja/ });
+    // the disclosure (aria-expanded) says "Liitu ootenimekirjaga" (B's wording, C49), as the form's own submit button does
+    const toggle = full.locator("button[aria-expanded]");
+    await expect(toggle).toHaveText("Liitu ootenimekirjaga");
     const form = full.locator("[data-waitlist-form]");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(form).toHaveCount(0);
@@ -220,7 +222,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(few).toContainText("Viimased kohad · 2");
     expect(await few.locator("[data-seat-state]").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(107, 79, 92)");
     await expect(few.getByRole("link", { name: /Registreeru/ })).toHaveAttribute("href", /^\/koolitused\/lash-lift-botox\?sessioon=\d+$/);
-    await expect(few.getByRole("button", { name: /Ootenimekirja/ })).toHaveCount(0);
+    await expect(few.getByRole("button", { name: /ootenimekirja/i })).toHaveCount(0);
   });
 
   test("the course page shows the full date but it cannot be picked", async ({ page }) => {
@@ -237,7 +239,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await page.goto("/ru/koolituskalender");
     const full = page.locator("[data-calendar-row][data-state='full']");
     await expect(full).toContainText("Мест нет");
-    await expect(full.getByRole("button", { name: /В лист ожидания/ })).toBeVisible();
+    await expect(full.locator("button[aria-expanded]")).toHaveText("Встать в лист ожидания");
     await expect(page.locator("[data-calendar-row][data-state='few']")).toContainText("Последние места · 2");
   });
 });

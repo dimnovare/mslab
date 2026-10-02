@@ -97,11 +97,11 @@ export const et = {
     // Hybrid is only an explanation: a student combines an e-learning and a contact course (K1, K8). No steps, no filter.
     hybrid: {
       name: "Hübriidõpe",
-      short: "Veeb + kohapeal",
+      short: "E-õpe + kontaktõpe",
       question: "Mis on hübriidõpe?",
       definition:
-        "Hübriidõpe ühendab kaks erinevat õppevormi: e-õpe ja kontaktõpe. Teooria omandad iseseisvalt veebis omas tempos ning praktiline osa toimub koolitaja juhendamisel kohapeal. Hübriidõppe koostad ise, valides sobiva e-õppe ja kontaktõppe koolituse.",
-      facts: ["Teooria veebis", "Praktika kohapeal"],
+        "Hübriidõpe tähendab, et saad e-õpet ja kontaktõpet omavahel kombineerida — näiteks läbid ühe koolituse e-õppes ja tuled teisele kontaktõppesse. Hübriidõpe ei ole eraldi valik: koostad selle ise, valides sobivad e-õppe ja kontaktõppe koolitused.",
+      facts: ["E-õppe koolitus", "Kontaktõppe koolitus"],
       link: "Vaata kõiki koolitusi",
     },
   },
@@ -132,7 +132,7 @@ export const et = {
     levelBasic: "Baaskoolitus",
     levelAdvanced: "Täiendkoolitus",
     modulesLabel: "Moodulid",
-    videosLabel: "Videotunnid",
+    videosLabel: "Õppevideod", // not "Videotunnid": "tund" reads as an hour or a lesson (Maria asked "mitu õppevideot")
     accessLabel: "Ligipääs",
     monthsUnit: "kuud",
     languageLabel: "Õppekeel",
@@ -206,7 +206,7 @@ export const et = {
     stateCancelled: "Tühistatud",
     register: "Registreeru",
     // Row buttons (prototype A): full → waitlist form, cancelled → the course page with its other dates.
-    waitlist: "Ootenimekirja",
+    waitlist: "Liitu ootenimekirjaga", // prototype B's wording (C49)
     others: "Vaata teisi",
     empty: "Selles linnas hetkel koolitusi pole.",
     results: "Kuupäevi: {n}",

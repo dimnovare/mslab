@@ -28,7 +28,7 @@ test.describe("catalogue", () => {
     const hybrid = explainer.locator("[data-format-card='h']");
     await hybrid.click();
     await expect(hybrid).toHaveAttribute("aria-expanded", "true");
-    await expect(page.locator("[data-hybrid-panel]").getByText(/Hübriidõpe ühendab kaks erinevat õppevormi/)).toBeVisible();
+    await expect(page.locator("[data-hybrid-panel]").getByText(/Hübriidõpe tähendab, et saad e-õpet ja kontaktõpet omavahel kombineerida/)).toBeVisible();
     await expect(page.locator("[data-steps]")).toHaveCount(0);
     await expect(page.locator("[data-hybrid-panel]").getByRole("link")).toHaveCount(0);
     await expect(page.locator("[data-course-card]")).toHaveCount(6);

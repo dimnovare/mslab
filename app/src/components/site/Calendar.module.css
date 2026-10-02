@@ -219,7 +219,7 @@
   flex: 1;
 }
 
-/* A's secondary pill (#EBE8E9) for "Ootenimekirja" and "Vaata teisi". */
+/* A's secondary pill (#EBE8E9) for "Liitu ootenimekirjaga" and "Vaata teisi". */
 /* Used with ui.btn; the .action prefix makes it win over the ink pill. */
 .action .soft {
   border-color: var(--first);

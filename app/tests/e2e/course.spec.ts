@@ -60,6 +60,8 @@ test.describe("e-learning page", () => {
     await expect(s).toContainText("Moodulid");
     await expect(s).toContainText("6");
     await expect(s).toContainText("24");
+    await expect(s).toContainText("Õppevideod"); // not "Videotunnid" (N9)
+    await expect(s).not.toContainText("Videotunnid");
     await expect(s).toContainText("6 kuud");
     await expect(s).toContainText("ET / RU");
     await expect(s).toContainText("−10% järgmiselt koolituselt");
