@@ -4,6 +4,8 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 const nextConfig: NextConfig = {
   // Don't let `next dev` write AGENTS.md / CLAUDE.md into the project.
   agentRules: false,
+  // No "X-Powered-By: Next.js" on responses (N12).
+  poweredByHeader: false,
   // The design-review hub (public/guide, public/p/<dir>) must keep its trailing slash ("/guide/"): its pages use
   // relative asset URLs. Next's own "/x/" → "/x" redirect is off; src/middleware.ts makes it for every other path.
   skipTrailingSlashRedirect: true,

@@ -19,7 +19,7 @@ async function head(request: APIRequestContext, path: string) {
 test.describe("noindex on every kind of answer (item 16)", () => {
   test.skip(({ isMobile }) => isMobile, "the same answers for every browser: desktop project only");
 
-  test("pages, 404, API, /media, static files, the hub and redirects all say X-Robots-Tag: noindex, nofollow", async ({ request }) => {
+  test("pages, 404, API, /media, static files, the hub and redirects all say X-Robots-Tag: noindex, nofollow; none says X-Powered-By", async ({ request }) => {
     // a built script of the page itself (a hashed /_next/static file)
     const html = await (await request.get("/")).text();
     const chunk = /\/_next\/static\/[^"'\s]+\.js/.exec(html)?.[0];
@@ -59,6 +59,7 @@ test.describe("noindex on every kind of answer (item 16)", () => {
       report.push(`${path} → ${res.status()} x-robots-tag: ${robots ?? "(none)"}`);
       expect(ok, `${path}: status ${res.status()}`).toBe(true);
       expect(robots, `${path} (${res.status()}): once, exactly`).toBe(NOINDEX);
+      expect(res.headers()["x-powered-by"], `${path}: no X-Powered-By (N12)`).toBeUndefined();
     }
     test.info().annotations.push({ type: "answers", description: report.join("\n") });
   });
