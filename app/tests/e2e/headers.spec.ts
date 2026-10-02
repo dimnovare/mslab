@@ -235,7 +235,6 @@ test.describe("framing: only by this site's own pages (final review M10)", () =>
   });
 });
 
-
 // ---------------------------------------------------------------------------------------------------------------------
 // Parity on `next start` / Vercel (Move to Vercel, Task 5). Before, a Cloudflare layer put these headers on every answer;
 // now only next.config.ts headers() (and src/middleware.ts for its own redirects) do. The static files of public/ (the
@@ -252,8 +251,22 @@ function expectSiteHeaders(res: APIResponse, label: string): void {
   expect(h["x-powered-by"], `${label}: no X-Powered-By (N12)`).toBeUndefined();
 }
 
+/** Is the answer text (HTML, CSS, JavaScript, plain text) by its Content-Type? */
+function isText(contentType: string | undefined): boolean {
+  return /^text\/|javascript/i.test(contentType ?? "");
+}
+
+/**
+ * Is `served` the file `onDisk`? Byte for byte for a binary. Text without regard to line ends: the checkout here has CRLF
+ * (core.autocrlf, no .gitattributes) while a deployment built from Git sends LF, and the same file is both.
+ */
+function sameFile(served: Buffer, onDisk: Buffer, text: boolean): boolean {
+  if (!text) return served.equals(onDisk);
+  return served.toString("utf8").replace(/\r\n/g, "\n") === onDisk.toString("utf8").replace(/\r\n/g, "\n");
+}
+
 /** Where a redirect goes, as a path with its query (Location may be a full address or only a path). */
-function target(res: APIResponse): string {
+function redirectTarget(res: APIResponse): string {
   const to = new URL(res.headers()["location"] ?? "", "http://site.test");
   return to.pathname + to.search;
 }
@@ -294,10 +307,31 @@ test.describe("static files and the hub: the same headers as a page (Task 5)", (
         // a built file is named by its content hash: kept for a year (not by `next dev`, which rebuilds them)
         if (file === undefined && TARGET) expect(res.headers()["cache-control"], label).toBe("public, max-age=31536000, immutable");
         // the file itself, not the site's 404 page or another file (the hub's index pages are served by the middleware)
-        if (file !== undefined && method === "GET")
-          expect(Buffer.compare(await res.body(), readFileSync(join(process.cwd(), "public", file))), `${label}: the file public/${file}`).toBe(0);
+        if (file !== undefined && method === "GET") {
+          const onDisk = readFileSync(join(process.cwd(), "public", file));
+          const served = await res.body();
+          expect(sameFile(served, onDisk, isText(res.headers()["content-type"])), `${label}: the file public/${file}`).toBe(true);
+          // a deployment built from Git sends the text with LF, whatever this checkout (core.autocrlf) has: still the file
+          if (isText(res.headers()["content-type"])) expect(sameFile(Buffer.from(onDisk.toString("utf8").replace(/\r\n/g, "\n")), onDisk, true), `${label}: with LF line ends`).toBe(true);
+        }
       }
     }
+  });
+
+  test("the file comparison ignores line ends of text, never of anything else", () => {
+    const lf = Buffer.from("a\nb\n");
+    const crlf = Buffer.from("a\r\nb\r\n");
+    expect(sameFile(lf, crlf, true), "text: LF served, CRLF checked out").toBe(true);
+    expect(sameFile(crlf, lf, true), "text: CRLF served, LF checked out").toBe(true);
+    expect(sameFile(lf, Buffer.from("a\nc\n"), true), "text: another letter").toBe(false);
+    expect(sameFile(lf, Buffer.from("a\n\nb\n"), true), "text: another line").toBe(false);
+    expect(sameFile(lf, crlf, false), "binary: a 0x0D byte is a difference").toBe(false);
+    expect(sameFile(crlf, Buffer.from(crlf), false), "binary: the same bytes").toBe(true);
+    expect(isText("text/html; charset=UTF-8")).toBe(true);
+    expect(isText("application/javascript; charset=UTF-8")).toBe(true);
+    expect(isText("text/css; charset=UTF-8")).toBe(true);
+    expect(isText("text/plain; charset=UTF-8")).toBe(true);
+    for (const type of ["image/jpeg", "image/x-icon", "image/vnd.microsoft.icon", undefined]) expect(isText(type), String(type)).toBe(false);
   });
 
   test("a file asked for with a query string (?v=) gets the same headers", async ({ request }) => {
@@ -334,7 +368,7 @@ test.describe("redirects: noindex and the other headers on the middleware's own 
         const label = `${method} ${from}`;
         const res = await request.fetch(from, { method, maxRedirects: 0, failOnStatusCode: false });
         expect(res.status(), label).toBe(status);
-        expect(target(res), label).toBe(to);
+        expect(redirectTarget(res), label).toBe(to);
         expectSiteHeaders(res, label);
       }
     }

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mediaStore } from "@/server/media-store";
 
 // Which store holds the uploaded images: R2 when its four variables are set, otherwise a local folder in development (or
-// in a production build with MEDIA_LOCAL=1), otherwise none (production without R2: uploads are refused, /media 404).
+// in a production build with MEDIA_LOCAL=1, except on Vercel, where VERCEL is set and MEDIA_LOCAL is ignored), otherwise
+// none (production without R2: uploads are refused, /media 404).
 
 const R2 = { R2_ACCOUNT_ID: "0123456789abcdef0123456789abcdef", R2_ACCESS_KEY_ID: "AKIDFAKEFAKEFAKE", R2_SECRET_ACCESS_KEY: "fake-secret-access-key-for-tests", R2_BUCKET: "mslab-media" };
 const NONE = { R2_ACCOUNT_ID: undefined, R2_ACCESS_KEY_ID: undefined, R2_SECRET_ACCESS_KEY: undefined, R2_BUCKET: undefined };
