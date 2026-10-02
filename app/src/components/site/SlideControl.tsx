@@ -7,7 +7,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
  * Prototype A's hero control (Maria C03 / H2): mono "01 / 05" counter, a bar of 2px segments (current at full
  * opacity, the others at .25), a round outline "previous" and a filled "next" button, all in the hero's text colour.
  * Before them a quiet pause toggle (thin pause / play glyph, no frame; WCAG 2.2.2): pressed, the slides stay put until
- * it is pressed again. Hidden with reduced motion, where nothing plays.
+ * it is pressed again. Hidden with reduced motion and with a single slide, where nothing plays.
  */
 export function SlideControl({
   count,
@@ -44,9 +44,12 @@ export function SlideControl({
         ))}
       </div>
       <div className={styles.buttons}>
-        <button type="button" className={styles.toggle} aria-label={labels.pause} aria-pressed={paused} onClick={onTogglePause} data-slide-pause="">
-          <Icon name={paused ? "play" : "pause"} size={18} />
-        </button>
+        {/* one slide: nothing plays, so nothing to pause */}
+        {count > 1 && (
+          <button type="button" className={styles.toggle} aria-label={labels.pause} aria-pressed={paused} onClick={onTogglePause} data-slide-pause="">
+            <Icon name={paused ? "play" : "pause"} size={18} />
+          </button>
+        )}
         <button type="button" className={styles.prev} aria-label={labels.prev} onClick={onPrev}>
           <Icon name="chevronLeft" size={18} />
         </button>

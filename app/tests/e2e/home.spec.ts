@@ -148,14 +148,21 @@ test.describe("hero behaviour", () => {
     const slides = hero.locator("[data-hero-slides]");
     await expect(hero).toHaveAttribute("data-autoplay", "on");
     await expect(slides).toHaveAttribute("aria-live", "off"); // autoplay running: its changes are not announced
-    // record aria-live at the very moment the shown slide changes
+    await expect(hero.locator("img")).toHaveCount(5, { timeout: 10_000 }); // the idle pictures are in: no other DOM changes
+    // record aria-live at the very moment the shown slide changes, and the order of all changes in the hero
     await page.evaluate(() => {
       const box = document.querySelector("[data-hero-slides]")!;
       const seen: string[] = [];
-      (window as unknown as { __liveAtChange: string[] }).__liveAtChange = seen;
+      const order: string[] = [];
+      Object.assign(window, { __liveAtChange: seen, __order: order });
       new MutationObserver((list) => {
         if (list.some((m) => m.attributeName === "aria-hidden")) seen.push(box.getAttribute("aria-live") ?? "");
       }).observe(box, { subtree: true, attributes: true, attributeFilter: ["aria-hidden"] });
+      // MutationObserver records come in the order the DOM changed
+      new MutationObserver((list) => {
+        for (const m of list)
+          order.push(m.attributeName === "aria-live" ? `live:${box.getAttribute("aria-live")}` : `change:${m.type}${m.attributeName ? `:${m.attributeName}` : ""}`);
+      }).observe(document.querySelector("[data-hero]")!, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["aria-live", "aria-hidden", "aria-current"] });
     });
     const next = hero.getByRole("button", { name: "Järgmine slaid" });
     if (isMobile) await next.tap();
@@ -164,6 +171,13 @@ test.describe("hero behaviour", () => {
     const seen = await page.evaluate(() => (window as unknown as { __liveAtChange: string[] }).__liveAtChange);
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((v) => v === "polite"), JSON.stringify(seen)).toBe(true); // set before the change, so it is announced
+    // the live region turned polite (an attribute change) before any slide or counter change (round-2 item 18)
+    const order = await page.evaluate(() => (window as unknown as { __order: string[] }).__order);
+    const polite = order.indexOf("live:polite");
+    const firstChange = order.findIndex((o) => o.startsWith("change:"));
+    expect(polite, JSON.stringify(order)).toBeGreaterThanOrEqual(0);
+    expect(firstChange, JSON.stringify(order)).toBeGreaterThan(polite);
+    expect(order.slice(0, firstChange).filter((o) => o.startsWith("live:")).at(-1), JSON.stringify(order)).toBe("live:polite");
     if (!isMobile) await page.mouse.move(5, 5); // off the controls
     await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 }); // autoplay again
     await expect(slides).toHaveAttribute("aria-live", "off");
@@ -201,6 +215,26 @@ test.describe("hero behaviour", () => {
     await still.goto("/");
     await expect(still.locator("[data-slide-pause]")).toBeHidden();
     await ctx.close();
+  });
+
+  test("leaving the home page before the browser is idle cancels the idle callback it asked for (round 2 item 15)", async ({ page }) => {
+    await page.addInitScript(() => {
+      const asked: number[] = [];
+      const cancelled: number[] = [];
+      let n = 1000;
+      // idle never comes in this test: the callbacks are only recorded
+      window.requestIdleCallback = () => (asked.push(++n), n);
+      window.cancelIdleCallback = (h: number) => void cancelled.push(h);
+      Object.assign(window, { __idle: { asked, cancelled } });
+    });
+    await page.goto("/");
+    await expect(page.locator("[data-hero]")).toHaveAttribute("data-autoplay", /on|off/);
+    const idle = () => page.evaluate(() => (window as unknown as { __idle: { asked: number[]; cancelled: number[] } }).__idle);
+    await expect.poll(async () => (await idle()).asked.length).toBeGreaterThan(0);
+    await page.locator('main a[href="/koolitused"]').first().click(); // a client-side move: the hero unmounts
+    await expect(page).toHaveURL(/\/koolitused$/);
+    const { asked, cancelled } = await idle();
+    expect(cancelled).toContain(asked.at(-1)); // the hero's own handle, through cancelIdleCallback
   });
 
   test("the page loads the first picture only; the others follow when the browser is idle (lazy, low priority)", async ({ page, request }) => {

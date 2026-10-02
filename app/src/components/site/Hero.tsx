@@ -128,18 +128,25 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
   // The other pictures, once the page has loaded and the browser has a moment (not competing with the first one).
   useEffect(() => {
     let cancelled = false;
-    let handle: number | undefined;
+    let cancel: (() => void) | undefined;
     const later = () => {
       if (cancelled) return;
-      const idleCallback = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
-      handle = idleCallback ? idleCallback(() => !cancelled && setIdle(true), { timeout: 3000 }) : window.setTimeout(() => !cancelled && setIdle(true), 1500);
+      const done = () => !cancelled && setIdle(true);
+      if (typeof window.requestIdleCallback === "function") {
+        const handle = window.requestIdleCallback(done, { timeout: 3000 });
+        cancel = () => window.cancelIdleCallback(handle);
+      } else {
+        // Safari before 18: no idle callbacks, a short wait instead
+        const handle = window.setTimeout(done, 1500);
+        cancel = () => window.clearTimeout(handle);
+      }
     };
     if (document.readyState === "complete") later();
     else window.addEventListener("load", later, { once: true });
     return () => {
       cancelled = true;
       window.removeEventListener("load", later);
-      if (handle !== undefined) window.clearTimeout(handle);
+      cancel?.();
     };
   }, []);
 
