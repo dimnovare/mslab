@@ -34,7 +34,7 @@ import { upcomingFrom } from "@/domain/calendar";
 
 type Props = { params: Promise<{ locale: string }> };
 
-/** The link preview of / and /ru: the layout's card with this page's own address (og:url). */
+/** The link preview of / and /ru: the home page's own address (og:url), title, description and picture. */
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale } = await params;
   if (!isLocale(locale)) return {};

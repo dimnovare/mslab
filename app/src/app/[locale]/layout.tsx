@@ -26,7 +26,8 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
     title: dict.meta.title,
     description: dict.meta.description,
     robots: { index: false, follow: false },
-    // a link to any public page shows the home page's preview card (the home page adds its own og:url)
+    // every public page's link preview: the site's name, language, type and picture; a page's own title and description
+    // come from its <title> (the home page, a course and a post add their own preview: share-meta.ts)
     ...(await shareMetadata(locale)),
   };
 }
