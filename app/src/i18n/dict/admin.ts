@@ -293,9 +293,10 @@ export const adminEt = {
     doneOne: "Pilt lisatud.",
     doneMany: "Lisatud {n} pilti.",
     type: "Seda faili ei saa kasutada. Vali JPEG-, PNG- või WebP-pilt.",
-    size: "Pilt on liiga suur (kuni 8 MB).",
+    size: "Pilt on liiga suur (kuni 4 MB).",
     decode: "Pilti ei õnnestunud avada. Proovi teist faili.",
     session: "Sessioon on aegunud. Logi uuesti sisse ja proovi siis uuesti.",
+    storage: "Piltide salvestamine pole seadistatud — anna arendajale teada.",
     server: "Üleslaadimine ei õnnestunud. Proovi uuesti.",
   },
 

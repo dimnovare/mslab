@@ -47,11 +47,17 @@ const REQUIRED: readonly [RequiredName, string][] = [
   ["MAIL_FROM", "MS LAB <info@send.diipsolutions.eu>"],
 ];
 
-/** Does `new URL` accept it? (A postgres.js URL with several hosts or a socket path does not parse, and is not used here.) */
-function isUrl(value: string): boolean {
+/** The error for a DATABASE_URL that cannot be used. It never holds the value. */
+export const BAD_DATABASE_URL = "DATABASE_URL is not a valid postgres:// or postgresql:// URL";
+
+/**
+ * Is it a postgres:// or postgresql:// URL that `new URL` accepts? (A postgres.js URL with several hosts or a socket path
+ * does not parse, and is not used here.) Any other scheme is a mistake too (an http or redis address pasted by accident).
+ */
+function isPostgresUrl(value: string): boolean {
   try {
-    new URL(value);
-    return true;
+    const { protocol } = new URL(value);
+    return protocol === "postgres:" || protocol === "postgresql:";
   } catch {
     return false;
   }
@@ -65,7 +71,7 @@ const OPTIONAL = ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "A
  *
  * In production every required variable must be set: otherwise this throws an error that names the missing variables
  * (all of them) and never shows a value. Outside production (`next dev`, the tests) the required ones fall back to the
- * local values above. A DATABASE_URL that is not a URL is an error too ("DATABASE_URL is not a valid URL", no value):
+ * local values above. A DATABASE_URL that is not a postgres:// or postgresql:// URL is an error too (no value shown):
  * left to postgres.js, its own TypeError would quote the whole string, password included. `source` and `production`
  * are for the tests; the defaults are process.env and NODE_ENV.
  */
@@ -79,7 +85,7 @@ export function serverEnv(source: Source = process.env, production: boolean = pr
     else env[name] = value;
   }
   if (missing.length) throw new Error(`Missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
-  if (!isUrl(env.DATABASE_URL!)) throw new Error("DATABASE_URL is not a valid URL"); // no cause: the URL error carries the input
+  if (!isPostgresUrl(env.DATABASE_URL!)) throw new Error(BAD_DATABASE_URL); // no cause: the URL error carries the input
   for (const name of OPTIONAL) env[name] = read(name);
   return env as ServerEnv;
 }

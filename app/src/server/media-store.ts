@@ -8,17 +8,27 @@ import { r2Store } from "./r2";
 // - none set, outside production: a folder, app/.media-local (server/media-local.ts), so `next dev` needs no bucket;
 // - none set, in production: no store. Uploads are refused (503 `storage`) and /media answers 404: a server's own disk
 //   is no place for uploads (it is gone with the next deployment), so there is no folder fallback there;
-// - only some set: a mistake. No store either (the folder would hide it), and the log names the variables that are missing.
+// - only some set: a mistake. No store either (the folder would hide it), and the log names the variables that are
+//   missing, once per process (every /media request asks for the store: a line each would flood the log).
 
 type R2Env = Pick<ServerEnv, "R2_ACCOUNT_ID" | "R2_ACCESS_KEY_ID" | "R2_SECRET_ACCESS_KEY" | "R2_BUCKET">;
 const R2_VARIABLES = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
+
+// The notes already logged live on globalThis, like the database pool (db/client.ts): `next dev` evaluates a module
+// again on every hot reload, and the production build may bundle it into more than one server chunk.
+const shared = globalThis as typeof globalThis & { __mslabMediaNotes?: Set<string> };
 
 /** The store to use, or null when there is none. `env`, `production` and `localDir` are for the tests. */
 export function mediaStore(env: R2Env = serverEnv(), production: boolean = process.env.NODE_ENV === "production", localDir?: string): MediaStore | null {
   const missing = R2_VARIABLES.filter((name) => !env[name]);
   if (missing.length === 0) return r2Store({ accountId: env.R2_ACCOUNT_ID!, accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY!, bucket: env.R2_BUCKET! });
   if (missing.length < R2_VARIABLES.length) {
-    console.error(`[media] R2 is only partly configured, not set: ${missing.join(", ")}`);
+    const note = `[media] R2 is only partly configured, not set: ${missing.join(", ")}`;
+    const noted = (shared.__mslabMediaNotes ??= new Set()); // the text names variables, never values
+    if (!noted.has(note)) {
+      noted.add(note);
+      console.error(note);
+    }
     return null;
   }
   return production ? null : localStore(localDir);

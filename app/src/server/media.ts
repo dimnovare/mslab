@@ -4,14 +4,18 @@
 // declared type, the size and the file's first bytes itself. Keys are img/<random uuid>.<ext>, never the visitor's file
 // name, and /media serves nothing else (isMediaKey).
 
-/** Largest upload accepted (bytes). The browser sends images of at most 2400 px, far below this. */
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/**
+ * Largest upload accepted (bytes). The browser sends images of at most 2400 px, usually under 2 MB. Vercel Functions
+ * refuse a request body over 4.5 MB themselves (a bare 413 the admin page cannot explain), so the limit is below that,
+ * with room for the multipart envelope (the upload route's ENVELOPE): the size message comes from this check.
+ */
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 export const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as const;
 export type ImageType = keyof typeof IMAGE_TYPES;
 const CONTENT_TYPE_OF: Record<string, ImageType> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
 
-/** Why an upload was refused: not JPEG/PNG/WebP, over 8 MB, empty, or bytes that are not the declared image type. */
+/** Why an upload was refused: not JPEG/PNG/WebP, over 4 MB, empty, or bytes that are not the declared image type. */
 export type UploadReason = "type" | "size" | "empty" | "content";
 
 export class UploadError extends Error {
@@ -70,7 +74,7 @@ const isImageType = (type: string): type is ImageType => Object.hasOwn(IMAGE_TYP
 
 /**
  * Stores an uploaded image in the store and returns its key (img/<uuid>.<ext>). Throws UploadError when the declared type
- * is not JPEG/PNG/WebP, the file is empty or over 8 MB, or its first bytes are not that type; whatever the store throws
+ * is not JPEG/PNG/WebP, the file is empty or over 4 MB, or its first bytes are not that type; whatever the store throws
  * is the store's error. The content type is kept with the object, so /media answers with it.
  */
 export async function putImage(store: MediaStore, file: File): Promise<{ key: string }> {
@@ -90,12 +94,20 @@ export async function putImage(store: MediaStore, file: File): Promise<{ key: st
 /** A key never changes its bytes (a new upload gets a new key), so browsers and the edge may keep it for a year. */
 export const MEDIA_CACHE = "public, max-age=31536000, immutable";
 
+/**
+ * Vercel's CDN caches a function's response only when told to: by s-maxage, or by CDN-Cache-Control /
+ * Vercel-CDN-Cache-Control, which are for the CDN alone (Vercel strips this one; the browser goes by Cache-Control).
+ * Without it every first view per visitor and region would be a function call and a read from R2. Sent with the image
+ * only: a 404 stays no-store, so an image asked for too early is not remembered as missing.
+ */
+export const MEDIA_CDN_CACHE_HEADER = "vercel-cdn-cache-control";
+
 const notFound = () => new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
 /**
  * The answer for /media/<key>: 404 unless the key is one putImage makes and the object exists; otherwise the bytes with
- * the stored image type (or the one of the extension when the stored one is not an image type we allow), nosniff, and
- * the immutable cache header.
+ * the stored image type (or the one of the extension when the stored one is not an image type we allow), nosniff, the
+ * immutable cache header and the same for Vercel's CDN (MEDIA_CDN_CACHE_HEADER).
  */
 export async function serveMedia(store: MediaSource, key: string): Promise<Response> {
   if (!isMediaKey(key)) return notFound();
@@ -107,6 +119,7 @@ export async function serveMedia(store: MediaSource, key: string): Promise<Respo
     headers: {
       "content-type": contentType,
       "cache-control": MEDIA_CACHE,
+      [MEDIA_CDN_CACHE_HEADER]: MEDIA_CACHE,
       ...(object.etag ? { etag: object.etag } : {}),
       "x-content-type-options": "nosniff",
       // An image is only ever shown inside our pages; this keeps a stray SVG-like payload from running as a document.

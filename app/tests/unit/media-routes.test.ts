@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
+import { MAX_IMAGE_BYTES } from "@/server/media";
 import { fakeMediaStore } from "../fakes";
 
 // The two routes that reach the image store: POST /api/admin/upload and GET /media/<key>. The store comes from
@@ -48,13 +49,13 @@ describe("POST /api/admin/upload", () => {
     expect([...fake.objects.get(key)!.bytes]).toEqual(JPEG);
   });
 
-  test("the refusals keep their statuses: no file 400, not an image 415, over 8 MB 413, empty 400, wrong bytes 415", async () => {
+  test("the refusals keep their statuses: no file 400, not an image 415, over 4 MB 413, empty 400, wrong bytes 415", async () => {
     const fake = fakeMediaStore();
     store.current = fake;
     const cases: [File | null, number, string][] = [
       [null, 400, "missing"],
       [new File(["<html>"], "x.html", { type: "text/html" }), 415, "type"],
-      [new File([new Uint8Array(8 * 1024 * 1024 + 1)], "x.jpg", { type: "image/jpeg" }), 413, "size"],
+      [new File([new Uint8Array(MAX_IMAGE_BYTES + 1)], "x.jpg", { type: "image/jpeg" }), 413, "size"],
       [new File([], "x.jpg", { type: "image/jpeg" }), 400, "empty"],
       [new File(["<html>"], "x.jpg", { type: "image/jpeg" }), 415, "content"],
     ];
@@ -63,6 +64,20 @@ describe("POST /api/admin/upload", () => {
       expect(res.status, error).toBe(status);
       expect(await res.json(), error).toEqual({ ok: false, error });
     }
+    expect(fake.objects.size).toBe(0);
+  });
+
+  test("a request announced as larger than the limit plus the multipart envelope is 413 before its body is read", async () => {
+    const fake = fakeMediaStore();
+    store.current = fake;
+    const body = new FormData();
+    body.set("file", jpeg());
+    const request = new Request("https://mslab.example/api/admin/upload", { method: "POST", body, headers: { "content-length": String(MAX_IMAGE_BYTES + 128 * 1024) } });
+    const formData = vi.spyOn(request, "formData");
+    const res = await POST(request, undefined);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ ok: false, error: "size" });
+    expect(formData).not.toHaveBeenCalled();
     expect(fake.objects.size).toBe(0);
   });
 
@@ -94,13 +109,17 @@ describe("GET /media/<key>", () => {
     expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(res.headers.get("vercel-cdn-cache-control")).toBe("public, max-age=31536000, immutable"); // Vercel's CDN keeps it
     expect([...new Uint8Array(await res.arrayBuffer())]).toEqual(JPEG);
   });
 
   test("404 for a missing image and for a key that is not one; the store is not asked about the latter", async () => {
     const fake = fakeMediaStore();
     store.current = fake;
-    expect((await media(`img/${ID}.jpg`)).status).toBe(404);
+    const missing = await media(`img/${ID}.jpg`);
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    expect(missing.headers.get("vercel-cdn-cache-control")).toBeNull();
     expect(fake.requested).toEqual([`img/${ID}.jpg`]);
     fake.requested.length = 0;
     for (const key of [`img/${ID}.svg`, "img/olematu.jpg", "seed/x.jpg"]) expect((await media(key)).status, key).toBe(404);
@@ -112,6 +131,7 @@ describe("GET /media/<key>", () => {
     const res = await media(`img/${ID}.jpg`);
     expect(res.status).toBe(404);
     expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("vercel-cdn-cache-control")).toBeNull();
     expect(log).not.toHaveBeenCalled();
   });
 
@@ -120,6 +140,7 @@ describe("GET /media/<key>", () => {
     const res = await media(`img/${ID}.jpg`);
     expect(res.status).toBe(500);
     expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("vercel-cdn-cache-control")).toBeNull();
     expect(log.mock.calls.map((c) => c.join(" "))).toEqual(["[media] read failed: Error"]);
   });
 });

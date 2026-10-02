@@ -9,13 +9,13 @@ import styles from "./editor.module.css";
 /** The longest side of an uploaded image (spec: ≤ 2400 px). */
 export const MAX_EDGE = 2400;
 const ACCEPT = ["image/jpeg", "image/png", "image/webp"];
-/** The server's limit; checked here too so a hopeless upload is not sent. */
-const MAX_BYTES = 8 * 1024 * 1024;
+/** The server's limit (MAX_IMAGE_BYTES; Vercel refuses request bodies over 4.5 MB); checked here too so a hopeless upload is not sent. */
+const MAX_BYTES = 4 * 1024 * 1024;
 /** Larger originals are not even opened (a phone photo is 3–12 MB). */
 const MAX_SOURCE_BYTES = 60 * 1024 * 1024;
 const QUALITY = 0.86;
 
-type Problem = "type" | "size" | "decode" | "session" | "server";
+type Problem = "type" | "size" | "decode" | "session" | "storage" | "server";
 class UploadProblem extends Error {
   constructor(readonly problem: Problem) {
     super(problem);
@@ -58,7 +58,7 @@ export async function shrinkImage(file: File): Promise<File> {
   return new File([blob], `pilt.${ext}`, { type });
 }
 
-/** Sends one prepared image to /api/admin/upload; its R2 key. */
+/** Sends one prepared image to /api/admin/upload; its key. */
 async function send(file: File): Promise<string> {
   const body = new FormData();
   body.set("file", file);
@@ -72,6 +72,7 @@ async function send(file: File): Promise<string> {
   if (res.ok && json?.ok && typeof json.key === "string") return json.key;
   if (res.status === 401) throw new UploadProblem("session");
   if (res.status === 413) throw new UploadProblem("size");
+  if (res.status === 503 && json?.error === "storage") throw new UploadProblem("storage"); // no image store is set up (R2 variables)
   if (res.status === 415) throw new UploadProblem("type");
   throw new UploadProblem("server");
 }

@@ -411,7 +411,37 @@ test.describe("course editor", () => {
     await expect(input).toHaveValue("");
   });
 
-  test("upload API: only signed-in, same-site requests with a real JPEG / PNG / WebP of at most 8 MB", async ({ page, context, visitorIp, playwright }) => {
+  test("the upload answers the admin can be told apart: no image store set up (503 storage), a body Vercel itself refuses (413 without our JSON)", async ({ page, context, visitorIp }, info) => {
+    const c = mine(info);
+    const id = await changing(c.slug);
+    await signIn(page, context, visitorIp);
+    await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
+    const gallery = page.locator("[data-gallery-editor]");
+    const items = gallery.locator("[data-gallery-item]");
+    const before = await items.count();
+    const input = gallery.locator('input[type="file"]');
+    const status = gallery.locator("[data-upload-status]");
+    const jpeg = { name: "certificate-white.jpg", mimeType: "image/jpeg", buffer: readFileSync("public/seed/certificate-white.jpg") };
+    // our own 503 for production without the R2 variables
+    await page.route("**/api/admin/upload", (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, error: "storage" }) }));
+    await input.setInputFiles([jpeg]);
+    await expect(status).toHaveText("Piltide salvestamine pole seadistatud — anna arendajale teada.");
+    await expect(status).toHaveAttribute("data-upload-status", "error");
+    // Vercel's platform answer to a request body over 4.5 MB: a 413 with a plain body, not our JSON
+    await page.unroute("**/api/admin/upload");
+    await page.route("**/api/admin/upload", (route) => route.fulfill({ status: 413, contentType: "text/plain", body: "Request Entity Too Large" }));
+    await input.setInputFiles([jpeg]);
+    await expect(status).toHaveText("Pilt on liiga suur (kuni 4 MB).");
+    // any other 503 is the generic message
+    await page.unroute("**/api/admin/upload");
+    await page.route("**/api/admin/upload", (route) => route.fulfill({ status: 503, contentType: "text/plain", body: "unavailable" }));
+    await input.setInputFiles([jpeg]);
+    await expect(status).toHaveText("Üleslaadimine ei õnnestunud. Proovi uuesti.");
+    await expect(items).toHaveCount(before); // nothing was added
+  });
+
+  test("upload API: only signed-in, same-site requests with a real JPEG / PNG / WebP of at most 4 MB", async ({ page, context, visitorIp, playwright }) => {
     const jpeg = readFileSync("public/seed/course-manual.jpg");
     const post = (data: { name: string; mimeType: string; buffer: Buffer }, headers: Record<string, string> = {}) =>
       page.request.post("/api/admin/upload", { multipart: { file: data }, headers });
@@ -428,8 +458,13 @@ test.describe("course editor", () => {
     expect(await html.json()).toEqual({ ok: false, error: "content" });
     const svg = await post({ name: "x.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") });
     expect(await svg.json()).toEqual({ ok: false, error: "type" });
-    const big = Buffer.concat([jpeg.subarray(0, 4), Buffer.alloc(9 * 1024 * 1024)]);
-    expect((await post({ name: "big.jpg", mimeType: "image/jpeg", buffer: big })).status()).toBe(413);
+    // over 4 MB (Vercel refuses bodies over 4.5 MB itself): 413 from the announced length alone, and from the file's own size
+    const huge = Buffer.concat([jpeg.subarray(0, 4), Buffer.alloc(5 * 1024 * 1024)]);
+    expect((await post({ name: "huge.jpg", mimeType: "image/jpeg", buffer: huge })).status()).toBe(413);
+    const big = Buffer.concat([jpeg.subarray(0, 4), Buffer.alloc(4 * 1024 * 1024)]);
+    const bigRes = await post({ name: "big.jpg", mimeType: "image/jpeg", buffer: big });
+    expect(bigRes.status()).toBe(413);
+    expect(await bigRes.json()).toEqual({ ok: false, error: "size" });
     const ok = await post({ name: "a.jpg", mimeType: "image/jpeg", buffer: jpeg });
     expect(ok.status()).toBe(201);
     const { key } = (await ok.json()) as { key: string };

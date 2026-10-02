@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { applySeatFixtures, LOCAL_FIXTURES, scheduleSampleSessions, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { forbiddenSettingError } from "../local-secrets";
 import { assertLocalUpstream } from "./local-cache";
 import { assertLocalDatabases } from "./local-db";
 import { removeLeftoverComments } from "./local-kv";
@@ -14,7 +15,7 @@ export default async function globalSetup(): Promise<void> {
       throw new Error("e2e: E2E_BASE_URL is not a local server — set E2E_ALLOW_REMOTE=1 for a read-only run (form tests are skipped)");
     return;
   }
-  refuseMailSecrets();
+  refuseForbiddenSettings();
   assertLocalDatabases(); // before any write: the fixtures' database and the dev server's are both on this machine
   await assertLocalUpstream(); // the local production build believes it is localhost, never the live domain
   await removeFormRows();
@@ -31,13 +32,13 @@ export default async function globalSetup(): Promise<void> {
 
 /**
  * The form tests submit to `next dev`, which must not e-mail or ping anyone: notifications are skipped there because
- * the dev environment has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN. Stop before any test if someone has added them.
+ * the dev environment has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN. The upload tests must not reach the real image bucket
+ * either: with no R2_* variable `next dev` keeps images in a local folder. Stop before any test if someone has added
+ * one of them (tests/local-secrets.ts, FORBIDDEN_SETTINGS).
  */
-function refuseMailSecrets(): void {
-  const secret = /^\s*(RESEND_API_KEY|TELEGRAM_BOT_TOKEN)\s*=\s*\S/m;
-  for (const file of [".dev.vars", ".env", ".env.local", ".env.development", ".env.development.local"]) {
-    if (existsSync(file) && secret.test(readFileSync(file, "utf8")))
-      throw new Error(`e2e: ${file} sets RESEND_API_KEY or TELEGRAM_BOT_TOKEN — the form tests would send real e-mails / Telegram messages`);
-  }
-  if (process.env.RESEND_API_KEY || process.env.TELEGRAM_BOT_TOKEN) throw new Error("e2e: RESEND_API_KEY / TELEGRAM_BOT_TOKEN is set in the environment");
+function refuseForbiddenSettings(): void {
+  const files: Record<string, string | undefined> = {};
+  for (const file of [".dev.vars", ".env", ".env.local", ".env.development", ".env.development.local"]) files[file] = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+  const problem = forbiddenSettingError(files, process.env);
+  if (problem) throw new Error(problem);
 }

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { isMediaKey, MAX_IMAGE_BYTES, MEDIA_CACHE, NO_MEDIA, putImage, serveMedia, UploadError } from "@/server/media";
+import { isMediaKey, MAX_IMAGE_BYTES, MEDIA_CACHE, MEDIA_CDN_CACHE_HEADER, NO_MEDIA, putImage, serveMedia, UploadError } from "@/server/media";
 import { fakeMediaStore } from "../fakes";
 
 // Task 13: the server side of an image upload. putImage trusts nothing the browser says: the declared type must be
-// JPEG, PNG or WebP, the size at most 8 MB, and the first bytes must really be that kind of image (an HTML page renamed
+// JPEG, PNG or WebP, the size at most 4 MB (Vercel refuses request bodies over 4.5 MB), and the first bytes must really be that kind of image (an HTML page renamed
 // to .jpg is refused). The store is an in-memory fake of the MediaStore interface (R2 through the S3 API in production,
 // a local folder in development: r2.test.ts, media-local.test.ts).
 
@@ -31,11 +31,12 @@ describe("putImage", () => {
     expect(store.objects.size).toBe(0);
   });
 
-  test("rejects a 9 MB JPEG (the limit is 8 MB)", async () => {
+  test("rejects a 5 MB JPEG (the limit is 4 MB, below Vercel's 4.5 MB request body limit)", async () => {
     const store = fakeMediaStore();
-    expect(MAX_IMAGE_BYTES).toBe(8 * MB);
-    expect(reason(await putImage(store, file(JPEG, 9 * MB, "image/jpeg")).catch((e) => e))).toBe("size");
-    expect(reason(await putImage(store, file(JPEG, 8 * MB + 1, "image/jpeg")).catch((e) => e))).toBe("size");
+    expect(MAX_IMAGE_BYTES).toBe(4 * MB);
+    expect(MAX_IMAGE_BYTES).toBeLessThan(4.5 * MB);
+    expect(reason(await putImage(store, file(JPEG, 5 * MB, "image/jpeg")).catch((e) => e))).toBe("size");
+    expect(reason(await putImage(store, file(JPEG, 4 * MB + 1, "image/jpeg")).catch((e) => e))).toBe("size");
     expect(store.objects.size).toBe(0);
   });
 
@@ -53,9 +54,9 @@ describe("putImage", () => {
     expect(key).not.toContain("IMG_0001");
   });
 
-  test("an 8 MB image is still accepted; every upload gets its own key", async () => {
+  test("a 4 MB image is still accepted; every upload gets its own key", async () => {
     const store = fakeMediaStore();
-    const a = await putImage(store, file(JPEG, 8 * MB, "image/jpeg"));
+    const a = await putImage(store, file(JPEG, 4 * MB, "image/jpeg"));
     const b = await putImage(store, file(JPEG, 10, "image/jpeg"));
     expect(a.key).not.toBe(b.key);
     expect(store.objects.size).toBe(2);
@@ -120,6 +121,9 @@ describe("serveMedia (GET /media/<key>)", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(res.headers.get("etag")).toBe('"e1"');
+    // Vercel's CDN caches a function's response only when told to: the same year, for the CDN
+    expect(MEDIA_CDN_CACHE_HEADER).toBe("vercel-cdn-cache-control");
+    expect(res.headers.get("vercel-cdn-cache-control")).toBe("public, max-age=31536000, immutable");
     expect([...new Uint8Array(await res.arrayBuffer())]).toEqual(JPEG);
   });
 
@@ -149,6 +153,7 @@ describe("serveMedia (GET /media/<key>)", () => {
     expect(missing.status).toBe(404);
     expect(missing.headers.get("cache-control")).toBe("no-store");
     expect(missing.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(missing.headers.get("vercel-cdn-cache-control")).toBeNull(); // a 404 is never kept by the CDN
     store.requested.length = 0;
     for (const key of ["seed/x.jpg", `img/${id}.svg`, "img/../secret", "", `img/${id}.jpg/..`]) expect((await serveMedia(store, key)).status, key).toBe(404);
     expect(store.requested).toEqual([]);
@@ -158,6 +163,7 @@ describe("serveMedia (GET /media/<key>)", () => {
     const res = await serveMedia(NO_MEDIA, `img/${id}.jpg`);
     expect(res.status).toBe(404);
     expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("vercel-cdn-cache-control")).toBeNull();
   });
 });
 

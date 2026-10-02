@@ -4,11 +4,11 @@ import { join } from "node:path";
 // The settings of local development and the tests, read from .env.example: placeholders, never a real address (the real
 // ones are Environment Variables of the Vercel project). playwright.config.ts hands them to the dev server it starts.
 
-/** KEY=VALUE lines of a .env-style file (comments and blank lines skipped). */
+/** KEY=VALUE lines of a .env-style file (comments and blank lines skipped; `export KEY=VALUE` counts). */
 export function parseEnvFile(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    const m = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
     if (m) out[m[1]] = m[2];
   }
   return out;
@@ -19,9 +19,52 @@ for (const key of ["DATABASE_URL", "ADMIN_EMAILS", "ADMIN_NAMES", "MARIA_EMAIL"]
 
 /**
  * What the dev server of an e2e run is started with (server/env.ts): the local database and the admin allow-list the
- * tests sign in with. These win over a .env.local of your own, so a run is the same on every machine.
+ * tests sign in with. These win over a .env.local of your own, so a run is the same on every machine. The R2 variables
+ * are blank (server/env.ts counts a blank one as not set), so the dev server keeps uploads in its local folder whatever
+ * a .env.local says; global-setup also refuses to run when one is set anywhere (FORBIDDEN_SETTINGS).
  */
-export const LOCAL_ENV = { DATABASE_URL: vars.DATABASE_URL, ADMIN_EMAILS: vars.ADMIN_EMAILS, ADMIN_NAMES: vars.ADMIN_NAMES, MARIA_EMAIL: vars.MARIA_EMAIL };
+export const LOCAL_ENV = {
+  DATABASE_URL: vars.DATABASE_URL,
+  ADMIN_EMAILS: vars.ADMIN_EMAILS,
+  ADMIN_NAMES: vars.ADMIN_NAMES,
+  MARIA_EMAIL: vars.MARIA_EMAIL,
+  R2_ACCOUNT_ID: "",
+  R2_ACCESS_KEY_ID: "",
+  R2_SECRET_ACCESS_KEY: "",
+  R2_BUCKET: "",
+};
+
+/**
+ * Settings an e2e run must not have, each with what it would do: the form tests would reach real people, and the upload
+ * tests would write to the real image bucket (they run against `next dev`, which keeps images in a local folder).
+ */
+export const FORBIDDEN_SETTINGS: Record<string, string> = {
+  RESEND_API_KEY: "the form tests would send real e-mails",
+  TELEGRAM_BOT_TOKEN: "the form tests would send real Telegram messages",
+  R2_ACCOUNT_ID: "the upload tests would write to the real image bucket",
+  R2_ACCESS_KEY_ID: "the upload tests would write to the real image bucket",
+  R2_SECRET_ACCESS_KEY: "the upload tests would write to the real image bucket",
+  R2_BUCKET: "the upload tests would write to the real image bucket",
+};
+
+/** The value of a .env line without its quotes: `R2_BUCKET=""` sets nothing. */
+const unquoted = (value: string | undefined) => (value ?? "").replace(/^(["'])(.*)\1$/, "$2").trim();
+
+/**
+ * The reason a run must stop, or undefined when it may go on. `files` are the texts of the env files the dev server
+ * would read (name -> text; a missing file is undefined), `env` the environment the run starts in. A setting counts when
+ * it has a value: a commented-out or empty one does not. The message names the setting, never its value.
+ */
+export function forbiddenSettingError(files: Record<string, string | undefined>, env: Record<string, string | undefined>): string | undefined {
+  for (const [file, text] of Object.entries(files)) {
+    const set = text === undefined ? {} : parseEnvFile(text);
+    const name = Object.keys(FORBIDDEN_SETTINGS).find((n) => unquoted(set[n]));
+    if (name) return `e2e: ${file} sets ${name} — ${FORBIDDEN_SETTINGS[name]}`;
+  }
+  const name = Object.keys(FORBIDDEN_SETTINGS).find((n) => env[n]?.trim());
+  if (name) return `e2e: ${name} is set in the environment — ${FORBIDDEN_SETTINGS[name]}`;
+  return undefined;
+}
 
 /** The local allow-list, in order: the e2e tests sign in as the first one only. */
 export const LOCAL_ADMINS = vars.ADMIN_EMAILS.split(",").map((a) => a.trim());

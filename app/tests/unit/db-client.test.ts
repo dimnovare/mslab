@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { BAD_DATABASE_URL } from "@/server/env";
 
 // getDb(): one postgres.js pool for the whole process, made from DATABASE_URL on first use. It is never closed by the
 // app (no sql.end() per request) and never tied to a request. Nothing here connects: postgres.js connects on the first
@@ -60,17 +61,19 @@ describe("getDb", () => {
     expect(message).not.toContain("admin@example.test");
   });
 
-  test("a DATABASE_URL that is not a URL fails with an error that names the variable and shows none of the value", async () => {
-    vi.stubEnv("DATABASE_URL", "postgres://app:s3cret-pw#oops@db.example.com:5432/mslab");
+  test("a DATABASE_URL that is not a postgres URL (garbage, or another scheme) fails with an error that names the variable and shows none of the value", async () => {
     const getDb = await load();
-    let error: unknown;
-    try {
-      getDb();
-    } catch (e) {
-      error = e;
+    for (const url of ["postgres://app:s3cret-pw#oops@db.example.com:5432/mslab", "https://app:s3cret-pw@db.example.com/mslab"]) {
+      vi.stubEnv("DATABASE_URL", url);
+      let error: unknown;
+      try {
+        getDb();
+      } catch (e) {
+        error = e;
+      }
+      expect((error as Error).message, url).toBe(BAD_DATABASE_URL);
+      expect(JSON.stringify(error, Object.getOwnPropertyNames(error)), url).not.toContain("s3cret-pw"); // message, stack and any cause
     }
-    expect((error as Error).message).toBe("DATABASE_URL is not a valid URL");
-    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain("s3cret-pw"); // message, stack and any cause
   });
 
   test("without DATABASE_URL outside production it is the local development database", async () => {

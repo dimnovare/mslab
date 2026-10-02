@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { LOCAL_DATABASE_URL, serverEnv } from "@/server/env";
+import { BAD_DATABASE_URL, LOCAL_DATABASE_URL, serverEnv } from "@/server/env";
 import { parseEnvFile } from "../local-secrets";
 
 // serverEnv() is the one place the server reads its configuration (process.env on Vercel and under `next dev`). In
@@ -76,14 +76,16 @@ describe("serverEnv in production", () => {
   });
 });
 
-describe("a DATABASE_URL that is not a URL", () => {
+describe("a DATABASE_URL that is not a postgres URL", () => {
   // `#` ends the address early, so "…:s3cret-pw" would be read as a port: postgres.js's own error would quote the whole
   // string, password included. serverEnv() refuses it first, with an error that never shows the value.
   const BAD = ["postgres://app:s3cret-pw#oops@db.example.com:5432/mslab", "not a url at all, s3cret-pw", "postgres://app:s3cret-pw@db.example.com:port/mslab"];
+  // a well-formed URL of another scheme is not a database address either
+  const OTHER_SCHEME = ["https://app:s3cret-pw@db.example.com/mslab", "http://db.example.com:5432/s3cret-pw", "mysql://app:s3cret-pw@db.example.com:3306/mslab", "redis://:s3cret-pw@cache.example.com:6379", "file:///s3cret-pw", "javascript:alert('s3cret-pw')", "//app:s3cret-pw@db.example.com/mslab"];
 
   for (const production of [true, false]) {
     test(`is an error that names the variable and shows none of the value (production ${production})`, () => {
-      for (const url of BAD) {
+      for (const url of [...BAD, ...OTHER_SCHEME]) {
         let error: unknown;
         try {
           serverEnv({ ...FULL, DATABASE_URL: url }, production);
@@ -92,14 +94,15 @@ describe("a DATABASE_URL that is not a URL", () => {
         }
         expect(error, url).toBeInstanceOf(Error);
         const { message, cause } = error as Error;
-        expect(message).toBe("DATABASE_URL is not a valid URL");
+        expect(message).toBe(BAD_DATABASE_URL);
+        expect(message).toContain("DATABASE_URL");
         expect(cause).toBeUndefined(); // the URL error is not chained: it carries the input
         expect(String((error as Error).stack)).not.toContain("s3cret-pw");
       }
     });
   }
 
-  test("a well-formed one passes, with its parameters (?sslmode=require) and an escaped password", () => {
+  test("a postgres:// or postgresql:// one passes, with its parameters (?sslmode=require) and an escaped password", () => {
     for (const url of [SECRET_URL, LOCAL_DATABASE_URL, "postgresql://postgres:pa%23ss@host.proxy.example:12345/railway?sslmode=require"])
       expect(serverEnv({ ...FULL, DATABASE_URL: url }, true).DATABASE_URL, url).toBe(url);
   });
