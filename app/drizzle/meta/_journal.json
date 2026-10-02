@@ -8,6 +8,13 @@
       "when": 1790858519289,
       "tag": "0000_peaceful_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790960705039,
+      "tag": "0001_client_accounts",
+      "breakpoints": true
     }
   ]
 }

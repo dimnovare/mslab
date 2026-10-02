@@ -1,5 +1,5 @@
-import { relations } from "drizzle-orm";
-import { pgTable, serial, text, integer, boolean, jsonb, timestamp, pgEnum, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import { pgTable, serial, text, integer, boolean, jsonb, timestamp, pgEnum, uniqueIndex, index, primaryKey, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type { I18n } from "@/i18n/field";
 
 export const courseType = pgEnum("course_type", ["e_learning", "contact"]);
@@ -8,7 +8,7 @@ export const regStatus = pgEnum("registration_status", ["awaiting_prepayment", "
 export const regKind = pgEnum("registration_kind", ["group", "individual"]);
 export const payChoice = pgEnum("payment_choice", ["full", "half"]);
 export const sessionStatus = pgEnum("session_status", ["scheduled", "cancelled"]);
-export const requestKind = pgEnum("request_kind", ["contact", "individual", "practice", "waitlist"]);
+export const requestKind = pgEnum("request_kind", ["contact", "individual", "practice", "waitlist", "change_request"]);
 
 /** A badge's text: Estonian, and Russian when Maria gave one (the RU pages fall back to the Estonian text). */
 export type BadgeLabel = { et: string; ru?: string };
@@ -78,16 +78,21 @@ export const registrations = pgTable("registrations", {
   status: regStatus("status").notNull().default("awaiting_prepayment"),
   paidCents: integer("paid_cents").notNull().default(0),
   note: text("note").notNull().default(""),
+  clientId: integer("client_id").references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index("registrations_client").on(t.clientId),
+  index("registrations_email_lower").on(sql`lower(${t.email})`),
+]);
 
 export const requests = pgTable("requests", {
   id: serial("id").primaryKey(),
   kind: requestKind("kind").notNull(),
   payload: jsonb("payload").$type<Record<string, string | boolean | number>>().notNull(),
   handled: boolean("handled").notNull().default(false),
+  clientId: integer("client_id").references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [index("requests_client").on(t.clientId)]);
 
 export const practicePackages = pgTable("practice_packages", {
   code: text("code").primaryKey(),                             // "MINI" | "MAXI"
@@ -138,7 +143,60 @@ export const subscribers = pgTable("subscribers", {
   id: serial("id").primaryKey(), email: text("email").notNull(), locale: text("locale").notNull().default("et"),
   token: text("token").notNull(), consentAt: timestamp("consent_at", { withTimezone: true }).notNull().defaultNow(),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  clientId: integer("client_id").references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
 }, (t) => [uniqueIndex("subscribers_email").on(t.email)]);
+
+export const clients = pgTable("clients", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),                 // lowercased (normalizeEmail)
+  name: text("name").notNull().default(""),
+  phone: text("phone").notNull().default(""),
+  locale: text("locale").$type<"et" | "ru">().notNull().default("et"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("clients_email").on(t.email)]);
+
+export const clientLoginTokens = pgTable("client_login_tokens", {
+  hash: text("hash").primaryKey(),                // sha256(raw link token)
+  codeHash: text("code_hash").notNull(),          // sha256(`${hash}:${code}`)
+  email: text("email").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+}, (t) => [index("client_login_tokens_email").on(t.email)]);
+
+export const clientSessions = pgTable("client_sessions", {
+  idHash: text("id_hash").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  endReason: text("end_reason").$type<"logout" | "replaced">(),
+}, (t) => [index("client_sessions_client").on(t.clientId)]);
+
+export const courseAccess = pgTable("course_access", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  courseId: integer("course_id").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  grantedBy: text("granted_by").notNull(),        // admin e-mail or "payment"
+  grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("course_access_client_course").on(t.clientId, t.courseId)]);
+
+export const termsAcceptances = pgTable("terms_acceptances", {
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  courseId: integer("course_id").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  termsVersion: text("terms_version").notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.clientId, t.courseId, t.termsVersion] })]);
+
+export const clientFavourites = pgTable("client_favourites", {
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  courseId: integer("course_id").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.clientId, t.courseId] })]);
+
+export const mailQuota = pgTable("mail_quota", { day: text("day").primaryKey(), sent: integer("sent").notNull().default(0) });
 
 export const settings = pgTable("settings", { key: text("key").primaryKey(), value: jsonb("value").notNull() });
 // keys: "contact" {email, phone, address, instagram, facebook}, "newsletter" {discountLabel}, "trainer" {portraitKey, name, role: I18n, stats: [{value,label:I18n}]}
@@ -178,3 +236,5 @@ export type Subscriber = typeof subscribers.$inferSelect;
 export type Setting = typeof settings.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
 export type AdminSession = typeof adminSessions.$inferSelect;
+export type Client = typeof clients.$inferSelect;
+export type ClientSession = typeof clientSessions.$inferSelect;

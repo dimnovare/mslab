@@ -45,6 +45,8 @@ const FIELDS: Record<RequestKind | "interest", [string, Field][]> = {
   ],
   practice: [["package", "package"], ["name", "name"], ["email", "email"], ["phone", "phone"], ["course", "completedCourse"], ["times", "times"], ["locale", "locale"]],
   waitlist: [["name", "name"], ["email", "email"], ["course", "course"], ["session", "session"], ["locale", "locale"]],
+  // A client's cancel / change-date request from the account page. Its own tab and the registration link come with the admin clients task.
+  change_request: [["email", "email"], ["message", "message"]],
 };
 /** Stored for the system, not for reading. */
 const HIDDEN = new Set(["courseId", "intent", "terms", "website"]);

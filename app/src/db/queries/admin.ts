@@ -394,7 +394,7 @@ export async function adminCounts(db: Db): Promise<AdminCounts> {
       .where(and(eq(requests.kind, "contact"), eq(requests.handled, false), sql`${requests.payload}->>'intent' = 'purchase'`)),
     db.select({ total: count(), confirmed: count(subscribers.confirmedAt) }).from(subscribers),
   ]);
-  const openRequests: Record<RequestKind, number> = { contact: 0, individual: 0, practice: 0, waitlist: 0 };
+  const openRequests: Record<RequestKind, number> = { contact: 0, individual: 0, practice: 0, waitlist: 0, change_request: 0 };
   for (const row of byKind) openRequests[row.kind] = Number(row.n);
   return {
     awaitingPrepayment: Number(awaiting.n),

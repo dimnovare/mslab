@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
+import { eq } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
-import { courses, courseImages, courseSessions, registrations } from "@/db/schema";
+import { courses, courseImages, courseSessions, registrations, requests, clients, clientSessions, courseAccess, mailQuota } from "@/db/schema";
 
 test("migrations apply and a course round-trips", async () => {
   const db = await makeTestDb();
@@ -25,4 +26,20 @@ test("relations load course images, sessions and registration parents", async ()
   expect(reg?.course.slug).toBe("rel");
   expect(reg?.courseSession?.city).toBe("Tallinn");
   expect(reg?.status).toBe("awaiting_prepayment");
+});
+
+test("client tables exist and link records", async () => {
+  const db = await makeTestDb();
+  const [c] = await db.insert(clients).values({ email: "kati@example.test" }).returning();
+  await db.insert(clientSessions).values({ idHash: "h1", clientId: c.id, expiresAt: new Date(Date.now() + 1000) });
+  await db.insert(mailQuota).values({ day: "2026-10-02", sent: 1 });
+  const [course] = await db.insert(courses).values({ slug: "acc", type: "e_learning", level: "basic", title: { et: "A" }, summary: { et: "" }, body: { et: "" } }).returning(); // makeTestDb() does not seed
+  await db.insert(courseAccess).values({ clientId: c.id, courseId: course.id, grantedBy: "admin@example.test", expiresAt: new Date() });
+  await db.insert(requests).values({ kind: "change_request", payload: { registrationId: 1 }, clientId: c.id });
+  const [r] = await db.select({ clientId: registrations.clientId }).from(registrations).limit(1);
+  expect(r === undefined || r.clientId === null).toBe(true);
+  await db.delete(clients).where(eq(clients.id, c.id)); // cascades sessions/access, nulls requests.client_id
+  expect(await db.select().from(clientSessions)).toHaveLength(0);
+  expect(await db.select().from(courseAccess)).toHaveLength(0);
+  expect((await db.select().from(requests).where(eq(requests.kind, "change_request")))[0].clientId).toBeNull();
 });
