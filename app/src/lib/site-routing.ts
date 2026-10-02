@@ -3,7 +3,9 @@
 // ET lives at "/", RU at "/ru"; internally both render app/[locale]/…
 
 // Paths the app serves as they are (no "/et" rewrite). The hub (guide, p/…) and /api are handled before this list.
-const PASS = /^\/(ru(\/|$)|admin|media|_next|feedback\.js$|robots\.txt$|favicon|icon\.svg|brand\/|seed\/|og\.(jpg|png)$)/;
+// Every entry ends at a path boundary or is one exact file: "/admin.php", "/administrator" or "/media.php" are unknown
+// addresses (the cached 404 page), not the admin or /media.
+const PASS = /^\/(ru(\/|$)|admin(\/|$)|media(\/|$)|_next(\/|$)|feedback\.js$|robots\.txt$|favicon\.ico$|icon\.svg$|brand\/|seed\/|og\.(jpg|png)$)/;
 
 /** API routes answer at their own path: no trailing-slash or locale redirect (a POST must not be redirected). */
 const API = /^\/api(\/|$)/;

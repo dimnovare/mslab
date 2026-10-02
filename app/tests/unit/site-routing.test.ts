@@ -49,6 +49,12 @@ describe("routeSitePath", () => {
     expect(routeSitePath("//evil.example", new URLSearchParams())).toEqual({ kind: "redirect", path: "/evil.example" });
     expect(route("/guide/")).toEqual({ kind: "hub" });
     expect(route("/api/feedback")).toEqual({ kind: "api" });
-    for (const p of ["/admin", "/admin/koolitused", "/media/img/a.jpg", "/_next/static/x.js", "/robots.txt", "/seed/a.jpg", "/og.jpg"]) expect(route(p), p).toEqual({ kind: "other" });
+    for (const p of ["/admin", "/admin/koolitused", "/media/img/a.jpg", "/_next/static/x.js", "/robots.txt", "/seed/a.jpg", "/og.jpg", "/favicon.ico", "/icon.svg"]) expect(route(p), p).toEqual({ kind: "other" });
+  });
+
+  test("names that only begin like admin, media or a static file are unknown addresses: the cached 404 page (final review M1)", () => {
+    for (const p of ["/admin.php", "/administrator", "/adminer.php", "/media.php", "/mediakit", "/_nextx", "/favicon.png", "/favicon.ico.bak", "/icon.svgz", "/robots.txt.bak"])
+      expect(route(p), p).toEqual({ kind: "page", page: "/et/leidmata", rewritten: true });
+    expect(route("/ru/admin.php")).toEqual({ kind: "page", page: "/ru/leidmata", rewritten: true });
   });
 });

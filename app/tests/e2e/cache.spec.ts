@@ -87,7 +87,8 @@ test("admin pages and the API never come from the page cache", async ({ request 
 
 test("unknown addresses share their locale's one cached 404 page: status 404, noindex, the site's own 404 (round 2 item 21)", async ({ request }) => {
   for (const [locale, title, paths] of [
-    ["et", "Lehte ei leitud", ["/olematu-leht", "/wp-admin", "/.env", "/koolitused/a/b", `/e2e-${Date.now()}`]],
+    // (/admin.php, /administrator, /adminer.php, /media.php: names that only begin like the admin or /media, final review M1)
+    ["et", "Lehte ei leitud", ["/olematu-leht", "/wp-admin", "/.env", "/koolitused/a/b", "/admin.php", "/administrator", "/adminer.php", "/media.php", `/e2e-${Date.now()}`]],
     ["ru", "Страница не найдена", ["/ru/net-takoj", "/ru/wp-login.php", `/ru/e2e-${Date.now()}`]],
   ] as const) {
     // the first one may render it (once per locale, also after a change made it stale: on a deployment OpenNext may
