@@ -337,6 +337,22 @@ test.describe("both types", () => {
     }
   });
 
+  test("gallery thumbnail arrows keep keyboard focus at the end (aria-disabled, not disabled) (item 7)", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "the thumbnails scroll on phones (3 of 4 shown)");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    const next = page.getByRole("button", { name: "Järgmised pildid" });
+    const prev = page.getByRole("button", { name: "Eelmised pildid" });
+    await expect(prev).toHaveAttribute("aria-disabled", "true");
+    await next.focus();
+    await page.keyboard.press("Enter");
+    await expect(next).toHaveAttribute("aria-disabled", "true");
+    await expect(next).toBeFocused(); // focus stays on the arrow (a disabled button would drop it to the page)
+    expect(await next.evaluate((b: HTMLButtonElement) => b.disabled)).toBe(false);
+    expect(await next.evaluate((b) => getComputedStyle(b).opacity)).toBe("0.35"); // dimmed, still visible while focused
+    await expect(prev).not.toHaveAttribute("aria-disabled", "true");
+  });
+
   test("tags show type, level and language; no hybrid wording on any course page (K1, K2)", async ({ page }) => {
     for (const slug of ["kulmumeistri-baaskoolitus", "lash-lift-botox", "kulmude-lami", "kulmumeistri-e-koolitus", "kulmukuju-ja-summeetria", "ripsmete-laminatsiooni-alused"]) {
       await page.goto(`/koolitused/${slug}`);

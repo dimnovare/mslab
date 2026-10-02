@@ -40,7 +40,9 @@ export function Gallery({ images, t }: { images: LightboxImage[]; t: GalleryText
     };
   }, [measure]);
 
+  // At an end the arrow is aria-disabled, not disabled: a disabled button would drop keyboard focus to the page.
   const scrollThumbs = (dir: 1 | -1) => {
+    if (dir === -1 ? ends.start : ends.end) return;
     const el = track.current;
     const item = el?.firstElementChild as HTMLElement | null;
     if (!el || !item) return;
@@ -84,10 +86,10 @@ export function Gallery({ images, t }: { images: LightboxImage[]; t: GalleryText
           </ul>
           {overflow && (
             <>
-              <button type="button" className={`${styles.arrow} ${styles.arrowPrev}`} onClick={() => scrollThumbs(-1)} disabled={ends.start} aria-label={t.prevThumbs}>
+              <button type="button" className={`${styles.arrow} ${styles.arrowPrev}`} onClick={() => scrollThumbs(-1)} aria-disabled={ends.start || undefined} aria-label={t.prevThumbs}>
                 <Icon name="chevronLeft" size={18} />
               </button>
-              <button type="button" className={`${styles.arrow} ${styles.arrowNext}`} onClick={() => scrollThumbs(1)} disabled={ends.end} aria-label={t.nextThumbs}>
+              <button type="button" className={`${styles.arrow} ${styles.arrowNext}`} onClick={() => scrollThumbs(1)} aria-disabled={ends.end || undefined} aria-label={t.nextThumbs}>
                 <Icon name="chevronRight" size={18} />
               </button>
             </>

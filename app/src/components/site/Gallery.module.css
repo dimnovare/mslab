@@ -9,7 +9,7 @@
 .placeholder {
   aspect-ratio: 5 / 4;
   border-radius: 20px;
-  background: #e6dfe0;
+  background: var(--line);
 }
 
 .main {
@@ -21,7 +21,7 @@
   overflow: hidden;
   border: 0;
   border-radius: 20px;
-  background: #e6dfe0;
+  background: var(--line);
   cursor: zoom-in;
 }
 
@@ -74,7 +74,7 @@
   overflow: hidden;
   border: 0;
   border-radius: 14px;
-  background: #e6dfe0;
+  background: var(--line);
   cursor: zoom-in;
 }
 
@@ -113,15 +113,21 @@
   border-radius: 50%;
   background: var(--paper);
   color: var(--ink);
-  box-shadow: 0 6px 18px -8px rgba(34, 34, 34, 0.45);
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--ink) 45%, transparent);
   cursor: pointer;
   transform: translateY(-50%);
   transition: opacity 0.2s;
 }
 
-.arrow:disabled {
+/* At an end the arrow hides (and lets clicks through to the thumbnail under it); it keeps keyboard focus, dimmed. */
+.arrow[aria-disabled="true"] {
   opacity: 0;
   pointer-events: none;
+  cursor: default;
+}
+
+.arrow[aria-disabled="true"]:focus-visible {
+  opacity: 0.35;
 }
 
 .arrowPrev {

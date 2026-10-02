@@ -3,7 +3,7 @@
 .section {
   margin-top: clamp(64px, 8vw, 110px);
   padding: clamp(56px, 6vw, 85px) 0 clamp(64px, 7vw, 95px);
-  background: #f1edef;
+  background: var(--first);
 }
 
 /* The footer keeps its own top margin; the band should touch it. */

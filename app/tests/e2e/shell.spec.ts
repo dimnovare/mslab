@@ -55,6 +55,38 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { name: "Личный кабинет ученика скоро откроется" })).toBeVisible();
   });
 
+  test("the language switch keeps the query and hash, and leaves Ctrl/Shift/middle clicks to the browser (item 8)", async ({ page, context }) => {
+    await page.goto("/koolitused?vorm=k#x");
+    const lang = page.locator("header").getByRole("link", { name: /Vaheta keelt/ });
+    // Ctrl+click: a new tab with the Russian page and the same query; this page stays as it is
+    const [tab] = await Promise.all([context.waitForEvent("page"), lang.click({ modifiers: ["ControlOrMeta"] })]);
+    await tab.waitForURL(/\/ru\/koolitused/);
+    expect(new URL(tab.url()).pathname + new URL(tab.url()).search + new URL(tab.url()).hash).toBe("/ru/koolitused?vorm=k#x");
+    await tab.close();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k#x$/);
+    // middle click: a new tab too (not this one)
+    const [tab2] = await Promise.all([context.waitForEvent("page"), lang.click({ button: "middle" })]);
+    await tab2.waitForURL(/\/ru\/koolitused/);
+    expect(new URL(tab2.url()).pathname + new URL(tab2.url()).search).toBe("/ru/koolitused?vorm=k");
+    await tab2.close();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k#x$/);
+    // a plain click switches this tab
+    await lang.click();
+    await expect(page).toHaveURL(/\/ru\/koolitused\?vorm=k#x$/);
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+  });
+
+  test("the newsletter card is capped at 1400 px and centred on wide screens (item 8)", async ({ page }) => {
+    await page.setViewportSize({ width: 2560, height: 1300 });
+    await page.goto("/konto");
+    const card = page.locator("footer section").filter({ has: page.locator("[data-newsletter-form]") });
+    const box = (await card.boundingBox())!;
+    expect(box.width).toBe(1400);
+    expect(Math.round(box.x)).toBe((2560 - 1400) / 2);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => (await card.boundingBox())!.width).toBeLessThan(1400); // narrower screens: the footer's width
+  });
+
   test("unknown paths show a localized 404 inside the shell", async ({ page }) => {
     const et = await page.goto("/olematu-leht");
     expect(et?.status()).toBe(404);

@@ -73,5 +73,5 @@
   height: 32px;
   border-radius: 50%;
   background: var(--ok);
-  color: #fff;
+  color: var(--paper);
 }

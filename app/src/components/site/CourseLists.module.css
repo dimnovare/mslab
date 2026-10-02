@@ -47,7 +47,7 @@
 }
 
 .num {
-  color: #716a6d;
+  color: var(--muted-2);
   font: 400 13px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -58,5 +58,5 @@
 
 .lock {
   align-self: center;
-  color: #8a8085;
+  color: var(--muted-2);
 }

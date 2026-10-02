@@ -165,6 +165,22 @@ test.describe("catalogue", () => {
     expect(await page.locator("[data-explainer-text]").evaluate((e) => getComputedStyle(e).fontSize)).toBe("16px");
   });
 
+  test("at 390 the level chips stay on one row, ET and RU, as 44 px targets (item 9)", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "phone width");
+    for (const path of ["/koolitused", "/ru/koolitused"]) {
+      await page.goto(path);
+      const chips = page.locator("[data-filter-row='level'] button");
+      await expect(chips).toHaveCount(3);
+      const boxes = await chips.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as DOMRect));
+      for (const b of boxes) {
+        expect(Math.abs(b.top - boxes[0].top), path).toBeLessThan(1); // one row
+        expect(b.height, path).toBeGreaterThanOrEqual(44);
+        expect(b.width, path).toBeGreaterThanOrEqual(44);
+        expect(b.right, path).toBeLessThanOrEqual(390 - 22 + 0.5); // inside the page's side padding
+      }
+    }
+  });
+
   test("RU catalogue", async ({ page }) => {
     await page.goto("/ru/koolitused?vorm=k");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Найдите свой курс.");

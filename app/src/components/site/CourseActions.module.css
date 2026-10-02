@@ -7,7 +7,7 @@
   min-height: 44px;
   padding: 8px 0;
   border: 0;
-  border-bottom: 1px solid #a49b9f;
+  border-bottom: 1px solid var(--iced);
   background: none;
   color: var(--ink);
   font: 500 13px/1.2 var(--font-body);
@@ -25,7 +25,7 @@
 }
 
 .action[aria-pressed="true"] .heart {
-  color: #8c5f74;
+  color: var(--warn);
 }
 
 .action:active .heart {
@@ -43,8 +43,8 @@
   padding: 15px 22px;
   border-radius: 12px;
   background: var(--ink);
-  box-shadow: 0 5px 30px rgba(34, 34, 34, 0.15);
-  color: #fff;
+  box-shadow: 0 5px 30px color-mix(in srgb, var(--ink) 15%, transparent);
+  color: var(--paper);
   font: 500 13px/1.4 var(--font-body);
   overflow-wrap: anywhere;
   opacity: 0;

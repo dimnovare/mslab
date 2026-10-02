@@ -11,7 +11,7 @@
   gap: 4px 12px;
   margin: 0;
   padding: 0;
-  color: #716a6d;
+  color: var(--muted-2);
   font-size: 12px;
   list-style: none;
 }
@@ -24,7 +24,7 @@
 
 .crumb li + li::before {
   content: "/";
-  color: #a49b9f;
+  color: var(--iced);
 }
 
 .crumb a {
@@ -103,7 +103,7 @@
 .summary {
   max-width: 600px;
   margin: 0;
-  color: #5e5559;
+  color: var(--muted);
   font-size: 16px;
   line-height: 1.6;
 }
@@ -139,7 +139,7 @@
 .prose p {
   max-width: 640px;
   margin: 0 0 14px;
-  color: #3a3437;
+  color: var(--ink-soft);
   font-size: 16px;
   line-height: 1.7;
 }
@@ -167,7 +167,7 @@
 .checkList svg {
   flex: none;
   margin-top: 3px;
-  color: #8c6f80;
+  color: var(--warn);
 }
 
 /* B .notice */
@@ -176,7 +176,7 @@
   padding: 14px 18px;
   border-left: 2px solid var(--rose);
   border-radius: 0 10px 10px 0;
-  background: #f0ebed;
+  background: var(--first);
   font-size: 14px;
   line-height: 1.55;
 }

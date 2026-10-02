@@ -152,11 +152,11 @@
   transition: border-color 0.3s;
 }
 
-.buttons button:hover:not(:disabled) {
+.buttons button:hover:not([aria-disabled="true"]) {
   border-color: #fff;
 }
 
-.buttons button:disabled {
+.buttons button[aria-disabled="true"] {
   opacity: 0.35;
   cursor: default;
 }

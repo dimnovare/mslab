@@ -39,7 +39,7 @@
 .pill[aria-pressed="true"] {
   border-color: var(--ink);
   background: var(--ink);
-  color: #fff;
+  color: var(--paper);
 }
 
 /* B .level-filter: below the explainer, a little smaller. */
@@ -57,7 +57,7 @@
   flex: none;
   width: 300px;
   max-width: 100%;
-  color: #716a6d;
+  color: var(--muted-2);
 }
 
 .search svg {
@@ -84,7 +84,7 @@
 }
 
 .search input::placeholder {
-  color: #8a8085;
+  color: var(--muted-2);
 }
 
 .grid {
@@ -100,9 +100,9 @@
   align-items: center;
   gap: 14px;
   padding: 72px 20px;
-  border: 1px dashed #c4b7bf;
+  border: 1px dashed var(--fog);
   border-radius: 18px;
-  color: #716a6d;
+  color: var(--muted-2);
   text-align: center;
 }
 
@@ -149,13 +149,22 @@
     font-size: 13px;
   }
 
-  .levels .pill {
-    padding: 9px 12px;
-    font-size: 12px;
+  /* The three level chips stay on one row (they used to wrap one chip onto a row of its own): each takes the width
+     its label needs, and a long label (RU "Курсы повышения квалификации") breaks inside its chip instead. */
+  .levels {
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 6px;
+    margin-bottom: 28px;
   }
 
-  .levels {
-    margin-bottom: 28px;
+  .levels .pill {
+    flex: 1 1 auto;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
   }
 
   .grid {

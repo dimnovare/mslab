@@ -223,6 +223,30 @@ test.describe("hero behaviour", () => {
   });
 });
 
+test("blog carousel arrows keep keyboard focus at the ends (aria-disabled, not disabled) (item 7)", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const blog = page.getByRole("region", { name: "Uudised ja nõuanded" });
+  const track = blog.getByRole("group", { name: "Postituste karussell" });
+  const prev = blog.getByRole("button", { name: "Eelmine" });
+  const next = blog.getByRole("button", { name: "Järgmine" });
+  await next.scrollIntoViewIfNeeded();
+  await expect(prev).toHaveAttribute("aria-disabled", "true");
+  expect(await prev.evaluate((b: HTMLButtonElement) => b.disabled)).toBe(false); // focusable
+  await next.focus();
+  for (let i = 0; i < 10 && (await next.getAttribute("aria-disabled")) !== "true"; i++) {
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(150);
+  }
+  await expect(next).toHaveAttribute("aria-disabled", "true");
+  await expect(next).toBeFocused();
+  const end = await track.evaluate((e) => e.scrollLeft);
+  await page.keyboard.press("Enter"); // nothing to scroll at the end
+  await page.waitForTimeout(150);
+  expect(await track.evaluate((e) => e.scrollLeft)).toBe(end);
+  await expect(prev).not.toHaveAttribute("aria-disabled", "true");
+});
+
 test.describe("home content from the database", () => {
   test("upcoming strip, course cards with badges, practice, blog and FAQ", async ({ page }) => {
     await page.goto("/");

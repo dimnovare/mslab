@@ -11,7 +11,7 @@ export type BlogCard = { slug: string; href: string; title: string; excerpt: str
 
 /**
  * Prototype D dark blog panel (`blogp` + `newsDark`, H16): heading, a scroll-snap row of cards that open the full
- * post, "Kõik postitused" and previous / next buttons (disabled at the ends).
+ * post, "Kõik postitused" and previous / next buttons (aria-disabled at the ends: they keep keyboard focus).
  */
 export function BlogCarousel({
   t,
@@ -44,7 +44,9 @@ export function BlogCarousel({
     };
   }, [update]);
 
+  // At an end the arrow is aria-disabled, not disabled: a disabled button would drop keyboard focus to the page.
   const scroll = (dir: 1 | -1) => {
+    if (dir === -1 ? edges.start : edges.end) return;
     const el = track.current;
     if (!el) return;
     const card = el.firstElementChild as HTMLElement | null;
@@ -90,10 +92,10 @@ export function BlogCarousel({
               {t.all}
             </Link>
             <div className={styles.buttons}>
-              <button type="button" aria-label={t.prev} disabled={edges.start} onClick={() => scroll(-1)}>
+              <button type="button" aria-label={t.prev} aria-disabled={edges.start || undefined} onClick={() => scroll(-1)}>
                 <Icon name="chevronLeft" size={16} />
               </button>
-              <button type="button" aria-label={t.next} disabled={edges.end} onClick={() => scroll(1)}>
+              <button type="button" aria-label={t.next} aria-disabled={edges.end || undefined} onClick={() => scroll(1)}>
                 <Icon name="chevronRight" size={16} />
               </button>
             </div>

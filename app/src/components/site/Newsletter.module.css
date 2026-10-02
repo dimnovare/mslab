@@ -1,10 +1,14 @@
 /* Prototype B .newsletter: lilac surface with white / ink / lilac (Maria C10), now inside the footer (H13). */
 
+/* Capped like B, where the block sat in a 1600px .wrap with 100px sides (1400px): on wide screens it does not run
+   across the whole footer, and it stays centred over the link columns. */
 .newsletter {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 60px;
   align-items: center;
+  max-width: 1400px;
+  margin-inline: auto;
   padding: 60px;
   border-radius: 24px;
   background: var(--lilac);

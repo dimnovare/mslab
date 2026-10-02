@@ -15,6 +15,12 @@
   --warn: #6b4f5c;
   --bad: #8a3b3b;
 
+  /* Text shades mixed from the palette only (no colours of their own): prototype B's greys #3a3437, #5e5559 and
+     #716a6d as ink + rose / fog. Contrast on paper: 11.9, 7.4 and 5.2 : 1. */
+  --ink-soft: color-mix(in srgb, var(--ink) 81%, var(--rose));
+  --muted: color-mix(in srgb, var(--ink) 52%, var(--rose));
+  --muted-2: color-mix(in srgb, var(--ink) 50%, var(--fog));
+
   /* Type */
   --font-display: var(--font-jost), "Jost", system-ui, sans-serif;
   --font-body: var(--font-manrope), "Manrope", system-ui, sans-serif;
