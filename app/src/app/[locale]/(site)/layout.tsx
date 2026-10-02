@@ -40,7 +40,7 @@ export default async function SiteLayout({ children, params }: { children: React
       <Header locale={locale} />
       <main id="main">{children}</main>
       <Footer locale={locale} newsletter={settings.newsletter} contact={settings.contact} trainerName={settings.trainerName} />
-      {REVIEW_TOOLS && <Script src="/feedback.js?v=4" strategy="afterInteractive" />}
+      {REVIEW_TOOLS && <Script src="/feedback.js?v=5" strategy="afterInteractive" />}
     </>
   );
 }

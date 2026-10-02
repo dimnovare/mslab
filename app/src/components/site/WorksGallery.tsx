@@ -61,7 +61,7 @@ export function WorksGallery({ images, t }: { images: LightboxImage[]; t: WorksT
           {t.title}
         </h2>
         {scrolls && (
-          <div className={styles.arrows}>
+          <div className={styles.arrows} data-fab-avoid="">
             <button type="button" className={styles.arrow} onClick={() => scroll(-1)} aria-disabled={ends.start || undefined} aria-label={t.previous}>
               <Icon name="chevronLeft" size={18} />
             </button>
@@ -75,7 +75,7 @@ export function WorksGallery({ images, t }: { images: LightboxImage[]; t: WorksT
         {images.map((img, i) => (
           <li key={img.src + i} className={styles.item} data-work="">
             <button type="button" className={styles.thumb} onClick={() => setOpen(i)} aria-label={img.alt ? `${t.open}: ${img.alt}` : t.open}>
-              <Image className={styles.image} src={img.src} alt="" fill unoptimized sizes="(max-width: 640px) 80vw, (max-width: 860px) 50vw, 15vw" />
+              <Image className={styles.image} src={img.src} alt="" fill unoptimized sizes="(max-width: 860px) 50vw, 15vw" />
             </button>
           </li>
         ))}

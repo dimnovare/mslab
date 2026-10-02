@@ -79,7 +79,7 @@ test.describe("comment API", () => {
 test.describe("comment widget on the main site", () => {
   test("is on the public pages, not in /admin", async ({ page }) => {
     await page.goto("/koolitused");
-    await expect(page.locator('script[src="/feedback.js?v=4"]')).toHaveCount(1);
+    await expect(page.locator('script[src="/feedback.js?v=5"]')).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Jäta kommentaar" })).toBeVisible();
     await page.goto("/admin/login");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -208,6 +208,34 @@ test.describe("the comment button keeps clear of the site's messages", () => {
     await page.goto("/?uudiskiri=kinnitatud");
     await expect(fab(page)).toBeVisible();
     await clearOf(page, page.locator("[data-flash-notice] [data-fab-avoid]"));
+  });
+
+  test("never on the works gallery's arrows on /koolitaja at 1440×900 (N4)", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the arrows reach the button's corner on the desktop layout");
+    await page.goto("/koolitaja");
+    await expect(fab(page)).toBeVisible();
+    const arrows = page.locator("[data-works] [data-fab-avoid]");
+    // the arrows are in the button's corner on first view: the case that needs the lift
+    const box = (await arrows.boundingBox())!;
+    expect(box.x + box.width, "arrows under the button's column").toBeGreaterThan(1440 - 16 - 120);
+    expect(box.y + box.height, "arrows near the bottom").toBeGreaterThan(900 - 16 - 48);
+    await clearOf(page, arrows);
+    for (const name of ["Eelmine", "Järgmine"]) await clearOf(page, page.locator("[data-works]").getByRole("button", { name }));
+  });
+
+  test("never on the footer newsletter's Liitu at any scroll position, 1440×900 (N4)", async ({ page, isMobile }) => {
+    test.skip(isMobile, "Liitu reaches the button's corner on the desktop layout");
+    for (const path of ["/ostukorv", "/koolitaja"]) {
+      await page.goto(path);
+      await expect(fab(page)).toBeVisible();
+      const liitu = page.locator("[data-newsletter-form]").getByRole("button", { name: "Liitu" });
+      const top = await liitu.evaluate((e) => e.getBoundingClientRect().top + scrollY);
+      for (const below of [8, 24, 48, 72]) {
+        // scroll until Liitu's bottom is `below` px above the window's bottom edge, where the button sits
+        await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, top + 49 + below - 900));
+        await clearOf(page, liitu);
+      }
+    }
   });
 
   test.describe("campaign", () => {

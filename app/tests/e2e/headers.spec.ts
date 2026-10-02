@@ -39,7 +39,7 @@ test.describe("noindex on every kind of answer (item 16)", () => {
       ["/media/img/olematu.jpg", 404],
       ["/robots.txt", 200],
       ["/og.jpg", 200],
-      ["/feedback.js?v=4", 200],
+      ["/feedback.js?v=5", 200],
       ["/seed/flower-hero.png", 200],
       ["/brand/logo.png", 200],
       [chunk!, 200],

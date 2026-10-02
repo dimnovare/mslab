@@ -103,8 +103,9 @@
     var mood = null, picked = null, pickedEl = null, sending = false, panel = null, hl = null;
 
     // The button never covers the host page's own bottom-right UI: a prototype's .sticky-buy bar, and on the main site
-    // anything marked [data-fab-avoid] while it is on screen (the copy/share toast, the newsletter notice, the campaign
-    // sheet). It moves up above the highest of them that shares its corner; re-checked whenever the page changes.
+    // anything marked [data-fab-avoid] while it is on screen (the copy/share toast, the newsletter notice and its "Liitu",
+    // the campaign sheet, the works gallery's arrows). It moves up above the highest of them that shares its corner;
+    // re-checked whenever the page changes or scrolls (once per frame).
     function liftFab() {
       var sb = document.querySelector(".sticky-buy");
       var lift = sb && sb.offsetHeight && getComputedStyle(sb).display !== "none" ? sb.offsetHeight + 12 : 16;
@@ -126,6 +127,7 @@
       requestAnimationFrame(function () { liftQueued = false; liftFab(); });
     }
     window.addEventListener("resize", queueLift);
+    window.addEventListener("scroll", queueLift, { passive: true });
     window.addEventListener("hashchange", function () { setTimeout(liftFab, 300); });
     document.addEventListener("transitionend", queueLift, true);
     if (window.MutationObserver)

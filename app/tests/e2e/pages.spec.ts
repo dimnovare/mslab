@@ -172,7 +172,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     // Disclosure: opens the form under the row with focus in the name field, and closes again.
     // the disclosure (aria-expanded) says "Liitu ootenimekirjaga" (B's wording, C49), as the form's own submit button does
     const toggle = full.locator("button[aria-expanded]");
-    await expect(toggle).toHaveText("Liitu ootenimekirjaga");
+    await expect(toggle).toHaveAccessibleName(new RegExp(`^Liitu ootenimekirjaga\\s*: Kulmude LAMI · ${lamiParnu} · Pärnu$`));
     const form = full.locator("[data-waitlist-form]");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(form).toHaveCount(0);
@@ -239,7 +239,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await page.goto("/ru/koolituskalender");
     const full = page.locator("[data-calendar-row][data-state='full']");
     await expect(full).toContainText("Мест нет");
-    await expect(full.locator("button[aria-expanded]")).toHaveText("Встать в лист ожидания");
+    await expect(full.locator("button[aria-expanded]")).toHaveAccessibleName(/^Встать в лист ожидания\s*: /);
     await expect(page.locator("[data-calendar-row][data-state='few']")).toContainText("Последние места · 2");
   });
 });
@@ -395,14 +395,14 @@ test.describe("trainer", () => {
     expect(Math.abs(box!.x - portrait!.x)).toBeLessThan(2);
     await expect(works.locator("[data-work]")).toHaveCount(7);
 
-    // Per view: 3 on desktop, about 1.2 on phones (2 on tablets, checked below).
+    // Per view: 3 on desktop, 2 on tablets and phones (C29 "paar-kolm pilti ritta", N8; the tablet checked below).
     const perView = () =>
       works.locator("[data-works-track]").evaluate((track) => {
         const item = track.firstElementChild as HTMLElement;
         const gap = parseFloat(getComputedStyle(track).columnGap) || 0;
         return (track.clientWidth + gap) / (item.getBoundingClientRect().width + gap);
       });
-    if (isMobile) expect(await perView()).toBeCloseTo(1.2, 1);
+    if (isMobile) expect(await perView()).toBeCloseTo(2, 1);
     else {
       expect(await perView()).toBeCloseTo(3, 1);
       await page.setViewportSize({ width: 834, height: 1112 });

@@ -109,7 +109,8 @@ export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }
                 {...describe("email")}
               />
               {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
-              <button className={styles.submit} type="submit" aria-disabled={pending || undefined}>
+              {/* data-fab-avoid: the review build's comment button moves up instead of covering it (N4) */}
+              <button className={styles.submit} type="submit" aria-disabled={pending || undefined} data-fab-avoid="">
                 {t.submit}
                 <Icon name="arrow" />
               </button>

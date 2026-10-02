@@ -1,4 +1,5 @@
-/* "Koolitaja tööd" (Maria C29): a small carousel under the portrait. Square images, 3 / 2 / 1.2 per view. */
+/* "Koolitaja tööd" (Maria C29 "paar-kolm pilti ritta"): a small carousel under the portrait. Square images, 3 per
+   view, 2 from 860 px down, phones included (N8); swiping and the arrows move it. */
 
 .works {
   margin-top: 20px;
@@ -110,8 +111,3 @@
   }
 }
 
-@media (max-width: 640px) {
-  .track {
-    --visible: 1.2;
-  }
-}
