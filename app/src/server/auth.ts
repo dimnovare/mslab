@@ -2,12 +2,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, count, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { cache } from "react";
 import { getDb, type Db } from "@/db/client";
 import { adminSessions, authTokens } from "@/db/schema";
 import type * as schema from "@/db/schema";
 import { serverEnv } from "./env";
 import { logFailure } from "./log";
-import { perRequest } from "./per-request";
 import { isTokenShape, newToken, sha256 } from "./token";
 
 // Admin sign-in by magic link. Only the e-mails in ADMIN_EMAILS can sign in. A login link holds a random token that is
@@ -31,7 +31,7 @@ export const sessionCookieOptions = { httpOnly: true, secure: true, sameSite: "l
 const normalize = (email: string) => email.trim().toLowerCase();
 
 /**
- * Is `email` in the comma-separated allow-list `allow` (the Worker secret ADMIN_EMAILS)? Whole addresses only,
+ * Is `email` in the comma-separated allow-list `allow` (the setting ADMIN_EMAILS)? Whole addresses only,
  * case-insensitive, trimmed. No allow-list (the secret not set): nobody.
  */
 export function isAllowedAdmin(email: string, allow: string | undefined): boolean {
@@ -41,8 +41,8 @@ export function isAllowedAdmin(email: string, allow: string | undefined): boolea
 }
 
 /**
- * Greeting name of an admin from `names` (the Worker secret ADMIN_NAMES: "<address>=<name>,…"), or "" when the
- * address has none there (the admin pages then greet without a name). The addresses live in secrets, never here.
+ * Greeting name of an admin from `names` (the setting ADMIN_NAMES: "<address>=<name>,…"), or "" when the
+ * address has none there (the admin pages then greet without a name). The addresses live in the settings, never here.
  */
 export function adminFirstName(email: string, names: string | undefined): string {
   const wanted = normalize(email);
@@ -154,7 +154,7 @@ export function adminName(email: string): string {
  * page share one lookup. A failing database is logged without details and thrown as a plain error (a 500, never a
  * redirect that looks like a logout).
  */
-export const currentAdminEmail = perRequest(async (): Promise<string | null> => {
+export const currentAdminEmail = cache(async (): Promise<string | null> => {
   const raw = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!raw) return null;
   try {

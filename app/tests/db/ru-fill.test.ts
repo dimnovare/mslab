@@ -5,7 +5,7 @@ import type { Db } from "@/db/client";
 import { campaign, courseImages, courses, faq, pages, posts, practicePackages, settings } from "@/db/schema";
 import { applySeed } from "@/db/seed-apply";
 import { applyRuFill, fillBadge, fillI18n, fillTrainer, OLD_TRAINER_STATS, planRuFill } from "@/db/ru-fill";
-import { revalidateEverySql, targetMatches } from "@/db/fill-ru";
+import { targetMatches } from "@/db/fill-ru";
 import { pageSeeds } from "@/db/seed-data";
 
 // Round 2 item 1b: the Russian sample texts reach a database seeded before them, and nothing Maria wrote is touched.
@@ -124,9 +124,5 @@ describe("the CLI's guards", () => {
     expect(targetMatches("postgres://u:p@localhost:5432/mslab", "railway")).toBe(false);
     expect(targetMatches("postgres://u:p@db.example.com/x", "railway")).toBe(false);
     expect(targetMatches("not a url", "local")).toBe(false);
-  });
-
-  test("the revalidation SQL marks every page's tag (the site layout) stale for the build", () => {
-    expect(revalidateEverySql("B1", 1000)).toBe("INSERT INTO revalidations (tag, revalidatedAt, stale, expire) VALUES ('B1/_N_T_/[locale]/(site)/layout', 1000, 1000, 1000)");
   });
 });

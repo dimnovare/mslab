@@ -6,7 +6,7 @@ import { courseSessions, courses, registrations, requests, subscribers } from "@
 import { applySeed } from "@/db/seed-apply";
 import { SEEDED_AT } from "@/db/seed-data";
 import { seedBaseDate } from "@/db/seed-dates";
-import { applyDemo, DEMO_PLAN, demoPlan, demoRevalidateSql, demoTags, isSampleEmail, planDemo, removeDemo, SAMPLE_REGISTRATIONS } from "@/db/demo-data";
+import { applyDemo, DEMO_PLAN, demoPlan, isSampleEmail, planDemo, removeDemo, SAMPLE_REGISTRATIONS } from "@/db/demo-data";
 import { describeReport } from "@/db/demo";
 import { listUpcomingSessions } from "@/db/queries/public";
 import { registrationPrice, registrationStatusAfterPayment } from "@/domain/registration";
@@ -157,18 +157,5 @@ describe("sample data", () => {
       expect(r.email).toMatch(/^[a-z.]+\.naidis@example\.test$/);
       expect(r.name).toMatch(/\(näidis\)$/);
     }
-  });
-
-  test("the public pages to refresh: the calendar, the three course pages in both languages, the home page", () => {
-    expect(demoTags(PLAN).sort()).toEqual(
-      [
-        "_N_T_/[locale]/(site)/koolituskalender/page",
-        "_N_T_/[locale]/(site)/page",
-        ...["kulmumeistri-baaskoolitus", "lash-lift-botox", "kulmude-lami"].flatMap((slug) => [`_N_T_/et/koolitused/${slug}`, `_N_T_/ru/koolitused/${slug}`]),
-      ].sort(),
-    );
-    const sql = demoRevalidateSql("B1", PLAN, 5000);
-    expect(sql.split("; ")).toHaveLength(8);
-    expect(sql).toContain("INSERT INTO revalidations (tag, revalidatedAt, stale, expire) VALUES ('B1/_N_T_/[locale]/(site)/koolituskalender/page', 5000, 5000, 5000)");
   });
 });

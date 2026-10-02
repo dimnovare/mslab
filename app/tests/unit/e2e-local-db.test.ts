@@ -11,17 +11,24 @@ describe("e2e local database guard", () => {
       expect(isLocalDbUrl(url), url).toBe(false);
   });
 
-  test("collects E2E_DATABASE_URL, DATABASE_URL, the Hyperdrive local overrides, env files and wrangler.jsonc", () => {
+  test("collects E2E_DATABASE_URL and DATABASE_URL from the environment and from every env file the server reads", () => {
     const files: Record<string, string> = {
-      ".dev.vars": 'SESSION_SECRET=x\nCLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgres://u:p@db.example.com/x"\n',
-      "wrangler.jsonc": '{ "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "x", "localConnectionString": "postgres://postgres:postgres@localhost:5432/mslab" }] }',
+      ".env": 'SESSION_SECRET=x\nDATABASE_URL="postgres://u:p@db.example.com/x"\n',
+      ".env.local": "# DATABASE_URL=postgres://u:p@commented.example/x\nexport DATABASE_URL=postgres://u:p@localhost:5432/mine\n",
+      ".env.production": "DATABASE_URL=postgres://u:p@proxy.railway.example:5432/railway\n",
+      ".env.production.local": "E2E_DATABASE_URL=postgres://u:p@127.0.0.1/e2e\n",
+      // no longer read: wrangler's own files
+      ".dev.vars": "DATABASE_URL=postgres://u:p@elsewhere.example/x\n",
+      "wrangler.jsonc": '{ "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "x", "localConnectionString": "postgres://u:p@elsewhere.example/x" }] }',
     };
     const settings = databaseSettings({ E2E_DATABASE_URL: "postgres://a@localhost/x", DATABASE_URL: "postgres://a@rail.example/x" }, (f) => files[f] ?? null);
-    expect(settings.map((s) => s.source)).toEqual([
-      "env E2E_DATABASE_URL",
-      "env DATABASE_URL",
-      ".dev.vars CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE",
-      "wrangler.jsonc localConnectionString",
+    expect(settings).toEqual([
+      { source: "env E2E_DATABASE_URL", url: "postgres://a@localhost/x" },
+      { source: "env DATABASE_URL", url: "postgres://a@rail.example/x" },
+      { source: ".env DATABASE_URL", url: "postgres://u:p@db.example.com/x" },
+      { source: ".env.local DATABASE_URL", url: "postgres://u:p@localhost:5432/mine" },
+      { source: ".env.production DATABASE_URL", url: "postgres://u:p@proxy.railway.example:5432/railway" },
+      { source: ".env.production.local E2E_DATABASE_URL", url: "postgres://u:p@127.0.0.1/e2e" },
     ]);
   });
 
@@ -43,8 +50,9 @@ describe("e2e local database guard", () => {
     expect(message).not.toContain("user:");
   });
 
-  test("this repository's own settings are local (wrangler.jsonc's localConnectionString)", () => {
-    expect(databaseSettings({}).some((s) => s.source === "wrangler.jsonc localConnectionString")).toBe(true);
-    expect(() => assertLocalDatabases(databaseSettings({}))).not.toThrow();
+  test("the env files are the ones `next dev` and `next start` read, and nothing reads wrangler.jsonc any more", () => {
+    const read: string[] = [];
+    databaseSettings({}, (f) => (read.push(f), null));
+    expect(read).toEqual([".env", ".env.local", ".env.development", ".env.development.local", ".env.production", ".env.production.local"]);
   });
 });

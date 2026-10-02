@@ -2,16 +2,22 @@ import type { Page } from "@playwright/test";
 import { DEV_REVIEW_KEY } from "../../src/server/review-key";
 import { LOCAL_FIXTURES } from "./fixtures";
 import { deleteLocalComments, E2E_COMMENT } from "./local-kv";
+import { E2E_REVIEW_KEY } from "./prod-build";
+import { PROD_BUILD } from "./target";
 import { expect, submitsForms, test } from "./test";
 
 // Task 15: the design-review hub (/guide/, /p/<dir>/, /guide/tagasiside/) and its comment API (/api/feedback) inside
 // the app, and the comment widget on the main site's public pages (never in /admin).
-// Against `next dev` there is no ADMIN_KEY: the list accepts the local development key (src/server/review-key.ts), and
-// the comments go to the dev server's KV (the kv_entries table of the local database), from which each test deletes its own again.
+// Against `next dev` there is no ADMIN_KEY: the list accepts the local development key (src/server/review-key.ts); the
+// local production build never does, so it is started with an ADMIN_KEY of its own (prod-build.ts). The comments go to
+// the server's KV (the kv_entries table of the local database), from which each test deletes its own again.
+
+/** The key the local server's comment list accepts. */
+const REVIEW_KEY = PROD_BUILD ? E2E_REVIEW_KEY : DEV_REVIEW_KEY;
 
 type Item = { id: string; dir: string; route?: string; title?: string; device?: string; name?: string; mood?: string; text: string; done: boolean; link: string; el: { label?: string; sel?: string } };
 
-const listComments = async (page: Page, key: string | null = DEV_REVIEW_KEY) => page.request.get("/api/feedback", { headers: key === null ? {} : { "x-key": key } });
+const listComments = async (page: Page, key: string | null = REVIEW_KEY) => page.request.get("/api/feedback", { headers: key === null ? {} : { "x-key": key } });
 
 async function commentById(page: Page, id: string): Promise<Item | undefined> {
   const res = await listComments(page);
@@ -155,14 +161,14 @@ test.describe("comment widget on the main site", () => {
       // PATCH round trip (the list page's "Tehtud ✓"), and without the key nothing changes
       expect((await page.request.patch(`/api/feedback/${body.id}`, { data: { done: true } })).status()).toBe(401);
       expect((await commentById(page, body.id))!.done).toBe(false);
-      const done = await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": DEV_REVIEW_KEY }, data: { done: true } });
+      const done = await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": REVIEW_KEY }, data: { done: true } });
       expect(done.status()).toBe(200);
       expect((await commentById(page, body.id))!.done).toBe(true);
-      expect((await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": DEV_REVIEW_KEY }, data: { done: "yes" } })).status()).toBe(400);
-      expect((await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": DEV_REVIEW_KEY }, data: { done: false } })).status()).toBe(200);
+      expect((await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": REVIEW_KEY }, data: { done: "yes" } })).status()).toBe(400);
+      expect((await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": REVIEW_KEY }, data: { done: false } })).status()).toBe(200);
 
       // the list page shows it under "Põhileht" with the link, and marks it done
-      await page.goto(`/guide/tagasiside/#key=${DEV_REVIEW_KEY}`);
+      await page.goto(`/guide/tagasiside/#key=${REVIEW_KEY}`);
       const card = page.locator("article.card").filter({ hasText: text });
       await expect(card).toBeVisible();
       await expect(card.getByText("Põhileht", { exact: true })).toBeVisible();

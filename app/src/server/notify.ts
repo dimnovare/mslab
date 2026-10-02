@@ -3,11 +3,11 @@ import { errorSummary } from "./log";
 import type { TextKv } from "./ratelimit";
 
 // Outgoing notifications: e-mail through Resend and a Telegram ping to Maria (until launch: to Dim, see MARIA_EMAIL in
-// wrangler.jsonc). Both are best effort — callers store the submission first and never fail a request because of a
+// the Vercel project's settings). Both are best effort — callers store the submission first and never fail a request because of a
 // notification. Without the secrets (local `next dev` has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN) nothing is sent
 // and a console note says so. Logs never contain addresses, message text, tokens or provider error messages.
 
-/** The bindings and secrets notifications use (a subset of the Worker env; secrets are optional). */
+/** The settings and secrets notifications use (part of server/env.ts plus the KV store; secrets are optional). */
 export type Env = {
   KV: TextKv;
   MAIL_FROM: string;
@@ -23,7 +23,7 @@ export type Mail = { to: string; subject: string; text: string; replyTo?: string
 
 const TELEGRAM_MAX = 3900;
 export const TG_CHAT_KEY = "tg:chat";
-/** A hung provider call must not hold the Worker's waitUntil. */
+/** A hung provider call must not hold the function after the response (next/server after()). */
 export const NOTIFY_TIMEOUT_MS = 8000;
 
 class TimeoutError extends Error {}

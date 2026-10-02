@@ -55,11 +55,21 @@ export class PgKv implements TextKv, FeedbackKv {
   /** Deletes the expired rows. A failure is logged (no values) and never fails the caller: the next TTL put sweeps again, and reads ignore expired rows meanwhile. */
   async sweep(): Promise<void> {
     try {
-      await this.db.delete(kvEntries).where(lte(kvEntries.expiresAt, this.now()));
+      await sweepExpired(this.db, this.now());
     } catch (e) {
       logFailure("[kv] sweeping expired entries failed", e);
     }
   }
+}
+
+/**
+ * Deletes the rows that expired at or before `now` and returns how many. A failing database throws. Every TTL put sweeps
+ * (PgKv.put); the daily cron (app/api/cron/sweep) does it too, so a quiet site's rate limit rows (visitors' addresses) do
+ * not wait for the next submission.
+ */
+export async function sweepExpired(db: Db, now: Date = new Date()): Promise<number> {
+  const gone = await db.delete(kvEntries).where(lte(kvEntries.expiresAt, now)).returning();
+  return gone.length;
 }
 
 /** The store of this request, in the app's database. */

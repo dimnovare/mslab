@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { perRequest } from "@/server/per-request";
+import { cache } from "react";
 import { getDb } from "@/db/client";
 import { getPage } from "@/db/queries/public";
 import { paragraphs } from "@/domain/catalogue";
@@ -11,7 +11,7 @@ import styles from "./LegalPage.module.css";
 type LegalKey = "privacy" | "terms";
 
 // One page query per request, shared by generateMetadata and the page.
-const loadPage = perRequest(async (key: LegalKey) => {
+const loadPage = cache(async (key: LegalKey) => {
   return getPage(getDb(), key);
 });
 

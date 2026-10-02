@@ -34,7 +34,7 @@ import type { PublicChange } from "./cache-targets";
 import { isTokenShape, newToken, sha256 } from "./token";
 import { upcomingFrom } from "@/domain/calendar";
 
-// The public form submissions without Next.js: actions/public.ts builds the dependencies (database, Worker env,
+// The public form submissions without Next.js: actions/public.ts builds the dependencies (database, settings,
 // visitor IP, after()) and calls these, and the tests call them with PGlite and fakes.
 //
 // Every submission: honeypot → validation → rate limit (5 per 10 min per form and IP) → checks against the database
@@ -54,8 +54,8 @@ export type Deps = {
   /** Runs work after the response has been sent: next/server after() in production, collected and awaited in tests. */
   later: (task: () => Promise<unknown>) => void;
   /**
-   * Told when a stored submission changes what public pages show; awaited before the answer, so the very next request
-   * already renders those pages again (writes the tag cache's rows, no page render; public-cache.ts).
+   * Told when a stored submission changes what public pages show, before the answer, so the very next request already
+   * renders those pages again (revalidatePath(); public-cache.ts).
    */
   changed?: (change: PublicChange) => Promise<void> | void;
 };

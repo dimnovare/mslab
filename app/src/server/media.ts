@@ -102,6 +102,12 @@ export const MEDIA_CACHE = "public, max-age=31536000, immutable";
  */
 export const MEDIA_CDN_CACHE_HEADER = "vercel-cdn-cache-control";
 
+/**
+ * An image is only ever shown inside our pages; this keeps a stray SVG-like payload from running as a document.
+ * next.config.ts gives /media the same value (its headers() would otherwise replace the route's own).
+ */
+export const MEDIA_CSP = "default-src 'none'; sandbox";
+
 const notFound = () => new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
 /**
@@ -122,8 +128,7 @@ export async function serveMedia(store: MediaSource, key: string): Promise<Respo
       [MEDIA_CDN_CACHE_HEADER]: MEDIA_CACHE,
       ...(object.etag ? { etag: object.etag } : {}),
       "x-content-type-options": "nosniff",
-      // An image is only ever shown inside our pages; this keeps a stray SVG-like payload from running as a document.
-      "content-security-policy": "default-src 'none'; sandbox",
+      "content-security-policy": MEDIA_CSP,
     },
   });
 }

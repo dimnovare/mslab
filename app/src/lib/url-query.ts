@@ -70,10 +70,10 @@ if (typeof window !== "undefined") {
   for (const type of ["pointerdown", "keydown", "click"]) window.addEventListener(type, catchUpRouter, true);
 }
 
-// The public pages are rendered once and cached for every visitor, whatever the query (open-next.config.ts), so the
-// server renders them as if the address had no query, and the browser applies it after hydration. On the server,
-// useSearchParams() would also make Next.js give up the server rendering of the page; it is called in the browser only
-// (the choice is fixed per bundle, so the hook order never changes within one).
+// The public pages are rendered once and cached for every visitor, whatever the query (incremental static
+// regeneration), so the server renders them as if the address had no query, and the browser applies it after
+// hydration. On the server, useSearchParams() would also make Next.js give up the server rendering of the page; it is
+// called in the browser only (the choice is fixed per bundle, so the hook order never changes within one).
 function useRouterQueryInBrowser(): string {
   return useSearchParams().toString();
 }

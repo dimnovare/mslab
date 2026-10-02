@@ -12,15 +12,14 @@ import { revalidatePublic, type PublicChange } from "../public-cache";
 // The content editors' server actions (courses, calendar): every export is wrapped in adminAction (signed-in admin or a
 // redirect to /admin/login; tests/unit/admin-guards.test.ts fails otherwise). The work is in ../admin-content.ts.
 // The public pages are cached: a saved change revalidates the pages that show it (server/public-cache.ts), so the
-// public site shows it on its next request (the database client bypasses Hyperdrive's query cache); refresh() updates
-// the open admin page.
+// public site shows it on its next request; refresh() updates the open admin page.
 
 async function run(what: string, change: PublicChange, work: (db: Db) => Promise<EditResult>): Promise<EditResult> {
   try {
     const result = await work(getDb());
     // not on "stale": the editor keeps the admin's unsaved draft on screen (reloading is her choice)
     if (result.ok) {
-      await revalidatePublic(change);
+      revalidatePublic(change);
       refresh();
     }
     return result;

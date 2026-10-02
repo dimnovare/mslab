@@ -1,19 +1,21 @@
-import { readFileSync } from "node:fs";
 import type { APIRequestContext } from "@playwright/test";
-import { LOCAL_FIXTURES } from "./fixtures";
-import { PROD_BUILD, TARGET } from "./target";
+import { LOCAL_ENV } from "../local-secrets";
+import { PROD_ENV } from "./prod-build";
+import { PROD_BUILD } from "./target";
 import { test, expect } from "./test";
 
-// Read-only checks of the answers themselves, like `curl -I`: they run against the local dev server and against a
-// deployment (E2E_BASE_URL). Task 16 items 14 (link preview) and 16 (noindex on every kind of answer).
+// Read-only checks of the answers themselves, like `curl -I`: they run against the local dev server, the local
+// production build (E2E_PROD_BUILD) and a deployment (E2E_BASE_URL). Task 16 items 14 (link preview) and 16 (noindex on
+// every kind of answer). The headers every answer carries come from next.config.ts headers().
 
 const NOINDEX = "noindex, nofollow";
+const REFERRER = "strict-origin-when-cross-origin";
 
-/** A production build (the local one under wrangler dev, or a deployment): the Worker entry runs (worker.ts). */
-const WORKER = !!TARGET && (PROD_BUILD || !LOCAL_FIXTURES);
-
-/** The site's address (wrangler.jsonc SITE_URL): link previews name it, whichever host served the page (Task 17). */
-const SITE_URL = /"SITE_URL":\s*"([^"]+)"/.exec(readFileSync("wrangler.jsonc", "utf8"))![1];
+/**
+ * The site's address (SITE_URL): link previews name it, whichever host served the page (Task 17). The public value of
+ * .env.example, or the local production build's own address (prod-build.ts).
+ */
+const SITE_URL = PROD_BUILD ? PROD_ENV.SITE_URL : LOCAL_ENV.SITE_URL;
 
 /** HEAD (as curl -I), without following redirects; GET where the answer to HEAD would not say anything. */
 async function head(request: APIRequestContext, path: string) {
@@ -65,6 +67,7 @@ test.describe("noindex on every kind of answer (item 16)", () => {
       report.push(`${path} → ${res.status()} x-robots-tag: ${robots ?? "(none)"}`);
       expect(ok, `${path}: status ${res.status()}`).toBe(true);
       expect(robots, `${path} (${res.status()}): once, exactly`).toBe(NOINDEX);
+      expect(res.headers()["referrer-policy"], `${path} (${res.status()}): Referrer-Policy once, exactly`).toBe(REFERRER);
       expect(res.headers()["x-powered-by"], `${path}: no X-Powered-By (N12)`).toBeUndefined();
     }
     test.info().annotations.push({ type: "answers", description: report.join("\n") });
@@ -100,7 +103,7 @@ test.describe("link preview of the home page (item 14)", () => {
       expect(await meta("og:locale"), path).toBe(locale);
       expect(new URL((await meta("og:url"))!).pathname, path).toBe(path);
       const image = new URL((await meta("og:image"))!);
-      // a cached page is the same for every host that serves it (custom domain, workers.dev): absolute links use SITE_URL
+      // a cached page is the same for every host that serves it (custom domain, Vercel addresses): absolute links use SITE_URL
       expect(image.origin, "the picture is on the site's address").toBe(new URL(SITE_URL).origin);
       expect(image.pathname).toBe("/og.jpg");
       expect(await meta("og:image:width")).toBe("1200");
@@ -163,10 +166,10 @@ test.describe("link preview of the home page (item 14)", () => {
   });
 });
 
-test.describe("uploaded images are answered by the Worker before OpenNext (final review I1)", () => {
+test.describe("uploaded images: the /media route's own answers (final review I1)", () => {
   test.skip(({ isMobile }) => isMobile, "the same answers for every browser: desktop project only");
 
-  test("/media: the route's 404s with noindex and nosniff; on a production build from the Worker entry, not Next.js", async ({ request }) => {
+  test("/media: the route's 404s with noindex and nosniff, never kept by a CDN", async ({ request }) => {
     // a key putImage could have made, of an image that does not exist; and keys it never makes
     for (const path of ["/media/img/00000000-0000-4000-8000-000000000000.jpg", "/media/img/olematu.jpg", "/media/img/x.svg"]) {
       for (const method of ["GET", "HEAD"]) {
@@ -175,15 +178,16 @@ test.describe("uploaded images are answered by the Worker before OpenNext (final
         expect(res.headers()["x-robots-tag"], `${method} ${path}`).toBe(NOINDEX);
         expect(res.headers()["x-content-type-options"], `${method} ${path}`).toBe("nosniff");
         expect(res.headers()["cache-control"], `${method} ${path}`).toMatch(/no-store/);
-        // the Worker's own answer says where it came from; Next.js's route (`next dev`) does not
-        expect(res.headers()["x-media-cache"], `${method} ${path}`).toBe(WORKER ? "r2" : undefined);
+        expect(res.headers()["content-security-policy"], `${method} ${path}`).toBe("default-src 'none'; sandbox");
+        // an image asked for too early is not remembered as missing (server/media.ts)
+        expect(res.headers()["vercel-cdn-cache-control"], `${method} ${path}`).toBeUndefined();
       }
     }
     // addresses that only look like /media are not images: the site's 404 page
     for (const path of ["/media.php", "/mediakit"]) {
       const res = await request.get(path, { failOnStatusCode: false });
       expect(res.status(), path).toBe(404);
-      expect(res.headers()["x-media-cache"], path).toBeUndefined();
+      expect(await res.text(), path).toContain("Lehte ei leitud");
     }
   });
 });

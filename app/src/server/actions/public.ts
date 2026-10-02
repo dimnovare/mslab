@@ -41,11 +41,10 @@ async function run(form: FormName, handler: (deps: Deps, formData: FormData) => 
         ip: clientIp(h) ?? (process.env.NODE_ENV === "development" ? "local" : null),
         siteUrl: linkBase(requestOrigin(h), env.SITE_URL),
         now: new Date(),
-        // Notifications run after the response (the Worker's waitUntil) and never fail or slow the form.
+        // Notifications run after the response (next/server after()) and never fail or slow the form.
         later: (task) => after(() => task().catch((e) => logFailure(`[forms] ${form}: notification failed`, e))),
-        // a registration or waitlist entry: the calendar and the course page show the session's seats. Their tag rows
-        // are written before the answer (a D1 write, no page render in the POST), so the very next request shows the
-        // new count; once more SETTLE_MS later, after the answer.
+        // a registration or waitlist entry: the calendar and the course page show the session's seats. They are
+        // revalidated before the answer, so the very next request shows the new count (server/public-cache.ts).
         changed: revalidatePublic,
       };
     },

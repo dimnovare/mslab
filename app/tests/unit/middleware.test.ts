@@ -14,7 +14,7 @@ const passesThrough = (path: string) => {
 };
 
 describe("noindex (the whole host stays out of search engines)", () => {
-  test("every redirect the middleware makes says X-Robots-Tag: noindex, nofollow (next.config headers() do not reach it)", () => {
+  test("every redirect the middleware makes says X-Robots-Tag: noindex, nofollow itself, wherever it is answered", () => {
     for (const p of ["/koolitused/", "/et/koolitused", "/et", "//evil.example/", "/ru/", "/guide", "/p/d", "/admin/"]) {
       const res = run(p);
       expect(res.status, p).toBeGreaterThanOrEqual(300);
@@ -22,7 +22,7 @@ describe("noindex (the whole host stays out of search engines)", () => {
     }
   });
 
-  test("other answers leave it to next.config headers() (set here too, OpenNext would send the value twice)", () => {
+  test("other answers leave it to next.config headers() (set here too, it could be sent twice)", () => {
     for (const p of ["/", "/koolitused", "/ru/koolitused", "/admin/login", "/api/feedback/", "/media/img/a.jpg", "/guide/", "/robots.txt"])
       expect(run(p).headers.get("x-robots-tag"), p).toBeNull();
   });

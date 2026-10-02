@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
+import { SERVER_ENV_FILES } from "../local-secrets";
 
 // The e2e run writes to a database in two ways: directly (fixtures.ts: seat fixtures, test rows, snapshots) and through
-// the local dev server (the form and admin tests submit to it; it uses DATABASE_URL, which the run sets to the local
+// the local server (the form and admin tests submit to it; it uses DATABASE_URL, which the run sets to the local
 // database: tests/local-secrets.ts). Both must be a database on this machine, never a shared one (Railway): the run refuses to start otherwise.
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -24,31 +25,26 @@ function hostOf(url: string): string {
   }
 }
 
-/** The settings that point the run at a database: environment variables, and the dev server's own sources. */
+/** The settings that point the run at a database: environment variables, and the server's own env files. */
 const ENV_KEYS = [
   "E2E_DATABASE_URL", // fixtures.ts
-  "DATABASE_URL", // the dev server (server/env.ts), the seed / drizzle CLI; refused too, so a shell left pointing at Railway cannot be used by mistake
-  "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE", // the dev server's Hyperdrive binding (overrides wrangler.jsonc)
-  "WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE", // its older name
+  "DATABASE_URL", // the server (server/env.ts), the seed / drizzle CLI; refused too, so a shell left pointing at Railway cannot be used by mistake
 ] as const;
 
 export type DbSetting = { source: string; url: string };
 
-/** Every database setting in this environment (process env, .env* / .dev.vars files, wrangler.jsonc). */
+/** Every database setting in this environment: the process environment and the env files the server reads. */
 export function databaseSettings(env: Record<string, string | undefined> = process.env, read: (file: string) => string | null = readIfExists): DbSetting[] {
   const out: DbSetting[] = [];
   for (const key of ENV_KEYS) if (env[key]) out.push({ source: `env ${key}`, url: env[key]! });
-  for (const file of [".dev.vars", ".env", ".env.local", ".env.development", ".env.development.local"]) {
+  for (const file of SERVER_ENV_FILES) {
     const text = read(file);
     if (!text) continue;
     for (const key of ENV_KEYS) {
-      const m = new RegExp(`^\\s*${key}\\s*=\\s*["']?([^"'\\s]+)`, "m").exec(text);
+      const m = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=\\s*["']?([^"'\\s]+)`, "m").exec(text);
       if (m) out.push({ source: `${file} ${key}`, url: m[1] });
     }
   }
-  const wrangler = read("wrangler.jsonc");
-  const local = wrangler && /"localConnectionString"\s*:\s*"([^"]+)"/.exec(wrangler);
-  if (local) out.push({ source: "wrangler.jsonc localConnectionString", url: local[1] });
   return out;
 }
 

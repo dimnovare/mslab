@@ -1,5 +1,13 @@
+import { resolve } from "node:path";
 import type { NextConfig } from "next";
-import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+import { MEDIA_CSP } from "./src/server/media";
+
+/**
+ * The e2e run's production build (E2E_PROD_BUILD=1, tests/e2e/target.ts) keeps its pages in Next.js's own file cache
+ * through a thin wrapper that lets the tests mark every page stale after writing to the database directly
+ * (tests/e2e/page-cache.cjs). Only when the e2e run builds and starts the app with E2E_PAGE_CACHE set; never on Vercel.
+ */
+const e2ePageCache = process.env.E2E_PAGE_CACHE ? { cacheHandler: resolve(process.cwd(), "tests/e2e/page-cache.cjs") } : {};
 
 const nextConfig: NextConfig = {
   // Don't let `next dev` write AGENTS.md / CLAUDE.md into the project.
@@ -11,8 +19,8 @@ const nextConfig: NextConfig = {
   skipTrailingSlashRedirect: true,
   experimental: {
     // How long the browser's client router keeps a cached page it has visited or prefetched (x-nextjs-stale-time) before
-    // asking again: the public pages are cached on the Worker now (open-next.config.ts), and an open tab should see an
-    // admin's change on its next navigation within this time. 30 s is the least Next.js accepts (default 300).
+    // asking again: the public pages are served from the cache (incremental static regeneration), and an open tab should
+    // see an admin's change on its next navigation within this time. 30 s is the least Next.js accepts (default 300).
     staleTimes: { dynamic: 0, static: 30 },
   },
   env: {
@@ -20,10 +28,17 @@ const nextConfig: NextConfig = {
     // On ("1") for the review builds; switched off ("0") at the mslab.ee launch. Inlined at build time, not a secret.
     NEXT_PUBLIC_REVIEW_TOOLS: "1",
   },
-  // The whole host stays out of search engines until launch on mslab.ee (static files: public/_headers).
-  // Pages may be framed by this site's own pages only (static files: public/_headers; cached pages: the Worker's
-  // front, src/worker/page-front.ts FRAMING).
-  // The admin area and the login endpoints answer per visitor and are never cached (by the browser or the edge).
+  ...e2ePageCache,
+  // Every answer (pages, API, /media and the static files of public/, the hub included):
+  // - the whole host stays out of search engines until launch on mslab.ee;
+  // - pages may be framed by this site's own pages only (the hub /guide/ shows the prototypes /p/<dir>/ in a
+  //   same-origin frame);
+  // - links to other sites carry the origin only.
+  // A redirect made by src/middleware.ts sets its own X-Robots-Tag. The admin area and the login endpoints answer per
+  // visitor and are never cached (by the browser or a CDN). /_next/static files get Next.js's own year-long immutable
+  // Cache-Control.
+  // A header given here replaces the one a route sets itself, and of two rules for the same path and header the later
+  // one wins: so the routes with a stricter value of their own get it here again, after the rule for every path.
   async headers() {
     const noStore = [{ key: "Cache-Control", value: "no-store" }];
     return [
@@ -32,16 +47,18 @@ const nextConfig: NextConfig = {
         headers: [
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
           { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         ],
       },
       { source: "/admin/:path*", headers: noStore },
       { source: "/api/auth/:path*", headers: noStore },
       { source: "/api/admin/:path*", headers: noStore },
+      // uploaded images: nothing in them may run (server/media.ts)
+      { source: "/media/:path*", headers: [{ key: "Content-Security-Policy", value: MEDIA_CSP }] },
+      // the login link: its token is in the address, so it is never sent on as a Referer (api/auth/verify/route.ts)
+      { source: "/api/auth/verify", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
     ];
   },
 };
 
 export default nextConfig;
-
-// Makes getCloudflareContext() work under `next dev`, for the bindings that are left (the page cache): removed with them.
-initOpenNextCloudflareForDev();

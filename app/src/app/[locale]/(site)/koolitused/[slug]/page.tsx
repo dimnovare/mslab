@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { perRequest } from "@/server/per-request";
+import { cache } from "react";
 import { ContactRegister, type SessionOption } from "@/components/site/ContactRegister";
 import { courseCardData } from "@/components/site/course-card-data";
 import { CourseSummary, type SummaryItem } from "@/components/site/CourseSummary";
@@ -37,13 +37,20 @@ import { getSiteSettings } from "@/server/site-data";
 
 type Props = { params: Promise<{ locale: string; slug: string }> };
 
+/**
+ * This page lists course dates, and a date is listed only until its session begins. So it is rendered again when it is
+ * older than 5 minutes (the first visit after that still gets the cached copy and starts the new render), and a session
+ * that has begun drops off without anyone saving. Saves revalidate it at once (server/public-cache.ts).
+ */
+export const revalidate = 300;
+
 /** Rendered on the first visit and cached, like every public page (app/[locale]/layout.tsx). */
 export function generateStaticParams(): { slug: string }[] {
   return [];
 }
 
 // One course query per request, shared by generateMetadata and the page. Sessions that have begun are left out.
-const loadCourse = perRequest((slug: string) => getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) }));
+const loadCourse = cache((slug: string) => getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) }));
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params;

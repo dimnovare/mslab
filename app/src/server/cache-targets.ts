@@ -1,13 +1,13 @@
-// Which public pages show what (pure: no Next.js, so the Worker's cron can use it too; server/public-cache.ts does the
-// revalidating). Pages are named by their route (app/[locale]/(site)/…), which covers both languages: a "page" target is
-// that page, a "layout" target every page at or below it. A path without brackets is one address (as the middleware
+// Which public pages show what (pure: no Next.js, so it is tested on its own; server/public-cache.ts hands each target to
+// revalidatePath()). Pages are named by their route (app/[locale]/(site)/…), which covers both languages: a "page" target
+// is that page, a "layout" target every page at or below it. A path without brackets is one address (as the middleware
 // rewrote it, so with its locale: "/et/koolitused/x").
 
 /** What changed. `parts`: the editor parts that were saved (an editor page sends only the changed ones). */
 export type PublicChange =
   /** a course saved, created or moved in the list */
   | { kind: "courses" }
-  /** a calendar session saved or deleted, or one has begun */
+  /** a calendar session saved or deleted */
   | { kind: "sessions" }
   /** seat counts: a registration or waitlist entry for `course` (its slug), or an admin's status / payment change */
   | { kind: "seats"; course?: string }
@@ -80,11 +80,3 @@ export function revalidationTargets(change: PublicChange): CacheTarget[] {
   }
 }
 
-/**
- * The cache tag Next.js's revalidatePath(target.path, target.type) writes ("_N_T_/[locale]/(site)/koolituskalender/page"):
- * every page carries such tags for its route, its layouts and its address (server/lib/implicit-tags in Next.js).
- */
-export function targetTag(t: CacheTarget): string {
-  const path = `_N_T_${t.path.length > 1 ? t.path.replace(/\/+$/, "") : t.path}`;
-  return t.type ? `${path}${path.endsWith("/") ? "" : "/"}${t.type}` : path;
-}

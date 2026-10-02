@@ -17,7 +17,7 @@ import { revalidatePublic, type PublicChange } from "../public-cache";
 async function run(what: string, change: PublicChange | null, work: (db: Db) => Promise<AdminResult>): Promise<AdminResult> {
   try {
     const result = await work(getDb());
-    if (result.ok && change) await revalidatePublic(change);
+    if (result.ok && change) revalidatePublic(change);
     // stale: nothing was saved, but the page must show what is stored now
     if (result.ok || result.error === "stale") refresh();
     return result;

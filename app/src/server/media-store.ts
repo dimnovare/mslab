@@ -7,11 +7,12 @@ import { r2Store } from "./r2";
 // - all four R2 variables set: Cloudflare R2 through its S3 API (server/r2.ts), in production and in development;
 // - none set, outside production: a folder, app/.media-local (server/media-local.ts), so `next dev` needs no bucket;
 // - none set, in production: no store. Uploads are refused (503 `storage`) and /media answers 404: a server's own disk
-//   is no place for uploads (it is gone with the next deployment), so there is no folder fallback there;
+//   is no place for uploads (it is gone with the next deployment), so there is no folder fallback there. Unless
+//   MEDIA_LOCAL is "1": the production build on this machine (`next build && next start`, the e2e run) uses the folder;
 // - only some set: a mistake. No store either (the folder would hide it), and the log names the variables that are
 //   missing, once per process (every /media request asks for the store: a line each would flood the log).
 
-type R2Env = Pick<ServerEnv, "R2_ACCOUNT_ID" | "R2_ACCESS_KEY_ID" | "R2_SECRET_ACCESS_KEY" | "R2_BUCKET">;
+type R2Env = Pick<ServerEnv, "R2_ACCOUNT_ID" | "R2_ACCESS_KEY_ID" | "R2_SECRET_ACCESS_KEY" | "R2_BUCKET" | "MEDIA_LOCAL">;
 const R2_VARIABLES = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
 
 // The notes already logged live on globalThis, like the database pool (db/client.ts): `next dev` evaluates a module
@@ -31,5 +32,5 @@ export function mediaStore(env: R2Env = serverEnv(), production: boolean = proce
     }
     return null;
   }
-  return production ? null : localStore(localDir);
+  return production && env.MEDIA_LOCAL !== "1" ? null : localStore(localDir);
 }

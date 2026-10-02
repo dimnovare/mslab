@@ -1,11 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { revalidationTargets, type PublicChange } from "@/server/cache-targets";
-import { sqliteD1 } from "../d1-sqlite";
 
-// Task 17: which cached public pages each change makes stale (server/cache-targets.ts), and that the tags written are
-// the ones Next.js gives those pages.
+// Task 17: which cached public pages each change makes stale (server/cache-targets.ts), and how they are revalidated
+// (server/public-cache.ts).
 
 const SITE = "/[locale]/(site)";
 const paths = (change: PublicChange) => revalidationTargets(change).map((t) => `${t.path}${t.type ? ` (${t.type})` : ""}`);
@@ -67,77 +67,82 @@ describe("the revalidation map", () => {
   });
 });
 
-// The tags these targets write: tests/unit/tag-cache.test.ts checks them against Next.js's own revalidatePath().
+// revalidatePublic hands each target to Next.js's own revalidatePath(), run here as in a server action: inside a work
+// store, where it records the tags it expires.
 
 describe("revalidatePublic", () => {
-  const CONTEXT = Symbol.for("__cloudflare-context__");
-  const g = globalThis as Record<string | symbol, unknown>;
+  // as Next.js's server sets it up before loading next/cache and its request stores
+  (globalThis as Record<string, unknown>).AsyncLocalStorage ??= AsyncLocalStorage;
+  type Pending = { tag: string; profile?: unknown };
+  type Store = { pendingRevalidatedTags?: Pending[]; pathWasRevalidated?: unknown };
 
-  afterEach(() => {
-    vi.doUnmock("next/server");
-    vi.resetModules();
-    vi.useRealTimers();
-    delete g[CONTEXT];
-    delete process.env.OPEN_NEXT_BUILD_ID;
-  });
-
-  async function load(db: ReturnType<typeof sqliteD1>) {
-    const later: (() => Promise<void>)[] = [];
-    vi.doMock("next/server", () => ({ after: (fn: () => Promise<void>) => void later.push(fn) }));
-    g[CONTEXT] = { env: { NEXT_TAG_CACHE_D1: db.binding }, ctx: {}, cf: {} };
-    process.env.OPEN_NEXT_BUILD_ID = "B1";
-    const mod = await import("@/server/public-cache");
-    return { ...mod, later };
+  /** Runs `fn` with a work store like a server action's; returns what revalidatePath() recorded in it. */
+  async function inAction(fn: () => void): Promise<Store> {
+    const { workAsyncStorage } = await import("next/dist/server/app-render/work-async-storage.external.js");
+    const store = { route: "/admin/x", page: "/admin/x/page", incrementalCache: {}, cacheLifeProfiles: {} };
+    workAsyncStorage.run(store as unknown as Parameters<typeof workAsyncStorage.run>[0], fn);
+    return store as Store;
   }
 
-  test("an admin save: OpenNext's rows are in D1 before the action answers, and written again SETTLE_MS later", async () => {
-    const db = sqliteD1();
-    const { revalidatePublic, SETTLE_MS, later } = await load(db);
-    vi.useFakeTimers({ now: 1_000_000 });
-    await revalidatePublic({ kind: "practice" });
-    const first = db.d1.rows();
-    expect(first).toEqual([
-      { tag: "B1/_N_T_/[locale]/(site)/page", revalidatedAt: 1_000_000, stale: 1_000_000, expire: 1_000_000 },
-      { tag: "B1/_N_T_/[locale]/(site)/praktika/page", revalidatedAt: 1_000_000, stale: 1_000_000, expire: 1_000_000 },
+  afterEach(() => vi.restoreAllMocks());
+
+  test("an admin save: Next.js expires the pages' tags at once (no stale copy served), and re-renders the open page", async () => {
+    const { revalidatePublic } = await import("@/server/public-cache");
+    const store = await inAction(() => revalidatePublic({ kind: "practice" }));
+    expect(store.pendingRevalidatedTags).toEqual([
+      { tag: "_N_T_/[locale]/(site)/page", profile: undefined, revalidatedAt: expect.any(Number) },
+      { tag: "_N_T_/[locale]/(site)/praktika/page", profile: undefined, revalidatedAt: expect.any(Number) },
     ]);
-    expect(later).toHaveLength(1);
-    const settled = later[0]();
-    await vi.advanceTimersByTimeAsync(SETTLE_MS);
-    await settled;
-    // the second write really reaches the table (a second revalidatePath() of pending tags would be dropped by Next.js)
-    expect(db.d1.rows().map((r) => r.revalidatedAt)).toEqual([1_000_000 + SETTLE_MS, 1_000_000 + SETTLE_MS]);
+    expect(store.pathWasRevalidated, "the action's answer carries the re-rendered page").toBeTruthy();
   });
 
-  test("a public form (seats): the rows are in D1 before the answer, so the next request shows the new count; again later", async () => {
-    const db = sqliteD1();
-    const { revalidatePublic, SETTLE_MS, later } = await load(db);
-    vi.useFakeTimers({ now: 2_000_000 });
-    await revalidatePublic({ kind: "seats", course: "kulmude-lami" });
-    expect(db.d1.rows().map((r) => r.tag)).toEqual(["B1/_N_T_/[locale]/(site)/koolituskalender/page", "B1/_N_T_/et/koolitused/kulmude-lami", "B1/_N_T_/ru/koolitused/kulmude-lami"]);
-    expect(new Set(db.d1.rows().map((r) => r.revalidatedAt))).toEqual(new Set([2_000_000]));
-    expect(later).toHaveLength(1);
-    const settled = later[0]();
-    await vi.advanceTimersByTimeAsync(SETTLE_MS);
-    await settled;
-    expect(new Set(db.d1.rows().map((r) => r.revalidatedAt))).toEqual(new Set([2_000_000 + SETTLE_MS]));
+  test("a public form (seats): that course's page in both languages and the calendar", async () => {
+    const { revalidatePublic } = await import("@/server/public-cache");
+    const store = await inAction(() => revalidatePublic({ kind: "seats", course: "kulmude-lami" }));
+    expect(store.pendingRevalidatedTags?.map((p) => p.tag)).toEqual(["_N_T_/et/koolitused/kulmude-lami", "_N_T_/ru/koolitused/kulmude-lami", "_N_T_/[locale]/(site)/koolituskalender/page"]);
   });
 
-  test("next dev (no OpenNext build id) and changes that show nowhere write nothing", async () => {
-    const db = sqliteD1();
-    const { revalidatePublic, later } = await load(db);
-    await revalidatePublic({ kind: "settings", parts: [] });
-    delete process.env.OPEN_NEXT_BUILD_ID;
-    await revalidatePublic({ kind: "home" });
-    expect(db.d1.rows()).toEqual([]);
-    expect(later).toEqual([]);
+  test("every target of every change is one revalidatePath() accepts: no warning (a route pattern without its type does nothing)", async () => {
+    const { revalidatePublic } = await import("@/server/public-cache");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const changes: PublicChange[] = [
+      { kind: "courses" },
+      { kind: "sessions" },
+      { kind: "seats", course: "kulmude-lami" },
+      { kind: "seats" },
+      { kind: "home" },
+      { kind: "campaign" },
+      { kind: "practice" },
+      { kind: "posts" },
+      { kind: "trainer", parts: ["trainer"] },
+      { kind: "trainer", parts: ["bio", "works"] },
+      { kind: "settings", parts: ["contact"] },
+      { kind: "settings", parts: ["privacy", "terms"] },
+    ];
+    for (const change of changes) {
+      const store = await inAction(() => revalidatePublic(change));
+      expect(store.pendingRevalidatedTags?.length, JSON.stringify(change)).toBe(revalidationTargets(change).length);
+      expect(new Set(store.pendingRevalidatedTags?.map((p) => p.profile)), JSON.stringify(change)).toEqual(new Set([undefined]));
+    }
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
-  test("a failing write is logged, never thrown at the admin whose save is stored", async () => {
-    const db = sqliteD1();
-    const { revalidatePublic } = await load(db);
-    db.d1.exec("DROP TABLE revalidations");
+  test("a change that shows nowhere revalidates nothing", async () => {
+    const { revalidatePublic } = await import("@/server/public-cache");
+    const store = await inAction(() => revalidatePublic({ kind: "settings", parts: [] }));
+    expect(store.pendingRevalidatedTags ?? []).toEqual([]);
+  });
+
+  test("a failing revalidation is logged (route names only), never thrown at the person whose change is stored", async () => {
+    const { revalidatePublic } = await import("@/server/public-cache");
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(revalidatePublic({ kind: "home" })).resolves.toBeUndefined();
-    expect(log.mock.calls[0][0]).toContain("[public-cache] revalidation of 1 tags failed");
+    // outside a request Next.js has no work store: revalidatePath() throws
+    expect(() => revalidatePublic({ kind: "practice" })).not.toThrow();
+    expect(log.mock.calls.map((c) => c[0])).toEqual([
+      "[public-cache] revalidating /[locale]/(site) failed: Error",
+      "[public-cache] revalidating /[locale]/(site)/praktika failed: Error",
+    ]);
   });
 });

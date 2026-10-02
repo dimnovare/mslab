@@ -5,8 +5,6 @@ import { addDays } from "./seed-dates";
 import { tallinnInstant } from "../domain/calendar";
 import { registrationPrice, registrationStatusAfterPayment } from "../domain/registration";
 import { seatState, type SeatState } from "../domain/sessions";
-import { revalidationTargets, targetTag } from "../server/cache-targets";
-import { tagRows } from "../server/tag-cache";
 import { newToken } from "../server/token";
 
 // SAMPLE data for the admin: registrations, waitlist entries, requests and newsletter subscribers, so the inboxes and
@@ -365,26 +363,4 @@ export async function removeDemo(db: Db): Promise<DemoReport["inserted"]> {
     const subs = await tx.delete(subscribers).where(like(subscribers.email, SAMPLE_EMAIL)).returning();
     return { registrations: regs.length, waitlist: reqs.filter((x) => x.kind === "waitlist").length, requests: reqs.filter((x) => x.kind !== "waitlist").length, subscribers: subs.length };
   });
-}
-
-// ---------- the public pages ----------
-
-/** The cache tags of the pages whose seat states the samples change: the calendar, the course pages, the home page. */
-export function demoTags(plan: DemoPlan = DEMO_PLAN): string[] {
-  const slugs = [...new Set([plan.full.course, plan.few.course, plan.other.course])];
-  const targets = [...slugs.flatMap((course) => revalidationTargets({ kind: "seats", course })), ...revalidationTargets({ kind: "home" })];
-  return [...new Set(targets.map(targetTag))];
-}
-
-/**
- * The SQL that marks those pages stale for the deployed build `buildId`, in the production tag cache's own row
- * format (server/tag-cache.ts): `npx wrangler d1 execute mslab-next-tags --remote --command "<it>"`. No secrets in it.
- */
-export function demoRevalidateSql(buildId: string, plan: DemoPlan = DEMO_PLAN, now = Date.now()): string {
-  return tagRows(buildId, demoTags(plan), now)
-    .map(({ values: [tag, a, b, c] }) => {
-      if (!/^[\w/()[\].-]+$/.test(tag)) throw new Error("unexpected characters in a tag");
-      return `INSERT INTO revalidations (tag, revalidatedAt, stale, expire) VALUES ('${tag}', ${a}, ${b}, ${c})`;
-    })
-    .join("; ");
 }

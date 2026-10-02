@@ -27,12 +27,12 @@ export async function POST(request: Request): Promise<Response> {
         env,
         // `next dev` has no edge address header: one local bucket. Production always has cf-connecting-ip.
         ip: clientIp(h) ?? (process.env.NODE_ENV === "development" ? "local" : null),
-        // The link in the e-mail comes from the Host header only (Cloudflare routes by Host), never from Origin or
+        // The link in the e-mail comes from the Host header only (the host routes requests by it), never from Origin or
         // x-forwarded-host, which a client can set; a Host that is not in the allow-list gives SITE_URL.
         siteUrl: linkBase(hostOrigin(h), env.SITE_URL),
         host: h.get("host"),
         now: new Date(),
-        // The e-mail goes out after the response (the Worker's waitUntil), so the answer is as quick for a refused address.
+        // The e-mail goes out after the response (next/server after()), so the answer is as quick for a refused address.
         later: (task) => after(() => task().catch((e) => logFailure("[auth] login e-mail failed", e))),
       },
       await request.json().catch(() => null),

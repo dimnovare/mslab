@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { applySeatFixtures, LOCAL_FIXTURES, scheduleSampleSessions, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
-import { forbiddenSettingError } from "../local-secrets";
-import { assertLocalUpstream } from "./local-cache";
+import { forbiddenSettingError, SERVER_ENV_FILES } from "../local-secrets";
 import { assertLocalDatabases } from "./local-db";
 import { removeLeftoverComments } from "./local-kv";
 
@@ -16,8 +15,7 @@ export default async function globalSetup(): Promise<void> {
     return;
   }
   refuseForbiddenSettings();
-  assertLocalDatabases(); // before any write: the fixtures' database and the dev server's are both on this machine
-  await assertLocalUpstream(); // the local production build believes it is localhost, never the live domain
+  assertLocalDatabases(); // before any write: the fixtures' database and the server's are both on this machine
   await removeFormRows();
   await removeAdminRows(); // e2e-auth-… leftovers of an interrupted run
   await removeAdminFixtures(); // e2e-admin-… inbox fixtures of an interrupted run
@@ -31,14 +29,14 @@ export default async function globalSetup(): Promise<void> {
 }
 
 /**
- * The form tests submit to `next dev`, which must not e-mail or ping anyone: notifications are skipped there because
- * the dev environment has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN. The upload tests must not reach the real image bucket
- * either: with no R2_* variable `next dev` keeps images in a local folder. Stop before any test if someone has added
- * one of them (tests/local-secrets.ts, FORBIDDEN_SETTINGS).
+ * The form tests submit to the local server, which must not e-mail or ping anyone: notifications are skipped there
+ * because its environment has no RESEND_API_KEY / TELEGRAM_BOT_TOKEN. The upload tests must not reach the real image
+ * bucket either: with no R2_* variable the server keeps images in a local folder. Stop before any test if someone has
+ * added one of them (tests/local-secrets.ts, FORBIDDEN_SETTINGS).
  */
 function refuseForbiddenSettings(): void {
   const files: Record<string, string | undefined> = {};
-  for (const file of [".dev.vars", ".env", ".env.local", ".env.development", ".env.development.local"]) files[file] = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+  for (const file of SERVER_ENV_FILES) files[file] = existsSync(file) ? readFileSync(file, "utf8") : undefined;
   const problem = forbiddenSettingError(files, process.env);
   if (problem) throw new Error(problem);
 }

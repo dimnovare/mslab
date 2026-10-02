@@ -7,11 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "build:cf": "opennextjs-cloudflare build",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv --strict-vars=false cloudflare-env.d.ts && node tools/env-types.mjs",
     "test": "vitest run",
     "e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
@@ -21,7 +16,6 @@
     "visual": "playwright test -c playwright.visual.config.ts"
   },
   "dependencies": {
-    "@opennextjs/cloudflare": "1.20.7",
     "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.3",
     "next": "16.3.8",
@@ -42,7 +36,6 @@
     "eslint-config-next": "16.3.8",
     "tsx": "^4.23.15",
     "typescript": "^5",
-    "vitest": "^5.0.3",
-    "wrangler": "^4.145.0"
+    "vitest": "^5.0.3"
   }
 }

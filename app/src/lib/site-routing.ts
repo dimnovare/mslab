@@ -1,5 +1,4 @@
-// Where a request path goes: the decisions of src/middleware.ts as plain functions, without Next.js, so that the
-// Worker's cached-page front (src/worker/page-front.ts) reads exactly the page the middleware would render.
+// Where a request path goes: the decisions of src/middleware.ts as plain functions, without Next.js (tested on their own).
 // ET lives at "/", RU at "/ru"; internally both render app/[locale]/…
 
 // Paths the app serves as they are (no "/et" rewrite). The hub (guide, p/…) and /api are handled before this list.
@@ -12,9 +11,8 @@ const API = /^\/api(\/|$)/;
 
 /**
  * The design-review hub (public/guide, public/p/<dir>): static folders whose index.html pages use relative asset URLs,
- * so they must be opened with the trailing slash ("/guide/", "/p/d/"). In production the Worker's static assets answer
- * these paths before the app (html_handling auto-trailing-slash: "/guide" redirects to "/guide/", which serves
- * guide/index.html). `next dev` serves public files only by their file name, so the middleware does the same.
+ * so they must be opened with the trailing slash ("/guide/", "/p/d/"). Next.js serves public files only by their file
+ * name, so the middleware redirects "/guide" to "/guide/" and serves guide/index.html there.
  */
 const HUB = /^\/(guide(\/|$)|p\/)/;
 
@@ -31,8 +29,9 @@ export function canonicalPath(pathname: string): string {
 
 /**
  * The cart of one course ("/ostukorv?kursus=x", "/ru/ostukorv?kursus=x") is served from a page of its own,
- * "/<locale>/ostukorv/x": the public pages are cached by their path alone (open-next.config.ts), so a page whose content
- * depends on the query could not be. The address bar keeps the visitor's URL. null: not a cart with a course.
+ * "/<locale>/ostukorv/x": the public pages are cached by their path alone (incremental static regeneration), so a
+ * page whose content depends on the query could not be. The address bar keeps the visitor's URL. null: not a cart
+ * with a course.
  */
 export function cartPage(pathname: string, search: URLSearchParams): string | null {
   const m = /^(\/ru)?\/ostukorv$/.exec(pathname);

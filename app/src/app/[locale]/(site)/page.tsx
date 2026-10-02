@@ -34,6 +34,13 @@ import { upcomingFrom } from "@/domain/calendar";
 
 type Props = { params: Promise<{ locale: string }> };
 
+/**
+ * This page lists course dates, and a date is listed only until its session begins. So it is rendered again when it is
+ * older than 5 minutes (the first visit after that still gets the cached copy and starts the new render), and a session
+ * that has begun drops off without anyone saving. Saves revalidate it at once (server/public-cache.ts).
+ */
+export const revalidate = 300;
+
 /** The link preview of / and /ru: the home page's own address (og:url), title, description and picture. */
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale } = await params;

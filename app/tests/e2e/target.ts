@@ -3,28 +3,27 @@
 // and form tests) or against a deployment (read-only). The worker processes inherit the normalised variable.
 if (!process.env.E2E_BASE_URL && process.env.BASE_URL) process.env.E2E_BASE_URL = process.env.BASE_URL;
 
-/** The deployment under test, or "" for the local dev server. */
-export const TARGET = process.env.E2E_BASE_URL ?? "";
-
 export const LOCAL_URL = "http://localhost:3000";
 
 /**
- * E2E_PROD_BUILD=1: the local server (E2E_BASE_URL=http://localhost:8787) is the production build under `wrangler dev`
- * (`npx opennextjs-cloudflare build && npx wrangler dev --port 8787 --local-upstream localhost:8787 --env-file .env.example`:
- * the placeholder admin allow-list the tests sign in with), with the page
- * cache of the deployed Worker (R2, D1 and the cached-page front, all local). --local-upstream matters: without it the
- * Worker sees the custom domain as its own address, and Next.js's server-action redirects (which fetch the target page
- * from the app's own origin) would go to the live site. In this mode the admin tests sign in without the devLink (a
- * production build never returns one), the per-test visitor address also goes in CF-Connecting-IP (wrangler dev passes
- * it on; the form rate limit reads it first), and every fixture written straight to the database is followed by a
- * revalidation of all pages (a cached page would not show it; the app's own saves revalidate what they change).
- * admin-auth.spec (the devLink itself) and feedback.spec (the dev review key) need `next dev`.
+ * E2E_PROD_BUILD=1: the tests run against the production build of this working tree, `next build && next start` on
+ * PROD_URL (its own port, so it never meets a dev server on 3000), which the Playwright config builds and starts itself
+ * (tests/e2e/server.ts) with the local settings and the switches of tests/e2e/prod-build.ts. The public pages are
+ * cached there as on Vercel (incremental static regeneration). In this mode the admin tests sign in without the devLink
+ * (a production build never returns one), the review comment tests use the server's ADMIN_KEY instead of the dev key,
+ * and every fixture written straight to the database is followed by a revalidation of all pages (a cached page would
+ * not show it; the app's own saves revalidate what they change).
  */
 export const PROD_BUILD = process.env.E2E_PROD_BUILD === "1";
 
-/** True for a server on this machine: http(s)://localhost / 127.0.0.1 / [::1], any port. */
-export const isLocalTarget = (url: string): boolean => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(url);
+export const PROD_PORT = 3100;
+export const PROD_URL = `http://localhost:${PROD_PORT}`;
 
-// The production-build mode signs in by writing to the database and writes the tag cache: never against a deployment.
-if (PROD_BUILD && !isLocalTarget(TARGET))
-  throw new Error(`e2e: E2E_PROD_BUILD=1 is for the local production build only, but E2E_BASE_URL is "${TARGET || "(unset)"}" — use http://localhost:8787`);
+// The production-build mode starts its own server on this machine (it signs in by writing to the local database and
+// revalidates its pages): an address of another server would not be what the tests think it is.
+if (PROD_BUILD && process.env.E2E_BASE_URL && process.env.E2E_BASE_URL.replace(/\/+$/, "") !== PROD_URL)
+  throw new Error(`e2e: E2E_PROD_BUILD=1 builds and starts the app itself on ${PROD_URL}; leave E2E_BASE_URL unset (it is "${process.env.E2E_BASE_URL}")`);
+if (PROD_BUILD) process.env.E2E_BASE_URL = PROD_URL;
+
+/** The server under test: a deployment, the local production build (PROD_URL), or "" for the local dev server. */
+export const TARGET = process.env.E2E_BASE_URL ?? "";

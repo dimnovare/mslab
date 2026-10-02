@@ -6,16 +6,13 @@
 // --target says which database is meant, and the address must agree: "local" only on this machine, "railway" only on a
 // Railway host (the e2e harness refuses a non-local database the same way, tests/e2e/local-db.ts).
 //
-// The public pages are cached (open-next.config.ts): a change made here does not revalidate them. After --apply on the
-// live database, mark every page stale in the production tag cache:
-//   npx tsx src/db/fill-ru.ts --revalidate-sql <build id>   prints the one INSERT for every page's tag (no secrets),
-//   npx wrangler d1 execute mslab-next-tags --remote --command "<that INSERT>"
+// The public pages are cached: a change made here does not revalidate them. After --apply on the live database, every
+// page shows it after its daily refresh ((site)/layout.tsx: a day and a visit), the pages that list course dates within
+// 5 minutes.
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 import { applyRuFill, planRuFill } from "./ru-fill";
-import { revalidationTargets, targetTag } from "../server/cache-targets";
-import { tagRows } from "../server/tag-cache";
 
 const LOCAL = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const RAILWAY = /\.(rlwy\.net|railway\.app|railway\.internal)$/i;
@@ -29,15 +26,6 @@ export function targetMatches(url: string, target: "local" | "railway"): boolean
     return false;
   }
   return target === "local" ? LOCAL.has(host) : RAILWAY.test(host) && !LOCAL.has(host);
-}
-
-/** The SQL that marks every public page stale for `buildId` (the tag of every page: the site layout's). */
-export function revalidateEverySql(buildId: string, now = Date.now()): string {
-  const tags = revalidationTargets({ kind: "settings", parts: ["contact"] }).map(targetTag); // every page
-  const [row] = tagRows(buildId, tags, now);
-  const [tag, a, b, c] = row.values;
-  if (!/^[\w/()[\].-]+$/.test(tag)) throw new Error("unexpected characters in the tag");
-  return `INSERT INTO revalidations (tag, revalidatedAt, stale, expire) VALUES ('${tag}', ${a}, ${b}, ${c})`;
 }
 
 function safeMessage(err: unknown, url: string): string {
@@ -54,16 +42,6 @@ function safeMessage(err: unknown, url: string): string {
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const sqlFor = args.indexOf("--revalidate-sql");
-  if (sqlFor >= 0) {
-    const buildId = args[sqlFor + 1];
-    if (!buildId || !/^[\w-]+$/.test(buildId)) {
-      console.error("Give the deployed build id: --revalidate-sql <build id>");
-      return 1;
-    }
-    console.log(revalidateEverySql(buildId));
-    return 0;
-  }
   const t = args.indexOf("--target");
   const target = args[t + 1];
   if (t < 0 || (target !== "local" && target !== "railway")) {

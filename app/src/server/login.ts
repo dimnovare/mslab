@@ -8,7 +8,7 @@ import { sendMail, type Env } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
 import { isLocalHost } from "./site";
 
-// POST /api/auth/request without Next.js: api/auth/request/route.ts builds the dependencies (database, Worker env,
+// POST /api/auth/request without Next.js: api/auth/request/route.ts builds the dependencies (database, settings,
 // visitor IP, after()) and calls handleLoginRequest; the tests call it with PGlite and fakes.
 //
 // The answer never tells whether an address is allowed: an allowed and a not allowed address get the same

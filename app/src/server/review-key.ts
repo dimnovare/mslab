@@ -1,12 +1,12 @@
 import { isLocalHost } from "./site";
 
 // The access key of the review comment list (GET /api/feedback, PATCH /api/feedback/:id, page /guide/tagasiside/):
-// the ADMIN_KEY secret of the Worker, sent by the list page in the `x-key` header.
+// the ADMIN_KEY secret (server/env.ts), sent by the list page in the `x-key` header.
 
 /**
  * The key `next dev` accepts when no ADMIN_KEY is configured, so the e2e tests (and a local look at /guide/tagasiside/)
  * work without a secret. Only a development build on this machine uses it: the routes pass `dev` as
- * NODE_ENV === "development", which is inlined at build time (the deployed Worker has `dev: false` compiled in, so this
+ * NODE_ENV === "development", which is inlined at build time (a production build has `dev: false` compiled in, so this
  * key is never accepted there), and the request must also be addressed to localhost.
  */
 export const DEV_REVIEW_KEY = "local-review-key";

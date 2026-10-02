@@ -1,5 +1,5 @@
-// ET lives at "/", RU at "/ru"; internally both render app/[locale]/… The decisions are in lib/site-routing.ts, which
-// the Worker's cached-page front uses too (src/worker/page-front.ts), so both always mean the same page.
+// ET lives at "/", RU at "/ru"; internally both render app/[locale]/… The decisions are in lib/site-routing.ts (plain
+// functions, tested without Next.js).
 import { NextResponse, type NextRequest } from "next/server";
 import { routeSitePath } from "@/lib/site-routing";
 
@@ -32,10 +32,9 @@ export function middleware(req: NextRequest) {
 }
 
 /**
- * The whole host stays out of search engines until launch. Pages, API and /media get X-Robots-Tag from next.config
- * headers(), static files from public/_headers (they are answered before the Worker runs). A redirect made here gets
- * it here: in production next.config headers() does not reach it. Only redirects: on the other answers OpenNext adds
- * next.config's header to one set here, and the value would be sent twice.
+ * The whole host stays out of search engines until launch. Every answer gets X-Robots-Tag from next.config headers();
+ * a redirect made here also sets it here, so it carries the header wherever it is answered. Only redirects: setting it
+ * on the other answers too could send the value twice.
  */
 function noindex(res: NextResponse): NextResponse {
   if (res.status >= 300 && res.status < 400) res.headers.set("X-Robots-Tag", ROBOTS);

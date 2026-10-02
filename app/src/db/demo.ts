@@ -4,15 +4,14 @@
 //
 // --target says which database is meant, and the address must agree (as in fill-ru.ts and seed.ts).
 //
-// The public pages are cached (open-next.config.ts): after --apply or --remove on the live database, mark the
-// calendar, the plan's course pages and the home page stale in the production tag cache:
-//   npm run db:demo -- --revalidate-sql <build id>     prints the INSERTs (no secrets), then
-//   npx wrangler d1 execute mslab-next-tags --remote --command "<them>"
+// The public pages are cached: a change made here does not revalidate them. The pages that show the samples' seat states
+// (the calendar, the course pages, the home page) list course dates, so they are rendered again within 5 minutes and a
+// visit (their `revalidate`).
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 import { targetMatches } from "./fill-ru";
-import { applyDemo, demoRevalidateSql, planDemo, removeDemo, type DemoReport } from "./demo-data";
+import { applyDemo, planDemo, removeDemo, type DemoReport } from "./demo-data";
 
 function safeMessage(err: unknown, url: string): string {
   const text = err instanceof Error ? err.message : String(err);
@@ -40,16 +39,6 @@ export function describeReport(report: DemoReport, verb: string): string[] {
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const sqlFor = args.indexOf("--revalidate-sql");
-  if (sqlFor >= 0) {
-    const buildId = args[sqlFor + 1];
-    if (!buildId || !/^[\w-]+$/.test(buildId)) {
-      console.error("Give the deployed build id: --revalidate-sql <build id>");
-      return 1;
-    }
-    console.log(demoRevalidateSql(buildId));
-    return 0;
-  }
   const t = args.indexOf("--target");
   const target = args[t + 1];
   if (t < 0 || (target !== "local" && target !== "railway")) {

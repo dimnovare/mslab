@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { perRequest } from "@/server/per-request";
+import { cache } from "react";
 import { Icon } from "@/components/site/Icon";
 import { NewsGrid } from "@/components/site/NewsCard";
 import ui from "@/components/site/ui.module.css";
@@ -28,7 +28,7 @@ export function generateStaticParams(): { slug: string }[] {
 const MORE = 3;
 
 // One post query per request, shared by generateMetadata and the page.
-const loadPost = perRequest(async (slug: string) => {
+const loadPost = cache(async (slug: string) => {
   return getPost(getDb(), slug);
 });
 

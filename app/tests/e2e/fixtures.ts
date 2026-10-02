@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
 import { courseSeeds } from "../../src/db/seed-data";
-import { revalidateLocalPages } from "./local-cache";
+import { revalidateLocalPages } from "./prod-build";
 import { assertLocalDatabases, isLocalDbUrl } from "./local-db";
 import { PROD_BUILD, TARGET } from "./target";
 
@@ -31,7 +31,7 @@ export const FIXTURES = {
 
 /**
  * Fixtures and test rows are written to and deleted from a local database only, never a shared one (local-db.ts).
- * Against the local production build, closing a connection also marks the cached pages stale (local-cache.ts): what
+ * Against the local production build, closing a connection also marks the cached pages stale (prod-build.ts): what
  * was written here must show on the next page view, as it does under `next dev`.
  */
 const connect = () => {
@@ -39,7 +39,7 @@ const connect = () => {
   const sql = postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
   if (!PROD_BUILD) return sql;
   const end = sql.end.bind(sql);
-  return Object.assign(sql, { end: async (...args: Parameters<typeof end>) => { await end(...args); await revalidateLocalPages(); } });
+  return Object.assign(sql, { end: async (...args: Parameters<typeof end>) => { await end(...args); revalidateLocalPages(); } });
 };
 
 /** Removes this suite's rows; returns how many are left afterwards (0 when clean). */

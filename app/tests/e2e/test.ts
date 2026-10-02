@@ -4,8 +4,8 @@ import { PROD_BUILD } from "./target";
 
 // `test` for every spec that opens site pages.
 // - Every test is its own visitor: the forms allow 5 submissions per 10 minutes per visitor IP (KV rate limit), and
-//   against `next dev` the IP comes from x-forwarded-for, so repeated runs do not hit the limit. On Cloudflare the
-//   edge's cf-connecting-ip wins and this header changes nothing.
+//   against the local server (`next dev` or `next start`) the IP comes from x-forwarded-for, so repeated runs do not hit
+//   the limit. On Vercel the edge sets x-forwarded-for itself and this header changes nothing.
 // - Against anything but the local dev server (E2E_BASE_URL + E2E_ALLOW_REMOTE=1), every request but GET and HEAD is
 //   blocked in the browser: a deployment's
 //   database and notifications are real, and tests must never submit to it. Tests that submit call submitsForms()
@@ -71,11 +71,17 @@ export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopu
       if (!LOCAL_FIXTURES) {
         // read-only: only GET and HEAD reach a deployment (no POST, PUT, PATCH, DELETE, …)
         await context.route("**/*", (route) => (["GET", "HEAD"].includes(route.request().method()) ? route.fallback() : route.abort("blockedbyclient")));
+      } else if (PROD_BUILD) {
+        // `next start` sends a cached page's Cache-Control as it is (s-maxage and stale-while-revalidate, meant for a
+        // CDN). Chromium then answers a repeated prefetch from its own cache and asks again in the background, requests
+        // Playwright never sees finish (networkidle never comes). On Vercel the CDN answers browsers with max-age=0,
+        // must-revalidate instead. Routing the requests turns the browser's HTTP cache off: the nearest a local run gets.
+        await context.route("**/*", (route) => route.fallback());
       }
       // the run-unique part first: the server keeps 64 characters of the address, and a key that is the same in every run
       // would collect the rate limit of repeated runs (5 per 10 minutes)
       const ip = `e2e-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}-${info.retry}-${info.project.name}-${info.testId}`;
-      await context.setExtraHTTPHeaders(PROD_BUILD ? { "x-forwarded-for": ip, "cf-connecting-ip": ip } : { "x-forwarded-for": ip });
+      await context.setExtraHTTPHeaders({ "x-forwarded-for": ip });
       await use(ip);
     },
     { auto: true },

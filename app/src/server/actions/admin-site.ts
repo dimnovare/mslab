@@ -13,8 +13,7 @@ import { revalidatePublic, type PublicChange } from "../public-cache";
 // The site content editors' server actions (Task 13B): every export is wrapped in adminAction (signed-in admin or a
 // redirect to /admin/login; tests/unit/admin-guards.test.ts fails otherwise). The work is in ../admin-site.ts. The
 // public pages are cached: a save revalidates the pages that show what it saved (server/public-cache.ts), so the public
-// site shows it on its next request (Hyperdrive's query cache is off and the client bypasses it); refresh() updates
-// the open admin page.
+// site shows it on its next request; refresh() updates the open admin page.
 
 /** The parts an editor save stored (it sends only the changed ones). */
 const savedParts = (result: EditResult): string[] => (result.ok ? Object.keys(result.saved?.values ?? {}) : []);
@@ -24,7 +23,7 @@ async function run(what: string, change: (result: EditResult) => PublicChange, w
     const result = await work(getDb());
     // not on "stale" or a refusal: the editor keeps the admin's unsaved draft on screen
     if (result.ok) {
-      await revalidatePublic(change(result));
+      revalidatePublic(change(result));
       refresh();
     }
     return result;

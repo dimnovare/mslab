@@ -27,6 +27,10 @@ export type ServerEnv = {
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
   R2_BUCKET?: string;
+  /** "1": without R2, a production build keeps uploads in the local folder too (`next start` on this machine only). */
+  MEDIA_LOCAL?: string;
+  /** The daily cron's secret: Vercel sends `Authorization: Bearer <it>` (app/api/cron/sweep). Unset, the cron is refused. */
+  CRON_SECRET?: string;
 };
 
 type Source = Record<string, string | undefined>;
@@ -35,7 +39,7 @@ type RequiredName = "DATABASE_URL" | "SITE_URL" | "ADMIN_EMAILS" | "ADMIN_NAMES"
 /**
  * The required variables, in the order an error lists them, each with the value `next dev` and the tests fall back to
  * when it is not set (never in production). The local database is a default so `next dev` and the e2e run need no setup.
- * SITE_URL and MAIL_FROM default to the public production values (what wrangler.jsonc's vars gave `next dev` before).
+ * SITE_URL and MAIL_FROM default to the public production values.
  * The addresses default to empty: nobody can sign in and nothing is sent until `.env.local` sets them (.env.example).
  */
 const REQUIRED: readonly [RequiredName, string][] = [
@@ -63,7 +67,18 @@ function isPostgresUrl(value: string): boolean {
   }
 }
 
-const OPTIONAL = ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
+const OPTIONAL = [
+  "RESEND_API_KEY",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
+  "ADMIN_KEY",
+  "R2_ACCOUNT_ID",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_BUCKET",
+  "MEDIA_LOCAL",
+  "CRON_SECRET",
+] as const;
 
 /**
  * The configuration, typed. A variable that is empty or only spaces counts as not set (a settings form can save an

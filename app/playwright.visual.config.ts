@@ -1,12 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import { e2eWebServer } from "./tests/e2e/server";
 import { LOCAL_URL, TARGET } from "./tests/e2e/target";
-import { LOCAL_ENV } from "./tests/local-secrets";
 
 // The visual suite (Task 16): every public page, ET and RU, at the four check widths. Each page is screenshotted in full
 // to visual-shots/<local|remote>/<width>/<page>.png (git-ignored) and checked for horizontal overflow and console
 // errors. Read-only: against a deployment (BASE_URL / E2E_BASE_URL) it only reads pages, and every POST is blocked.
 //   npm run visual                                                      (local dev server, local DB fixtures)
-//   BASE_URL=https://mslab-web.dim-novare.workers.dev npm run visual    (a deployment)
+//   BASE_URL=https://<deployment> npm run visual                        (a deployment)
 // Run it on its own, not at the same time as the e2e suite: both put the same seat fixtures into the local database.
 
 const baseURL = TARGET || LOCAL_URL;
@@ -26,5 +26,5 @@ export default defineConfig({
     { name: "w1440", use: { ...chrome, viewport: { width: 1440, height: 900 } } },
     { name: "w2560", use: { ...chrome, viewport: { width: 2560, height: 1300 } } },
   ],
-  webServer: TARGET ? undefined : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 180_000, env: LOCAL_ENV },
+  webServer: e2eWebServer(),
 });

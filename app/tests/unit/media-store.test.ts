@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mediaStore } from "@/server/media-store";
 
-// Which store holds the uploaded images: R2 when its four variables are set, otherwise a local folder in development,
-// otherwise none (production without R2: uploads are refused, /media answers 404).
+// Which store holds the uploaded images: R2 when its four variables are set, otherwise a local folder in development (or
+// in a production build with MEDIA_LOCAL=1), otherwise none (production without R2: uploads are refused, /media 404).
 
 const R2 = { R2_ACCOUNT_ID: "0123456789abcdef0123456789abcdef", R2_ACCESS_KEY_ID: "AKIDFAKEFAKEFAKE", R2_SECRET_ACCESS_KEY: "fake-secret-access-key-for-tests", R2_BUCKET: "mslab-media" };
 const NONE = { R2_ACCOUNT_ID: undefined, R2_ACCESS_KEY_ID: undefined, R2_SECRET_ACCESS_KEY: undefined, R2_BUCKET: undefined };
@@ -47,6 +47,26 @@ describe("mediaStore", () => {
 
   test("without R2 variables in production there is no store: nothing is written to a folder on a server", () => {
     expect(mediaStore(NONE, true)).toBeNull();
+    for (const value of [undefined, "0", "yes", "true"]) expect(mediaStore({ ...NONE, MEDIA_LOCAL: value }, true), String(value)).toBeNull();
+  });
+
+  test("MEDIA_LOCAL=1: the production build on this machine (next start, the e2e run) uses the folder too; R2 still wins", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mslab-store-"));
+    try {
+      const store = mediaStore({ ...NONE, MEDIA_LOCAL: "1" }, true, dir)!;
+      expect(store).not.toBeNull();
+      await store.put(KEY, new Uint8Array([0xff, 0xd8, 0xff]).buffer, "image/jpeg");
+      expect((await store.get(KEY))!.contentType).toBe("image/jpeg");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    const fetch = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await mediaStore({ ...R2, MEDIA_LOCAL: "1" }, true)!.get(KEY)).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // partly set R2 stays a mistake: no store
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(mediaStore({ ...R2, R2_BUCKET: undefined, MEDIA_LOCAL: "1" }, true)).toBeNull();
   });
 
   test("partly set R2 variables are a mistake, not a reason to use the folder: no store, in production and in development", () => {

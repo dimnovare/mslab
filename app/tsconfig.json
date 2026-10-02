@@ -28,7 +28,6 @@
       ]
     },
     "types": [
-      "./cloudflare-env.d.ts",
       "node"
     ]
   },
@@ -41,7 +40,6 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules",
-    "worker.ts"
+    "node_modules"
   ]
 }

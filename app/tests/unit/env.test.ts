@@ -34,17 +34,17 @@ describe("serverEnv in production", () => {
   test("returns the six required values as given; every optional one is undefined when not set", () => {
     const env = serverEnv(FULL, true);
     expect(env).toMatchObject(FULL);
-    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const)
+    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MEDIA_LOCAL", "CRON_SECRET"] as const)
       expect(env[name], name).toBeUndefined();
   });
 
   test("optional values are passed through; blank ones count as not set", () => {
     const env = serverEnv(
-      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media" },
+      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c" },
       true,
     );
-    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media" });
-    expect(serverEnv({ ...FULL, RESEND_API_KEY: "  ", ADMIN_KEY: "" }, true)).toMatchObject({ RESEND_API_KEY: undefined, ADMIN_KEY: undefined });
+    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c" });
+    expect(serverEnv({ ...FULL, RESEND_API_KEY: "  ", ADMIN_KEY: "", CRON_SECRET: " " }, true)).toMatchObject({ RESEND_API_KEY: undefined, ADMIN_KEY: undefined, CRON_SECRET: undefined });
   });
 
   test("a missing required variable is an error that names it", () => {
@@ -121,7 +121,7 @@ describe("serverEnv outside production (next dev, the tests)", () => {
     expect(env.ADMIN_EMAILS).toBe("");
     expect(env.ADMIN_NAMES).toBe("");
     expect(env.MARIA_EMAIL).toBe("");
-    expect(env.SITE_URL).toBe("https://mslab.diipsolutions.eu"); // public: what wrangler.jsonc's vars gave next dev before
+    expect(env.SITE_URL).toBe("https://mslab.diipsolutions.eu"); // public
     expect(env.MAIL_FROM).toBe("MS LAB <info@send.diipsolutions.eu>");
     expect(serverEnv(FULL, false)).toMatchObject(FULL);
   });

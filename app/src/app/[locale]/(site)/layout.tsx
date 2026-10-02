@@ -9,11 +9,12 @@ import { getSiteSettings } from "@/server/site-data";
 import { isLocale, type Locale } from "@/i18n/locales";
 
 /**
- * Every public page is cached once rendered (open-next.config.ts) and rendered again when an admin save, a registration,
- * a waitlist entry or a session's start makes it stale (server/public-cache.ts). This is the safety net on top of that:
- * a page older than a day is refreshed on its next visit (that visit still gets the old copy, the following ones the new
- * one), so a change made around the site (directly in the database) shows after a day and a visit. Nothing here may
- * depend on the request: no headers, cookies, query strings or connection().
+ * Every public page is cached once rendered (incremental static regeneration) and rendered again when an admin save, a
+ * registration or a waitlist entry makes it stale (server/public-cache.ts); the pages that list course dates also every
+ * 5 minutes (their own `revalidate`). This is the safety net on top of that: a page older than a day is refreshed on its
+ * next visit (that visit still gets the old copy, the following ones the new one), so a change made around the site
+ * (directly in the database) shows after a day and a visit. Nothing here may depend on the request: no headers,
+ * cookies, query strings or connection().
  */
 export const revalidate = 86400;
 

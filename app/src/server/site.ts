@@ -26,9 +26,9 @@ export function requestOrigin(headers: Pick<Headers, "get">): string | null {
 export const isLocalHost = (host: string | null | undefined): boolean => !!host && /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
 
 /**
- * scheme + Host header, nothing else: no Origin and no x-forwarded-host, which a client can send. Cloudflare routes a
- * request by its Host, so the Host of a request that reached this Worker is one of the zone's own names. The login link
- * is built from this; null without a Host.
+ * scheme + Host header, nothing else: no Origin and no x-forwarded-host, which a client can send. The host (Vercel, or
+ * Cloudflare before it) routes a request by its Host, so the Host of a request that reached this app is one of its own
+ * names. The login link is built from this; null without a Host.
  */
 export function hostOrigin(headers: Pick<Headers, "get">): string | null {
   const host = headers.get("host");
