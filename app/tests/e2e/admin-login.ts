@@ -3,19 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { BrowserContext, Page } from "@playwright/test";
+import { LOCAL_ADMINS } from "../local-secrets";
 import { onLocalDb, sha256Hex } from "./fixtures";
 import { PROD_BUILD } from "./target";
 import { expect } from "./test";
 
 // Signing in during the e2e tests (local dev server only).
 //
-// - Only Dim's address is ever used to ask for a login link (tests/unit/test-addresses.test.ts checks that no test asks
-//   for Maria's). Locally the link comes back in the answer (devLink) and is never e-mailed (server/login.ts).
+// - Only the first placeholder admin of .dev.vars.example is ever used to ask for a login link, never a real address
+//   (tests/unit/test-addresses.test.ts keeps every real address out of the repository). Locally the link comes back in
+//   the answer (devLink) and is never e-mailed (server/login.ts).
 // - One address may hold at most 3 unused links at a time (server/auth.ts LOGIN_TOKEN_CAP), and the workers sign in in
 //   parallel. So asking for a link and using it (or deleting it) happens under one lock shared by all worker processes:
 //   at most one test link is unused at any moment, and the cap is never reached by the tests themselves.
 
-export const ADMIN = "dim@example.test";
+export const ADMIN = LOCAL_ADMINS[0];
 
 const LOCK = join(tmpdir(), "mslab-e2e-login.lock");
 /** A lock older than this was left by a worker that crashed while holding it. */

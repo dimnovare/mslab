@@ -69,6 +69,8 @@ export const adminEt = {
 
   panel: {
     hello: "Tere, {name}.",
+    /** an admin without a greeting name in ADMIN_NAMES */
+    helloNoName: "Tere.",
     logout: "Logi välja",
   },
 

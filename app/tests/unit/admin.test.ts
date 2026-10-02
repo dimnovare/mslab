@@ -73,7 +73,7 @@ describe("CSV", () => {
     expect(csvCell(12)).toBe("12");
   });
   test("a file: BOM, header, CRLF lines", () => {
-    expect(toCsv(["E-post", "Keel"], [["a@b.ee", "ET"], ["=x", "RU"]])).toBe("\uFEFFE-post,Keel\r\na@b.ee,ET\r\n'=x,RU\r\n");
+    expect(toCsv(["E-post", "Keel"], [["a@example.ee", "ET"], ["=x", "RU"]])).toBe("\uFEFFE-post,Keel\r\na@example.ee,ET\r\n'=x,RU\r\n");
     expect(toCsv(["E-post"], [])).toBe("\uFEFFE-post\r\n");
   });
 });

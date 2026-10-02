@@ -174,8 +174,8 @@ test.describe("login page", () => {
   });
 });
 
-// Dim only (written loosely, as people type it): no test asks for a link for Maria's address. Her greeting is a unit test.
-for (const [address, name] of [[" dim@example.test ", "Dim"]] as const) {
+// The test admin only (written loosely, as people type it), greeted by its ADMIN_NAMES name (.dev.vars.example).
+for (const [address, name] of [[` ${ADMIN.toUpperCase()} `, "Dim"]] as const) {
   test(`${name}: the link from the e-mail signs in; the session lasts 30 days; logout ends it`, async ({ page, context, request, baseURL, isMobile }) => {
     submitsForms();
     const { headers, body } = await requestLink(page, address);
@@ -231,8 +231,8 @@ for (const [address, name] of [[" dim@example.test ", "Dim"]] as const) {
 test.describe("the link", () => {
   test("works once: a second opening, in any browser, is refused", async ({ page, context, browser, baseURL }) => {
     submitsForms();
-    const { devLink, session } = await signIn(page, context, "dim@example.test");
-    expect(await storedAuthTokens("dim@example.test")).toContainEqual({ used: true });
+    const { devLink, session } = await signIn(page, context, ADMIN);
+    expect(await storedAuthTokens(ADMIN)).toContainEqual({ used: true });
     // another browser: the used link gives it no session
     const second = await (await browser.newContext({ baseURL: baseURL! })).newPage();
     await second.goto(pathOf(devLink));
@@ -245,7 +245,7 @@ test.describe("the link", () => {
 
   test("a HEAD request (mail scanner) does not use it up", async ({ page, context, request }) => {
     submitsForms();
-    const { body } = await requestLink(page, "dim@example.test");
+    const { body } = await requestLink(page, ADMIN);
     const head = await request.head(pathOf(body.devLink!));
     expect(head.status()).toBe(405);
     await page.goto(pathOf(body.devLink!));
@@ -255,7 +255,7 @@ test.describe("the link", () => {
 
   test("a prefetch (Sec-Purpose / Purpose) is sent to the login page without using the link up", async ({ page, context, request }) => {
     submitsForms();
-    const { body } = await requestLink(page, "dim@example.test");
+    const { body } = await requestLink(page, ADMIN);
     for (const header of ["sec-purpose", "purpose"]) {
       const res = await request.get(pathOf(body.devLink!), { headers: { [header]: "prefetch" }, maxRedirects: 0 });
       expect(res.status()).toBe(303);
@@ -352,7 +352,7 @@ test.describe("limits", () => {
 
   test("only JSON is accepted, and logout is POST only", async ({ request }) => {
     submitsForms();
-    const form = await request.post("/api/auth/request", { form: { email: "dim@example.test" } });
+    const form = await request.post("/api/auth/request", { form: { email: ADMIN } });
     expect(form.status()).toBe(415);
     const get = await request.get("/api/auth/logout", { maxRedirects: 0 });
     expect(get.status()).toBe(405);

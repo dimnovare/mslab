@@ -42,7 +42,7 @@ export async function assertLocalUpstream(): Promise<void> {
   const location = res.headers.get("location") ?? "";
   const host = location ? new URL(location, TARGET).host : "";
   if (!sameLocalWorker(host, new URL(TARGET).host))
-    throw new Error(`e2e: the local Worker sees itself as "${host || "?"}", not ${new URL(TARGET).host}: start it with \`npx wrangler dev --port 8787 --local-upstream localhost:8787\``);
+    throw new Error(`e2e: the local Worker sees itself as "${host || "?"}", not ${new URL(TARGET).host}: start it with \`npx wrangler dev --port 8787 --local-upstream localhost:8787 --env-file .dev.vars.example\``);
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);

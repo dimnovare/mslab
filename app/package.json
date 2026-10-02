@@ -11,7 +11,7 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv --strict-vars=false cloudflare-env.d.ts && node tools/env-types.mjs",
     "test": "vitest run",
     "e2e": "playwright test",
     "db:generate": "drizzle-kit generate",

@@ -14,7 +14,7 @@ import { makeTestDb } from "./helpers";
 
 const NOW = new Date("2026-10-01T10:00:00Z");
 const OTHER_ADMIN = "second.admin@example.com";
-const ALLOW = `dim@example.test,${OTHER_ADMIN}`;
+const ALLOW = `admin@example.test,${OTHER_ADMIN}`;
 const SITE_HOST = "mslab.example";
 
 let db: Db;
@@ -69,47 +69,47 @@ describe("allowed address", () => {
   test("a token is stored and the link is e-mailed after the response", async () => {
     const { mails } = resend();
     const { deps, flush } = setup({ host: SITE_HOST });
-    const res = await handleLoginRequest(deps, { email: " dim@example.test " });
+    const res = await handleLoginRequest(deps, { email: " Admin@Example.TEST " });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(await tokens()).toHaveLength(1);
     expect(mails()).toHaveLength(0); // sent after the response
     await flush();
     const [mail] = mails();
-    expect(mail).toMatchObject({ from: "MS LAB <info@send.example>", to: "dim@example.test", subject: "MS LAB — sisselogimislink" });
+    expect(mail).toMatchObject({ from: "MS LAB <info@send.example>", to: "admin@example.test", subject: "MS LAB — sisselogimislink" });
     expect(mail.text).toContain("https://mslab.example/api/auth/verify?t=");
     expect(mail.text).toContain("15 minutit");
     expect(mail.text).toContain("ainult ühe korra");
     // the e-mailed link is the one that signs in, once
     const raw = mail.text.match(/\/api\/auth\/verify\?t=([A-Za-z0-9_-]+)/)![1];
-    expect(await consumeLoginToken(db, raw, NOW)).toBe("dim@example.test");
+    expect(await consumeLoginToken(db, raw, NOW)).toBe("admin@example.test");
     expect(await consumeLoginToken(db, raw, NOW)).toBeNull();
   });
 
   test("the link starts with the site address given to the handler", async () => {
     resend();
     const { deps } = setup({ siteUrl: "https://mslab-web.dim-novare.workers.dev" });
-    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
+    const res = await handleLoginRequest(deps, { email: "admin@example.test" });
     expect(res.status === 200 && res.body.ok && res.body.devLink?.startsWith("https://mslab-web.dim-novare.workers.dev/api/auth/verify?t=")).toBe(true);
   });
 
   test("a failing e-mail provider does not change the answer", async () => {
-    const { mails } = resend(() => Response.json({ name: "application_error", message: "dim@example.test is not allowed" }, { status: 422 }));
+    const { mails } = resend(() => Response.json({ name: "application_error", message: "admin@example.test is not allowed" }, { status: 422 }));
     const { deps, flush } = setup({ host: SITE_HOST });
-    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
+    const res = await handleLoginRequest(deps, { email: "admin@example.test" });
     expect(res.status).toBe(200);
     await flush();
     expect(mails()).toHaveLength(1);
     // no address, token or provider message in the logs
     const logged = [...vi.mocked(console.error).mock.calls, ...vi.mocked(console.info).mock.calls].flat().join("\n");
-    expect(logged).not.toMatch(/dim\.novare|gmail/);
+    expect(logged).not.toMatch(/admin@|example\.test/);
     expect(logged).not.toContain(mails()[0].text.match(/\?t=([A-Za-z0-9_-]+)/)![1]);
   });
 
   test("without RESEND_API_KEY (local development) nothing is sent", async () => {
     const { mails } = resend();
     const { deps, flush } = setup({ key: false, host: SITE_HOST });
-    expect((await handleLoginRequest(deps, { email: "dim@example.test" })).status).toBe(200);
+    expect((await handleLoginRequest(deps, { email: "admin@example.test" })).status).toBe(200);
     await flush();
     expect(mails()).toHaveLength(0);
   });
@@ -120,21 +120,21 @@ describe("no account enumeration", () => {
     vi.stubEnv("NODE_ENV", "production");
     const { mails } = resend();
     const { deps, flush } = setup();
-    const allowed = await handleLoginRequest(deps, { email: "dim@example.test" });
+    const allowed = await handleLoginRequest(deps, { email: "admin@example.test" });
     await db.delete(authTokens);
-    const refused = await handleLoginRequest(deps, { email: "someone@gmail.com" });
+    const refused = await handleLoginRequest(deps, { email: "someone@example.com" });
     await flush();
     expect(refused).toEqual(allowed);
     expect(refused).toEqual({ status: 200, body: { ok: true } });
     expect(await tokens()).toHaveLength(0);
-    expect(mails().map((m) => m.to)).toEqual(["dim@example.test"]); // only the allowed address got a mail
+    expect(mails().map((m) => m.to)).toEqual(["admin@example.test"]); // only the allowed address got a mail
   });
 
   test("the rate limit counts allowed and not allowed addresses alike", async () => {
     resend();
     const { deps } = setup();
-    for (let i = 0; i < RATE_LIMIT; i++) expect((await handleLoginRequest(deps, { email: i % 2 ? "dim@example.test" : "x@example.com" })).status).toBe(200);
-    expect((await handleLoginRequest(deps, { email: "dim@example.test" })).status).toBe(429);
+    for (let i = 0; i < RATE_LIMIT; i++) expect((await handleLoginRequest(deps, { email: i % 2 ? "admin@example.test" : "x@example.com" })).status).toBe(200);
+    expect((await handleLoginRequest(deps, { email: "admin@example.test" })).status).toBe(429);
     expect((await handleLoginRequest(deps, { email: "x@example.com" })).status).toBe(429);
   });
 
@@ -146,7 +146,7 @@ describe("no account enumeration", () => {
         throw new Error("db down");
       },
     } as unknown as Db;
-    await expect(handleLoginRequest(broken.deps, { email: "dim@example.test" })).rejects.toThrow();
+    await expect(handleLoginRequest(broken.deps, { email: "admin@example.test" })).rejects.toThrow();
     expect((await handleLoginRequest(broken.deps, { email: "other@example.com" })).status).toBe(200);
   });
 });
@@ -159,7 +159,7 @@ describe("per-address cap", () => {
     const { mails } = resend();
     const { deps, flush } = setup();
     const answers = [];
-    for (let i = 0; i < LOGIN_TOKEN_CAP + 1; i++) answers.push(await handleLoginRequest(deps, { email: "dim@example.test" }));
+    for (let i = 0; i < LOGIN_TOKEN_CAP + 1; i++) answers.push(await handleLoginRequest(deps, { email: "admin@example.test" }));
     await flush();
     expect(new Set(answers.map((a) => JSON.stringify(a))).size).toBe(1);
     expect(answers[0]).toEqual({ status: 200, body: { ok: true } });
@@ -171,8 +171,8 @@ describe("per-address cap", () => {
   test("a capped request has no devLink either (nothing exists to link to)", async () => {
     resend();
     const { deps } = setup();
-    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) await handleLoginRequest(deps, { email: "dim@example.test" });
-    expect(await handleLoginRequest(deps, { email: "dim@example.test" })).toEqual({ status: 200, body: { ok: true } });
+    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) await handleLoginRequest(deps, { email: "admin@example.test" });
+    expect(await handleLoginRequest(deps, { email: "admin@example.test" })).toEqual({ status: 200, body: { ok: true } });
   });
 
   test("it holds across IPs (the per-IP limit is not what protects an inbox), and other addresses are not affected", async () => {
@@ -181,19 +181,19 @@ describe("per-address cap", () => {
     const flushes = [];
     for (let i = 0; i < 6; i++) {
       const s = setup({ kv, ip: `198.51.100.${i}`, host: SITE_HOST });
-      await handleLoginRequest(s.deps, { email: "dim@example.test" });
+      await handleLoginRequest(s.deps, { email: "admin@example.test" });
       flushes.push(s.flush());
     }
     const other = setup({ kv, ip: "198.51.100.99", host: SITE_HOST });
     await handleLoginRequest(other.deps, { email: OTHER_ADMIN });
     await Promise.all([...flushes, other.flush()]);
-    expect(mails().filter((m) => m.to === "dim@example.test")).toHaveLength(LOGIN_TOKEN_CAP);
+    expect(mails().filter((m) => m.to === "admin@example.test")).toHaveLength(LOGIN_TOKEN_CAP);
     expect(mails().filter((m) => m.to === OTHER_ADMIN)).toHaveLength(1);
   });
 
   test("a burst of simultaneous requests cannot slip past the cap", async () => {
     resend();
-    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => handleLoginRequest(setup({ ip: `203.0.113.${i}` }).deps, { email: "dim@example.test" })));
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => handleLoginRequest(setup({ ip: `203.0.113.${i}` }).deps, { email: "admin@example.test" })));
     expect(results.every((r) => r.status === 200)).toBe(true);
     expect(await tokens()).toHaveLength(LOGIN_TOKEN_CAP);
   });
@@ -201,16 +201,16 @@ describe("per-address cap", () => {
   test("tokens issued more than 10 minutes ago and used ones do not count", async () => {
     resend();
     const old = new Date(NOW.getTime() - 11 * MIN); // still alive for 4 more minutes, but not "within the last 10 minutes"
-    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) expect(await issueLoginToken(db, "dim@example.test", old)).not.toBeNull();
-    const first = await handleLoginRequest(setup().deps, { email: "dim@example.test" });
+    for (let i = 0; i < LOGIN_TOKEN_CAP; i++) expect(await issueLoginToken(db, "admin@example.test", old)).not.toBeNull();
+    const first = await handleLoginRequest(setup().deps, { email: "admin@example.test" });
     expect(first.status === 200 && "devLink" in first.body).toBe(true);
     // used: sign in with each of two fresh links, then two more can be requested
     for (let i = 0; i < 2; i++) {
-      const r = await handleLoginRequest(setup().deps, { email: "dim@example.test" });
+      const r = await handleLoginRequest(setup().deps, { email: "admin@example.test" });
       if (!(r.status === 200 && r.body.ok && r.body.devLink)) throw new Error("expected a link");
-      expect(await consumeLoginToken(db, tokenOf(r.body.devLink), NOW)).toBe("dim@example.test");
+      expect(await consumeLoginToken(db, tokenOf(r.body.devLink), NOW)).toBe("admin@example.test");
     }
-    expect(await handleLoginRequest(setup().deps, { email: "dim@example.test" })).toMatchObject({ body: { devLink: expect.any(String) } });
+    expect(await handleLoginRequest(setup().deps, { email: "admin@example.test" })).toMatchObject({ body: { devLink: expect.any(String) } });
   });
 });
 
@@ -218,32 +218,32 @@ describe("devLink", () => {
   test("a link handed back as devLink is never e-mailed, even when RESEND_API_KEY is set", async () => {
     const { mails, calls } = resend();
     const { deps, flush } = setup(); // a local Host, a non-production build, and a key
-    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
+    const res = await handleLoginRequest(deps, { email: "admin@example.test" });
     expect(res.status === 200 && res.body.ok && typeof res.body.devLink === "string").toBe(true);
     expect(await flush()).toHaveLength(0); // no e-mail work was even scheduled
     expect(mails()).toHaveLength(0);
     expect(calls).toHaveLength(0);
     // the same request to the site's own address: e-mailed, no devLink
     const site = setup({ host: SITE_HOST });
-    expect(await handleLoginRequest(site.deps, { email: "dim@example.test" })).toEqual({ status: 200, body: { ok: true } });
+    expect(await handleLoginRequest(site.deps, { email: "admin@example.test" })).toEqual({ status: 200, body: { ok: true } });
     await site.flush();
-    expect(mails().map((m) => m.to)).toEqual(["dim@example.test"]);
+    expect(mails().map((m) => m.to)).toEqual(["admin@example.test"]);
   });
 
   test("is returned outside production (tests and local development) and works as a login link", async () => {
     resend();
     const { deps } = setup();
-    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
+    const res = await handleLoginRequest(deps, { email: "admin@example.test" });
     if (!(res.status === 200 && res.body.ok)) throw new Error("expected ok");
     expect(res.body.devLink).toBe(verifyUrl("https://mslab.example", tokenOf(res.body.devLink!)));
-    expect(await consumeLoginToken(db, tokenOf(res.body.devLink!), NOW)).toBe("dim@example.test");
+    expect(await consumeLoginToken(db, tokenOf(res.body.devLink!), NOW)).toBe("admin@example.test");
   });
 
   test("is never returned in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     resend();
     const { deps } = setup();
-    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
+    const res = await handleLoginRequest(deps, { email: "admin@example.test" });
     expect(res).toEqual({ status: 200, body: { ok: true } });
     expect(JSON.stringify(res)).not.toMatch(/devLink|verify|http/);
     expect(await tokens()).toHaveLength(1); // the token itself is stored and e-mailed
@@ -252,12 +252,12 @@ describe("devLink", () => {
   test("is returned only for a local Host: not for a preview or staging address even in a non-production build", async () => {
     resend();
     for (const host of ["localhost:3000", "127.0.0.1:3001", "localhost"]) {
-      const res = await handleLoginRequest(setup({ host }).deps, { email: "dim@example.test" });
+      const res = await handleLoginRequest(setup({ host }).deps, { email: "admin@example.test" });
       expect(res.status === 200 && "devLink" in res.body, host).toBe(true);
       await db.delete(authTokens);
     }
     for (const host of ["mslab-web.dim-novare.workers.dev", "mslab.example", "localhost.evil.example", "evil.example:3000", "", null]) {
-      const res = await handleLoginRequest(setup({ host }).deps, { email: "dim@example.test" });
+      const res = await handleLoginRequest(setup({ host }).deps, { email: "admin@example.test" });
       expect(res, String(host)).toEqual({ status: 200, body: { ok: true } });
       await db.delete(authTokens);
     }
@@ -266,18 +266,18 @@ describe("devLink", () => {
   test("production + a local Host: still never", async () => {
     vi.stubEnv("NODE_ENV", "production");
     resend();
-    expect(await handleLoginRequest(setup({ host: "localhost:3000" }).deps, { email: "dim@example.test" })).toEqual({ status: 200, body: { ok: true } });
+    expect(await handleLoginRequest(setup({ host: "localhost:3000" }).deps, { email: "admin@example.test" })).toEqual({ status: 200, body: { ok: true } });
   });
 
   test("is not returned for an address outside the allow-list either", async () => {
     resend();
     const { deps } = setup();
-    expect(await handleLoginRequest(deps, { email: "someone@gmail.com" })).toEqual({ status: 200, body: { ok: true } });
+    expect(await handleLoginRequest(deps, { email: "someone@example.com" })).toEqual({ status: 200, body: { ok: true } });
   });
 });
 
 describe("validation", () => {
-  test.each([[{}], [{ email: "" }], [{ email: "no-at-sign" }], [{ email: 42 }], [{ email: "a".repeat(200) + "@example.com" }], [null], ["dim@example.test"], [[]]])(
+  test.each([[{}], [{ email: "" }], [{ email: "no-at-sign" }], [{ email: 42 }], [{ email: "a".repeat(200) + "@example.com" }], [null], ["admin@example.test"], [[]]])(
     "%j is refused with 400 and nothing stored",
     async (input) => {
       const { deps, kv } = setup();
@@ -292,18 +292,18 @@ describe("rate limit", () => {
   test("5 requests per 10 minutes per IP, then 429; another IP is not affected", async () => {
     resend();
     const { deps, kv } = setup({ ip: "198.51.100.7" });
-    for (let i = 0; i < RATE_LIMIT; i++) expect((await handleLoginRequest(deps, { email: "dim@example.test" })).status).toBe(200);
-    expect(await handleLoginRequest(deps, { email: "dim@example.test" })).toEqual({ status: 429, body: { ok: false, error: "rate" } });
+    for (let i = 0; i < RATE_LIMIT; i++) expect((await handleLoginRequest(deps, { email: "admin@example.test" })).status).toBe(200);
+    expect(await handleLoginRequest(deps, { email: "admin@example.test" })).toEqual({ status: 429, body: { ok: false, error: "rate" } });
     expect(await tokens()).toHaveLength(LOGIN_TOKEN_CAP); // 5 accepted requests, but one address gets 3 links; the refused 6th created none
     expect(kv.ttl.get("rl:login:198.51.100.7")).toBe(600);
     const other = setup({ kv, ip: "198.51.100.8" });
-    expect((await handleLoginRequest(other.deps, { email: "dim@example.test" })).status).toBe(200);
+    expect((await handleLoginRequest(other.deps, { email: "admin@example.test" })).status).toBe(200);
   });
 
   test("a request without an address is not rate limited", async () => {
     resend();
     const { deps, kv } = setup({ ip: null });
-    for (let i = 0; i < RATE_LIMIT + 2; i++) expect((await handleLoginRequest(deps, { email: "someone@gmail.com" })).status).toBe(200);
+    for (let i = 0; i < RATE_LIMIT + 2; i++) expect((await handleLoginRequest(deps, { email: "someone@example.com" })).status).toBe(200);
     expect(kv.store.size).toBe(0);
   });
 
@@ -311,7 +311,7 @@ describe("rate limit", () => {
     resend();
     const kv = { ...fakeKv(), get: () => Promise.reject(new Error("KV down")), put: () => Promise.reject(new Error("KV down")) };
     const { deps } = setup({ kv });
-    expect((await handleLoginRequest(deps, { email: "dim@example.test" })).status).toBe(200);
+    expect((await handleLoginRequest(deps, { email: "admin@example.test" })).status).toBe(200);
     expect(await tokens()).toHaveLength(1);
   });
 });

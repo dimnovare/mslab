@@ -90,7 +90,7 @@ Layout: **B admin** (left sidebar, "Tere, Maria." overview) refined. Server-side
 admin route and admin API.
 
 Login: e-mail magic link (Resend), 15-minute single-use token, allow-list exactly
-`dim@example.test`, `maria@example.test`. Session cookie: HttpOnly, Secure, SameSite=Lax,
+Dim's address and Maria's address (the Worker secret `ADMIN_EMAILS`). Session cookie: HttpOnly, Secure, SameSite=Lax,
 30 days, stored hashed in the DB (revocable).
 
 Sections in phase 1:

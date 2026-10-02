@@ -1,6 +1,6 @@
 import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
-import { adminFirstName } from "@/server/auth";
+import { adminName } from "@/server/auth";
 import { getAdminCounts } from "./data";
 import { ReadyMark } from "./ReadyMark";
 import { SECTIONS, type Section } from "./sections";
@@ -21,7 +21,7 @@ export async function Shell({ email, active, children }: { email: string; active
     requests: openRequests ? { n: openRequests, label: fill(t.badgeRequests, { n: openRequests }) } : undefined,
   };
   const items: NavItem[] = SECTIONS.map((s) => ({ ...s, label: adminEt.nav[s.key], badge: badges[s.key] }));
-  const name = adminFirstName(email);
+  const name = adminName(email);
 
   return (
     <div className={styles.layout}>
@@ -48,9 +48,9 @@ export async function Shell({ email, active, children }: { email: string; active
         <div className={styles.top}>
           <span>{t.top}</span>
           <span className={styles.who} title={fill(t.signedInAs, { email })}>
-            <span className={styles.whoName}>{name}</span>
+            {name && <span className={styles.whoName}>{name}</span>}
             <span className={styles.avatar} aria-hidden="true">
-              {name.charAt(0)}
+              {(name || email).charAt(0).toUpperCase()}
             </span>
           </span>
         </div>

@@ -7,8 +7,9 @@ import { getPlatformProxy } from "wrangler";
 export const E2E_COMMENT = "[e2e-kommentaar]";
 
 async function withLocalKv<T>(fn: (kv: KVNamespace) => Promise<T>): Promise<T> {
-  // envFiles: [] like @opennextjs/cloudflare's dev context; no remote bindings (local persistence only)
-  const { env, dispose } = await getPlatformProxy<{ KV: KVNamespace }>({ envFiles: [], remoteBindings: false });
+  // the placeholder secrets (wrangler.jsonc secrets.required would be reported missing); no remote bindings (local
+  // persistence only)
+  const { env, dispose } = await getPlatformProxy<{ KV: KVNamespace }>({ envFiles: [".dev.vars.example"], remoteBindings: false });
   try {
     return await fn(env.KV);
   } finally {

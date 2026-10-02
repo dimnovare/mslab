@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Page, Route, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
+import { LOCAL_ADMINS } from "../local-secrets";
 import { adminReady, signInAsAdmin } from "./admin-login";
 import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows } from "./fixtures";
 
@@ -446,7 +447,7 @@ test.describe("settings", () => {
     await page.goto("/admin/seaded");
     await adminReady(page);
     const admins = page.locator("[data-admin-emails] li");
-    await expect(admins).toHaveText(["dim@example.test", "maria@example.test"]);
+    await expect(admins).toHaveText(LOCAL_ADMINS);
     await expect(page.locator("[data-admin-emails] input")).toHaveCount(0);
     const privacy = page.locator('[data-legal-editor="privacy"]');
     const body = privacy.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true });

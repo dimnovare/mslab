@@ -15,9 +15,9 @@ export const metadata: Metadata = { title: adminTitle(adminEt.nav.settings) };
 export default async function SettingsEditPage() {
   const email = await requireAdmin();
   const initial = await loadSettings(getDb());
-  // the sign-in allow-list (wrangler vars ADMIN_EMAILS): shown, never edited here
-  const admins = getCloudflareContext()
-    .env.ADMIN_EMAILS.split(",")
+  // the sign-in allow-list (the Worker secret ADMIN_EMAILS): shown, never edited here
+  const admins = (getCloudflareContext().env.ADMIN_EMAILS ?? "")
+    .split(",")
     .map((a) => a.trim())
     .filter(Boolean);
   return (

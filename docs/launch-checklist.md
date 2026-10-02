@@ -5,7 +5,7 @@ Phase 1 is live as a **prototype** on https://mslab.diipsolutions.eu (Worker `ms
 ## 1. Accounts and switches
 - [ ] Recreate Cloudflare (Worker, R2 `mslab-media` + `mslab-next-cache`, D1 tag cache, KV, Hyperdrive), Railway, Resend and the Telegram bot under Maria's accounts; move the data (Postgres dump, R2 objects, KV comments if still wanted).
 - [ ] `SITE_URL` → https://mslab.ee; `LINK_ORIGINS`; custom domain `routes` in `app/wrangler.jsonc`.
-- [ ] `MARIA_EMAIL` and the Telegram chat (`TELEGRAM_CHAT_ID` / KV `tg:chat`) → Maria (today: Dim).
+- [ ] `MARIA_EMAIL` (a Worker secret: `npx wrangler secret put MARIA_EMAIL`) and the Telegram chat (`TELEGRAM_CHAT_ID` / KV `tg:chat`) → Maria's address (today: Dim's).
 - [ ] `NEXT_PUBLIC_REVIEW_TOOLS` → "0" in `app/next.config.ts` (removes the review comment widget and its anonymous Telegram ping).
 - [ ] Remove noindex: `X-Robots-Tag` in `next.config.ts`, the middleware, `public/_headers` and the cache front's `ROBOTS`; robots.txt; metadata `robots`.
 - [ ] New OG image for the final home page (`public/og.jpg`; strip metadata with `tools/strip_provenance.py`).

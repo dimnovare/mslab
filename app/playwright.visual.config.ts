@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { LOCAL_URL, TARGET } from "./tests/e2e/target";
+import { LOCAL_SECRETS } from "./tests/local-secrets";
 
 // The visual suite (Task 16): every public page, ET and RU, at the four check widths. Each page is screenshotted in full
 // to visual-shots/<local|remote>/<width>/<page>.png (git-ignored) and checked for horizontal overflow and console
@@ -25,5 +26,5 @@ export default defineConfig({
     { name: "w1440", use: { ...chrome, viewport: { width: 1440, height: 900 } } },
     { name: "w2560", use: { ...chrome, viewport: { width: 2560, height: 1300 } } },
   ],
-  webServer: TARGET ? undefined : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 180_000 },
+  webServer: TARGET ? undefined : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 180_000, env: LOCAL_SECRETS },
 });

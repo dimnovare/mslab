@@ -15,7 +15,7 @@ import {
 // the actions now need the Worker env, the parsing they start with does not).
 
 test("registration requires terms and a session for group", () => {
-  const base = { courseId: 1, kind: "group", name: "A B", email: "a@b.ee", phone: "+372 5555", paymentChoice: "half", terms: "on" };
+  const base = { courseId: 1, kind: "group", name: "A B", email: "a@example.ee", phone: "+372 5555", paymentChoice: "half", terms: "on" };
   expect(registrationSchema.safeParse({ ...base, courseSessionId: 3 }).success).toBe(true);
   expect(registrationSchema.safeParse(base).success).toBe(false);
   expect(registrationSchema.safeParse({ ...base, courseSessionId: 3, terms: undefined }).success).toBe(false);
@@ -96,10 +96,10 @@ describe("contact, newsletter, cart, practice, waitlist", () => {
       data: { name: "Test", email: "test@example.com", message: "Tere!\nKüsimus.", locale: "ru" },
     });
     expect(errors(parseContact(form({ name: " ", email: "x@", message: "" })))).toEqual({ name: "required", email: "invalid", message: "required" });
-    expect(errors(parseContact(form({ name: "x".repeat(121), email: "a@b.ee", message: "x".repeat(2001) })))).toEqual({ name: "required", message: "required" });
+    expect(errors(parseContact(form({ name: "x".repeat(121), email: "a@example.ee", message: "x".repeat(2001) })))).toEqual({ name: "required", message: "required" });
   });
   test("newsletter: e-mail and consent", () => {
-    expect(parseSubscribe(form({ email: "a@b.ee", consent: "on" }))).toEqual({ ok: true, data: { email: "a@b.ee", consent: "on", locale: "et" } });
+    expect(parseSubscribe(form({ email: "a@example.ee", consent: "on" }))).toEqual({ ok: true, data: { email: "a@example.ee", consent: "on", locale: "et" } });
     expect(errors(parseSubscribe(form({ email: "nope" })))).toEqual({ email: "invalid", consent: "required" });
   });
   test("cart interest: e-mail and course", () => {
@@ -135,7 +135,7 @@ describe("normalisation", () => {
     expect(r.ok && r.data).toMatchObject({ name: "Mari Maasikas", email: "mari.maasikas+kursus@example.com" });
   });
   test("an unknown locale falls back to Estonian", () => {
-    const r = parseContact(form({ name: "A", email: "a@b.ee", message: "m", locale: "de" }));
+    const r = parseContact(form({ name: "A", email: "a@example.ee", message: "m", locale: "de" }));
     expect(r.ok && r.data.locale).toBe("et");
   });
   test("checkboxes: only 'on' ticks", () => {

@@ -362,11 +362,11 @@ describe("settings", () => {
     });
     for (const facebook of ["data:text/html,x", "https://", "//facebook.com/x", "https://user:pw@facebook.com/x"])
       expect(fieldsOf(await saveSettingsForm(db, form({ contact: { version: s.versions.contact, value: { ...s.values.contact, facebook } } }))), facebook).toEqual({ "contact.facebook": "url" });
-    const good = { email: " maria@mslab.ee ", phone: "+372 5555  0101", address: "Rüütli 12, Pärnu", instagram: "https://www.instagram.com/mslab", facebook: "https://facebook.com/mslab" };
+    const good = { email: " maria@example.ee ", phone: "+372 5555  0101", address: "Rüütli 12, Pärnu", instagram: "https://www.instagram.com/mslab", facebook: "https://facebook.com/mslab" };
     await db.update(settings).set({ value: { ...s.values.contact, extra: "kept" } }).where(eq(settings.key, "contact"));
     const fresh = await loadSettings(db);
     expect(await saveSettingsForm(db, form({ contact: { version: fresh.versions.contact, value: good } }))).toMatchObject({ ok: true });
-    expect((await getSettings(db)).contact).toEqual({ email: "maria@mslab.ee", phone: "+372 5555 0101", address: "Rüütli 12, Pärnu", instagram: "https://www.instagram.com/mslab", facebook: "https://facebook.com/mslab", extra: "kept" });
+    expect((await getSettings(db)).contact).toEqual({ email: "maria@example.ee", phone: "+372 5555 0101", address: "Rüütli 12, Pärnu", instagram: "https://www.instagram.com/mslab", facebook: "https://facebook.com/mslab", extra: "kept" });
   });
 
   test("newsletter discount label and the legal pages", async () => {

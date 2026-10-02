@@ -30,20 +30,28 @@ export const sessionCookieOptions = { httpOnly: true, secure: true, sameSite: "l
 
 const normalize = (email: string) => email.trim().toLowerCase();
 
-/** Is `email` in the comma-separated allow-list `allow`? Whole addresses only, case-insensitive, trimmed. */
-export function isAllowedAdmin(email: string, allow: string): boolean {
+/**
+ * Is `email` in the comma-separated allow-list `allow` (the Worker secret ADMIN_EMAILS)? Whole addresses only,
+ * case-insensitive, trimmed. No allow-list (the secret not set): nobody.
+ */
+export function isAllowedAdmin(email: string, allow: string | undefined): boolean {
   const wanted = normalize(email);
   if (!wanted) return false;
-  return allow.split(",").some((entry) => normalize(entry) === wanted);
+  return (allow ?? "").split(",").some((entry) => normalize(entry) === wanted);
 }
 
-/** Greeting name of an admin: the known first names, otherwise the capitalised start of the address. */
-export function adminFirstName(email: string): string {
-  const known: Record<string, string> = { "maria@example.test": "Maria", "dim@example.test": "Dim" };
-  const e = normalize(email);
-  if (known[e]) return known[e];
-  const local = e.split("@")[0].split(/[._+-]/)[0];
-  return local.charAt(0).toUpperCase() + local.slice(1);
+/**
+ * Greeting name of an admin from `names` (the Worker secret ADMIN_NAMES: "<address>=<name>,…"), or "" when the
+ * address has none there (the admin pages then greet without a name). The addresses live in secrets, never here.
+ */
+export function adminFirstName(email: string, names: string | undefined): string {
+  const wanted = normalize(email);
+  if (!wanted) return "";
+  for (const entry of (names ?? "").split(",")) {
+    const at = entry.lastIndexOf("=");
+    if (at > 0 && normalize(entry.slice(0, at)) === wanted) return entry.slice(at + 1).trim();
+  }
+  return "";
 }
 
 /**
@@ -134,6 +142,11 @@ export async function deleteSession(db: Db, raw: string | undefined): Promise<vo
 }
 
 // ---------- guards (cookie + Worker bindings) ----------
+
+/** The greeting name of a signed-in admin (the Worker secret ADMIN_NAMES), or "". */
+export function adminName(email: string): string {
+  return adminFirstName(email, getCloudflareContext().env.ADMIN_NAMES);
+}
 
 /**
  * The signed-in admin of this request, or null. The session must be live and its e-mail still in ADMIN_EMAILS (taking

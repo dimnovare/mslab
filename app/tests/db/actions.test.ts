@@ -108,15 +108,15 @@ const group = (extra: Record<string, string> = {}) =>
   form({ course: "kulmud", session: String(s.id), name: "Test  Õpilane", email: " Test@Example.com ", phone: "+372 5555 5555", payment: "half", modelHelp: "on", terms: "on", locale: "ru", ...extra });
 
 test("createRegistration never confirms", async () => {
-  const r = await createRegistration(db, { courseId: c.id, courseSessionId: s.id, kind: "group", name: "A", email: "a@b.ee", phone: "1", paymentChoice: "full", wantsModelHelp: true, wantsAccount: false, preferredPeriod: "", message: "", locale: "et" });
+  const r = await createRegistration(db, { courseId: c.id, courseSessionId: s.id, kind: "group", name: "A", email: "a@example.ee", phone: "1", paymentChoice: "full", wantsModelHelp: true, wantsAccount: false, preferredPeriod: "", message: "", locale: "et" });
   expect(r.status).toBe("awaiting_prepayment");
   expect(r.paidCents).toBe(0);
   await db.delete(registrations).where(eq(registrations.id, r.id));
 });
 
 test("createRegistration stores the e-mail trimmed and lowercased", async () => {
-  const r = await createRegistration(db, { courseId: c.id, courseSessionId: s.id, kind: "group", name: "A", email: "  A@B.EE ", phone: "1", paymentChoice: "full", wantsModelHelp: false, wantsAccount: false, preferredPeriod: "", message: "", locale: "et" });
-  expect(r.email).toBe("a@b.ee");
+  const r = await createRegistration(db, { courseId: c.id, courseSessionId: s.id, kind: "group", name: "A", email: "  A@Example.EE ", phone: "1", paymentChoice: "full", wantsModelHelp: false, wantsAccount: false, preferredPeriod: "", message: "", locale: "et" });
+  expect(r.email).toBe("a@example.ee");
   await db.delete(registrations).where(eq(registrations.id, r.id));
 });
 

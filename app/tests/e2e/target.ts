@@ -10,7 +10,8 @@ export const LOCAL_URL = "http://localhost:3000";
 
 /**
  * E2E_PROD_BUILD=1: the local server (E2E_BASE_URL=http://localhost:8787) is the production build under `wrangler dev`
- * (`npx opennextjs-cloudflare build && npx wrangler dev --port 8787 --local-upstream localhost:8787`), with the page
+ * (`npx opennextjs-cloudflare build && npx wrangler dev --port 8787 --local-upstream localhost:8787 --env-file .dev.vars.example`:
+ * the placeholder admin allow-list the tests sign in with), with the page
  * cache of the deployed Worker (R2, D1 and the cached-page front, all local). --local-upstream matters: without it the
  * Worker sees the custom domain as its own address, and Next.js's server-action redirects (which fetch the target page
  * from the app's own origin) would go to the live site. In this mode the admin tests sign in without the devLink (a

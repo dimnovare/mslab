@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { LOCAL_URL, TARGET } from "./tests/e2e/target";
+import { LOCAL_SECRETS } from "./tests/local-secrets";
 
 const baseURL = TARGET || LOCAL_URL; // E2E_BASE_URL (or BASE_URL) = a deployment, read-only; else the local dev server
 
@@ -34,7 +35,9 @@ export default defineConfig({
     { name: "chromium-edit", use: desktop, testMatch: EDITS },
     { name: "mobile-edit", use: phone, testMatch: EDITS },
   ],
+  // The dev server gets the placeholder secrets of .dev.vars.example (the admin allow-list the tests sign in with); a
+  // .dev.vars of your own takes their place, and a dev server already running is used as it is.
   webServer: TARGET
     ? undefined
-    : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 180_000 },
+    : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 180_000, env: LOCAL_SECRETS },
 });

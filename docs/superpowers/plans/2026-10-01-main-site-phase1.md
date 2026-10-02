@@ -23,7 +23,7 @@
 - A registration is created with status `awaiting_prepayment`; phase 1 code never sets `confirmed` automatically (P15).
 - Fonts: Jost (headings, numbers, prices), Manrope (UI/body/menu/buttons/language switch), JetBrains Mono only for slide counter and small numerals (G2, G4).
 - Colours: ink `#222222`, rose `#9E8993`, iced `#AD9FA6`, fog `#C0B7BB`, heather `#D5D0D3`, first-light `#EBE8E9`, orchid `#DDD4DC`, paper `#FFFFFF`, canvas `#F6F4F5`, line `#E6E1E3`, ok `#2F5D46`, warn `#6B4F5C`, bad `#8A3B3B`, lilac newsletter surface = B's newsletter background (copy exact value from `site/p/b/styles.css` `.newsletter`).
-- Admin allow-list exactly: `dim@example.test`, `maria@example.test`.
+- Admin allow-list exactly: Dim's address and Maria's address (since 02.10.2026 the Worker secret `ADMIN_EMAILS`, never in the repository).
 - No AI tool names (Claude, GPT, Lovable, …) in any client-facing text, URL, file name or image metadata.
 - Whole host stays `noindex` (header `X-Robots-Tag: noindex, nofollow`, robots.txt disallow except link-preview bots).
 - Responsive check widths: 390, 834, 1440, 2560. No horizontal overflow; touch targets ≥44 px; `prefers-reduced-motion` respected.
@@ -95,7 +95,7 @@ app/
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<from Task 0 step 2>", "localConnectionString": "postgres://postgres:postgres@localhost:5432/mslab" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "mslab-media" }],
   "kv_namespaces": [{ "binding": "KV", "id": "325a989613294fa19c86451afd8f6fa3" }],
-  "vars": { "SITE_URL": "https://mslab.diipsolutions.eu", "ADMIN_EMAILS": "dim@example.test,maria@example.test", "MAIL_FROM": "MS LAB <info@send.diipsolutions.eu>", "MARIA_EMAIL": "maria@example.test" }
+  "vars": { "SITE_URL": "https://mslab.diipsolutions.eu", "ADMIN_EMAILS": "<Dim's address>,<Maria's address>", "MAIL_FROM": "MS LAB <info@send.diipsolutions.eu>", "MARIA_EMAIL": "<Maria's address>" }
 }
 ```
 (No `routes` yet — deploy goes to `mslab-web.<account>.workers.dev` until Task 16.)
@@ -812,7 +812,7 @@ Rules: honeypot field `website` must be empty (else pretend success, store nothi
 // forms.test.ts
 import { registrationSchema } from "@/server/forms";
 test("registration requires terms and a session for group", () => {
-  const base = { courseId: 1, kind: "group", name: "A B", email: "a@b.ee", phone: "+372 5555", paymentChoice: "half", terms: "on" };
+  const base = { courseId: 1, kind: "group", name: "A B", email: "a@example.ee", phone: "+372 5555", paymentChoice: "half", terms: "on" };
   expect(registrationSchema.safeParse({ ...base, courseSessionId: 3 }).success).toBe(true);
   expect(registrationSchema.safeParse(base).success).toBe(false);
   expect(registrationSchema.safeParse({ ...base, courseSessionId: 3, terms: undefined }).success).toBe(false);
@@ -822,7 +822,7 @@ test("registration requires terms and a session for group", () => {
 // db/actions.test.ts
 test("createRegistration never confirms", async () => {
   const db = await makeTestDb(); /* insert contact course + session */
-  const r = await createRegistration(db, { courseId: c.id, courseSessionId: s.id, kind: "group", name: "A", email: "a@b.ee", phone: "1", paymentChoice: "full", wantsModelHelp: true, wantsAccount: false, preferredPeriod: "", message: "", locale: "et" });
+  const r = await createRegistration(db, { courseId: c.id, courseSessionId: s.id, kind: "group", name: "A", email: "a@example.ee", phone: "1", paymentChoice: "full", wantsModelHelp: true, wantsAccount: false, preferredPeriod: "", message: "", locale: "et" });
   expect(r.status).toBe("awaiting_prepayment"); expect(r.paidCents).toBe(0);
 });
 ```
@@ -876,20 +876,20 @@ Flow: POST `/api/auth/request {email}` → always responds `{ok:true}` (no accou
 ```ts
 test("token is single use and expires", async () => {
   const db = await makeTestDb(); const now = new Date("2026-10-01T10:00:00Z");
-  const t = await createLoginToken(db, "dim@example.test", now);
-  expect(await consumeLoginToken(db, t, new Date(now.getTime() + 60_000))).toBe("dim@example.test");
+  const t = await createLoginToken(db, "admin@example.test", now);
+  expect(await consumeLoginToken(db, t, new Date(now.getTime() + 60_000))).toBe("admin@example.test");
   expect(await consumeLoginToken(db, t, new Date(now.getTime() + 61_000))).toBeNull();
-  const t2 = await createLoginToken(db, "dim@example.test", now);
+  const t2 = await createLoginToken(db, "admin@example.test", now);
   expect(await consumeLoginToken(db, t2, new Date(now.getTime() + 16 * 60_000))).toBeNull();
 });
 test("allow-list", () => {
-  const allow = "dim@example.test,maria@example.test";
-  expect(isAllowedAdmin(" maria@example.test ", allow)).toBe(true);
-  expect(isAllowedAdmin("someone@gmail.com", allow)).toBe(false);
+  const allow = "admin@example.test,second.admin@example.test";
+  expect(isAllowedAdmin(" Second.Admin@Example.test ", allow)).toBe(true);
+  expect(isAllowedAdmin("someone@example.com", allow)).toBe(false);
 });
 test("session lookup", async () => {
-  const db = await makeTestDb(); const s = await createSession(db, "dim@example.test");
-  expect(await getSessionEmail(db, s)).toBe("dim@example.test"); expect(await getSessionEmail(db, "nope")).toBeNull();
+  const db = await makeTestDb(); const s = await createSession(db, "admin@example.test");
+  expect(await getSessionEmail(db, s)).toBe("admin@example.test"); expect(await getSessionEmail(db, "nope")).toBeNull();
 });
 ```
 - [ ] **Step 2:** FAIL → **Step 3:** implement with Web Crypto (`crypto.getRandomValues`, `crypto.subtle.digest("SHA-256")`) → **Step 4:** PASS. E2E: request link for allowed e-mail, follow `devLink`, land on `/admin` showing "Tere, Maria." / "Tere, Dim."; `/admin` without cookie redirects to `/admin/login`.

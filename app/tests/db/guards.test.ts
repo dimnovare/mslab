@@ -7,7 +7,7 @@ import { makeTestDb } from "./helpers";
 const state = vi.hoisted(() => ({ db: null as unknown, cookie: undefined as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Host-mslab_admin" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
 vi.mock("@/db/client", () => ({ getDb: () => state.db }));
-vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext: () => ({ env: { ADMIN_EMAILS: "dim@example.test,second.admin@example.com" } }) }));
+vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext: () => ({ env: { ADMIN_EMAILS: "admin@example.test,second.admin@example.com" } }) }));
 
 import { adminAction, createSession, isCrossSite, requireAdmin, requireAdminEmail, withAdmin } from "@/server/auth";
 
@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const signIn = async (email = "dim@example.test") => void (state.cookie = await createSession(db, email));
+const signIn = async (email = "admin@example.test") => void (state.cookie = await createSession(db, email));
 const req = (method: string, headers: Record<string, string> = {}) => new Request("https://mslab.example/api/admin/x", { method, headers });
 const body = async (r: Response) => ({ status: r.status, json: await r.json(), cache: r.headers.get("cache-control") });
 
@@ -38,7 +38,7 @@ describe("withAdmin", () => {
     const handler = vi.fn(() => new Response("secret"));
     state.cookie = "A".repeat(43);
     expect((await withAdmin(handler)(req("GET"), {})).status).toBe(401);
-    await signIn("former.admin@gmail.com");
+    await signIn("former.admin@example.com");
     expect((await withAdmin(handler)(req("GET"), {})).status).toBe(401);
     expect(handler).not.toHaveBeenCalled();
   });
@@ -88,11 +88,11 @@ describe("withAdmin", () => {
     state.cookie = "A".repeat(43);
     state.db = {
       select: () => {
-        throw new Error("select ... where id_hash = 'dim@example.test' failed");
+        throw new Error("select ... where id_hash = 'admin@example.test' failed");
       },
     };
     await expect(withAdmin(() => new Response("ok"))(req("GET"), {})).rejects.toThrow("admin session lookup failed");
-    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toMatch(/dim\.novare|id_hash/);
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toMatch(/admin@|id_hash/);
   });
 });
 
@@ -107,7 +107,7 @@ describe("adminAction", () => {
   test("with a session: the action gets the admin's e-mail first, then the caller's arguments", async () => {
     await signIn();
     const save = adminAction(async ({ email }, id: number, data: { name: string }) => `${email}:${id}:${data.name}`);
-    expect(await save(5, { name: "Kulmud" })).toBe("dim@example.test:5:Kulmud");
+    expect(await save(5, { name: "Kulmud" })).toBe("admin@example.test:5:Kulmud");
   });
 });
 

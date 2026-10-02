@@ -20,49 +20,54 @@ import {
 } from "@/server/auth";
 import { sha256 } from "@/server/token";
 
-const DIM = "dim@example.test";
+const DIM = "admin@example.test";
 const MIN = 60_000;
 
 test("token is single use and expires", async () => {
   const db = await makeTestDb();
   const now = new Date("2026-10-01T10:00:00Z");
-  const t = await createLoginToken(db, "dim@example.test", now);
-  expect(await consumeLoginToken(db, t, new Date(now.getTime() + 60_000))).toBe("dim@example.test");
+  const t = await createLoginToken(db, DIM, now);
+  expect(await consumeLoginToken(db, t, new Date(now.getTime() + 60_000))).toBe(DIM);
   expect(await consumeLoginToken(db, t, new Date(now.getTime() + 61_000))).toBeNull();
-  const t2 = await createLoginToken(db, "dim@example.test", now);
+  const t2 = await createLoginToken(db, DIM, now);
   expect(await consumeLoginToken(db, t2, new Date(now.getTime() + 16 * 60_000))).toBeNull();
 });
 
 test("allow-list", () => {
-  const allow = "dim@example.test,maria@example.test";
-  expect(isAllowedAdmin(" maria@example.test ", allow)).toBe(true);
-  expect(isAllowedAdmin("someone@gmail.com", allow)).toBe(false);
+  const allow = "admin@example.test,second.admin@example.test";
+  expect(isAllowedAdmin(" Second.Admin@Example.test ", allow)).toBe(true);
+  expect(isAllowedAdmin("someone@example.com", allow)).toBe(false);
 });
 
 test("session lookup", async () => {
   const db = await makeTestDb();
-  const s = await createSession(db, "dim@example.test");
-  expect(await getSessionEmail(db, s)).toBe("dim@example.test");
+  const s = await createSession(db, DIM);
+  expect(await getSessionEmail(db, s)).toBe(DIM);
   expect(await getSessionEmail(db, "nope")).toBeNull();
 });
 
 describe("allow-list edge cases", () => {
   test("the list is trimmed and case-insensitive; blanks and empty input never match", () => {
-    expect(isAllowedAdmin("dim@example.test", " dim@example.test , maria@example.test ")).toBe(true);
-    expect(isAllowedAdmin("", "dim@example.test,,")).toBe(false);
+    expect(isAllowedAdmin("admin@example.test", " Admin@Example.test , second.admin@example.test ")).toBe(true);
+    expect(isAllowedAdmin("", "admin@example.test,,")).toBe(false);
     expect(isAllowedAdmin("   ", ",  ,")).toBe(false);
     expect(isAllowedAdmin(DIM, "")).toBe(false);
+    expect(isAllowedAdmin(DIM, undefined)).toBe(false); // the secret not set: nobody
   });
   test("only a whole address matches (no substring, no domain)", () => {
-    const allow = "dim@example.test";
-    expect(isAllowedAdmin("dim@example.test", allow)).toBe(false);
-    expect(isAllowedAdmin("dim@example.test.evil.test", allow)).toBe(false);
-    expect(isAllowedAdmin("x@gmail.com,dim@example.test", allow)).toBe(false);
+    const allow = "second.admin@example.test";
+    expect(isAllowedAdmin("admin@example.test", allow)).toBe(false);
+    expect(isAllowedAdmin("second.admin@example.test.evil.test", allow)).toBe(false);
+    expect(isAllowedAdmin("x@example.com,second.admin@example.test", allow)).toBe(false);
   });
-  test("first names for the greeting", () => {
-    expect(adminFirstName("maria@example.test")).toBe("Maria");
-    expect(adminFirstName("dim@example.test")).toBe("Dim");
-    expect(adminFirstName("kati.kask@example.com")).toBe("Kati");
+  test("first names for the greeting come from ADMIN_NAMES (<address>=<name>,…); none: an empty name", () => {
+    const names = "admin@example.test=Dim, second.admin@example.test = Maria";
+    expect(adminFirstName("second.admin@example.test", names)).toBe("Maria");
+    expect(adminFirstName(" Admin@Example.test ", names)).toBe("Dim");
+    expect(adminFirstName("kati.kask@example.com", names)).toBe("");
+    expect(adminFirstName("admin@example.test", undefined)).toBe("");
+    expect(adminFirstName("", "=Nobody")).toBe("");
+    expect(adminFirstName("admin@example.test.evil.test", names)).toBe(""); // whole addresses only
   });
 });
 
@@ -86,7 +91,7 @@ describe("login tokens", () => {
 
   test("the e-mail is stored trimmed and lowercased and comes back that way", async () => {
     const db = await makeTestDb();
-    const raw = await createLoginToken(db, "  dim@example.test ", now);
+    const raw = await createLoginToken(db, "  Admin@Example.TEST ", now);
     expect(await consumeLoginToken(db, raw, now)).toBe(DIM);
   });
 
@@ -199,7 +204,7 @@ describe("issueLoginToken (per-address cap)", () => {
     const db = await makeTestDb();
     for (let i = 0; i < LOGIN_TOKEN_CAP; i++) expect(await issueLoginToken(db, DIM, new Date(now.getTime() + i * 1000))).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(await issueLoginToken(db, DIM, now)).toBeNull();
-    expect(await issueLoginToken(db, " dim@example.test ", now)).toBeNull(); // the same address however it is written
+    expect(await issueLoginToken(db, " ADMIN@example.TEST ", now)).toBeNull(); // the same address however it is written
     expect(await db.select().from(authTokens)).toHaveLength(3);
     expect(LOGIN_TOKEN_CAP).toBe(3);
     expect(LOGIN_CAP_WINDOW_MS).toBe(10 * MIN);
@@ -237,7 +242,7 @@ describe("issueLoginToken (per-address cap)", () => {
 
 describe("redeemLoginToken (one transaction)", () => {
   const now = new Date("2026-10-01T10:00:00Z");
-  const ALLOW = "dim@example.test,maria@example.test";
+  const ALLOW = "admin@example.test,second.admin@example.test";
 
   test("uses the token and returns a live session for its address", async () => {
     const db = await makeTestDb();

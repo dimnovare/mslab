@@ -40,7 +40,7 @@ describe("links an admin may store", () => {
       "//evil.example/x",
       "/\\evil.example",
       "koolitused",
-      "mailto:a@b.ee",
+      "mailto:a@example.ee",
       "/koolitused x",
       "/a\nb",
       "https://",
@@ -137,8 +137,8 @@ describe("a dark hero slide's phone focal point (item 6)", () => {
 
 describe("shell settings keep only https social links", () => {
   test("an older javascript: or http value is not linked", () => {
-    const s = shellSettings({ contact: { email: "a@b.ee", instagram: "javascript:alert(1)", facebook: "https://facebook.com/mslab" } });
-    expect(s.contact).toEqual({ email: "a@b.ee", phone: "", instagram: "", facebook: "https://facebook.com/mslab" });
+    const s = shellSettings({ contact: { email: "a@example.ee", instagram: "javascript:alert(1)", facebook: "https://facebook.com/mslab" } });
+    expect(s.contact).toEqual({ email: "a@example.ee", phone: "", instagram: "", facebook: "https://facebook.com/mslab" });
   });
 });
 
@@ -180,7 +180,7 @@ describe("drafts from stored values", () => {
         { uid: "t1", value: "", label: { et: "" } },
       ],
     });
-    expect(contactDraft({ email: "a@b.ee", phone: 5 })).toEqual({ email: "a@b.ee", phone: "", address: "", instagram: "", facebook: "" });
+    expect(contactDraft({ email: "a@example.ee", phone: 5 })).toEqual({ email: "a@example.ee", phone: "", address: "", instagram: "", facebook: "" });
     expect(campaignDraft(null)).toMatchObject({ active: false, ctaLabel: { et: "Leia enda koolitus" }, ctaHref: "/koolitused" });
     const stored = { active: true, kicker: { et: "" }, title: { et: "T" }, text: { et: "" }, code: "X", ctaLabel: { et: "", ru: "Найти" }, ctaHref: "/a", imageKey: "" };
     expect(campaignDraft(stored).ctaLabel).toEqual({ et: "Leia enda koolitus", ru: "Найти" });

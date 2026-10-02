@@ -1,0 +1,21 @@
+# Worker secrets for local development. Placeholders only: no real address ever goes into the repository.
+#
+# Production: the real values are Worker secrets, set with
+#   npx wrangler secret put ADMIN_EMAILS      (and ADMIN_NAMES, MARIA_EMAIL)
+# or in the same step as a deploy, from a file kept OUTSIDE the repository and deleted afterwards:
+#   npx opennextjs-cloudflare deploy -- --secrets-file <path outside the repo>
+# wrangler.jsonc lists them under "secrets.required": a deploy without them fails.
+#
+# Local `next dev` / `wrangler dev`: copy this file to .dev.vars (git-ignored) and change the values if you want to
+# sign in with your own address locally. Note: once a .dev.vars exists, only the keys in wrangler.jsonc vars and
+# secrets.required are read from it.
+# The e2e tests read this file as it is (playwright.config.ts passes it to the dev server; the local production build
+# runs with `--env-file .dev.vars.example`) and sign in as the first ADMIN_EMAILS address. Without a .dev.vars of your
+# own, `npm run dev` started by Playwright gets these values; a .dev.vars of yours would take their place.
+
+# the sign-in allow-list, comma-separated
+ADMIN_EMAILS=admin@example.test,second.admin@example.test
+# the greeting name of each admin: <address>=<name>, comma-separated
+ADMIN_NAMES=admin@example.test=Dim,second.admin@example.test=Maria
+# where form notifications go (never sent locally without RESEND_API_KEY)
+MARIA_EMAIL=maria@example.test

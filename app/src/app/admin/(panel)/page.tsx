@@ -12,7 +12,7 @@ import { seatsLeft } from "@/domain/sessions";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick } from "@/i18n/field";
 import { fill, formatDate, formatLongDate } from "@/i18n/format";
-import { adminFirstName, requireAdmin } from "@/server/auth";
+import { adminName, requireAdmin } from "@/server/auth";
 import styles from "./overview.module.css";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +29,7 @@ const UPCOMING_ROWS = 5;
  */
 export default async function Overview() {
   const email = await requireAdmin();
+  const name = adminName(email);
   const now = new Date();
   const [counts, sessions] = await Promise.all([getAdminCounts(), listUpcomingSessions(getDb(), startOfDayTallinn(now))]);
   const scheduled = sessions.filter((s) => s.status === "scheduled");
@@ -58,7 +59,7 @@ export default async function Overview() {
         <div className={ui.heading}>
           <div>
             <p className={ui.eyebrow}>{formatLongDate(now, "et")}</p>
-            <h1 className={ui.h1}>{fill(adminEt.panel.hello, { name: adminFirstName(email) })}</h1>
+            <h1 className={ui.h1}>{name ? fill(adminEt.panel.hello, { name }) : adminEt.panel.helloNoName}</h1>
             <p className={ui.lead}>{t.lead}</p>
           </div>
           <Link className={ui.btn} href="/admin/registreerimised">
