@@ -240,6 +240,29 @@ test.describe("short delay", () => {
     expect(await scrollLocked(page)).toBe(false);
   });
 
+  test("/ru: the Russian title keeps Lash Lift on one line too, 360–1440 (N6)", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the desktop project sets each width");
+    for (const [w, h] of [[360, 740], [390, 844], [834, 1112], [1440, 900]] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.goto("/ru");
+      const title = page.getByRole("dialog").getByRole("heading", { level: 2 });
+      await expect(title).toHaveText("−15% на курс Lash Lift BOTOX");
+      const tops = await title.evaluate((h) => {
+        const line = (word: string) => {
+          const range = document.createRange();
+          const at = h.textContent!.indexOf(word);
+          range.setStart(h.firstChild!, at);
+          range.setEnd(h.firstChild!, at + word.length);
+          return Math.round(range.getClientRects()[0].top);
+        };
+        return [line("Lash"), line("Lift")];
+      });
+      expect(tops[1], `${w}: Lash Lift on one line`).toBe(tops[0]);
+      await page.keyboard.press("Escape");
+      await newSession(page);
+    }
+  });
+
   test("/ru: Russian controls and button, the link stays in Russian", async ({ page }) => {
     await page.goto("/ru");
     const p = page.getByRole("dialog", { name: "−15% на курс Lash Lift BOTOX" }); // the seed campaign in Russian (G8)

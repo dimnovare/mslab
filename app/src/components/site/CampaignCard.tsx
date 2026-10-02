@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { CampaignView } from "@/domain/campaign";
 import { linkFor } from "@/domain/site-editor";
 import { href } from "@/i18n/href";
+import { keepNamesTogether } from "@/lib/typography";
 import type { Locale } from "@/i18n/locales";
 import { Icon } from "./Icon";
 import ui from "./ui.module.css";
@@ -30,7 +31,7 @@ export function CampaignCard({ c, locale, titleId, codeAction, close }: { c: Cam
         <div className={styles.body}>
           {c.kicker && <p className={`${ui.caps} ${styles.kicker}`}>{c.kicker}</p>}
           <h2 id={titleId} className={styles.title}>
-            {c.title}
+            {keepNamesTogether(c.title)}
           </h2>
           {c.text && <p className={styles.text}>{c.text}</p>}
           {c.code && (
