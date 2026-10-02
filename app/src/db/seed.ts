@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 import { targetMatches } from "./fill-ru";
+import { safeDbError } from "./safe-error";
 import { applySeed } from "./seed-apply";
 
 /** Why the seed must not run against `url` with these arguments, or null when it may. Never names the address. */
@@ -21,19 +22,6 @@ export function seedRefusal(url: string, args: string[]): string | null {
   if (args.includes("--reset")) return "Refusing to reset without --target: say which database is meant (--target local | --target railway).";
   if (!targetMatches(url, "local")) return "Refusing: DATABASE_URL is not a local database. For Railway, add --target railway.";
   return null;
-}
-
-/** Error text without the connection string or its host. */
-function safeMessage(err: unknown, url: string): string {
-  const text = err instanceof Error ? err.message : String(err);
-  const secrets = [url];
-  try {
-    const parsed = new URL(url);
-    secrets.push(parsed.host, parsed.hostname, parsed.password);
-  } catch {
-    // not a parseable URL: only the full string is redacted
-  }
-  return secrets.filter(Boolean).reduce((out, secret) => out.split(secret).join("***"), text);
 }
 
 async function main(): Promise<number> {
@@ -58,8 +46,7 @@ async function main(): Promise<number> {
     for (const [table, n] of Object.entries(counts)) console.log(`  ${table}: ${n}`);
     return 0;
   } catch (err) {
-    const code = typeof err === "object" && err !== null && "code" in err ? ` [${String((err as { code: unknown }).code)}]` : "";
-    console.error(`Seed failed${code}: ${safeMessage(err, url)}`);
+    console.error(`Seed failed: ${safeDbError(err)}.`);
     return 1;
   } finally {
     await sql.end({ timeout: 5 });

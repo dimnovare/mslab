@@ -12,6 +12,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { safeDbError } from "./safe-error";
 import { applyRuFill, planRuFill } from "./ru-fill";
 
 const LOCAL = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -26,18 +27,6 @@ export function targetMatches(url: string, target: "local" | "railway"): boolean
     return false;
   }
   return target === "local" ? LOCAL.has(host) : RAILWAY.test(host) && !LOCAL.has(host);
-}
-
-function safeMessage(err: unknown, url: string): string {
-  const text = err instanceof Error ? err.message : String(err);
-  const secrets = [url];
-  try {
-    const parsed = new URL(url);
-    secrets.push(parsed.host, parsed.hostname, parsed.password, parsed.username);
-  } catch {
-    // only the full string is redacted
-  }
-  return secrets.filter((x) => x && x.length > 2).reduce((out, secret) => out.split(secret).join("***"), text);
 }
 
 async function main(): Promise<number> {
@@ -72,8 +61,7 @@ async function main(): Promise<number> {
     }
     return 0;
   } catch (err) {
-    const code = typeof err === "object" && err !== null && "code" in err ? ` [${String((err as { code: unknown }).code)}]` : "";
-    console.error(`Fill failed${code}: ${safeMessage(err, url)}`);
+    console.error(`Fill failed: ${safeDbError(err)}.`);
     return 1;
   } finally {
     await client.end({ timeout: 5 });
