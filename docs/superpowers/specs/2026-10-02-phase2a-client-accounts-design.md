@@ -41,8 +41,8 @@ The users are brow and lash students, many not confident with computers, mostly 
 6. **Few words, clear targets.** Plain ET/RU, no jargon ("sessioon", "staatus", "ligipääs" only where unavoidable). One primary button per card, using the site's existing button styles (touch targets ≥ 44 px, the current rule). Empty states explain the one thing to do ("Lisa koolitus lemmikuks ♡ koolituse lehel").
 7. **Mobile first.** Designed at 390 px first; bottom tab bar with icons + labels; nothing needs horizontal scrolling except the swipeable course list.
 8. **Forgiving forms.** E-mail is trimmed and lower-cased; obvious typos in common domains (gmial.com, gmail.ee …) get a "Kas mõtlesid …?" suggestion before sending. Errors say what to do, never only what went wrong.
-10. **Same design as the site (Dim).** Simplicity means fewer steps and words, not a new look: the client area follows the current design rules — prototype B's dashboard (`site/p/b`), the public site's components, fonts (Jost/Manrope), colour tokens and button styles. No new visual language.
 9. **Dangerous actions are rare and clear.** Only "Kustuta konto" needs a confirmation; it sits at the very bottom of "Minu andmed".
+10. **Same design as the site (Dim).** Simplicity means fewer steps and words, not a new look: the client area follows the current design rules — prototype B's dashboard (`site/p/b`), the public site's components, fonts (Jost/Manrope), colour tokens and button styles. No new visual language.
 
 ## 3. Architecture — fit the Free plan
 
