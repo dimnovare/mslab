@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 import { revalidatedSince, tagKey, type TagRow } from "@/server/tag-cache";
 import {
   afterFront,
   BROWSER_CACHE_CONTROL,
+  FRAMING,
   frontAnswer,
   frontKey,
   frontRequest,
@@ -161,6 +163,7 @@ describe("servePageFromCache", () => {
       vary: VARY,
       "x-nextjs-stale-time": "300",
       "x-robots-tag": "noindex, nofollow",
+      "content-security-policy": "frame-ancestors 'self'",
       "x-page-cache": "front",
     });
     expect(res.headers.get("x-nextjs-rewritten-path")).toBeNull(); // documents only tell it for RSC
@@ -199,6 +202,7 @@ describe("servePageFromCache", () => {
       expect(res.status, path).toBe(404);
       expect(await res.text()).toBe("<html>Lehte ei leitud</html>");
       expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+      expect(res.headers.get("content-security-policy")).toBe(FRAMING);
     }
     const head = (await servePageFromCache(req("/wp-admin", { method: "HEAD" }), f.env, "B1", NOW))!;
     expect([head.status, head.body]).toEqual([404, null]);
@@ -240,5 +244,16 @@ describe("servePageFromCache", () => {
     // an object written before render dating existed (no s): its upload time
     const older = fakes({ "front/B1/et/koolitused#html": { ...stored, uploaded: NOW - 1000 } }, rows);
     expect((await frontAnswer(req("/koolitused"), older.env, "B1", NOW))).toHaveProperty("response");
+  });
+});
+
+describe("framing (final review M10)", () => {
+  test("the front, the app (next.config.ts headers) and the static files (public/_headers) allow only this site's own pages to frame them", () => {
+    expect(FRAMING).toBe("frame-ancestors 'self'");
+    expect(readFileSync("next.config.ts", "utf8")).toContain(`{ key: "Content-Security-Policy", value: "${FRAMING}" }`);
+    // in the rule for every path ("/*"), which the hub (/guide/, /p/<dir>/) falls under
+    const blocks = readFileSync("public/_headers", "utf8").replaceAll("\r", "").split(/\n(?=\S)/);
+    const all = blocks.find((b) => b.startsWith("/*\n"));
+    expect(all?.split("\n").map((l) => l.trim())).toContain(`Content-Security-Policy: ${FRAMING}`);
   });
 });

@@ -47,6 +47,8 @@ export function frontKey(buildId: string, page: string, variant: FrontVariant): 
 /** Same as OpenNext's response for a cached page (core/routing/cacheInterceptor.js). */
 export const VARY = "RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, Next-Url";
 const ROBOTS = "noindex, nofollow";
+/** Framing by this site's own pages only, as next.config.ts headers() says for every answer of the app (final review M10). */
+export const FRAMING = "frame-ancestors 'self'";
 
 /**
  * What browsers are told about a page, its RSC payload and its segments: keep it, but ask again before every use (the
@@ -147,6 +149,7 @@ export async function frontAnswer(
     // as Next.js's middleware adapter tells the client router about a rewrite (RSC requests only)
     if (want.variant.kind !== "html" && want.rewritten) headers.set("x-nextjs-rewritten-path", want.page);
     headers.set("x-robots-tag", ROBOTS);
+    headers.set("content-security-policy", FRAMING);
     headers.set("x-opennext-cache", "HIT");
     headers.set("x-page-cache", "front");
     // the 404 page: the same page for every unknown address, answered with its status (and never as "not modified")

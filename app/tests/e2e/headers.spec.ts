@@ -1,11 +1,16 @@
 import { readFileSync } from "node:fs";
 import type { APIRequestContext } from "@playwright/test";
+import { LOCAL_FIXTURES } from "./fixtures";
+import { PROD_BUILD, TARGET } from "./target";
 import { test, expect } from "./test";
 
 // Read-only checks of the answers themselves, like `curl -I`: they run against the local dev server and against a
 // deployment (E2E_BASE_URL). Task 16 items 14 (link preview) and 16 (noindex on every kind of answer).
 
 const NOINDEX = "noindex, nofollow";
+
+/** A production build (the local one under wrangler dev, or a deployment): the Worker entry runs (worker.ts). */
+const WORKER = !!TARGET && (PROD_BUILD || !LOCAL_FIXTURES);
 
 /** The site's address (wrangler.jsonc SITE_URL): link previews name it, whichever host served the page (Task 17). */
 const SITE_URL = /"SITE_URL":\s*"([^"]+)"/.exec(readFileSync("wrangler.jsonc", "utf8"))![1];
@@ -38,6 +43,7 @@ test.describe("noindex on every kind of answer (item 16)", () => {
       ["/api/feedback/zzzzzzzzzzzzzz", 404],
       ["/media/img/olematu.jpg", 404],
       ["/robots.txt", 200],
+      ["/favicon.ico", 200],
       ["/og.jpg", 200],
       ["/feedback.js?v=5", 200],
       ["/seed/flower-hero.png", 200],
@@ -156,3 +162,71 @@ test.describe("link preview of the home page (item 14)", () => {
     expect(bytes.toString("latin1")).not.toMatch(/claude|anthropic|lovable|openai|gemini|midjourney|dall-e|c2pa|jumbf/i);
   });
 });
+
+test.describe("uploaded images are answered by the Worker before OpenNext (final review I1)", () => {
+  test.skip(({ isMobile }) => isMobile, "the same answers for every browser: desktop project only");
+
+  test("/media: the route's 404s with noindex and nosniff; on a production build from the Worker entry, not Next.js", async ({ request }) => {
+    // a key putImage could have made, of an image that does not exist; and keys it never makes
+    for (const path of ["/media/img/00000000-0000-4000-8000-000000000000.jpg", "/media/img/olematu.jpg", "/media/img/x.svg"]) {
+      for (const method of ["GET", "HEAD"]) {
+        const res = await request.fetch(path, { method, maxRedirects: 0, failOnStatusCode: false });
+        expect(res.status(), `${method} ${path}`).toBe(404);
+        expect(res.headers()["x-robots-tag"], `${method} ${path}`).toBe(NOINDEX);
+        expect(res.headers()["x-content-type-options"], `${method} ${path}`).toBe("nosniff");
+        expect(res.headers()["cache-control"], `${method} ${path}`).toMatch(/no-store/);
+        // the Worker's own answer says where it came from; Next.js's route (`next dev`) does not
+        expect(res.headers()["x-media-cache"], `${method} ${path}`).toBe(WORKER ? "r2" : undefined);
+      }
+    }
+    // addresses that only look like /media are not images: the site's 404 page
+    for (const path of ["/media.php", "/mediakit"]) {
+      const res = await request.get(path, { failOnStatusCode: false });
+      expect(res.status(), path).toBe(404);
+      expect(res.headers()["x-media-cache"], path).toBeUndefined();
+    }
+  });
+});
+
+test.describe("framing: only by this site's own pages (final review M10)", () => {
+  const FRAMING = "frame-ancestors 'self'";
+
+  test("pages, the 404 page, the admin, the hub and the prototypes say frame-ancestors 'self', once", async ({ request, isMobile }) => {
+    test.skip(isMobile, "the same answers for every browser: desktop project only");
+    for (const path of ["/", "/ru", "/koolitused/kulmumeistri-baaskoolitus", "/olematu-leht", "/admin/login", "/guide/", "/p/d/", "/p/a/"]) {
+      const res = await request.get(path, { maxRedirects: 0, failOnStatusCode: false });
+      expect(res.status(), path).toBeLessThan(500);
+      expect(res.headers()["content-security-policy"], path).toBe(FRAMING);
+    }
+  });
+
+  test("the hub still shows the prototypes in its frame, at desktop and phone size", async ({ page }) => {
+    const refused: string[] = [];
+    page.on("console", (m) => {
+      if (/frame-ancestors|refused to (display|frame)/i.test(m.text())) refused.push(m.text());
+    });
+    for (const [dir, device] of [["d", "desk"], ["a", "mob"], ["b", "mob"]] as const) {
+      await page.goto("about:blank"); // (a new hash alone would not load the hub again)
+      await page.goto(`/guide/#vaade=${dir}&seade=${device}`);
+      await expect(page.locator("#viewer")).toBeVisible();
+      // the framed document is the prototype itself (same origin, so the hub can reach into it), with its content
+      await expect
+        .poll(
+          () =>
+            page.locator("#ifr").evaluate((f: HTMLIFrameElement) => {
+              try {
+                const doc = f.contentDocument;
+                return doc && doc.body && doc.body.children.length > 0 ? f.contentWindow!.location.pathname : "";
+              } catch {
+                return "blocked";
+              }
+            }),
+          { message: `${dir} at ${device}` },
+        )
+        .toBe(`/p/${dir}/`);
+      await expect(page.locator("#ifr")).toBeVisible();
+    }
+    expect(refused).toEqual([]);
+  });
+});
+

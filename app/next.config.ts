@@ -21,11 +21,19 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_REVIEW_TOOLS: "1",
   },
   // The whole host stays out of search engines until launch on mslab.ee (static files: public/_headers).
+  // Pages may be framed by this site's own pages only (static files: public/_headers; cached pages: the Worker's
+  // front, src/worker/page-front.ts FRAMING).
   // The admin area and the login endpoints answer per visitor and are never cached (by the browser or the edge).
   async headers() {
     const noStore = [{ key: "Cache-Control", value: "no-store" }];
     return [
-      { source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
+      },
       { source: "/admin/:path*", headers: noStore },
       { source: "/api/auth/:path*", headers: noStore },
       { source: "/api/admin/:path*", headers: noStore },
