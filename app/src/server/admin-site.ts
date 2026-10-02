@@ -180,9 +180,9 @@ function bodyPart(key: string, max: number, defaultTitle: I18n): Part<{ body: I1
   });
 }
 
-// ---------- Avaleht: hero slides, statement, FAQ ----------
+// ---------- Avaleht: hero slides, statement, the trainer card's text, FAQ ----------
 
-export type HomeValues = { slides: SlideDraft[]; statement: { body: I18n }; faq: FaqDraft[] };
+export type HomeValues = { slides: SlideDraft[]; statement: { body: I18n }; teaser: { body: I18n }; faq: FaqDraft[] };
 
 /** A stored row's id in a list draft; null (or absent) for a new row. */
 const storedId = z.number().int().positive().max(ID_MAX).nullable().default(null);
@@ -230,6 +230,8 @@ const homeParts: Parts = {
     },
   }),
   statement: bodyPart("statement", L.statement, { et: "MS LAB Koolituskeskus" }),
+  // the text on the home page's trainer card (Maria C26); empty: the first paragraph of the trainer's bio
+  teaser: bodyPart("trainer_teaser", L.teaser, { et: "Sinu koolitaja", ru: "Ваш преподаватель" }),
   faq: part<FaqDraft[]>({
     tables: ["faq"],
     schema: z.array(z.object({ uid, id: storedId, q: i18n, a: i18n })).max(200),
@@ -301,7 +303,7 @@ const trainerParts: Parts = {
     schema: z.object({
       portraitKey: text(400),
       portraitPos: text(20),
-      name: text(400),
+      name: i18n,
       role: i18n,
       stats: z.array(z.object({ uid, value: text(100), label: i18n })).max(20),
     }),
@@ -311,7 +313,7 @@ const trainerParts: Parts = {
       const p = `${name}.`;
       const portraitKey = c.image(`${p}portraitKey`, v.portraitKey);
       const portraitPos = c.focal(`${p}portraitPos`, v.portraitPos);
-      const trainerName = c.plain(`${p}name`, v.name, L.trainerName, { required: true });
+      const trainerName = c.text(`${p}name`, v.name, L.trainerName, { required: true });
       const role = c.text(`${p}role`, v.role, L.role);
       const stats: { value: string; label: I18n }[] = [];
       for (const [i, s] of v.stats.entries()) {

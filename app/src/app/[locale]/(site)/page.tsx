@@ -85,7 +85,8 @@ export default async function Home({ params }: Props) {
 
   const statement = home.pages.statement;
   const bio = home.pages.trainer_bio;
-  const trainer = trainerSettings(home.settings);
+  const teaser = home.pages.trainer_teaser; // the card's own text (Avaleht editor), else the bio's first paragraph
+  const trainer = trainerSettings(home.settings, locale);
   const trainerName = trainer.name || pick(bio?.title, locale);
 
   // The newsletter confirmation link (/api/newsletter/confirm) lands here with ?uudiskiri=kinnitatud | vigane | viga.
@@ -161,7 +162,7 @@ export default async function Home({ params }: Props) {
         d={{
           eyebrow: d.trainer.eyebrow,
           name: trainerName,
-          text: firstParagraph(pick(bio?.body, locale)) || pick(trainer.role, locale),
+          text: pick(teaser?.body, locale).trim() || firstParagraph(pick(bio?.body, locale)) || pick(trainer.role, locale),
           portrait: mediaUrl(trainer.portraitKey),
           portraitPos: trainer.portraitPos,
           portraitZoom: trainer.portraitZoom,

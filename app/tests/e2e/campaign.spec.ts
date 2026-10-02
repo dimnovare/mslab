@@ -242,7 +242,7 @@ test.describe("short delay", () => {
 
   test("/ru: Russian controls and button, the link stays in Russian", async ({ page }) => {
     await page.goto("/ru");
-    const p = popup(page); // the seed campaign has Estonian texts only: they are shown (content falls back to et)
+    const p = page.getByRole("dialog", { name: "−15% на курс Lash Lift BOTOX" }); // the seed campaign in Russian (G8)
     await expect(p.getByRole("button", { name: "Закрыть" })).toBeFocused();
     await expect(p.getByRole("button", { name: "Копировать" })).toBeVisible();
     await expect(p.getByRole("link", { name: "Найти свой курс" })).toHaveAttribute("href", "/ru/koolitused/lash-lift-botox");

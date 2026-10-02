@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { tallinnFormParts, tallinnInstant } from "@/domain/calendar";
+import { readBadge, shownBadge } from "@/domain/badge";
 import { BADGE_PRESETS, BADGE_SWATCHES, badgeOf, draftFromCourse, moveItem, newCourseDraft, swatchOf } from "@/domain/course-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import { isSlug, slugify } from "@/lib/slug";
@@ -43,7 +44,9 @@ describe("Estonian date and time of a session", () => {
 
 describe("badges (prototype D)", () => {
   test("D's presets and swatches, every swatch from the palette", () => {
-    expect(BADGE_PRESETS).toEqual(["Uus", "Populaarne", "Bestseller", "Enim müüdud", "Viimased kohad", "Soodus"]);
+    expect(BADGE_PRESETS.map((p) => p.et)).toEqual(["Uus", "Populaarne", "Bestseller", "Enim müüdud", "Viimased kohad", "Soodus"]);
+    // round 2 item 1c: each with its Russian text
+    expect(BADGE_PRESETS.map((p) => p.ru)).toEqual(["Новинка", "Популярное", "Бестселлер", "Хит продаж", "Последние места", "Скидка"]);
     expect(BADGE_SWATCHES.map((s) => [adminEt.badge.swatch[s.id], s.bg, s.fg])).toEqual([
       ["Tint", "#222222", "#ffffff"],
       ["Orhidee", "#DDD4DC", "#222222"],
@@ -68,11 +71,28 @@ describe("badges (prototype D)", () => {
   });
 
   test("badgeOf trims and uses the swatch's colours; swatchOf finds it by background in any case", () => {
-    expect(badgeOf(" Uus ", "orchid")).toEqual({ label: "Uus", bg: "#DDD4DC", fg: "#222222" });
-    expect(badgeOf("  ", "tint")).toBeNull();
+    expect(badgeOf({ et: " Uus " }, "orchid")).toEqual({ label: { et: "Uus" }, bg: "#DDD4DC", fg: "#222222" });
+    expect(badgeOf({ et: "Uus", ru: " Новинка " }, "orchid")).toEqual({ label: { et: "Uus", ru: "Новинка" }, bg: "#DDD4DC", fg: "#222222" });
+    expect(badgeOf({ et: "Uus", ru: "  " }, "tint")!.label).toEqual({ et: "Uus" }); // an empty Russian text is left out
+    expect(badgeOf({ et: "  ", ru: "Новинка" }, "tint")).toBeNull(); // no badge without the Estonian text
     expect(swatchOf({ label: "Uus", bg: "#ddd4dc", fg: "#000" })).toBe("orchid");
     expect(swatchOf({ label: "Uus", bg: "#ff0000", fg: "#fff" })).toBeNull();
     expect(swatchOf(null)).toBeNull();
+  });
+});
+
+describe("badge labels in two languages (round 2 item 1c)", () => {
+  test("an old plain label is the Estonian text; RU pages show the Russian text or fall back to the Estonian", () => {
+    const old = { label: "Populaarne", bg: "#222222", fg: "#ffffff" };
+    const both = { label: { et: "Populaarne", ru: "Популярное" }, bg: "#222222", fg: "#ffffff" };
+    expect(readBadge(old)).toEqual({ label: { et: "Populaarne" }, bg: "#222222", fg: "#ffffff" });
+    expect(shownBadge(old, "ru")).toEqual({ label: "Populaarne", bg: "#222222", fg: "#ffffff" });
+    expect(shownBadge(both, "ru")!.label).toBe("Популярное");
+    expect(shownBadge(both, "et")!.label).toBe("Populaarne");
+    expect(shownBadge({ ...both, label: { et: "Uus", ru: " " } }, "ru")!.label).toBe("Uus");
+    expect(shownBadge(null, "et")).toBeNull();
+    expect(shownBadge({ label: "  ", bg: "#222222", fg: "#ffffff" }, "et")).toBeNull();
+    expect(readBadge({ label: { et: "" }, bg: "#222222", fg: "#ffffff" })).toBeNull();
   });
 });
 
@@ -98,7 +118,7 @@ describe("drafts", () => {
       videoCount: null,
       durationLabel: { et: "6 ak" },
       nextDiscount: null,
-      badge: { label: "Uus", bg: "#DDD4DC", fg: "#222222" },
+      badge: { label: "Uus", bg: "#DDD4DC", fg: "#222222" }, // stored before round 2: a plain Estonian label
       recommendationIds: [3, 1],
       published: true,
       isSample: true,
@@ -116,6 +136,7 @@ describe("drafts", () => {
       durationLabel: { et: "6 ak" },
       images: [{ key: "/seed/a.jpg", alt: { et: "" } }],
       recommendationIds: [3, 1],
+      badge: { label: { et: "Uus" }, bg: "#DDD4DC", fg: "#222222" },
     });
     expect(draftFromCourse({ ...stored, language: "EN" }).language).toBe("ET"); // not one of the three: ET
     expect(newCourseDraft()).toMatchObject({ id: null, version: null, type: "contact", published: false, isSample: false, badge: null });

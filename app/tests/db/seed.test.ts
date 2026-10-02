@@ -32,7 +32,7 @@ describe("prototype seed", () => {
       hero_slides: 5,
       faq: 6,
       posts: 6,
-      pages: 6,
+      pages: 7,
       gallery_items: 7,
       campaign: 1,
       settings: 3,
@@ -133,7 +133,7 @@ describe("prototype seed", () => {
     expect(home.faq).toHaveLength(6);
     expect(home.posts).toHaveLength(6);
     expect(home.campaign?.ctaLabel.et).toBe("Leia enda koolitus");
-    expect(Object.keys(home.pages).sort()).toEqual(["center_story", "privacy", "statement", "terms", "trainer_bio", "trainer_journey"]);
+    expect(Object.keys(home.pages).sort()).toEqual(["center_story", "privacy", "statement", "terms", "trainer_bio", "trainer_journey", "trainer_teaser"]);
     expect(home.settings).toHaveProperty("contact");
     expect(home.settings).toHaveProperty("newsletter", { discountLabel: "10%" });
   });
@@ -160,7 +160,15 @@ describe("prototype seed", () => {
     const gallery = await getGallery(db, "trainer_works");
     expect(gallery).toHaveLength(7);
     const settings = await getSettings(db);
-    expect(settings.trainer).toMatchObject({ name: "Maria Sosnina", stats: [{ value: "8+" }, { value: "4" }, { value: "1:4" }] });
+    expect(settings.trainer).toMatchObject({
+      name: { et: "Maria Sosnina", ru: "Мария Соснина" },
+      // D's labels (C26), in both languages
+      stats: [
+        { value: "8+", label: { et: "aastat kogemust", ru: "лет опыта" } },
+        { value: "4", label: { et: "linna", ru: "города" } },
+        { value: "1:4", label: { et: "väikesed grupid", ru: "малые группы" } },
+      ],
+    });
     expect(settings.contact).toMatchObject({ email: "info@mslab.ee" });
   });
 

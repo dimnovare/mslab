@@ -1,4 +1,5 @@
 import type { CourseWithImages } from "@/db/queries/public";
+import { shownBadge } from "@/domain/badge";
 import { fromPrice, priceOptions } from "@/domain/course";
 import { formatEUR } from "@/domain/money";
 import { pick } from "@/i18n/field";
@@ -30,7 +31,7 @@ export function courseCardData(
     summary: pick(c.summary, l),
     image: image ? mediaUrl(image.key) : "",
     imageAlt: pick(image?.alt, l) || title,
-    badge: c.badge,
+    badge: shownBadge(c.badge, l),
     tags: [online ? d.formats.elearning.name : d.formats.contact.name, c.level === "basic" ? d.course.levelBasic : d.course.levelAdvanced],
     meta: online ? { text: d.catalogue.onlineStart } : next ? { lead: formatDayMonth(next.startsAt, l), text: next.city } : { text: d.formats.contact.short },
     price: from == null ? "" : priceOptions(c).length > 1 ? `${d.catalogue.from} ${formatEUR(from, l)}` : formatEUR(from, l),

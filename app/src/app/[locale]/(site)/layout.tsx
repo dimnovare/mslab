@@ -4,7 +4,7 @@ import { Footer } from "@/components/site/Footer";
 import { Header } from "@/components/site/Header";
 import { shellSettings, type ShellSettings } from "@/components/site/settings";
 import { getSiteSettings } from "@/server/site-data";
-import { isLocale } from "@/i18n/locales";
+import { isLocale, type Locale } from "@/i18n/locales";
 
 /**
  * Every public page is cached once rendered (open-next.config.ts) and rendered again when an admin save, a registration,
@@ -19,9 +19,9 @@ export const revalidate = 86400;
 // read is not replaced by defaults: the page is cached once rendered, and a footer without the contact details would
 // stay for a day. Failing, the render stores nothing: in the daily refresh the previous copy stays in use; for a page a
 // change has marked stale (or one never rendered), visitors get the error page until a render succeeds.
-async function loadShellSettings(): Promise<ShellSettings> {
+async function loadShellSettings(locale: Locale): Promise<ShellSettings> {
   try {
-    return shellSettings(await getSiteSettings());
+    return shellSettings(await getSiteSettings(), locale);
   } catch (err) {
     console.error("site shell: settings unavailable:", err instanceof Error ? err.message : err);
     throw err;
@@ -36,7 +36,7 @@ const REVIEW_TOOLS = process.env.NEXT_PUBLIC_REVIEW_TOOLS === "1";
 export default async function SiteLayout({ children, params }: { children: React.ReactNode; params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  const settings = await loadShellSettings();
+  const settings = await loadShellSettings(locale);
   return (
     <>
       <Header locale={locale} />

@@ -305,6 +305,9 @@ export const adminEt = {
     none: "Puudub",
     own: "Oma tekst (kuni 18 märki)",
     placeholder: "nt. Sügise hitt",
+    ownRu: "Tekst vene keeles (kuni 18 märki)",
+    placeholderRu: "nt. Хит осени",
+    ruNote: "Vene lehel näidatakse seda teksti, tühjana eestikeelset. Kiirvalikul on vene tekst juba olemas.",
     colour: "Värv",
     swatch: { tint: "Tint", orchid: "Orhidee", rose: "Tuhkroos", plum: "Ploom", light: "Hele" },
     preview: "Eelvaade",
@@ -564,6 +567,12 @@ export const adminEt = {
       lead: "Lühike lause avalehe keskel. Esimese komani on tekst tumedam.",
       field: "Lause",
       hint: "Tühjaks jättes lõiku avalehel ei näidata.",
+    },
+    teaser: {
+      title: "Koolitaja kaart avalehel",
+      lead: "Lühike tekst avalehe koolitaja kaardil nime all. Nimi, foto ja numbrid tulevad lehelt Koolitaja.",
+      field: "Tekst",
+      hint: "Tühjaks jättes näidatakse koolitaja tutvustuse esimest lõiku.",
     },
     faq: {
       title: "Korduma kippuvad küsimused",

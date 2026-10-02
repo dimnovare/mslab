@@ -14,6 +14,7 @@ export const SITE_LIMITS = {
   ctaLabel: 40,
   href: 300,
   statement: 400,
+  teaser: 300,
   faq: 30,
   question: 200,
   answer: 2000,
@@ -238,7 +239,7 @@ export function packageDraft(p: { name: I18n; tagline: I18n; models: number; dur
 }
 
 export type StatDraft = Keyed & { value: string; label: I18n };
-export type TrainerDraft = { portraitKey: string; portraitPos: string; name: string; role: I18n; stats: StatDraft[] };
+export type TrainerDraft = { portraitKey: string; portraitPos: string; name: I18n; role: I18n; stats: StatDraft[] };
 
 /** settings.trainer → the trainer card's draft (the portrait's focal point defaults as the site frames it). */
 export function trainerDraft(value: unknown): TrainerDraft {
@@ -247,7 +248,8 @@ export function trainerDraft(value: unknown): TrainerDraft {
   return {
     portraitKey,
     portraitPos: portraitFraming(portraitKey, str(t.portraitPos)).pos,
-    name: str(t.name),
+    // a plain string (before round 2) is the Estonian name
+    name: typeof t.name === "string" ? { et: t.name } : i18nOf(t.name),
     role: i18nOf(t.role),
     stats: (Array.isArray(t.stats) ? t.stats : []).map((s, i) => ({ uid: `t${i}`, value: str(obj(s).value), label: i18nOf(obj(s).label) })),
   };

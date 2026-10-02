@@ -68,7 +68,7 @@ export default async function TrainerPage({ params }: Props) {
     getGallery(db, "trainer_works"),
   ]);
 
-  const trainer = trainerSettings(settings);
+  const trainer = trainerSettings(settings, locale);
   const name = trainer.name || pick(bio?.title, locale);
   const bioText = paragraphs(pick(bio?.body, locale));
   const lead = bioText.length > 0 ? bioText : [pick(trainer.role, locale)].filter(Boolean);

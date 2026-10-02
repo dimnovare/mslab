@@ -50,7 +50,7 @@ const one = async <T>(query: (sql: Parameters<Parameters<typeof onLocalDb>[0]>[0
 test.describe("practice packages (A8, R3)", () => {
   test("the package's duration and items are saved; the home practice card and /praktika show them", async ({ page, context, visitorIp }, info) => {
     // the brief: MAXI "9 ak" → home card "≈ 9 ak" (desktop); the phone project changes MINI the same way
-    const pkg = phone(info) ? { code: "MINI", before: "4 ak", after: "5 ak" } : { code: "MAXI", before: "8 ak", after: "9 ak" };
+    const pkg = phone(info) ? { code: "MINI", before: "4 ak", after: "5 ak", ru: "4 ак. ч." } : { code: "MAXI", before: "8 ak", after: "9 ak", ru: "8 ак. ч." };
     await changing(["practice_packages", { column: "code", value: pkg.code }]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/praktika");
@@ -73,7 +73,7 @@ test.describe("practice packages (A8, R3)", () => {
     expect(await noOverflow(page)).toBe(true);
     await save(page);
     const stored = await one((sql) => sql<{ duration: { et: string }; items: { et: string; ru?: string }[] }[]>`select duration_label as duration, items from practice_packages where code = ${pkg.code}`);
-    expect(stored.duration).toEqual({ et: pkg.after });
+    expect(stored.duration).toEqual({ et: pkg.after, ru: pkg.ru }); // the Russian text is Maria's to update
     expect(stored.items.at(-1)).toEqual({ et: "E2E punkt", ru: "E2E пункт" });
 
     await page.goto("/");
@@ -166,6 +166,27 @@ test.describe("home page", () => {
     await expect(page.locator("[data-hero] [data-tone]").first().getByRole("link").first()).toHaveAttribute("href", "/ru/praktika");
   });
 
+  test("the trainer card's text (C26): D's line by default; edited in ET and RU it is on / and /ru (round 2 item 5)", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "desktop changes the trainer card's text; the phone project the FAQ");
+    await changing(["pages", { column: "key", value: "trainer_teaser" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/avaleht");
+    await adminReady(page);
+    const editor = page.locator("[data-teaser-editor]");
+    await expect(editor.getByRole("heading", { name: "Koolitaja kaart avalehel" })).toBeVisible();
+    const et = editor.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true });
+    await expect(et).toHaveValue(/^Kulmu- ja ripsmetehnikate meister ja koolitaja\. Õpetan nii, nagu oleksin ise tahtnud õppida/);
+    await et.fill("E2E koolitaja tekst.");
+    await editor.getByRole("group", { name: /^Keel/ }).getByRole("button", { name: /^RU/ }).click();
+    await editor.getByRole("textbox", { name: "Tekst (vene keeles)", exact: true }).fill("E2E текст преподавателя.");
+    await save(page);
+    expect(await one((sql) => sql<{ body: unknown }[]>`select body from pages where key = 'trainer_teaser'`)).toEqual({ body: { et: "E2E koolitaja tekst.", ru: "E2E текст преподавателя." } });
+    await page.goto("/");
+    await expect(page.locator("[data-trainer-teaser]")).toContainText("E2E koolitaja tekst.");
+    await page.goto("/ru");
+    await expect(page.locator("[data-trainer-teaser]")).toContainText("E2E текст преподавателя.");
+  });
+
   test("FAQ: a new question in ET and RU, moved to the top; the home page shows it first", async ({ page, context, visitorIp }, info) => {
     test.skip(!phone(info), "the phone project changes the FAQ; desktop the hero slides");
     await changing(["faq"]);
@@ -223,7 +244,7 @@ test.describe("trainer page (T1–T4)", () => {
     await save(page);
     const stored = await one((sql) => sql<{ value: Record<string, unknown> }[]>`select value from settings where key = 'trainer'`);
     expect(stored.value.portraitKey).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
-    expect(stored.value).toMatchObject({ portraitPos: "30% 25%", contactPhotoKey: "/seed/maria-seated.jpg", name: "Maria Sosnina" });
+    expect(stored.value).toMatchObject({ portraitPos: "30% 25%", contactPhotoKey: "/seed/maria-seated.jpg", name: { et: "Maria Sosnina", ru: "Мария Соснина" } });
     const key = stored.value.portraitKey as string;
 
     await page.goto("/koolitaja");
@@ -347,11 +368,14 @@ test.describe("campaign (M2–M5)", () => {
     await expect(href).toBeFocused();
     expect(await one((sql) => sql<{ image: string }[]>`select image_key as image from campaign where id = 1`)).toEqual({ image: "/seed/lash-editorial.jpg" });
     await href.fill("/koolitused/lash-lift-botox");
+    // an empty button text in both languages: "Leia enda koolitus" (M4); the seed's Russian text is cleared too
     await page.getByRole("textbox", { name: "Nupu tekst (eesti keeles)", exact: true }).fill("");
+    await page.getByRole("group", { name: "Keel: Nupu tekst" }).getByRole("button", { name: /^RU/ }).click();
+    await page.getByRole("textbox", { name: "Nupu tekst (vene keeles)", exact: true }).fill("");
     await save(page);
 
     const stored = await one((sql) => sql<{ image: string; code: string; cta: { et: string }; title: { et: string } }[]>`select image_key as image, code, cta_label as cta, title from campaign where id = 1`);
-    expect(stored).toEqual({ image: src, code: "E2E-10", cta: { et: "Leia enda koolitus" }, title: { et: "E2E kampaania" } });
+    expect(stored).toEqual({ image: src, code: "E2E-10", cta: { et: "Leia enda koolitus" }, title: { et: "E2E kampaania", ru: "−15% на курс Lash Lift BOTOX" } });
     const media = await page.request.get(`/media/${src}`);
     expect(media.status()).toBe(200);
     expect(media.headers()["content-type"]).toBe("image/jpeg");

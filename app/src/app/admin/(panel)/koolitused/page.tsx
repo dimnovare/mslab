@@ -7,6 +7,7 @@ import { Shell } from "@/components/admin/Shell";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
 import { listAllCourses, type AdminCourse } from "@/db/queries/admin";
+import { shownBadge } from "@/domain/badge";
 import { formatEUR } from "@/domain/money";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick } from "@/i18n/field";
@@ -116,9 +117,9 @@ export default async function CoursesPage({ searchParams }: Props) {
                       </td>
                       <td data-label={t.col.price}>{priceText(c)}</td>
                       <td data-label={t.col.badge}>
-                        {c.badge?.label ? (
-                          <span className={styles.badge} style={{ background: c.badge.bg, color: c.badge.fg }} data-badge="">
-                            {c.badge.label}
+                        {shownBadge(c.badge, "et") ? (
+                          <span className={styles.badge} style={{ background: c.badge!.bg, color: c.badge!.fg }} data-badge="">
+                            {shownBadge(c.badge, "et")!.label}
                           </span>
                         ) : (
                           t.noBadge

@@ -7,7 +7,8 @@ import { DARK_MOBILE_FOCAL } from "@/domain/site-editor";
 
 /**
  * Prototype content that fills the site on day one (spec section 7). Texts come from prototype B (ET + RU)
- * and prototype D (ET); a Russian text exists only where prototype B has one. All courses are sample data.
+ * and prototype D (ET). The Russian texts that prototype B did not have were added in round 2 (item 1a) as drafts for
+ * a native speaker's check (task-16-report.md, "Fix round 2"). All courses are sample data.
  * Pure data: no database access, no Cloudflare bindings.
  */
 
@@ -42,18 +43,18 @@ const programme: I18n[] = [
 ];
 // "Koolitus sisaldab" (checklist P10), Maria's wording from docs/feedback/2026-10-01-maria-overview.md (first letter capitalised).
 const contactIncludes: I18n[] = [
-  t("Teooriaosa"),
-  t("Praktiline osa, nt töö kahel modellil"),
-  t("Õppematerjal, mis jääb peale koolitust õpilasele"),
-  t("Koolitaja juhendamine ja personaalne tugi koolituse ajal"),
-  t("Teadmiste test"),
-  t("Praktilise töö hindamine"),
-  t("Kõik vajalikud töövahendid koolituskeskuse poolt"),
-  t("Eduka koolituse läbimise korral tunnistus"),
+  t("Teooriaosa", "Теоретическая часть"),
+  t("Praktiline osa, nt töö kahel modellil", "Практическая часть, например работа на двух моделях"),
+  t("Õppematerjal, mis jääb peale koolitust õpilasele", "Учебные материалы, которые остаются у ученика после курса"),
+  t("Koolitaja juhendamine ja personaalne tugi koolituse ajal", "Руководство преподавателя и личная поддержка во время курса"),
+  t("Teadmiste test", "Тест знаний"),
+  t("Praktilise töö hindamine", "Оценка практической работы"),
+  t("Kõik vajalikud töövahendid koolituskeskuse poolt", "Все необходимые инструменты предоставляет учебный центр"),
+  t("Eduka koolituse läbimise korral tunnistus", "Сертификат при успешном завершении курса"),
 ];
 
-const badgePopular: Badge = { label: "Populaarne", bg: "#222222", fg: "#ffffff" };
-const badgeNew: Badge = { label: "Uus", bg: "#DDD4DC", fg: "#222222" };
+const badgePopular: Badge = { label: { et: "Populaarne", ru: "Популярное" }, bg: "#222222", fg: "#ffffff" };
+const badgeNew: Badge = { label: { et: "Uus", ru: "Новинка" }, bg: "#DDD4DC", fg: "#222222" };
 
 // ---------- courses ----------
 
@@ -68,11 +69,11 @@ export const SEEDED_AT = new Date();
 const day = (offset: number): Date => seedSessionStart(SEEDED_AT, offset);
 const studio = "MS LAB stuudio, Rüütli 12";
 
-const manualImage: SeedImage = { key: img("course-manual.jpg"), alt: t("MS LAB õppematerjal") };
-const certWhite: SeedImage = { key: img("certificate-white.jpg"), alt: t("MS LAB tunnistus valges raamis") };
-const certBlack: SeedImage = { key: img("certificate-black.jpg"), alt: t("MS LAB tunnistus mustas raamis") };
-const certEasel: SeedImage = { key: img("certificate-easel.jpg"), alt: t("MS LAB tunnistus laual") };
-const giftImage: SeedImage = { key: img("gift-bag-serum.jpg"), alt: t("MS LAB kingikott ja seerum") };
+const manualImage: SeedImage = { key: img("course-manual.jpg"), alt: t("MS LAB õppematerjal", "Учебные материалы MS LAB") };
+const certWhite: SeedImage = { key: img("certificate-white.jpg"), alt: t("MS LAB tunnistus valges raamis", "Сертификат MS LAB в белой рамке") };
+const certBlack: SeedImage = { key: img("certificate-black.jpg"), alt: t("MS LAB tunnistus mustas raamis", "Сертификат MS LAB в чёрной рамке") };
+const certEasel: SeedImage = { key: img("certificate-easel.jpg"), alt: t("MS LAB tunnistus laual", "Сертификат MS LAB на столе") };
+const giftImage: SeedImage = { key: img("gift-bag-serum.jpg"), alt: t("MS LAB kingikott ja seerum", "Подарочный пакет MS LAB и сыворотка") };
 
 export const courseSeeds: SeedCourse[] = [
   {
@@ -83,7 +84,7 @@ export const courseSeeds: SeedCourse[] = [
     summary: t("Tugev vundament sinu teekonnale kulmumeistrina.", "Уверенное начало вашего пути в профессии бровиста."),
     body: t(
       `Põhjalik baaskoolitus neile, kes alustavad kulmutehnikutena: kuju, värvimine, hooldus ja klienditöö. Praktika toimub modellil.\n\n${detailLead.et}`,
-      detailLead.ru,
+      `Подробный базовый курс для тех, кто начинает работать мастером бровей: форма, окрашивание, уход и работа с клиентом. Практика проходит на модели.\n\n${detailLead.ru}`,
     ),
     outcomes,
     includes: contactIncludes,
@@ -91,7 +92,7 @@ export const courseSeeds: SeedCourse[] = [
     language: "ET / RU",
     priceGroup: 35000,
     priceIndividual: 45000,
-    durationLabel: t("2 päeva · 16 ak"),
+    durationLabel: t("2 päeva · 16 ak", "2 дня · 16 ак. ч."),
     badge: badgePopular,
     images: [{ key: img("brow-editorial.jpg"), alt: t("Kulmumeistri baaskoolitus", "Базовый курс бровиста") }, manualImage, certWhite, giftImage],
     sessions: [
@@ -106,14 +107,17 @@ export const courseSeeds: SeedCourse[] = [
     level: "basic",
     title: t("Lash Lift BOTOX baaskoolitus", "Базовый курс Lash Lift BOTOX"),
     summary: t("Loomulik kaar. Täpne tehnika. Kaunis tulemus.", "Естественный изгиб. Точная техника. Красивый результат."),
-    body: t(`Ripsmete tõste ja toitev BOTOX-hooldus samm-sammult, koos praktikaga modellil.\n\n${detailLead.et}`, detailLead.ru),
+    body: t(
+      `Ripsmete tõste ja toitev BOTOX-hooldus samm-sammult, koos praktikaga modellil.\n\n${detailLead.et}`,
+      `Лифтинг ресниц и питательный уход BOTOX шаг за шагом, с практикой на модели.\n\n${detailLead.ru}`,
+    ),
     outcomes,
     includes: contactIncludes,
     modules: programme,
     language: "ET",
     priceGroup: 29000,
     priceIndividual: 39000,
-    durationLabel: t("8 ak"),
+    durationLabel: t("8 ak", "8 ак. ч."),
     badge: badgeNew,
     images: [{ key: img("lash-editorial.jpg"), alt: t("Lash Lift BOTOX baaskoolitus", "Базовый курс Lash Lift BOTOX") }, manualImage, certWhite, giftImage],
     sessions: [
@@ -127,7 +131,7 @@ export const courseSeeds: SeedCourse[] = [
     type: "contact",
     level: "advanced",
     title: t("Kulmude LAMI", "Ламинирование бровей"),
-    summary: t("Kulmude laminatsioon juba töötavale meistrile: tooted, ajastus ja kuju püsivus."),
+    summary: t("Kulmude laminatsioon juba töötavale meistrile: tooted, ajastus ja kuju püsivus.", "Ламинирование бровей для практикующих мастеров: средства, время выдержки и стойкость формы."),
     body: detailLead,
     outcomes,
     includes: contactIncludes,
@@ -135,7 +139,7 @@ export const courseSeeds: SeedCourse[] = [
     language: "ET / RU",
     priceGroup: 22000,
     priceIndividual: 30000,
-    durationLabel: t("6 ak"),
+    durationLabel: t("6 ak", "6 ак. ч."),
     badge: null,
     images: [{ key: img("brow-closeup.jpg"), alt: t("Kulmude LAMI", "Ламинирование бровей") }, manualImage, certWhite, giftImage],
     sessions: [
@@ -147,19 +151,19 @@ export const courseSeeds: SeedCourse[] = [
     slug: "kulmumeistri-e-koolitus",
     type: "e_learning",
     level: "basic",
-    title: t("Kulmumeistri e-koolitus"),
+    title: t("Kulmumeistri e-koolitus", "Онлайн-курс бровиста"),
     summary: t("Tugev vundament sinu teekonnale kulmumeistrina.", "Уверенное начало вашего пути в профессии бровиста."),
     body: t(
       `${onlineLead.et}\n\nPõhjalik baaskoolitus neile, kes alustavad kulmutehnikutena: kuju, värvimine, hooldus ja klienditöö.`,
-      onlineLead.ru,
+      `${onlineLead.ru}\n\nПодробный базовый курс для тех, кто начинает работать мастером бровей: форма, окрашивание, уход и работа с клиентом.`,
     ),
     outcomes,
     includes: [],
     modules: [
       programme[0],
       programme[1],
-      t("Kulmude arhitektuur"),
-      t("Värvid ja segamine"),
+      t("Kulmude arhitektuur", "Архитектура бровей"),
+      t("Värvid ja segamine", "Красители и смешивание"),
       programme[2],
       programme[3],
     ],
@@ -167,43 +171,48 @@ export const courseSeeds: SeedCourse[] = [
     price: 19000,
     accessMonths: 6,
     videoCount: 24,
-    nextDiscount: t("−10% järgmiselt koolituselt"),
+    nextDiscount: t("−10% järgmiselt koolituselt", "−10% на следующий курс"),
     badge: null,
-    images: [{ key: img("brow-editorial.jpg"), alt: t("Kulmumeistri e-koolitus") }, manualImage, certBlack, certEasel],
+    images: [{ key: img("brow-editorial.jpg"), alt: t("Kulmumeistri e-koolitus", "Онлайн-курс бровиста") }, manualImage, certBlack, certEasel],
   },
   {
     slug: "kulmukuju-ja-summeetria",
     type: "e_learning",
     level: "advanced",
-    title: t("Kulmukuju ja sümmeetria"),
-    summary: t("Lühike täiendkoolitus kuju kaardistamise ja sümmeetria kohta."),
+    title: t("Kulmukuju ja sümmeetria", "Форма и симметрия бровей"),
+    summary: t("Lühike täiendkoolitus kuju kaardistamise ja sümmeetria kohta.", "Короткий курс повышения квалификации о разметке формы и симметрии."),
     body: onlineLead,
     outcomes,
     includes: [],
-    modules: [t("Sissejuhatus ja töövahendid"), t("Kulmukuju analüüs"), t("Sümmeetria ja korrigeerimine")],
+    modules: [t("Sissejuhatus ja töövahendid", "Введение и инструменты"), t("Kulmukuju analüüs", "Анализ формы бровей"), t("Sümmeetria ja korrigeerimine", "Симметрия и коррекция")],
     language: "ET / RU",
     price: 9500,
     accessMonths: 6,
     videoCount: 8,
     badge: null,
-    images: [{ key: img("lash-tweezers-detail.jpg"), alt: t("Kulmukuju ja sümmeetria") }, manualImage, certEasel, certBlack],
+    images: [{ key: img("lash-tweezers-detail.jpg"), alt: t("Kulmukuju ja sümmeetria", "Форма и симметрия бровей") }, manualImage, certEasel, certBlack],
   },
   {
     slug: "ripsmete-laminatsiooni-alused",
     type: "e_learning",
     level: "basic",
-    title: t("Ripsmete laminatsiooni alused"),
-    summary: t("Teooria ja tehnika videotena, enne kui lähed esimese kliendi juurde."),
+    title: t("Ripsmete laminatsiooni alused", "Основы ламинирования ресниц"),
+    summary: t("Teooria ja tehnika videotena, enne kui lähed esimese kliendi juurde.", "Теория и техника в видео — до того, как вы примете первого клиента."),
     body: onlineLead,
     outcomes,
     includes: [],
-    modules: [t("Ripsmete anatoomia ja hügieen"), t("Töövahendid ja tooted"), t("Laminatsiooni tehnika samm-sammult"), t("Test ja tunnistus")],
+    modules: [
+      t("Ripsmete anatoomia ja hügieen", "Анатомия ресниц и гигиена"),
+      t("Töövahendid ja tooted", "Инструменты и средства"),
+      t("Laminatsiooni tehnika samm-sammult", "Техника ламинирования шаг за шагом"),
+      t("Test ja tunnistus", "Тест и сертификат"),
+    ],
     language: "ET / RU",
     price: 15000,
     accessMonths: 6,
     videoCount: 12,
     badge: null,
-    images: [{ key: img("eye-closeup.jpg"), alt: t("Ripsmete laminatsiooni alused") }, manualImage, certWhite, certBlack],
+    images: [{ key: img("eye-closeup.jpg"), alt: t("Ripsmete laminatsiooni alused", "Основы ламинирования ресниц") }, manualImage, certWhite, certBlack],
   },
 ];
 
@@ -220,7 +229,7 @@ export const practiceSeeds: PracticePackageInput[] = [
     name: t("MINI"),
     tagline: t("Keskendu sellele, mis vajab tuge.", "Сосредоточьтесь на том, что важно."),
     models: 2,
-    durationLabel: t("4 ak"),
+    durationLabel: t("4 ak", "4 ак. ч."),
     price: 10000,
     items: [t("Töö kahel modellil", "Работа на двух моделях"), ...practiceCommon],
     sort: 1,
@@ -230,7 +239,7 @@ export const practiceSeeds: PracticePackageInput[] = [
     name: t("MAXI"),
     tagline: t("Rohkem harjutamist. Veel kindlam käekiri.", "Больше практики. Больше уверенности."),
     models: 4,
-    durationLabel: t("8 ak"),
+    durationLabel: t("8 ak", "8 ак. ч."),
     price: 15000,
     items: [t("Töö neljal modellil", "Работа на четырёх моделях"), ...practiceCommon],
     sort: 2,
@@ -315,60 +324,105 @@ export const heroSeeds: HeroSlideInput[] = [
 
 export const faqSeeds: { q: I18n; a: I18n }[] = [
   {
-    q: t("Kas vajan eelnevaid kogemusi?"),
-    a: t("Ei. Baaskoolitused on mõeldud alustajatele ja on mahukamad. Täiendkoolitused sobivad neile, kes juba töötavad ja soovivad õppida konkreetset tehnikat."),
+    q: t("Kas vajan eelnevaid kogemusi?", "Нужен ли предварительный опыт?"),
+    a: t("Ei. Baaskoolitused on mõeldud alustajatele ja on mahukamad. Täiendkoolitused sobivad neile, kes juba töötavad ja soovivad õppida konkreetset tehnikat.", "Нет. Базовые курсы рассчитаны на начинающих и более объёмны. Курсы повышения квалификации подходят тем, кто уже работает и хочет освоить конкретную технику."),
   },
   {
-    q: t("Mis juhtub pärast e-koolituse ostu?"),
-    a: t("Sulle luuakse automaatselt õpilase konto ja saad kinnituse e-postiga. Logi sisse ja alusta kohe — videod ja materjalid on avatud kogu ligipääsu aja."),
+    q: t("Mis juhtub pärast e-koolituse ostu?", "Что происходит после покупки онлайн-курса?"),
+    a: t("Sulle luuakse automaatselt õpilase konto ja saad kinnituse e-postiga. Logi sisse ja alusta kohe — videod ja materjalid on avatud kogu ligipääsu aja.", "Для вас автоматически создаётся учётная запись ученика, а подтверждение приходит по электронной почте. Войдите и начните сразу — видео и материалы открыты весь срок доступа."),
   },
   {
-    q: t("Mis vahe on e-õppel ja kontaktõppel?"),
-    a: t("E-õpe toimub veebis videotena sinu enda tempos. Kontaktõpe toimub kohapeal koolitaja juhendamisel, grupis või individuaalselt. Soovi korral saad kahte õppevormi ka kombineerida, valides sobiva e-koolituse ja kontaktkoolituse."),
+    q: t("Mis vahe on e-õppel ja kontaktõppel?", "Чем онлайн-обучение отличается от очного?"),
+    a: t("E-õpe toimub veebis videotena sinu enda tempos. Kontaktõpe toimub kohapeal koolitaja juhendamisel, grupis või individuaalselt. Soovi korral saad kahte õppevormi ka kombineerida, valides sobiva e-koolituse ja kontaktkoolituse.", "Онлайн-обучение проходит в формате видео в вашем собственном темпе. Очное обучение проходит на месте под руководством преподавателя, в группе или индивидуально. При желании оба формата можно совместить, выбрав подходящий онлайн-курс и очный курс."),
   },
   {
-    q: t("Kas modellid tuleb ise leida?"),
-    a: t("Ei pea. Võid tulla oma modellidega, kuid vajadusel leiab modellid koolituskeskus ning kõik töövahendid on kohapeal olemas."),
+    q: t("Kas modellid tuleb ise leida?", "Нужно ли самой искать моделей?"),
+    a: t("Ei pea. Võid tulla oma modellidega, kuid vajadusel leiab modellid koolituskeskus ning kõik töövahendid on kohapeal olemas.", "Не обязательно. Можно прийти со своими моделями, но при необходимости моделей найдёт учебный центр, а все инструменты есть на месте."),
   },
   {
-    q: t("Kas saan maksta osade kaupa?"),
-    a: t("Kontaktkoolituse eest saad tasuda kohe 100% või 50% registreerimisel ja ülejäänud 50% koolituspäeval. Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist. E-koolituse eest tasud kohe pangalingiga; järelmaks lisandub hiljem."),
+    q: t("Kas saan maksta osade kaupa?", "Можно ли оплатить частями?"),
+    a: t("Kontaktkoolituse eest saad tasuda kohe 100% või 50% registreerimisel ja ülejäänud 50% koolituspäeval. Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist. E-koolituse eest tasud kohe pangalingiga; järelmaks lisandub hiljem.", "Очный курс можно оплатить сразу на 100% или 50% при регистрации и остальные 50% в день обучения. Место подтверждается после поступления предоплаты не менее 50%. Онлайн-курс оплачивается сразу через банковскую ссылку; рассрочка появится позже."),
   },
   {
-    q: t("Millal saan tunnistuse?"),
-    a: t("Pärast koolituse edukat lõpetamist: e-koolituses pärast teadmiste testi ja praktilise töö hindamist, kontaktkoolituses pärast testi ja praktilise töö hindamist."),
+    q: t("Millal saan tunnistuse?", "Когда я получу сертификат?"),
+    a: t("Pärast koolituse edukat lõpetamist: e-koolituses pärast teadmiste testi ja praktilise töö hindamist, kontaktkoolituses pärast testi ja praktilise töö hindamist.", "После успешного завершения курса: на онлайн-курсе — после теста знаний и оценки практической работы, на очном курсе — после теста и оценки практической работы."),
   },
 ];
 
 // ---------- posts (prototype D NEWS) ----------
 
-const postBody = (excerpt: string) =>
+const postBody = (excerpt: I18n) =>
   t(
     [
-      `${excerpt} See on näidispostitus, mis näitab, kuidas täismahus artikkel lehel välja näeb: pealkiri, kaanepilt, loetav tekstilaius ja lõpus soovitused.`,
+      `${excerpt.et} See on näidispostitus, mis näitab, kuidas täismahus artikkel lehel välja näeb: pealkiri, kaanepilt, loetav tekstilaius ja lõpus soovitused.`,
       "Mõtle, kas soovid alustada täiesti uue teenusega või täiendada seda, mida juba teed. Baaskoolitused on mahukamad ja põhjalikumad, täiendkoolitused keskenduvad ühele tehnikale või teemale.",
       "E-õpe sobib, kui soovid õppida omas tempos. Kontaktõpe annab kohese praktika koolitaja kõrval. E-õpet ja kontaktõpet saab omavahel kombineerida, valides endale sobivad koolitused.",
     ].join("\n\n"),
+    [
+      `${excerpt.ru} Это пример публикации: так на странице выглядит полная статья — заголовок, обложка, удобная для чтения ширина текста и рекомендации в конце.`,
+      "Подумайте, хотите ли вы начать совершенно новую услугу или усовершенствовать то, что уже делаете. Базовые курсы объёмнее и подробнее, курсы повышения квалификации посвящены одной технике или теме.",
+      "Онлайн-обучение подходит, если вы хотите учиться в своём темпе. Очное обучение даёт практику сразу рядом с преподавателем. Онлайн- и очное обучение можно сочетать, выбрав подходящие курсы.",
+    ].join("\n\n"),
   );
 
-const post = (date: string, category: I18n, title: string, cover: string, excerpt: string): PostInput => ({
-  slug: slugify(title),
-  title: t(title),
-  excerpt: t(excerpt),
-  body: postBody(excerpt),
+/** `title` and `excerpt`: [et, ru]; the slug comes from the Estonian title. */
+const post = (date: string, category: I18n, title: [string, string], cover: string, excerpt: [string, string]): PostInput => ({
+  slug: slugify(title[0]),
+  title: t(...title),
+  excerpt: t(...excerpt),
+  body: postBody(t(...excerpt)),
   category,
   coverKey: img(cover),
   publishedAt: new Date(`${date}T09:00:00+03:00`),
   published: true,
 });
 
+const advice = t("Nõuanne", "Совет");
+const news = t("Uudis", "Новость");
+
 export const postSeeds: PostInput[] = [
-  post("2026-09-22", t("Nõuanne"), "Kuidas valida endale sobiv kulmukoolitus?", "brow-editorial.jpg", "Baas- või täiendkoolitus, e-õpe või kontaktpäev — lühike juhend, kust alustada."),
-  post("2026-09-15", t("Uudis"), "Uus koolitus: Lash Lift BOTOX", "lash-editorial.jpg", "Novembrist lisandub kalendrisse ripsmete tõste ja BOTOX-hoolduse koolitus."),
-  post("2026-09-02", t("Praktika", "Практика"), "Praktika modellidega — mida oodata?", "certificate-easel.jpg", "Kuidas praktikapäev käib ja miks praktikaprotokoll on sinu parim tagasiside."),
-  post("2026-08-20", t("Nõuanne"), "Kulmude hooldus pärast laminatsiooni", "brow-closeup.jpg", "Viis asja, mida kliendile pärast protseduuri alati meelde tuletada."),
-  post("2026-08-05", t("Uudis"), "MS LAB koolitused nüüd ka Tartus ja Viljandis", "flower-petal.jpg", "Kontaktkoolitused jõuavad sügisest rohkemate linnadeni."),
-  post("2026-07-18", t("Õpilase lugu"), "Esimesest koolitusest oma salongini", "course-manual.jpg", "Kuidas üks baaskoolitus muutis karjääri — õpilase kogemus."),
+  post(
+    "2026-09-22",
+    advice,
+    ["Kuidas valida endale sobiv kulmukoolitus?", "Как выбрать подходящий курс по бровям?"],
+    "brow-editorial.jpg",
+    ["Baas- või täiendkoolitus, e-õpe või kontaktpäev — lühike juhend, kust alustada.", "Базовый курс или повышение квалификации, онлайн или очный день — короткое руководство, с чего начать."],
+  ),
+  post(
+    "2026-09-15",
+    news,
+    ["Uus koolitus: Lash Lift BOTOX", "Новый курс: Lash Lift BOTOX"],
+    "lash-editorial.jpg",
+    ["Novembrist lisandub kalendrisse ripsmete tõste ja BOTOX-hoolduse koolitus.", "С ноября в расписании появится курс по лифтингу ресниц и уходу BOTOX."],
+  ),
+  post(
+    "2026-09-02",
+    t("Praktika", "Практика"),
+    ["Praktika modellidega — mida oodata?", "Практика на моделях — чего ожидать?"],
+    "certificate-easel.jpg",
+    ["Kuidas praktikapäev käib ja miks praktikaprotokoll on sinu parim tagasiside.", "Как проходит день практики и почему протокол практики — ваша лучшая обратная связь."],
+  ),
+  post(
+    "2026-08-20",
+    advice,
+    ["Kulmude hooldus pärast laminatsiooni", "Уход за бровями после ламинирования"],
+    "brow-closeup.jpg",
+    ["Viis asja, mida kliendile pärast protseduuri alati meelde tuletada.", "Пять вещей, о которых стоит всегда напоминать клиенту после процедуры."],
+  ),
+  post(
+    "2026-08-05",
+    news,
+    ["MS LAB koolitused nüüd ka Tartus ja Viljandis", "Курсы MS LAB теперь и в Тарту и Вильянди"],
+    "flower-petal.jpg",
+    ["Kontaktkoolitused jõuavad sügisest rohkemate linnadeni.", "С осени очные курсы проходят в большем числе городов."],
+  ),
+  post(
+    "2026-07-18",
+    t("Õpilase lugu", "История ученицы"),
+    ["Esimesest koolitusest oma salongini", "От первого курса до собственного салона"],
+    "course-manual.jpg",
+    ["Kuidas üks baaskoolitus muutis karjääri — õpilase kogemus.", "Как один базовый курс изменил карьеру — опыт ученицы."],
+  ),
 ];
 
 // ---------- pages ----------
@@ -381,19 +435,32 @@ const legalPlaceholder = t(
 export const pageSeeds: { key: string; title: I18n; body: I18n }[] = [
   {
     key: "statement",
-    title: t("MS LAB Koolituskeskus"),
-    body: t("Õpetame kulmu- ja ripsmetehnikaid nii, nagu oleksime ise tahtnud õppida — väikestes gruppides, päris modellidel ja toega ka pärast koolitust."),
+    title: t("MS LAB Koolituskeskus", "Учебный центр MS LAB"),
+    body: t(
+      "Õpetame kulmu- ja ripsmetehnikaid nii, nagu oleksime ise tahtnud õppida — väikestes gruppides, päris modellidel ja toega ka pärast koolitust.",
+      "Мы учим техникам бровей и ресниц так, как хотели бы учиться сами, — в небольших группах, на настоящих моделях и с поддержкой после курса.",
+    ),
   },
   {
     key: "trainer_bio",
-    title: t("Maria Sosnina"),
+    title: t("Maria Sosnina", "Мария Соснина"),
     body: t(
       "Kulmu- ja ripsmetehnikate meister ja koolitaja. Töötan Pärnus ilukliinikus ja koolitan üle Eesti.\n\nMinu eesmärk on lihtne: et iga õpilane lahkuks koolituselt oskuste ja kindlusega alustada. Seepärast on grupid väikesed, praktika päris modellidel ja tagasiside kirjalik.",
+      "Мастер и преподаватель техник бровей и ресниц. Работаю в клинике красоты в Пярну и провожу обучение по всей Эстонии.\n\nМоя цель проста: чтобы каждый ученик уходил с курса с навыками и уверенностью, чтобы начать. Поэтому группы небольшие, практика — на настоящих моделях, а обратная связь — письменная.",
+    ),
+  },
+  {
+    // The home page's trainer card text (round 2 item 5, Maria C26: D's own line), edited under Avaleht
+    key: "trainer_teaser",
+    title: t("Sinu koolitaja", "Ваш преподаватель"),
+    body: t(
+      "Kulmu- ja ripsmetehnikate meister ja koolitaja. Õpetan nii, nagu oleksin ise tahtnud õppida: selgelt, praktiliselt ja iga õpilase tempos.",
+      "Мастер и преподаватель техник бровей и ресниц. Я учу так, как хотела бы учиться сама: понятно, практично и в темпе каждого ученика.",
     ),
   },
   {
     key: "center_story",
-    title: t("Koolituskeskuse lugu"),
+    title: t("Koolituskeskuse lugu", "История учебного центра"),
     body: t(
       "MS LAB ühendab teooria ja praktika. Õppimine jätkub ka pärast esimest koolituspäeva: saad oma tehnikat kinnistada individuaalpraktikas ning veebimaterjalide abil.",
       "MS LAB объединяет теорию и практику. Обучение продолжается после первого дня: закрепляйте технику на индивидуальной практике и с помощью онлайн-материалов.",
@@ -401,8 +468,11 @@ export const pageSeeds: { key: string; title: I18n; body: I18n }[] = [
   },
   {
     key: "trainer_journey",
-    title: t("Koolitaja teekond"),
-    body: t("Siia tuleb Maria lugu: kuidas kulmu- ja ripsmemeistrist sai koolitaja ja mis teda iga päev edasi viib. Maria täiendab."),
+    title: t("Koolitaja teekond", "Путь преподавателя"),
+    body: t(
+      "Siia tuleb Maria lugu: kuidas kulmu- ja ripsmemeistrist sai koolitaja ja mis teda iga päev edasi viib. Maria täiendab.",
+      "Здесь будет история Марии: как мастер бровей и ресниц стала преподавателем и что вдохновляет её каждый день. Мария дополнит.",
+    ),
   },
   { key: "privacy", title: t("Privaatsus", "Конфиденциальность"), body: legalPlaceholder },
   { key: "terms", title: t("Õppetingimused", "Условия обучения"), body: legalPlaceholder },
@@ -416,19 +486,19 @@ export const trainerWorks: SeedImage[] = [
   certEasel,
   manualImage,
   giftImage,
-  { key: img("maria-seated.jpg"), alt: t("Koolitaja Maria Sosnina") },
-  { key: img("maria-standing.jpg"), alt: t("Koolitaja Maria Sosnina") },
+  { key: img("maria-seated.jpg"), alt: t("Koolitaja Maria Sosnina", "Преподаватель Мария Соснина") },
+  { key: img("maria-standing.jpg"), alt: t("Koolitaja Maria Sosnina", "Преподаватель Мария Соснина") },
 ];
 
 // ---------- campaign popup (prototype D CAMP_DEFAULT; CTA wording M4) ----------
 
 export const campaignSeed: CampaignInput = {
   active: true,
-  kicker: t("Talvine pakkumine"),
-  title: t("−15% Lash Lift BOTOX koolitusele"),
-  text: t("Kehtib registreerumisel kuni 30.11. Sisesta kood ostukorvis."),
+  kicker: t("Talvine pakkumine", "Зимнее предложение"),
+  title: t("−15% Lash Lift BOTOX koolitusele", "−15% на курс Lash Lift BOTOX"),
+  text: t("Kehtib registreerumisel kuni 30.11. Sisesta kood ostukorvis.", "Действует при регистрации до 30.11. Введите код в корзине."),
   code: "TALV15",
-  ctaLabel: t("Leia enda koolitus"),
+  ctaLabel: t("Leia enda koolitus", "Найти свой курс"),
   ctaHref: "/koolitused/lash-lift-botox",
   imageKey: img("lash-editorial.jpg"),
 };
@@ -441,12 +511,13 @@ export const settingSeeds: Record<string, unknown> = {
   trainer: {
     portraitKey: img("maria-standing.jpg"),
     contactPhotoKey: img("maria-seated.jpg"),
-    name: "Maria Sosnina",
+    name: t("Maria Sosnina", "Мария Соснина"),
     role: t("Kulmu- ja ripsmetehnikate meister ja koolitaja", "Мастер и преподаватель техник бровей и ресниц"),
+    // D's labels (Maria C26)
     stats: [
-      { value: "8+", label: t("aastat") },
-      { value: "4", label: t("linna") },
-      { value: "1:4", label: t("grupp") },
+      { value: "8+", label: t("aastat kogemust", "лет опыта") },
+      { value: "4", label: t("linna", "города") },
+      { value: "1:4", label: t("väikesed grupid", "малые группы") },
     ],
   },
 };

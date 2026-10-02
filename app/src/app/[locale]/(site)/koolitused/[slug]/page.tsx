@@ -22,6 +22,7 @@ import { bookableCities, paragraphs } from "@/domain/catalogue";
 import { priceOptions } from "@/domain/course";
 import { firstParagraph, nextSessionByCourse } from "@/domain/home";
 import { formatEUR } from "@/domain/money";
+import { shownBadge } from "@/domain/badge";
 import { recommend } from "@/domain/recommend";
 import { seatState, seatsLeft } from "@/domain/sessions";
 import { pick, pickList } from "@/i18n/field";
@@ -83,7 +84,7 @@ export default async function CoursePage({ params }: Props) {
   const title = pick(course.title, locale);
   const images = course.images.map((img) => ({ src: mediaUrl(img.key), alt: pick(img.alt, locale) || title }));
 
-  const t = trainerSettings(settings);
+  const t = trainerSettings(settings, locale);
   const trainerName = t.name || pick(bio?.title, locale);
   const trainer: TrainerInfo = {
     name: trainerName,
@@ -143,6 +144,7 @@ export default async function CoursePage({ params }: Props) {
     return full ? [courseCardData(full, nextByCourse.get(full.id), locale, d, to)] : [];
   });
 
+  const badge = shownBadge(course.badge, locale);
   const body = paragraphs(pick(course.body, locale));
   const outcomes = pickList(course.outcomes, locale);
   const includes = online
@@ -184,9 +186,9 @@ export default async function CoursePage({ params }: Props) {
 
           <div className={styles.info}>
             <div className={styles.tags} data-course-tags="">
-              {course.badge?.label && (
-                <span className={styles.badge} style={{ background: course.badge.bg, color: course.badge.fg }}>
-                  {course.badge.label}
+              {badge && (
+                <span className={styles.badge} style={{ background: badge.bg, color: badge.fg }}>
+                  {badge.label}
                 </span>
               )}
               <span className={styles.tag}>{online ? d.formats.elearning.name : d.formats.contact.name}</span>

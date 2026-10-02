@@ -41,7 +41,7 @@ export default async function ContactPage({ params }: Props) {
     ["Instagram", str(c.instagram)],
     ["Facebook", str(c.facebook)],
   ].filter(([, url]) => isHttpsUrl(url)); // the admin stores https addresses only; anything else is not linked
-  const trainer = trainerSettings(settings);
+  const trainer = trainerSettings(settings, locale);
 
   return (
     <>

@@ -480,12 +480,13 @@ test.describe("trainer", () => {
     expect(j!.y).toBeGreaterThan(s!.y);
   });
 
-  test("RU trainer: Russian section names until Maria adds Russian titles, Estonian text as fallback", async ({ page }) => {
+  test("RU trainer: Russian section names and sample texts (G8); her name in Russian", async ({ page }) => {
     await page.goto("/ru/koolitaja");
     await expect(page.locator("[data-story='center_story'] h2")).toHaveText("История учебного центра");
     await expect(page.locator("[data-story='center_story']")).toContainText("MS LAB объединяет теорию и практику.");
     await expect(page.locator("[data-story='trainer_journey'] h2")).toHaveText("Путь преподавателя");
-    await expect(page.locator("[data-story='trainer_journey']")).toContainText("Maria täiendab.");
+    await expect(page.locator("[data-story='trainer_journey']")).toContainText("Мария дополнит.");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Мария Соснина");
     await expect(page.locator("[data-works]").getByRole("heading")).toHaveText("Работы преподавателя");
   });
 });
@@ -522,13 +523,14 @@ test.describe("blog", () => {
     await expect(page.getByRole("heading", { name: "Lehte ei leitud" })).toBeVisible();
   });
 
-  test("RU blog uses RU interface text and falls back to ET content", async ({ page }) => {
+  test("RU blog: RU interface text and the RU sample posts (G8)", async ({ page }) => {
     await page.goto("/ru/uudised");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Блог.");
     await expect(page.locator("[data-news-card]").first()).toHaveAttribute("href", /^\/ru\/uudised\//);
     await page.goto("/ru/uudised/praktika-modellidega-mida-oodata");
     await expect(page.locator("[data-article]")).toContainText("02.09.2026 · Практика");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Praktika modellidega — mida oodata?");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Практика на моделях — чего ожидать?");
+    await expect(page.locator("[data-article-body] p").first()).toContainText("Как проходит день практики");
     await expect(page.locator("[data-more-posts]").getByRole("heading", { name: "Читайте также" })).toBeVisible();
   });
 });

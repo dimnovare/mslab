@@ -15,7 +15,8 @@ import ui from "./ui.module.css";
 import styles from "./site-editor.module.css";
 
 /**
- * Avaleht: the hero slides (image, focal points, tone, texts, button, order, on / off), D's statement line and the FAQ,
+ * Avaleht: the hero slides (image, focal points, tone, texts, button, order, on / off), D's statement line, the text of
+ * the trainer card (C26) and the FAQ,
  * saved together with "Salvesta" (only the changed parts are sent). The home page's trainer block uses the trainer page's
  * data (Koolitaja), so it has a pointer there instead of fields of its own.
  */
@@ -62,6 +63,24 @@ export function HomeEditor({ initial, links }: { initial: Loaded<HomeValues>; li
             hint={t.statement.hint}
             error={d.err("statement.body")}
             name="statement.body"
+          />
+        </section>
+
+        <section className={ui.card} aria-labelledby={`${uid}-teaser`} data-teaser-editor="">
+          <h2 id={`${uid}-teaser`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {t.teaser.title}
+          </h2>
+          <p className={`${ui.muted} ${styles.cardLead}`}>{t.teaser.lead}</p>
+          <I18nInput
+            label={t.teaser.field}
+            value={d.draft.teaser.body}
+            onChange={(body) => d.set("teaser", { body })}
+            multiline
+            rows={3}
+            maxLength={SITE_LIMITS.teaser}
+            hint={t.teaser.hint}
+            error={d.err("teaser.body")}
+            name="teaser.body"
           />
         </section>
 

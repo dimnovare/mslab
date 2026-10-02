@@ -10,7 +10,12 @@ export const payChoice = pgEnum("payment_choice", ["full", "half"]);
 export const sessionStatus = pgEnum("session_status", ["scheduled", "cancelled"]);
 export const requestKind = pgEnum("request_kind", ["contact", "individual", "practice", "waitlist"]);
 
-export type Badge = { label: string; bg: string; fg: string } | null;
+/** A badge's text: Estonian, and Russian when Maria gave one (the RU pages fall back to the Estonian text). */
+export type BadgeLabel = { et: string; ru?: string };
+/** A course badge as written now. */
+export type Badge = { label: BadgeLabel; bg: string; fg: string } | null;
+/** A course badge as it may be stored: rows written before round 2 have a plain Estonian label (domain/badge.ts reads both). */
+export type StoredBadge = Badge | { label: string; bg: string; fg: string };
 
 export const courses = pgTable("courses", {
   id: serial("id").primaryKey(),
@@ -31,7 +36,7 @@ export const courses = pgTable("courses", {
   videoCount: integer("video_count"),
   durationLabel: jsonb("duration_label").$type<I18n>(),        // e.g. {et:"8 ak"}
   nextDiscount: jsonb("next_discount").$type<I18n>(),
-  badge: jsonb("badge").$type<Badge>(),
+  badge: jsonb("badge").$type<StoredBadge>(),
   recommendationIds: jsonb("recommendation_ids").$type<number[]>().notNull().default([]),
   published: boolean("published").notNull().default(false),
   sort: integer("sort").notNull().default(0),

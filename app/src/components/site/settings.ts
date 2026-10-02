@@ -1,5 +1,6 @@
 import { isHttpsUrl, portraitFraming } from "@/domain/site-editor";
-import type { I18n } from "@/i18n/field";
+import { pick, type I18n } from "@/i18n/field";
+import type { Locale } from "@/i18n/locales";
 
 // The parts of the settings table the site shell needs, with safe defaults (keys: see db/schema.ts settings).
 
@@ -13,13 +14,13 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object"
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 const https = (v: unknown): string => (isHttpsUrl(str(v)) ? str(v) : "");
 
-export function shellSettings(settings: Record<string, unknown>): ShellSettings {
+export function shellSettings(settings: Record<string, unknown>, locale: Locale = "et"): ShellSettings {
   const contact = obj(settings.contact);
   return {
     newsletter: { discountLabel: str(obj(settings.newsletter).discountLabel) || DEFAULT_DISCOUNT },
     // social links open in a new tab: https addresses only (the admin stores nothing else; anything older is dropped)
     contact: { email: str(contact.email), phone: str(contact.phone), instagram: https(contact.instagram), facebook: https(contact.facebook) },
-    trainerName: str(obj(settings.trainer).name),
+    trainerName: pick(trainerNameOf(obj(settings.trainer).name), locale),
   };
 }
 
@@ -48,13 +49,22 @@ const i18n = (v: unknown): I18n | null => {
   return ru ? { et, ru } : { et };
 };
 
-export function trainerSettings(settings: Record<string, unknown>): TrainerSettings {
+/**
+ * The trainer's name in both languages ("Maria Sosnina" / "Мария Соснина", round 2 item 1d). A plain string, as written
+ * before the name had a Russian version, is the Estonian name; the RU pages fall back to it.
+ */
+export function trainerNameOf(v: unknown): I18n | null {
+  if (typeof v === "string") return str(v) ? { et: str(v) } : null;
+  return i18n(v);
+}
+
+export function trainerSettings(settings: Record<string, unknown>, locale: Locale = "et"): TrainerSettings {
   const t = obj(settings.trainer);
   const stats = Array.isArray(t.stats) ? t.stats : [];
   const portraitKey = str(t.portraitKey);
   const framing = portraitFraming(portraitKey, str(t.portraitPos));
   return {
-    name: str(t.name),
+    name: pick(trainerNameOf(t.name), locale),
     role: i18n(t.role),
     portraitKey,
     portraitPos: framing.pos,

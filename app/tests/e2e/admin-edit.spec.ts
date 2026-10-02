@@ -7,6 +7,7 @@ import {
   EDIT_CITY_PREFIX,
   insertEditSession,
   NEW_COURSE_SLUG_PREFIX,
+  onLocalDb,
   registerOnSession,
   removeAdminRows,
   removeEditRows,
@@ -27,7 +28,7 @@ import { laterSaturday } from "./seed-sessions";
 const created = { tokens: new Set<string>(), sessions: new Set<string>() };
 const undo: (() => Promise<unknown>)[] = [];
 
-/** Each project edits its own seed course (both e-learning, neither has a badge or a Russian title in the seed). */
+/** Each project edits its own seed course (both e-learning, neither has a badge in the seed). */
 const mine = (info: TestInfo) =>
   info.project.name.startsWith("mobile")
     ? { slug: "ripsmete-laminatsiooni-alused", title: "Ripsmete laminatsiooni alused", price: "150" }
@@ -67,12 +68,14 @@ async function save(page: Page): Promise<void> {
 }
 
 /** The course's card in the public catalogue. */
-const publicCard = (page: Page, slug: string): Locator => page.locator(`[data-course-card][href="/koolitused/${slug}"]`);
+const publicCard = (page: Page, slug: string, prefix = ""): Locator => page.locator(`[data-course-card][href="${prefix}/koolitused/${slug}"]`);
 
 test.describe("course editor", () => {
   test("the ET title edited in the admin is on the public course page and card; RU falls back, then gets its own", async ({ page, context, visitorIp }, info) => {
     const c = mine(info);
     const id = await changing(c.slug);
+    // the seed has a Russian title now (round 2): this test starts from a course without one (put back afterwards)
+    await onLocalDb((sql) => sql`update courses set title = jsonb_build_object('et', title->>'et') where slug = ${c.slug}`);
     const before = await storedCourse(c.slug);
     await signIn(page, context, visitorIp);
 
@@ -151,12 +154,14 @@ test.describe("course editor", () => {
     const own = editor.getByLabel("Oma tekst (kuni 18 märki)");
     await expect(own).toHaveValue("Uus");
     await expect(own).toHaveAttribute("maxlength", "18");
+    const ownRu = editor.getByLabel("Tekst vene keeles (kuni 18 märki)");
+    await expect(ownRu).toHaveValue("Новинка"); // the quick label brings its Russian text (round 2 item 1c)
     const previewBadge = preview.getByText("Uus", { exact: true });
     await expect(previewBadge).toHaveCSS("background-color", "rgb(221, 212, 220)");
     await expect(previewBadge).toHaveCSS("color", "rgb(34, 34, 34)");
     for (const b of await editor.locator("button").all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await save(page);
-    expect((await storedCourse(c.slug)).badge).toEqual({ label: "Uus", bg: "#DDD4DC", fg: "#222222" });
+    expect((await storedCourse(c.slug)).badge).toEqual({ label: { et: "Uus", ru: "Новинка" }, bg: "#DDD4DC", fg: "#222222" });
 
     await page.goto("/koolitused");
     const badge = publicCard(page, c.slug).getByText("Uus", { exact: true });
@@ -165,6 +170,10 @@ test.describe("course editor", () => {
     await expect(badge).toHaveCSS("color", "rgb(34, 34, 34)");
     await page.goto(`/koolitused/${c.slug}`);
     await expect(page.locator("[data-course-tags]").getByText("Uus", { exact: true })).toBeVisible();
+    await page.goto(`/ru/koolitused/${c.slug}`);
+    await expect(page.locator("[data-course-tags]").getByText("Новинка", { exact: true })).toBeVisible();
+    await page.goto("/ru/koolitused");
+    await expect(publicCard(page, c.slug, "/ru").getByText("Новинка", { exact: true })).toBeVisible();
     await page.goto("/admin/koolitused");
     await adminReady(page);
     await expect(page.locator(`[data-course-row="${c.slug}"] [data-badge]`)).toHaveText("Uus");
@@ -173,13 +182,18 @@ test.describe("course editor", () => {
     await page.goto(`/admin/koolitused/${id}`);
     await adminReady(page);
     await own.fill("Sügise hitt");
+    await expect(ownRu).toHaveValue(""); // the preset's Russian text went with the preset
+    await ownRu.fill("Хит осени");
     await editor.getByRole("button", { name: "Tuhkroos" }).click();
     await expect(preview.getByText("Sügise hitt", { exact: true })).toHaveCSS("color", "rgb(34, 34, 34)"); // ink on rose: AA
     await editor.getByRole("button", { name: "Ploom" }).click();
     await expect(preview.getByText("Sügise hitt", { exact: true })).toHaveCSS("background-color", "rgb(107, 79, 92)");
     await expect(editor.getByRole("button", { name: "Uus", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await save(page);
+    expect((await storedCourse(c.slug)).badge).toEqual({ label: { et: "Sügise hitt", ru: "Хит осени" }, bg: "#6B4F5C", fg: "#ffffff" });
     await editor.getByRole("button", { name: "Puudub" }).click();
     await expect(own).toHaveValue("");
+    await expect(ownRu).toBeDisabled();
     await expect(preview.getByText("Sügise hitt")).toHaveCount(0);
     await save(page);
     expect((await storedCourse(c.slug)).badge).toBeNull();

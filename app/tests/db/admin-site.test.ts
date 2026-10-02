@@ -5,6 +5,7 @@ import type { Db } from "@/db/client";
 import { campaign, faq, galleryItems, heroSlides, pages, posts, practicePackages, settings } from "@/db/schema";
 import { applySeed } from "@/db/seed-apply";
 import { getHomeData, getPage, getPracticePackages, getSettings, listPosts } from "@/db/queries/public";
+import { shellSettings, trainerSettings } from "@/components/site/settings";
 import {
   deletePostForm,
   loadCampaign,
@@ -156,6 +157,20 @@ describe("home page: hero slides, statement, FAQ", () => {
     expect(await getPage(db, "statement")).toMatchObject({ title: { et: "MS LAB Koolituskeskus" }, body: { et: "Uus lause, mis on lühike." } });
   });
 
+  test("the trainer card's text (C26, round 2 item 5): D's line by default, saved in ET and RU; empty is allowed", async () => {
+    const home = await loadHome(db);
+    expect(home.values.teaser.body).toEqual({
+      et: "Kulmu- ja ripsmetehnikate meister ja koolitaja. Õpetan nii, nagu oleksin ise tahtnud õppida: selgelt, praktiliselt ja iga õpilase tempos.",
+      ru: "Мастер и преподаватель техник бровей и ресниц. Я учу так, как хотела бы учиться сама: понятно, практично и в темпе каждого ученика.",
+    });
+    const value = { body: { et: "Uus tekst.", ru: "Новый текст." } };
+    expect(await saveHomeForm(db, form({ teaser: { version: home.versions.teaser, value } }))).toMatchObject({ ok: true });
+    expect(await getPage(db, "trainer_teaser")).toMatchObject({ title: { et: "Sinu koolitaja" }, body: value.body });
+    const again = await loadHome(db);
+    expect(fieldsOf(await saveHomeForm(db, form({ teaser: { version: again.versions.teaser, value: { body: { et: "x".repeat(301) } } } })))).toEqual({ "teaser.body": "tooLong" });
+    expect(await saveHomeForm(db, form({ teaser: { version: again.versions.teaser, value: { body: { et: "" } } } }))).toMatchObject({ ok: true });
+  });
+
   test("FAQ: rows in their order, blank rows dropped; a question needs its answer; at most 30", async () => {
     const home = await loadHome(db);
     const items = clone(home.values.faq);
@@ -211,7 +226,7 @@ describe("practice packages", () => {
     expect(await savePracticeForm(db, form({ MAXI: { version: p.versions.MAXI, value: maxi } }))).toMatchObject({ ok: true });
     const [mini, stored] = await getPracticePackages(db);
     expect(stored).toMatchObject({ code: "MAXI", durationLabel: { et: "9 ak", ru: "9 ак" }, price: 15550, models: 4, items: [{ et: "Töö neljal modellil" }, { et: "Uus punkt", ru: "Новый пункт" }], sort: 2 });
-    expect(mini.durationLabel).toEqual({ et: "4 ak" });
+    expect(mini.durationLabel).toEqual({ et: "4 ak", ru: "4 ак. ч." });
     expect((await loadPractice(db)).versions.MINI).toBe(p.versions.MINI);
   });
 
@@ -243,12 +258,12 @@ describe("practice packages", () => {
 describe("trainer page", () => {
   test("the trainer card: portrait with its focal point, name, role and stats; the contact photo is kept", async () => {
     const t = await loadTrainer(db);
-    expect(t.values.trainer).toMatchObject({ portraitKey: "/seed/maria-standing.jpg", portraitPos: "50% 20%", name: "Maria Sosnina" });
+    expect(t.values.trainer).toMatchObject({ portraitKey: "/seed/maria-standing.jpg", portraitPos: "50% 20%", name: { et: "Maria Sosnina", ru: "Мария Соснина" } });
     expect(t.values.trainer.stats).toHaveLength(3);
-    const trainer = { ...clone(t.values.trainer), portraitKey: UPLOAD, portraitPos: "40% 30%", name: " Maria S. ", role: { et: "Koolitaja", ru: "Тренер" }, stats: [{ uid: "a", value: "10+", label: { et: "aastat", ru: "лет" } }, { uid: "b", value: " ", label: { et: "" } }] };
+    const trainer = { ...clone(t.values.trainer), portraitKey: UPLOAD, portraitPos: "40% 30%", name: { et: " Maria S. ", ru: "Мария С." }, role: { et: "Koolitaja", ru: "Тренер" }, stats: [{ uid: "a", value: "10+", label: { et: "aastat", ru: "лет" } }, { uid: "b", value: " ", label: { et: "" } }] };
     expect(await saveTrainerForm(db, form({ trainer: { version: t.versions.trainer, value: trainer } }))).toMatchObject({ ok: true });
     const s = (await getSettings(db)).trainer;
-    expect(s).toEqual({ portraitKey: UPLOAD, portraitPos: "40% 30%", contactPhotoKey: "/seed/maria-seated.jpg", name: "Maria S.", role: { et: "Koolitaja", ru: "Тренер" }, stats: [{ value: "10+", label: { et: "aastat", ru: "лет" } }] });
+    expect(s).toEqual({ portraitKey: UPLOAD, portraitPos: "40% 30%", contactPhotoKey: "/seed/maria-seated.jpg", name: { et: "Maria S.", ru: "Мария С." }, role: { et: "Koolitaja", ru: "Тренер" }, stats: [{ value: "10+", label: { et: "aastat", ru: "лет" } }] });
     expect((await loadTrainer(db)).values.trainer.portraitPos).toBe("40% 30%");
   });
 
@@ -259,10 +274,22 @@ describe("trainer page", () => {
       fieldsOf(
         await saveTrainerForm(
           db,
-          form({ trainer: { version: t.versions.trainer, value: { ...clone(t.values.trainer), name: "", portraitKey: "https://evil.example/p.jpg", stats: [{ uid: "a", value: "8+", label: { et: "" } }, ...four] } } }),
+          form({ trainer: { version: t.versions.trainer, value: { ...clone(t.values.trainer), name: { et: "", ru: "Мария" }, portraitKey: "https://evil.example/p.jpg", stats: [{ uid: "a", value: "8+", label: { et: "" } }, ...four] } } }),
         ),
       ),
     ).toEqual({ "trainer.name": "required", "trainer.portraitKey": "image", "trainer.stats.0.label": "required", "trainer.stats": "tooMany" });
+  });
+
+  test("a name stored before round 2 (a plain string) is the Estonian name in the editor and on the site (item 1d)", async () => {
+    const t = await loadTrainer(db);
+    const s = await getSettings(db);
+    await db.update(settings).set({ value: { ...(s.trainer as object), name: "Maria Sosnina" } }).where(eq(settings.key, "trainer"));
+    expect((await loadTrainer(db)).values.trainer.name).toEqual({ et: "Maria Sosnina" });
+    expect(trainerSettings(await getSettings(db), "ru").name).toBe("Maria Sosnina"); // RU falls back to it
+    await db.update(settings).set({ value: s.trainer }).where(eq(settings.key, "trainer"));
+    expect(trainerSettings(await getSettings(db), "ru").name).toBe("Мария Соснина");
+    expect(shellSettings(await getSettings(db), "ru").trainerName).toBe("Мария Соснина");
+    void t;
   });
 
   test("bio, works gallery and the two stories", async () => {

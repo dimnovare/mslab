@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import type { Badge } from "@/db/schema";
+import type { ShownBadge } from "@/domain/badge";
 import { Icon } from "./Icon";
 import styles from "./CourseCard.module.css";
 
@@ -12,7 +12,8 @@ export type CourseCardData = {
   summary: string;
   image: string;
   imageAlt: string;
-  badge: Badge;
+  /** In the page's language (domain/badge.ts). */
+  badge: ShownBadge;
   /** Format and level chips on the photo. */
   tags: string[];
   /** Contact: next date and city; e-learning: "Veebis · alusta kohe". */

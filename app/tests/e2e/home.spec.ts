@@ -400,6 +400,32 @@ test.describe("home content from the database", () => {
     }
   });
 
+  test("the trainer card: D's line and stat labels (C26); on RU her name, text and labels in Russian (G8)", async ({ page }) => {
+    await page.goto("/");
+    const card = page.locator("[data-trainer-teaser]");
+    await expect(card.getByRole("heading", { level: 2 })).toHaveText("Maria Sosnina");
+    await expect(card).toContainText("Kulmu- ja ripsmetehnikate meister ja koolitaja. Õpetan nii, nagu oleksin ise tahtnud õppida: selgelt, praktiliselt ja iga õpilase tempos.");
+    await expect(card.locator("dd")).toHaveText(["aastat kogemust", "linna", "väikesed grupid"]);
+    await page.goto("/ru");
+    await expect(card.getByRole("heading", { level: 2 })).toHaveText("Мария Соснина");
+    await expect(card).toContainText("Я учу так, как хотела бы учиться сама");
+    await expect(card.locator("dd")).toHaveText(["лет опыта", "города", "малые группы"]);
+    await expect(page.getByRole("contentinfo")).toContainText("Мария Соснина");
+    await expect(page.getByRole("contentinfo")).not.toContainText("Maria Sosnina");
+  });
+
+  test("RU home: the sample content is Russian (G8): course cards, badges, practice durations, FAQ, news", async ({ page }) => {
+    await page.goto("/ru");
+    const main = page.locator("main");
+    await expect(main.getByText("Популярное", { exact: true }).first()).toBeVisible(); // the badge
+    await expect(main.getByText("Новинка", { exact: true }).first()).toBeVisible();
+    await expect(main).toContainText("≈ 4 ак. ч.");
+    await expect(main).toContainText("Нужен ли предварительный опыт?");
+    await expect(main).not.toContainText("Kas vajan eelnevaid kogemusi?");
+    await expect(main).toContainText("Как выбрать подходящий курс по бровям?");
+    await expect(main).not.toContainText("Populaarne");
+  });
+
   test("contact form validates and shows the sent state (H15)", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("home-contact", info.project.name);

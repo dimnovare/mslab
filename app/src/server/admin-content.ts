@@ -43,7 +43,7 @@ const draftSchema = z.object({
   videoCount: z.string().max(40),
   durationLabel: i18n,
   nextDiscount: i18n,
-  badge: z.object({ label: z.string().max(200), bg: z.string().max(20), fg: z.string().max(20) }).nullable(),
+  badge: z.object({ label: z.object({ et: z.string().max(200), ru: z.string().max(200).optional() }), bg: z.string().max(20), fg: z.string().max(20) }).nullable(),
   images: z.array(z.object({ key: z.string().max(300), alt: i18n })).max(200),
   recommendationIds: z.array(z.number().int().positive().max(ID_MAX)).max(200),
   published: z.boolean(),
@@ -103,12 +103,12 @@ export async function saveCourseForm(db: Db, formData: FormData): Promise<EditRe
   if (d.published && online && price == null && !c.errors.price) c.fail("price", "priceRequired");
   if (d.published && !online && priceGroup == null && priceIndividual == null && !c.errors.priceGroup && !c.errors.priceIndividual) c.fail("priceGroup", "priceRequired");
 
-  // badge: one of D's swatches and at most 18 characters, or none
+  // badge: one of D's swatches and at most 18 characters (each language), or none; the Russian text is optional
   let badge: CourseFields["badge"] = null;
-  if (d.badge && d.badge.label.trim()) {
+  if (d.badge && d.badge.label.et.trim()) {
     const swatch = swatchOf(d.badge);
     if (!swatch) c.fail("badge", "badge");
-    else if (d.badge.label.trim().length > BADGE_MAX) c.fail("badge", "tooLong");
+    else if (d.badge.label.et.trim().length > BADGE_MAX || (d.badge.label.ru ?? "").trim().length > BADGE_MAX) c.fail("badge", "tooLong");
     else badge = badgeOf(d.badge.label, swatch);
   }
 

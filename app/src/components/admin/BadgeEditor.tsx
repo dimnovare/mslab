@@ -2,7 +2,8 @@
 
 import { useId, useState } from "react";
 import { CourseCard, type CourseCardData } from "@/components/site/CourseCard";
-import type { Badge } from "@/db/schema";
+import type { Badge, BadgeLabel } from "@/db/schema";
+import { shownBadge } from "@/domain/badge";
 import { BADGE_MAX, BADGE_PRESETS, BADGE_SWATCHES, swatchOf, type SwatchId } from "@/domain/course-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import ui from "./ui.module.css";
@@ -12,7 +13,8 @@ import styles from "./editor.module.css";
  * Prototype D `adminBadges` ("Koolituse märgis", Maria C36 "Väga meeldib see blokk. Jätame."): quick labels or an own
  * text of up to 18 characters, a colour from D's swatches, and a live preview: the site's real course card with the
  * badge as it would look on the catalogue page. Only the swatches can be chosen (D's free colour picker is left out,
- * so every badge stays in the palette). `card`: the course's card without its badge.
+ * so every badge stays in the palette). The text has a Russian version for the RU pages (a quick label brings its own;
+ * without one the RU pages show the Estonian text). `card`: the course's card without its badge.
  */
 export function BadgeEditor({ value, onChange, card, error }: { value: Badge; onChange: (badge: Badge) => void; card: CourseCardData; error?: string }) {
   const t = adminEt.badge;
@@ -21,18 +23,20 @@ export function BadgeEditor({ value, onChange, card, error }: { value: Badge; on
   const [chosen, setChosen] = useState<SwatchId>(() => swatchOf(value) ?? "tint");
   const stored = value ? swatchOf(value) : null;
   const pressed = value ? stored : chosen;
-  const label = value?.label ?? "";
+  const label: BadgeLabel = value?.label ?? { et: "" };
 
-  const withLabel = (text: string, swatch: SwatchId | null = pressed ?? chosen): Badge => {
-    if (!text.trim()) return null;
+  const withLabel = (next: BadgeLabel, swatch: SwatchId | null = pressed ?? chosen): Badge => {
+    if (!next.et.trim()) return null;
     const s = BADGE_SWATCHES.find((x) => x.id === swatch) ?? BADGE_SWATCHES[0];
-    return { label: text.slice(0, BADGE_MAX), bg: s.bg, fg: s.fg };
+    const ru = next.ru?.slice(0, BADGE_MAX);
+    return { label: ru ? { et: next.et.slice(0, BADGE_MAX), ru } : { et: next.et.slice(0, BADGE_MAX) }, bg: s.bg, fg: s.fg };
   };
   const pickSwatch = (id: SwatchId) => {
     setChosen(id);
     if (value) onChange(withLabel(value.label, id));
   };
-  const shown: Badge = value && value.label.trim() ? value : null;
+  const shown = shownBadge(value, "et");
+  const presetRu = (l: BadgeLabel) => BADGE_PRESETS.some((p) => p.et === l.et && p.ru === l.ru);
 
   return (
     <div className={styles.badge} data-badge-editor="">
@@ -50,8 +54,8 @@ export function BadgeEditor({ value, onChange, card, error }: { value: Badge; on
             {t.none}
           </button>
           {BADGE_PRESETS.map((p) => (
-            <button key={p} type="button" className={styles.chip} aria-pressed={value?.label === p} onClick={() => onChange(withLabel(p))}>
-              {p}
+            <button key={p.et} type="button" className={styles.chip} aria-pressed={value?.label.et === p.et} onClick={() => onChange(withLabel(p))}>
+              {p.et}
             </button>
           ))}
         </div>
@@ -64,14 +68,37 @@ export function BadgeEditor({ value, onChange, card, error }: { value: Badge; on
           className={ui.input}
           type="text"
           maxLength={BADGE_MAX}
-          value={label}
+          value={label.et}
           placeholder={t.placeholder}
           autoComplete="off"
-          onChange={(e) => onChange(withLabel(e.target.value))}
+          // a quick label's Russian text goes with it: an own Estonian text starts without one
+          onChange={(e) => onChange(withLabel({ et: e.target.value, ru: presetRu(label) ? undefined : label.ru }))}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${uid}-error` : undefined}
           data-badge-label=""
         />
+      </div>
+
+      <div className={ui.field}>
+        <label htmlFor={`${uid}-own-ru`}>{t.ownRu}</label>
+        <input
+          id={`${uid}-own-ru`}
+          className={ui.input}
+          type="text"
+          lang="ru"
+          maxLength={BADGE_MAX}
+          value={label.ru ?? ""}
+          placeholder={t.placeholderRu}
+          autoComplete="off"
+          // a Russian text belongs to a badge: there is none until the Estonian text is given
+          disabled={!value}
+          aria-describedby={`${uid}-ru-note`}
+          onChange={(e) => onChange(withLabel({ ...label, ru: e.target.value }))}
+          data-badge-label-ru=""
+        />
+        <small id={`${uid}-ru-note`} className={`${ui.muted} ${ui.small}`}>
+          {t.ruNote}
+        </small>
       </div>
 
       <div className={styles.fieldset} role="group" aria-labelledby={`${uid}-colour`}>

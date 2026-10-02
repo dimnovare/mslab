@@ -47,7 +47,7 @@ describe("saveCourseForm: a new course", () => {
       durationLabel: { et: "8 ak" },
       includes: [{ et: "Teooria" }, { et: " " }, { et: "Praktika", ru: "Практика" }],
       images: [{ key: UPLOAD, alt: { et: "Ripsmed" } }, { key: "/seed/lash-editorial.jpg", alt: { et: "" } }],
-      badge: { label: "Uus", bg: "#ddd4dc", fg: "#000000" },
+      badge: { label: { et: "Uus", ru: "Новинка" }, bg: "#ddd4dc", fg: "#000000" },
     };
     const r = await save(draft);
     expect(r).toMatchObject({ ok: true, created: true });
@@ -61,7 +61,7 @@ describe("saveCourseForm: a new course", () => {
       priceIndividual: null,
       price: null,
       includes: [{ et: "Teooria" }, { et: "Praktika", ru: "Практика" }],
-      badge: { label: "Uus", bg: "#DDD4DC", fg: "#222222" }, // the swatch's own colours, whatever was sent
+      badge: { label: { et: "Uus", ru: "Новинка" }, bg: "#DDD4DC", fg: "#222222" }, // the swatch's own colours, whatever was sent
       published: false,
       isSample: false,
       sort: 3,
@@ -92,14 +92,15 @@ describe("saveCourseForm: a new course", () => {
 
   test("badges: one of D's swatches, at most 18 characters; images: uploads and seed photos only; recommendations: at most 3", async () => {
     const t = { ...newCourseDraft(), title: { et: "Badge" } };
-    expect(fieldsOf(await save({ ...t, badge: { label: "Uus", bg: "#ff0000", fg: "#ffffff" } }))).toEqual({ badge: "badge" });
-    expect(fieldsOf(await save({ ...t, badge: { label: "x".repeat(19), bg: "#222222", fg: "#ffffff" } }))).toEqual({ badge: "tooLong" });
+    expect(fieldsOf(await save({ ...t, badge: { label: { et: "Uus" }, bg: "#ff0000", fg: "#ffffff" } }))).toEqual({ badge: "badge" });
+    expect(fieldsOf(await save({ ...t, badge: { label: { et: "x".repeat(19) }, bg: "#222222", fg: "#ffffff" } }))).toEqual({ badge: "tooLong" });
+    expect(fieldsOf(await save({ ...t, badge: { label: { et: "Uus", ru: "я".repeat(19) }, bg: "#222222", fg: "#ffffff" } }))).toEqual({ badge: "tooLong" });
     for (const key of ["https://evil.example/a.jpg", "//evil.example/a.jpg", "img/abc.jpg", "/seed/../secret.jpg", "javascript:alert(1)"])
       expect(fieldsOf(await save({ ...t, images: [{ key, alt: { et: "" } }] })), key).toEqual({ images: "image" });
     const many = await db.insert(courses).values([1, 2, 3].map((n) => ({ ...base, slug: `c${n}`, type: "contact" as const, title: { et: `C${n}` } }))).returning();
     expect(fieldsOf(await save({ ...t, recommendationIds: [contact.id, ...many.map((c) => c.id)] }))).toEqual({ recommendationIds: "tooMany" });
     // an empty label is no badge at all
-    const r = await save({ ...t, badge: { label: "  ", bg: "#ff0000", fg: "#fff" }, recommendationIds: [online.id, online.id, 999_999] });
+    const r = await save({ ...t, badge: { label: { et: "  ", ru: "Новинка" }, bg: "#ff0000", fg: "#fff" }, recommendationIds: [online.id, online.id, 999_999] });
     expect(r).toMatchObject({ ok: true });
     expect((await getCourseForEdit(db, (r as { id: number }).id))!).toMatchObject({ badge: null, recommendationIds: [online.id] });
   });
@@ -117,10 +118,10 @@ describe("saveCourseForm: editing", () => {
     await db.execute(sql`update courses set updated_at = '2026-01-01T00:00:00Z' where id = ${contact.id}`);
     const before = (await getCourseForEdit(db, contact.id))!;
     const draft = await load(contact.id);
-    const r = await save({ ...draft, title: { et: "Kulmude LAMI (uus)" }, badge: { label: "Uus", bg: "#DDD4DC", fg: "#222222" } });
+    const r = await save({ ...draft, title: { et: "Kulmude LAMI (uus)" }, badge: { label: { et: "Uus" }, bg: "#DDD4DC", fg: "#222222" } });
     expect(r).toEqual({ ok: true, id: contact.id, created: false });
     const after = (await getCourseForEdit(db, contact.id))!;
-    expect(after).toMatchObject({ title: { et: "Kulmude LAMI (uus)" }, badge: { label: "Uus", bg: "#DDD4DC" }, sort: 1, isSample: true, slug: "kulmude-lami" });
+    expect(after).toMatchObject({ title: { et: "Kulmude LAMI (uus)" }, badge: { label: { et: "Uus" }, bg: "#DDD4DC" }, sort: 1, isSample: true, slug: "kulmude-lami" });
     expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
     expect(after.images.map((i) => i.key)).toEqual(["/seed/brow-closeup.jpg"]);
     expect(await save({ ...(await load(contact.id)), isSample: false })).toMatchObject({ ok: true });

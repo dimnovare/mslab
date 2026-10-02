@@ -133,7 +133,7 @@ export function TrainerEditor({ initial, storyTitles }: { initial: Loaded<Traine
               )}
             </SingleImage>
             <div className={styles.fields}>
-              <TextField label={t.name} value={tr.name} onChange={(name) => setTrainer({ name })} maxLength={SITE_LIMITS.trainerName} error={d.err("trainer.name")} name="trainer.name" />
+              <I18nInput label={t.name} value={tr.name} onChange={(name) => setTrainer({ name })} maxLength={SITE_LIMITS.trainerName} error={d.err("trainer.name")} name="trainer.name" />
               <I18nInput label={t.role} value={tr.role} onChange={(role) => setTrainer({ role })} maxLength={SITE_LIMITS.role} hint={t.roleHint} error={d.err("trainer.role")} name="trainer.role" />
               <div ref={statsRoot} className={ed.list} role="group" aria-labelledby={`${uid}-stats`} data-stats-editor="" data-invalid={d.err("trainer.stats") ? "" : undefined} tabIndex={d.err("trainer.stats") ? -1 : undefined}>
                 <h3 id={`${uid}-stats`} className={ui.h3}>

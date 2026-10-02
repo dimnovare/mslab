@@ -2,7 +2,8 @@
 // (server/admin-content.ts): the draft the editor holds and sends, the badge choices of prototype D, and the limits.
 // Pure: no database, no React.
 
-import type { Badge } from "@/db/schema";
+import type { Badge, BadgeLabel, StoredBadge } from "@/db/schema";
+import { readBadge } from "./badge";
 import type { I18n } from "@/i18n/field";
 import { centsToInput } from "./money";
 
@@ -11,8 +12,15 @@ export type CourseLevel = "basic" | "advanced";
 export const COURSE_LANGUAGES = ["ET", "RU", "ET / RU"] as const;
 export type CourseLanguage = (typeof COURSE_LANGUAGES)[number];
 
-/** Prototype D adminBadges: the quick labels. */
-export const BADGE_PRESETS = ["Uus", "Populaarne", "Bestseller", "Enim müüdud", "Viimased kohad", "Soodus"] as const;
+/** Prototype D adminBadges: the quick labels, each with its Russian text (round 2 item 1c). */
+export const BADGE_PRESETS: readonly Required<BadgeLabel>[] = [
+  { et: "Uus", ru: "Новинка" },
+  { et: "Populaarne", ru: "Популярное" },
+  { et: "Bestseller", ru: "Бестселлер" },
+  { et: "Enim müüdud", ru: "Хит продаж" },
+  { et: "Viimased kohad", ru: "Последние места" },
+  { et: "Soodus", ru: "Скидка" },
+];
 /** D's "Oma tekst (kuni 18 märki)". */
 export const BADGE_MAX = 18;
 
@@ -31,17 +39,18 @@ export const BADGE_SWATCHES = [
 export type SwatchId = (typeof BADGE_SWATCHES)[number]["id"];
 
 /** The swatch a stored badge uses (by background, any case), or null for a colour that is not one of them. */
-export function swatchOf(badge: Badge): SwatchId | null {
+export function swatchOf(badge: Badge | StoredBadge): SwatchId | null {
   if (!badge) return null;
   return BADGE_SWATCHES.find((s) => s.bg.toLowerCase() === badge.bg.toLowerCase())?.id ?? null;
 }
 
-/** The stored badge for a label and a swatch: null without a label. */
-export function badgeOf(label: string, swatch: SwatchId): Badge {
-  const text = label.trim();
-  if (!text) return null;
+/** The stored badge for a label and a swatch: null without an Estonian label; an empty Russian text is left out. */
+export function badgeOf(label: BadgeLabel, swatch: SwatchId): Badge {
+  const et = label.et.trim();
+  if (!et) return null;
+  const ru = label.ru?.trim();
   const s = BADGE_SWATCHES.find((x) => x.id === swatch)!;
-  return { label: text, bg: s.bg, fg: s.fg };
+  return { label: ru ? { et, ru } : { et }, bg: s.bg, fg: s.fg };
 }
 
 export const LIMITS = {
@@ -145,7 +154,7 @@ type StoredCourse = {
   videoCount: number | null;
   durationLabel: I18n | null;
   nextDiscount: I18n | null;
-  badge: Badge;
+  badge: StoredBadge | null;
   recommendationIds: number[];
   published: boolean;
   isSample: boolean;
@@ -174,7 +183,7 @@ export function draftFromCourse(c: StoredCourse): CourseDraft {
     videoCount: whole(c.videoCount),
     durationLabel: copy(c.durationLabel),
     nextDiscount: copy(c.nextDiscount),
-    badge: c.badge ? { ...c.badge } : null,
+    badge: readBadge(c.badge), // a label stored before round 2 is a plain string: read as the Estonian text
     images: c.images.map((img) => ({ key: img.key, alt: copy(img.alt) })),
     recommendationIds: [...c.recommendationIds],
     published: c.published,

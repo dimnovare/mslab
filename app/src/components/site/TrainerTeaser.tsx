@@ -21,7 +21,7 @@ export type TrainerTeaserData = {
 export function TrainerTeaser({ d }: { d: TrainerTeaserData }) {
   if (!d.name) return null;
   return (
-    <section className={styles.section}>
+    <section className={styles.section} data-trainer-teaser="">
       <div className={ui.wrap}>
         <div className={styles.trainer}>
           <div className={styles.photo}>
