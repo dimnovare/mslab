@@ -138,7 +138,10 @@ export async function servePageFromCache(request: Request, env: FrontEnv, buildI
 
     const headers = new Headers({ "cache-control": BROWSER_CACHE_CONTROL, "content-type": want.variant.kind === "html" ? "text/html; charset=utf-8" : "text/x-component" });
     for (const [k, v] of Object.entries(parseHeaders(meta?.h))) headers.set(k, v);
-    headers.set("etag", object.httpEtag);
+    // weak: Cloudflare drops a strong ETag from an HTML answer (its HTML features may change the bytes), so the
+    // browser would never have one to send back in If-None-Match
+    const etag = `W/${object.httpEtag}`;
+    headers.set("etag", etag);
     headers.set("vary", VARY);
     if (want.variant.kind === "segment") {
       headers.set("x-nextjs-prerender", "1");
@@ -149,7 +152,7 @@ export async function servePageFromCache(request: Request, env: FrontEnv, buildI
     headers.set("x-robots-tag", ROBOTS);
     headers.set("x-opennext-cache", "HIT");
     headers.set("x-page-cache", "front");
-    if (notModified(request.headers.get("if-none-match"), object.httpEtag)) {
+    if (notModified(request.headers.get("if-none-match"), etag)) {
       await object.body.cancel();
       return new Response(null, { status: 304, headers });
     }

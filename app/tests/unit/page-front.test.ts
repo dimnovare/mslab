@@ -145,7 +145,7 @@ describe("servePageFromCache", () => {
     expect(Object.fromEntries(res.headers)).toMatchObject({
       "cache-control": BROWSER_CACHE_CONTROL,
       "content-type": "text/html; charset=utf-8",
-      etag: '"etag-1"',
+      etag: 'W/"etag-1"', // weak: Cloudflare keeps it on HTML
       vary: VARY,
       "x-nextjs-stale-time": "300",
       "x-robots-tag": "noindex, nofollow",
@@ -174,6 +174,8 @@ describe("servePageFromCache", () => {
     expect(head.body).toBeNull();
     const same = (await servePageFromCache(req("/koolitused", { headers: { "if-none-match": '"etag-1"' } }), f.env, "B1", NOW))!;
     expect(same.status).toBe(304);
+    const weak = (await servePageFromCache(req("/koolitused", { headers: { "if-none-match": 'W/"etag-1"' } }), f.env, "B1", NOW))!;
+    expect(weak.status).toBe(304); // what a browser sends back
     expect(same.headers.get("cache-control")).toBe(BROWSER_CACHE_CONTROL);
   });
 
