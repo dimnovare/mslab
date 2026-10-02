@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { cache } from "react";
+import { perRequest } from "@/server/per-request";
 import { ContactRegister, type SessionOption } from "@/components/site/ContactRegister";
 import { courseCardData } from "@/components/site/course-card-data";
 import { CourseSummary, type SummaryItem } from "@/components/site/CourseSummary";
@@ -42,8 +42,8 @@ export function generateStaticParams(): { slug: string }[] {
   return [];
 }
 
-// One course query per render, shared by generateMetadata and the page. Sessions that have begun are left out.
-const loadCourse = cache((slug: string) => getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) }));
+// One course query per request, shared by generateMetadata and the page. Sessions that have begun are left out.
+const loadCourse = perRequest((slug: string) => getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) }));
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params;

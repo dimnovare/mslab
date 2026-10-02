@@ -51,3 +51,20 @@ describe("perRequest", () => {
     expect(load()).toBe(load()); // the fake cache() of this file memoises for every caller
   });
 });
+
+describe("no React cache() in the server code", () => {
+  test("only server/per-request.ts imports it (as its fallback outside a Worker request)", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join, relative } = await import("node:path");
+    const src = join(process.cwd(), "src");
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+    const using = walk(src)
+      .filter((p) => /\.tsx?$/.test(p))
+      .filter((p) => {
+        const source = readFileSync(p, "utf8");
+        return /import\s*\{[^}]*\bcache\b[^}]*\}\s*from\s*["']react["']/.test(source) || /\bReact\.cache\(/.test(source);
+      })
+      .map((p) => relative(src, p).split("\\").join("/"));
+    expect(using).toEqual(["server/per-request.ts"]);
+  });
+});
