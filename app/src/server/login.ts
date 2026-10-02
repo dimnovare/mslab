@@ -43,7 +43,7 @@ export const verifyUrl = (siteUrl: string, token: string) => `${siteUrl.replace(
 
 /** A rate limit that fails open: when KV is unavailable (or over its write quota) the admins can still sign in. */
 async function withinRateLimit(deps: LoginDeps): Promise<boolean> {
-  if (deps.ip === null) return true; // never on Cloudflare (cf-connecting-ip); one shared bucket would lock everybody out
+  if (deps.ip === null) return true; // never on Vercel (x-forwarded-for); one shared bucket would lock everybody out
   try {
     return await rateLimit(deps.env.KV, rateKey("login", deps.ip), RATE_LIMIT, RATE_WINDOW_SEC);
   } catch (e) {

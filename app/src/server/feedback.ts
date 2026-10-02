@@ -171,7 +171,7 @@ const parseObject = (raw: string): Record<string, unknown> | null => {
 
 /** Rate limit that fails open: when KV cannot count, the comment still goes through (as the site's forms do). */
 async function withinRateLimit(kv: FeedbackKv, ip: string | null): Promise<boolean> {
-  if (ip === null) return true; // never on Cloudflare (cf-connecting-ip is always there); one shared bucket would lock everybody out
+  if (ip === null) return true; // never on Vercel (x-forwarded-for is always there); one shared bucket would lock everybody out
   try {
     return await rateLimit(kv, rateKey("feedback", ip), FEEDBACK_RATE_LIMIT, FEEDBACK_RATE_WINDOW_SEC);
   } catch (e) {

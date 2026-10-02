@@ -37,7 +37,7 @@ async function run(form: FormName, handler: (deps: Deps, formData: FormData) => 
       return {
         db: getDb(),
         env,
-        // `next dev` has no edge address header: one local bucket. Production always has cf-connecting-ip.
+        // Without x-forwarded-for (never on Vercel) `next dev` uses one local bucket.
         ip: clientIp(h) ?? (process.env.NODE_ENV === "development" ? "local" : null),
         siteUrl: linkBase(requestOrigin(h), env.SITE_URL),
         now: new Date(),

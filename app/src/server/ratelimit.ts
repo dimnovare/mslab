@@ -59,12 +59,13 @@ export function normalizeIp(raw: string): string {
 }
 
 /**
- * The visitor's rate limit bucket (see normalizeIp). On Cloudflare `cf-connecting-ip` is always set by the edge (clients
- * cannot forge it); `x-forwarded-for` (first hop) is only the fallback for `next dev`. null when neither is there: the
+ * The visitor's rate limit bucket (see normalizeIp): the first address of `x-forwarded-for`. Vercel's edge sets that
+ * header to the visitor's address itself, replacing whatever the client sent; `next dev` and `next start` keep the
+ * client's own (the e2e tests send one per test). `cf-connecting-ip` is not read: with nothing of Cloudflare in front of
+ * the app any more, any client could send it and get a fresh bucket each time. null when the header is missing: the
  * caller decides (dev: one "local" bucket; production: no rate limit for that request, rather than one bucket for everybody).
  */
 export function clientIp(headers: Pick<Headers, "get">): string | null {
-  const cf = headers.get("cf-connecting-ip")?.trim();
-  const ip = cf || headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const ip = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return ip ? normalizeIp(ip).slice(0, 64) : null; // an IPv6 address has at most 45 characters; KV keys stay short
 }

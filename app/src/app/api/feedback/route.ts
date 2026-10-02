@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request): Promise<Response> {
   try {
     const { env, origin } = feedbackContext(request);
-    // `next dev` has no edge address header: one local bucket. Production always has cf-connecting-ip.
+    // Without x-forwarded-for (never on Vercel) `next dev` uses one local bucket.
     const ip = clientIp(request.headers) ?? (process.env.NODE_ENV === "development" ? "local" : null);
     return reply(await createComment({ env, origin, ip, now: new Date() }, await readBody(request, MAX_BYTES)));
   } catch (e) {

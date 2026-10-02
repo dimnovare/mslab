@@ -25,13 +25,15 @@ describe("rateLimit", () => {
 
 describe("clientIp", () => {
   const h = (init: Record<string, string>) => new Headers(init);
-  test("Cloudflare's cf-connecting-ip wins over x-forwarded-for", () => {
-    expect(clientIp(h({ "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "198.51.100.1" }))).toBe("203.0.113.7");
-  });
-  test("x-forwarded-for (first hop) is the fallback; no header gives null (the caller decides)", () => {
+  test("the first address of x-forwarded-for (Vercel's edge sets it to the visitor's own); no header gives null (the caller decides)", () => {
     expect(clientIp(h({ "x-forwarded-for": "198.51.100.1, 10.0.0.1" }))).toBe("198.51.100.1");
+    expect(clientIp(h({ "x-forwarded-for": " 198.51.100.1 " }))).toBe("198.51.100.1");
     expect(clientIp(h({}))).toBeNull();
-    expect(clientIp(h({ "cf-connecting-ip": " " }))).toBeNull();
+    expect(clientIp(h({ "x-forwarded-for": " " }))).toBeNull();
+  });
+  test("cf-connecting-ip is never read: a client could send any value and get a fresh bucket each time", () => {
+    expect(clientIp(h({ "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "198.51.100.1" }))).toBe("198.51.100.1");
+    expect(clientIp(h({ "cf-connecting-ip": "203.0.113.7" }))).toBeNull();
   });
 });
 
@@ -74,16 +76,16 @@ describe("IPv6 buckets: one per /64", () => {
     for (const bad of ["1:2:3", "1:2:3:4:5:6:7:8:9", "::g", "1::2::3", "12345::1", "::ffff:999.1.1.1", "not:an:ip"]) expect(normalizeIp(bad), bad).toBe(bad);
   });
 
-  test("clientIp applies it to both headers; a visitor cannot get a fresh bucket by changing the lower 64 bits", async () => {
+  test("clientIp applies it; a visitor cannot get a fresh bucket by changing the lower 64 bits", async () => {
     const h = (init: Record<string, string>) => new Headers(init);
-    expect(clientIp(h({ "cf-connecting-ip": "2001:db8:1:2:1234:5678:9abc:def0" }))).toBe("2001:db8:1:2::/64");
+    expect(clientIp(h({ "x-forwarded-for": "2001:db8:1:2:1234:5678:9abc:def0" }))).toBe("2001:db8:1:2::/64");
     expect(clientIp(h({ "x-forwarded-for": "2001:db8:1:2::9, 10.0.0.1" }))).toBe("2001:db8:1:2::/64");
-    expect(clientIp(h({ "cf-connecting-ip": "203.0.113.7" }))).toBe("203.0.113.7");
+    expect(clientIp(h({ "x-forwarded-for": "203.0.113.7" }))).toBe("203.0.113.7");
     const kv = fakeKv();
     const results = [];
-    for (let i = 0; i < 7; i++) results.push(await rateLimit(kv, rateKey("contact", clientIp(h({ "cf-connecting-ip": `2001:db8:1:2::${i + 1}` }))!), 5, 600));
+    for (let i = 0; i < 7; i++) results.push(await rateLimit(kv, rateKey("contact", clientIp(h({ "x-forwarded-for": `2001:db8:1:2::${i + 1}` }))!), 5, 600));
     expect(results).toEqual([true, true, true, true, true, false, false]);
-    expect(await rateLimit(kv, rateKey("contact", clientIp(h({ "cf-connecting-ip": "2001:db8:1:3::1" }))!), 5, 600)).toBe(true);
+    expect(await rateLimit(kv, rateKey("contact", clientIp(h({ "x-forwarded-for": "2001:db8:1:3::1" }))!), 5, 600)).toBe(true);
     expect([...kv.store.keys()]).toEqual(["rl:contact:2001:db8:1:2::/64", "rl:contact:2001:db8:1:3::/64"]);
   });
 });

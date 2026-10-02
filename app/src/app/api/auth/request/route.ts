@@ -25,7 +25,7 @@ export async function POST(request: Request): Promise<Response> {
       {
         db: getDb(),
         env,
-        // `next dev` has no edge address header: one local bucket. Production always has cf-connecting-ip.
+        // Without x-forwarded-for (never on Vercel) `next dev` uses one local bucket.
         ip: clientIp(h) ?? (process.env.NODE_ENV === "development" ? "local" : null),
         // The link in the e-mail comes from the Host header only (the host routes requests by it), never from Origin or
         // x-forwarded-host, which a client can set; a Host that is not in the allow-list gives SITE_URL.

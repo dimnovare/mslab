@@ -82,13 +82,13 @@ async function allowed(env: Env, key: string, limit: number, windowSec: number):
 
 let warnedNoIp = false;
 
-/** Rate limit per form and visitor. Without a visitor address (never on Cloudflare) the request is let through:
+/** Rate limit per form and visitor. Without a visitor address (never on Vercel) the request is let through:
  *  one shared bucket would lock everybody out after five submissions. */
 async function withinRateLimit(deps: Deps, form: FormName): Promise<boolean> {
   if (deps.ip === null) {
     if (!warnedNoIp) {
       warnedNoIp = true;
-      console.warn("[forms] request without a visitor address (cf-connecting-ip / x-forwarded-for): not rate limited");
+      console.warn("[forms] request without a visitor address (x-forwarded-for): not rate limited");
     }
     return true;
   }
