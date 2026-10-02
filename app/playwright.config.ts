@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { LOCAL_URL, TARGET } from "./tests/e2e/target";
 
-const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+const baseURL = TARGET || LOCAL_URL; // E2E_BASE_URL (or BASE_URL) = a deployment, read-only; else the local dev server
 
 const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } };
 const phone = { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
@@ -15,6 +16,8 @@ const phone = { ...devices["Desktop Chrome"], viewport: { width: 390, height: 84
  */
 const EDITS = /admin-(edit|site)\.spec\.ts$/;
 const ORDER = /order\.setup\.ts$/;
+/** The visual suite has its own config: playwright.visual.config.ts (npm run visual). */
+const VISUAL = /[\\/]visual[\\/]/;
 
 export default defineConfig({
   testDir: "tests",
@@ -26,12 +29,12 @@ export default defineConfig({
   projects: [
     { name: "before-edits-desktop", testMatch: ORDER, teardown: "chromium-edit" },
     { name: "before-edits-mobile", testMatch: ORDER, teardown: "mobile-edit" },
-    { name: "chromium", use: desktop, testIgnore: EDITS, dependencies: ["before-edits-desktop", "before-edits-mobile"] },
-    { name: "mobile", use: phone, testIgnore: EDITS, dependencies: ["before-edits-desktop", "before-edits-mobile"] },
+    { name: "chromium", use: desktop, testIgnore: [EDITS, VISUAL], dependencies: ["before-edits-desktop", "before-edits-mobile"] },
+    { name: "mobile", use: phone, testIgnore: [EDITS, VISUAL], dependencies: ["before-edits-desktop", "before-edits-mobile"] },
     { name: "chromium-edit", use: desktop, testMatch: EDITS },
     { name: "mobile-edit", use: phone, testMatch: EDITS },
   ],
-  webServer: process.env.E2E_BASE_URL
+  webServer: TARGET
     ? undefined
     : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 180_000 },
 });

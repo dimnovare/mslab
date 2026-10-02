@@ -51,3 +51,5 @@ next-env.d.ts
 # tests
 /test-results/
 /playwright-report/
+# the visual suite's screenshots (npm run visual)
+/visual-shots/
