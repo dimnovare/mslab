@@ -38,15 +38,17 @@
   display: none;
 }
 
+/* A tab shrinks and wraps its words to two lines when the three do not fit side by side (the Russian names on a
+   phone, N3); where they fit, nothing changes. The strip still scrolls if even single words cannot fit. */
 .seg button {
   min-height: 44px;
-  padding: 0 22px;
+  padding: 4px 22px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: #3a3437;
-  font: 500 15px/1 var(--font-body);
-  white-space: nowrap;
+  font: 500 15px/1.15 var(--font-body);
+  text-wrap: balance;
   cursor: pointer;
   transition:
     background 0.3s var(--ease),
@@ -118,9 +120,18 @@
 
 @media (max-width: 640px) {
   .seg button {
-    padding: 0 16px;
+    padding: 4px 16px;
     font-size: 14px;
   }
+}
+
+@media (max-width: 380px) {
+  .seg button {
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 640px) {
 
   .panel {
     margin-top: 32px;

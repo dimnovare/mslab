@@ -341,6 +341,31 @@ test.describe("home content from the database", () => {
     await expect(page.locator("[data-steps]")).toHaveCount(0);
   });
 
+  test("RU format tabs fit at 360 and 390: nothing clipped, nothing to scroll (N3); ET stays on one line", async ({ page }) => {
+    for (const [path, names] of [["/ru", ["Онлайн-обучение", "Очное обучение", "Гибридное обучение"]], ["/", ["E-õpe", "Kontaktõpe", "Hübriidõpe"]]] as const) {
+      for (const width of [360, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(path);
+        const list = page.getByRole("tablist", { name: path === "/" ? "Õppevorm" : undefined }).first();
+        await expect(list.getByRole("tab")).toHaveText([...names]);
+        const fit = await list.evaluate((e) => {
+          const box = e.getBoundingClientRect();
+          return {
+            scroll: e.scrollWidth - e.clientWidth,
+            inside: [...e.children].every((t) => { const r = t.getBoundingClientRect(); return r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && t.scrollWidth <= t.clientWidth; }),
+            inWindow: box.left >= 0 && box.right <= innerWidth,
+            lines: [...e.children].map((t) => Math.round(t.getBoundingClientRect().height)),
+          };
+        });
+        expect(fit.scroll, `${path} ${width}`).toBeLessThanOrEqual(0);
+        expect(fit.inside, `${path} ${width}`).toBe(true);
+        expect(fit.inWindow, `${path} ${width}`).toBe(true);
+        for (const h of fit.lines) expect(h, `${path} ${width}: tab height`).toBeGreaterThanOrEqual(44);
+        if (path === "/") for (const h of fit.lines) expect(h, `${width}: ET tabs on one line`).toBe(44);
+      }
+    }
+  });
+
   test("contact form validates and shows the sent state (H15)", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("home-contact", info.project.name);
