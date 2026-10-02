@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -28,10 +29,18 @@ import { fill, formatDate, formatDayMonth, formatWeekday } from "@/i18n/format";
 import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
+import { shareMetadata } from "@/server/share-meta";
 import styles from "./home.module.css";
 import { upcomingFrom } from "@/domain/calendar";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+/** The link preview of / and /ru: the layout's card with this page's own address (og:url). */
+export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
+  const { locale } = await params;
+  if (!isLocale(locale)) return {};
+  return shareMetadata(locale, "/");
+}
 
 /**
  * Home page (Task 7). Section order from the brief: hero → upcoming strip → course cards → "Kuidas soovid õppida?"

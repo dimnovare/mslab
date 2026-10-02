@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDict, isLocale } from "@/i18n/locales";
+import { shareMetadata } from "@/server/share-meta";
 import { fontVariables } from "../fonts";
 import "@/styles/tokens.css";
 import "@/styles/globals.css";
@@ -15,6 +16,8 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
     title: dict.meta.title,
     description: dict.meta.description,
     robots: { index: false, follow: false },
+    // a link to any public page shows the home page's preview card (the home page adds its own og:url)
+    ...(await shareMetadata(locale)),
   };
 }
 

@@ -7,6 +7,7 @@ export const ru: Dict = {
   meta: {
     title: "MS LAB Учебный центр — Brow & Lash Academy",
     description: "Курсы бровей и ресниц, которые дают навыки, уверенность и прочную основу.",
+    ogAlt: "Главная страница MS LAB Учебного центра на компьютере и телефоне",
   },
 
   nav: {

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="et"><head><meta charset="utf-8">
+<!-- Source for app/public/og.jpg (1200x630), the link preview of the main site (/ and /ru). Same layout as og.html
+     (/guide/og.jpg), in the site's own fonts (Jost headings, Manrope UI). The two pictures are screenshots of the home
+     page, made by tools/og-home.cjs, which renders this page: node tools/og-home.cjs [base-url] -->
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400&family=Manrope:wght@500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1200px;height:630px;overflow:hidden;background:#F6F4F5;font-family:Manrope,sans-serif;color:#222;position:relative}
+.bg{position:absolute;inset:0;background:radial-gradient(120% 90% at 100% 0%,#DDD4DC 0%,rgba(221,212,220,0) 60%)}
+.l{position:absolute;left:72px;top:64px;width:470px}
+.l img{height:56px}
+.k{margin-top:70px;font:600 15px/1 Manrope;letter-spacing:.18em;text-transform:uppercase;color:#675D62}
+h1{margin-top:20px;font:300 70px/1.02 Jost;letter-spacing:-.01em}
+p{margin-top:24px;font:500 21px/1.45 Manrope;color:#3A3437}
+.chips{position:absolute;left:72px;bottom:60px;display:flex;gap:10px}
+.chips span{height:40px;padding:0 18px;border-radius:999px;background:#fff;display:flex;align-items:center;font:600 15px Manrope;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.desk{position:absolute;right:56px;top:72px;width:560px;aspect-ratio:1440/900;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 22px 48px -20px rgba(34,34,34,.45)}
+.phone{position:absolute;right:40px;bottom:40px;width:156px;aspect-ratio:390/844;border-radius:22px;overflow:hidden;background:#fff;outline:6px solid #222;box-shadow:0 22px 48px -16px rgba(34,34,34,.55)}
+.desk img,.phone img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 0}
+</style></head>
+<body><div class="bg"></div>
+<div class="l">
+  <img src="../app/public/brand/logo.png" alt="">
+  <div class="k">Brow &amp; Lash Academy</div>
+  <h1>Õpilase edu on<br>meie eesmärk.</h1>
+  <p>Kulmu- ja ripsmekoolitused, mis annavad sulle oskused, enesekindluse ja kindla alguse.</p>
+</div>
+<div class="chips"><span>Kontaktõpe</span><span>E-õpe</span><span>Praktika</span></div>
+<div class="desk"><img id="desk" alt=""></div>
+<div class="phone"><img id="phone" alt=""></div>
+<script>
+  // the screenshots come in as ?desk=<file URL>&phone=<file URL>
+  const q = new URLSearchParams(location.search);
+  document.getElementById("desk").src = q.get("desk") || "";
+  document.getElementById("phone").src = q.get("phone") || "";
+</script>
+</body></html>

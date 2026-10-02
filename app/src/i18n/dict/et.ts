@@ -6,6 +6,7 @@ export const et = {
   meta: {
     title: "MS LAB Koolituskeskus — Brow & Lash Academy",
     description: "Kulmu- ja ripsmekoolitused, mis annavad sulle oskused, enesekindluse ja kindla alguse.",
+    ogAlt: "MS LAB Koolituskeskuse avaleht arvutis ja telefonis",
   },
 
   nav: {
