@@ -305,9 +305,10 @@ test.describe("practice", () => {
     const form = page.locator("[data-practice-form]");
     await form.getByRole("radio", { name: /MAXI/ }).check();
     await expect(page).toHaveURL(/\/praktika\?pakett=MAXI#taotlus$/);
-    const rsc: string[] = [];
+    const rsc: string[] = []; // navigation requests (a production build also prefetches links: those are not counted)
     page.on("request", (r) => {
-      if (r.url().includes("_rsc=")) rsc.push(r.url());
+      const h = r.headers();
+      if (r.url().includes("_rsc=") && !h["next-router-prefetch"] && !h["next-router-segment-prefetch"]) rsc.push(r.url());
     });
     await page.locator("[data-practice]").getByRole("link", { name: /Registreeru MINI/ }).click();
     await expect(page).toHaveURL(/\/praktika\?pakett=MINI#taotlus$/);
