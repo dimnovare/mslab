@@ -324,6 +324,17 @@ test.describe("practice", () => {
     await expect(page).toHaveURL(/\/praktika\?pakett=MINI#taotlus$/);
   });
 
+  test("the in-place pick takes the package the link names, not the card it sits in (fix round 1)", async ({ page }) => {
+    await page.goto("/praktika?pakett=MINI#taotlus");
+    const link = page.locator("[data-package='MINI']").getByRole("link", { name: /Registreeru/ });
+    // a card whose link names another package (as an admin-made link could): the link wins
+    await link.evaluate((a: HTMLAnchorElement) => a.setAttribute("href", a.getAttribute("href")!.replace("pakett=MINI", "pakett=MAXI")));
+    await link.click();
+    await expect(page).toHaveURL(/\/praktika\?pakett=MAXI#taotlus$/);
+    await expect(page.locator("[data-practice-form]").getByRole("radio", { name: /MAXI/ })).toBeChecked();
+    await expect(page.locator("[data-package='MAXI']")).toHaveAttribute("data-selected", "true");
+  });
+
   test("home practice cards lead to the form with the package picked", async ({ page }) => {
     await page.goto("/");
     await page.locator("[data-practice]").getByRole("link", { name: /Registreeru MAXI/ }).click();

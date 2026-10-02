@@ -20,10 +20,10 @@ export function PackageFrame({ code, className, track, children }: { code: strin
 }
 
 /**
- * On the practice page the card's "Registreeru" link (?pakett=<code>#taotlus on this same page) picks the package
- * right here: the address, the card outline and the request form follow, and the form scrolls into view, without a
- * navigation. (A Next.js navigation back to the address the page was opened with doubled its #taotlus.) Ctrl/⌘,
- * Shift, Alt and middle clicks are left to the browser.
+ * On the practice page the card's "Registreeru" link (?pakett=<code>#taotlus on this same page) picks the package it
+ * names right here: the address, the card outline and the request form follow, and the form scrolls into view, without
+ * a navigation. (A Next.js navigation back to the address the page was opened with doubled its #taotlus.) A link
+ * without ?pakett, to another page or with Ctrl/⌘, Shift, Alt or a middle click is left to the browser.
  */
 function Tracked({ code, className, children }: { code: string; className: string; children: React.ReactNode }) {
   const [query, writeQuery] = useUrlQuery();
@@ -33,10 +33,11 @@ function Tracked({ code, className, children }: { code: string; className: strin
     const link = (e.target as Element).closest<HTMLAnchorElement>("a[href]");
     if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const to = new URL(link.href);
-    if (to.origin !== window.location.origin || to.pathname !== window.location.pathname) return;
+    const picked = to.searchParams.get("pakett");
+    if (to.origin !== window.location.origin || to.pathname !== window.location.pathname || !picked) return;
     e.preventDefault(); // before next/link's own handler (this one runs in the capture phase)
     const next = new URLSearchParams(window.location.search);
-    next.set("pakett", code);
+    next.set("pakett", picked); // the package the link names
     writeQuery(next, to.hash);
     const target = to.hash ? document.getElementById(decodeURIComponent(to.hash.slice(1))) : null;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

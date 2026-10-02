@@ -16,8 +16,9 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 // - when Next.js follows history changes (its patch is in place), a write goes through its replaceState at once: it
 //   copies its state onto the entry and moves its router to the new URL within the click;
 // - before that, a write keeps Next.js's history state on the entry itself, and the router is caught up at the start
-//   of the visitor's next press, key or click (capture phase: before any link handler). Never later than that, and never
-//   from an effect: telling the router while a link's navigation is pending cancels the navigation (Next.js lets the
+//   of the visitor's next press, key or click (capture phase: before any link handler), while the address is still the
+//   one written. Never later, never from an effect, and not at all once the visitor has moved on or clicked before the
+//   router follows: telling the router while a link's navigation is pending cancels the navigation (Next.js lets the
 //   newer URL win), and an effect can run after the next click.
 
 const CHANGED = "mslab:query";
@@ -38,17 +39,31 @@ const notify = (): void => {
 /** Next.js follows history.replaceState: its App Router's patch is an own property of window.history. */
 const routerFollows = (): boolean => Object.prototype.hasOwnProperty.call(window.history, "replaceState");
 
-/** The address bar moved on (an early write) while Next.js's router still has the previous URL. */
-let routerBehind = false;
+/** The address an early write left in the address bar while Next.js's router still had the previous one; null if none. */
+let behindAt: string | null = null;
 
 /**
- * Catches Next.js's router up with the address bar, once it follows history changes. `null` state: its replaceState
- * copies its own state over and moves its router to this URL (useSearchParams, the URL it writes back later).
+ * What to do about an early write at the start of a press, key or click: "tell" the router now (it follows history
+ * changes and the address is still the one written); "drop" it (the address has moved on, or a click comes while the
+ * router still does not follow: a navigation may start from it, and a later RESTORE would cancel that navigation;
+ * the entry keeps Next.js's state, so Back still works); otherwise "wait".
  */
-function catchUpRouter(): void {
-  if (!routerBehind || !routerFollows()) return;
-  routerBehind = false;
-  window.history.replaceState(null, "", window.location.href);
+export function catchUpDecision(at: { behindAt: string | null; href: string; follows: boolean; event: string }): "tell" | "drop" | "wait" {
+  if (at.behindAt === null) return "wait";
+  if (at.href !== at.behindAt) return "drop";
+  if (at.follows) return "tell";
+  return at.event === "click" ? "drop" : "wait";
+}
+
+/**
+ * Catches Next.js's router up with the address bar (see catchUpDecision). `null` state: its replaceState copies its own
+ * state over and moves its router to this URL (useSearchParams, the URL it writes back later).
+ */
+function catchUpRouter(e: Event): void {
+  const decision = catchUpDecision({ behindAt, href: window.location.href, follows: routerFollows(), event: e.type });
+  if (decision === "wait") return;
+  behindAt = null;
+  if (decision === "tell") window.history.replaceState(null, "", window.location.href);
 }
 
 if (typeof window !== "undefined") {
@@ -79,11 +94,11 @@ export function useUrlQuery(): [URLSearchParams, (next: URLSearchParams, hash?: 
     if (qs === new URLSearchParams(window.location.search).toString() && hash === window.location.hash) return; // nothing changes
     const url = `${window.location.pathname}${qs ? `?${qs}` : ""}${hash}`;
     if (routerFollows()) {
-      routerBehind = false; // this write brings the router up to date as well
+      behindAt = null; // this write brings the router up to date as well
       window.history.replaceState(null, "", url); // through Next.js: entry state and router follow at once
     } else {
       window.history.replaceState(window.history.state, "", url); // Next.js's state stays on the entry
-      routerBehind = true;
+      behindAt = window.location.href;
     }
     notify();
   }, []);
