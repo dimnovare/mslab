@@ -54,7 +54,7 @@ test.describe("noindex on every kind of answer (item 16)", () => {
       const robots = res.headers()["x-robots-tag"];
       report.push(`${path} → ${res.status()} x-robots-tag: ${robots ?? "(none)"}`);
       expect(ok, `${path}: status ${res.status()}`).toBe(true);
-      expect(robots, `${path} (${res.status()})`).toBe(NOINDEX);
+      expect(robots, `${path} (${res.status()}): once, exactly`).toBe(NOINDEX);
     }
     test.info().annotations.push({ type: "answers", description: report.join("\n") });
   });

@@ -49,12 +49,13 @@ export function middleware(req: NextRequest) {
 }
 
 /**
- * The whole host stays out of search engines until launch: every answer that passes through here carries the header —
- * pages, API, /media, the redirects made here (next.config headers() does not reach a middleware redirect in
- * production) and rewrites. Static files are answered before the Worker runs: public/_headers.
+ * The whole host stays out of search engines until launch. Pages, API and /media get X-Robots-Tag from next.config
+ * headers(), static files from public/_headers (they are answered before the Worker runs). A redirect made here gets
+ * it here: in production next.config headers() does not reach it. Only redirects: on the other answers OpenNext adds
+ * next.config's header to one set here, and the value would be sent twice.
  */
 function noindex(res: NextResponse): NextResponse {
-  res.headers.set("X-Robots-Tag", ROBOTS);
+  if (res.status >= 300 && res.status < 400) res.headers.set("X-Robots-Tag", ROBOTS);
   return res;
 }
 
