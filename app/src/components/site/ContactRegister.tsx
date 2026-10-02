@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
-import { hasPickableSession } from "@/domain/catalogue";
+import { hasPickableSession, initialSession } from "@/domain/catalogue";
 import type { SeatState } from "@/domain/sessions";
 import type { Locale } from "@/i18n/locales";
+import { useUrlQuery } from "@/lib/url-query";
 import { registerContact, submitIndividual } from "@/server/actions/public";
 import { Icon } from "./Icon";
 import ui from "./ui.module.css";
@@ -81,26 +82,31 @@ const FIELD_ORDER: Field[] = ["session", "name", "email", "phone", "period", "me
  *   is no payment choice and no prepayment line.
  * Both: help finding models (P11), create an account (P16), terms.
  * After a failed submit, focus goes to the first field with an error (its message is linked with aria-describedby).
+ * "?sessioon=12" (the links from the home page and the calendar) preselects that date until the visitor picks one. The
+ * page is cached for every visitor, so the address is read in the browser (useUrlQuery: after hydration).
  */
 export function ContactRegister({
   course,
   locale,
   kinds,
   sessions,
-  initialSession,
   t,
 }: {
   course: string;
   locale: Locale;
   kinds: { kind: Kind; price: string }[];
   sessions: SessionOption[];
-  initialSession: number | null;
   t: ContactRegisterTexts;
 }) {
   const id = useId();
   const offered = kinds.map((k) => k.kind);
-  const [kind, setKind] = useState<Kind>(initialSession !== null && offered.includes("group") ? "group" : (offered[0] ?? "group"));
-  const [session, setSession] = useState<number | null>(initialSession);
+  const [query] = useUrlQuery();
+  const linked = initialSession(sessions, query.get("sessioon") ?? undefined);
+  // undefined: not chosen on this page yet, the link's date (and the group kind with it) applies
+  const [kindChosen, setKind] = useState<Kind>();
+  const [sessionChosen, setSession] = useState<number | null>();
+  const kind: Kind = kindChosen ?? (linked !== null && offered.includes("group") ? "group" : (offered[0] ?? "group"));
+  const session = sessionChosen === undefined ? linked : sessionChosen;
   const [values, setValues] = useState({ name: "", email: "", phone: "", period: "", message: "" });
   const [payment, setPayment] = useState<"full" | "half">("full");
   const [checks, setChecks] = useState({ modelHelp: false, account: false, terms: false });

@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { Icon } from "@/components/site/Icon";
 import { trainerSettings } from "@/components/site/settings";
 import ui from "@/components/site/ui.module.css";
 import { WorksGallery } from "@/components/site/WorksGallery";
 import { getDb } from "@/db/client";
-import { getGallery, getPage, getSettings } from "@/db/queries/public";
+import { getGallery, getPage } from "@/db/queries/public";
+import { getSiteSettings } from "@/server/site-data";
 import type { Page } from "@/db/schema";
 import { paragraphs } from "@/domain/catalogue";
 import { pick } from "@/i18n/field";
@@ -58,11 +58,10 @@ function Story({ id, page, fallbackTitle, locale }: { id: string; page: Page | n
 export default async function TrainerPage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
   const db = getDb();
   const [settings, bio, story, journey, works] = await Promise.all([
-    getSettings(db),
+    getSiteSettings(),
     getPage(db, "trainer_bio"),
     getPage(db, "center_story"),
     getPage(db, "trainer_journey"),

@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
+import type { PublicChange } from "@/server/cache-targets";
 import type { Env } from "@/server/notify";
 import {
   confirmSubscriber,
@@ -84,8 +85,9 @@ function setup(opts: { secrets?: boolean; ip?: string; kv?: ReturnType<typeof fa
   const kv = opts.kv ?? fakeKv({ "tg:chat": "42" });
   const env: Env = { KV: kv, MAIL_FROM: "MS LAB <info@send.example>", MARIA_EMAIL: "maria@example.com", SITE_URL: "https://mslab.example", ...(opts.secrets ? SECRETS : {}) };
   const tasks: (() => Promise<unknown>)[] = [];
-  const deps: Deps = { db, env, ip: opts.ip ?? "203.0.113.1", siteUrl: "https://mslab.example", now: NOW, later: (task) => void tasks.push(task) };
-  return { deps, kv, flush: () => Promise.all(tasks.splice(0).map((task) => task())) };
+  const changes: PublicChange[] = [];
+  const deps: Deps = { db, env, ip: opts.ip ?? "203.0.113.1", siteUrl: "https://mslab.example", now: NOW, later: (task) => void tasks.push(task), changed: (c) => void changes.push(c) };
+  return { deps, kv, changes, flush: () => Promise.all(tasks.splice(0).map((task) => task())) };
 }
 
 /** Resend and Telegram stubs; quiet console. */
@@ -119,6 +121,15 @@ test("createRegistration stores the e-mail trimmed and lowercased", async () => 
 });
 
 describe("group registration", () => {
+  test("a stored registration revalidates the course's pages and the calendar (seats); a refused one does not", async () => {
+    outbox();
+    const { deps, changes } = setup();
+    expect(await handleRegistration(deps, group({ session: String(ids.full) }))).toEqual({ ok: false, errors: { session: "full" } });
+    expect(changes).toEqual([]);
+    expect(await handleRegistration(deps, group())).toEqual({ ok: true });
+    expect(changes).toEqual([{ kind: "seats", course: "kulmud" }]);
+  });
+
   test("is stored awaiting prepayment, then Maria gets the summary by e-mail and Telegram", async () => {
     const { mails, pings } = outbox();
     const { deps, flush } = setup({ secrets: true });
@@ -329,14 +340,17 @@ describe("requests", () => {
 
   test("waitlist for a scheduled session of a published course", async () => {
     const { mails } = outbox();
-    const { deps, flush } = setup({ secrets: true });
+    const { deps, flush, changes } = setup({ secrets: true });
     expect(await handleWaitlist(deps, form({ session: String(ids.full), name: "Test", email: "test@example.com" }))).toEqual({ ok: true });
+    // the cached calendar and course page show the session's seats: they are revalidated
+    expect(changes).toEqual([{ kind: "seats", course: "kulmud" }]);
     const [row] = await db.select().from(requests);
     expect(row).toMatchObject({ kind: "waitlist", payload: { session: ids.full, course: "kulmud", name: "Test", email: "test@example.com", locale: "et" } });
     await flush();
     expect(mails()[0].subject).toBe("Ootenimekiri: Kulmude baaskoolitus, 12.12.2026 kell 10:00, Pärnu — Test");
     for (const session of [ids.cancelled, 999999])
       expect(await handleWaitlist(deps, form({ session: String(session), name: "T", email: "t@example.com" }))).toEqual({ ok: false, errors: { form: "invalid" } });
+    expect(changes).toHaveLength(1); // nothing stored, nothing to revalidate
   });
 });
 

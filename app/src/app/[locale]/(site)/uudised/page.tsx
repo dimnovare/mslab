@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { NewsGrid } from "@/components/site/NewsCard";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
@@ -25,7 +24,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function NewsPage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
   const posts = await listPosts(getDb());
   return (

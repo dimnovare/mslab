@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { ContactBlock } from "@/components/site/ContactBlock";
 import { trainerSettings } from "@/components/site/settings";
 import { isHttpsUrl } from "@/domain/site-editor";
 import ui from "@/components/site/ui.module.css";
-import { getDb } from "@/db/client";
-import { getSettings } from "@/db/queries/public";
+import { getSiteSettings } from "@/server/site-data";
 import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "./contact.module.css";
@@ -33,9 +31,8 @@ const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
 export default async function ContactPage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
-  const settings = await getSettings(getDb());
+  const settings = await getSiteSettings();
   const c = (settings.contact && typeof settings.contact === "object" ? settings.contact : {}) as Record<string, unknown>;
   const email = str(c.email);
   const phone = str(c.phone);

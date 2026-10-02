@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { href } from "@/i18n/href";
 import { getDict, type Locale } from "@/i18n/locales";
-import { hostOrigin, linkBase } from "./site";
 
 /** The link preview picture (public/og.jpg, made from the home page by tools/og-home.cjs). ?v= changes with the file. */
 export const OG_IMAGE = { url: "/og.jpg?v=1", width: 1200, height: 630, type: "image/jpeg" } as const;
@@ -18,9 +16,21 @@ export type SharePage = {
   image?: string;
 };
 
+/** The site's own address for absolute links in the page (SITE_URL), without a trailing slash. */
+export function siteBase(): string {
+  let siteUrl = "https://mslab.diipsolutions.eu";
+  try {
+    siteUrl = getCloudflareContext().env.SITE_URL || siteUrl;
+  } catch {
+    // outside a request (build): the default
+  }
+  return siteUrl.replace(/\/+$/, "");
+}
+
 /**
- * Link preview tags (Open Graph and the Twitter / X card). Absolute addresses use the host the page was opened on when
- * it is one of ours (workers.dev now, the custom domain later), else SITE_URL.
+ * Link preview tags (Open Graph and the Twitter / X card). Absolute addresses use the site's address (SITE_URL), not
+ * the host the page was opened on: a page is rendered once and cached for every host that serves it (the custom domain
+ * and workers.dev), so nothing in it may depend on the request.
  *
  * Without `page` (the locale layout, so every public page): the site's name, language, type and the home page picture
  * only; a crawler takes the title and description from the page's own <title> and description. With `page` (the home
@@ -28,13 +38,7 @@ export type SharePage = {
  */
 export async function shareMetadata(locale: Locale, page?: SharePage): Promise<Pick<Metadata, "metadataBase" | "openGraph" | "twitter">> {
   const d = getDict(locale);
-  let siteUrl = "https://mslab.diipsolutions.eu";
-  try {
-    siteUrl = getCloudflareContext().env.SITE_URL || siteUrl;
-  } catch {
-    // outside a request (build): the default
-  }
-  const base = linkBase(hostOrigin(await headers()), siteUrl);
+  const base = siteBase();
   const image = page?.image ? { url: page.image, alt: page.title } : { ...OG_IMAGE, alt: d.meta.ogAlt };
   const site = { type: "website" as const, siteName: d.common.siteName, locale: locale === "ru" ? "ru_RU" : "et_EE", images: [image] };
   if (!page) return { metadataBase: new URL(base), openGraph: site, twitter: { card: "summary_large_image", images: [image] } };

@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { cache } from "react";
 import { getDb } from "@/db/client";
 import { getPage } from "@/db/queries/public";
@@ -13,7 +12,6 @@ type LegalKey = "privacy" | "terms";
 
 // One page query per request, shared by generateMetadata and the page.
 const loadPage = cache(async (key: LegalKey) => {
-  await connection();
   return getPage(getDb(), key);
 });
 

@@ -1,18 +1,23 @@
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import Script from "next/script";
 import { Footer } from "@/components/site/Footer";
 import { Header } from "@/components/site/Header";
 import { shellSettings, type ShellSettings } from "@/components/site/settings";
-import { getDb } from "@/db/client";
-import { getSettings } from "@/db/queries/public";
+import { getSiteSettings } from "@/server/site-data";
 import { isLocale } from "@/i18n/locales";
 
-// Footer contact and newsletter discount are read per request, so every public page renders dynamically.
+/**
+ * Every public page is cached once rendered (open-next.config.ts) and rendered again when an admin save, a registration
+ * or a session's start makes it stale (server/public-cache.ts). This is the safety net on top of that: a page is
+ * refreshed in the background at most once a day, so a change made around the site (directly in the database) shows
+ * within a day. Nothing here may depend on the request: no headers, cookies, query strings or connection().
+ */
+export const revalidate = 86400;
+
+// Footer contact and newsletter discount come from the settings (a settings save revalidates every page).
 async function loadShellSettings(): Promise<ShellSettings> {
-  await connection();
   try {
-    return shellSettings(await getSettings(getDb()));
+    return shellSettings(await getSiteSettings());
   } catch (err) {
     // The shell must not take the whole site down; fall back to defaults.
     console.error("site shell: settings unavailable:", err instanceof Error ? err.message : err);

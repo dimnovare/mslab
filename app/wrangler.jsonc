@@ -1,6 +1,7 @@
 {
   "name": "mslab-web",
-  "main": ".open-next/worker.js",
+  // worker.ts: the cached-page front (src/worker/page-front.ts), then OpenNext's .open-next/worker.js; and the cron
+  "main": "worker.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
@@ -9,8 +10,18 @@
   // and keep the workers.dev address (with routes set, wrangler would switch it off): previews and read-only test runs
   "workers_dev": true,
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "5004509b7b08431b8a053d9f8fce2335", "localConnectionString": "postgres://postgres:postgres@localhost:5432/mslab" }],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "mslab-media" }],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "mslab-media" },
+    // the rendered public pages (open-next.config.ts: incremental cache)
+    { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "mslab-next-cache" }
+  ],
   "kv_namespaces": [{ "binding": "KV", "id": "325a989613294fa19c86451afd8f6fa3" }],
+  // when each cached page was made stale (open-next.config.ts: tag cache; revalidatePath writes here)
+  "d1_databases": [{ "binding": "NEXT_TAG_CACHE_D1", "database_name": "mslab-next-tags", "database_id": "aae2ec02-d883-49f8-b9b5-b5b46178f1fb" }],
+  // the daily background refresh of a cached page is a request to the Worker itself (open-next.config.ts: queue)
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "mslab-web" }],
+  // a session that has begun leaves the public pages within 5 minutes (src/worker/session-starts.ts)
+  "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "SITE_URL": "https://mslab.diipsolutions.eu",
     "ADMIN_EMAILS": "dim@example.test,maria@example.test",

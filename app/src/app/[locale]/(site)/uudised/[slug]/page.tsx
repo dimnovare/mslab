@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { cache } from "react";
 import { Icon } from "@/components/site/Icon";
 import { NewsGrid } from "@/components/site/NewsCard";
@@ -20,12 +19,16 @@ import { shareMetadata } from "@/server/share-meta";
 
 type Props = { params: Promise<{ locale: string; slug: string }> };
 
+/** Rendered on the first visit and cached, like every public page (app/[locale]/layout.tsx). */
+export function generateStaticParams(): { slug: string }[] {
+  return [];
+}
+
 /** Number of other posts under "Loe veel". */
 const MORE = 3;
 
 // One post query per request, shared by generateMetadata and the page.
 const loadPost = cache(async (slug: string) => {
-  await connection();
   return getPost(getDb(), slug);
 });
 

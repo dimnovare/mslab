@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { cache } from "react";
 import { ContactRegister, type SessionOption } from "@/components/site/ContactRegister";
 import { courseCardData } from "@/components/site/course-card-data";
@@ -18,8 +17,8 @@ import { ShareButton } from "@/components/site/ShareButton";
 import { TrainerCard, TrainerLink, type TrainerInfo } from "@/components/site/TrainerLink";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
-import { getCourseBySlug, getPage, getSettings, listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
-import { bookableCities, initialSession, paragraphs } from "@/domain/catalogue";
+import { getCourseBySlug, getPage, listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
+import { bookableCities, paragraphs } from "@/domain/catalogue";
 import { priceOptions } from "@/domain/course";
 import { firstParagraph, nextSessionByCourse } from "@/domain/home";
 import { formatEUR } from "@/domain/money";
@@ -33,19 +32,19 @@ import { mediaUrl } from "@/lib/media";
 import styles from "./course.module.css";
 import { upcomingFrom } from "@/domain/calendar";
 import { shareMetadata } from "@/server/share-meta";
+import { getSiteSettings } from "@/server/site-data";
 
-type Props = {
-  params: Promise<{ locale: string; slug: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+type Props = { params: Promise<{ locale: string; slug: string }> };
 
-// One course query per request, shared by generateMetadata and the page. Past sessions are left out.
-const loadCourse = cache(async (slug: string) => {
-  await connection();
-  return getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) });
-});
+/** Rendered on the first visit and cached, like every public page (app/[locale]/layout.tsx). */
+export function generateStaticParams(): { slug: string }[] {
+  return [];
+}
 
-export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
+// One course query per render, shared by generateMetadata and the page. Sessions that have begun are left out.
+const loadCourse = cache((slug: string) => getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) }));
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params;
   if (!isLocale(locale)) return {};
   const course = await loadCourse(slug);
@@ -64,7 +63,7 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
  * course); the page never offers another format (K1, K2). Description, outcomes, contents, trainer and recommendations
  * follow below, recommendations last (P5).
  */
-export default async function CoursePage({ params, searchParams }: Props) {
+export default async function CoursePage({ params }: Props) {
   const { locale, slug } = await params;
   if (!isLocale(locale)) notFound();
   const course = await loadCourse(slug);
@@ -72,12 +71,11 @@ export default async function CoursePage({ params, searchParams }: Props) {
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const db = getDb();
-  const [all, upcoming, settings, bio, query] = await Promise.all([
+  const [all, upcoming, settings, bio] = await Promise.all([
     listPublishedCourses(db),
     listUpcomingSessions(db, upcomingFrom(new Date())),
-    getSettings(db),
+    getSiteSettings(),
     getPage(db, "trainer_bio"),
-    searchParams,
   ]);
 
   const c = d.course;
@@ -218,7 +216,6 @@ export default async function CoursePage({ params, searchParams }: Props) {
                 locale={locale}
                 kinds={kinds}
                 sessions={sessions}
-                initialSession={initialSession(sessions, query.sessioon)}
                 t={{
                   participationLabel: c.participationLabel,
                   group: c.group,

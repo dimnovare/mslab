@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { CalendarList } from "@/components/site/CalendarList";
 import type { CalendarRowData } from "@/components/site/CalendarRow";
 import ui from "@/components/site/ui.module.css";
@@ -31,7 +30,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function CalendarPage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const sessions = contactSessions(await listUpcomingSessions(getDb(), upcomingFrom(new Date())));

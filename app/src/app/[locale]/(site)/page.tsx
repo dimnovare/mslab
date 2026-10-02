@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { BlogCarousel } from "@/components/site/BlogCarousel";
 import { CampaignPopup } from "@/components/site/CampaignPopup";
 import { ContactBlock } from "@/components/site/ContactBlock";
 import { CourseCard } from "@/components/site/CourseCard";
 import { courseCardData } from "@/components/site/course-card-data";
 import { Faq } from "@/components/site/Faq";
-import { FlashNotice } from "@/components/site/FlashNotice";
+import { FlashNotice, type FlashMessage } from "@/components/site/FlashNotice";
 import { FormatsBlock, type FormatTab } from "@/components/site/FormatsBlock";
 import { Hero, type HeroSlideView } from "@/components/site/Hero";
 import { Icon } from "@/components/site/Icon";
@@ -33,10 +32,10 @@ import { shareMetadata } from "@/server/share-meta";
 import styles from "./home.module.css";
 import { upcomingFrom } from "@/domain/calendar";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
+type Props = { params: Promise<{ locale: string }> };
 
 /** The link preview of / and /ru: the layout's card with this page's own address (og:url). */
-export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale } = await params;
   if (!isLocale(locale)) return {};
   const d = getDict(locale);
@@ -48,10 +47,9 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
  * → statement → trainer → practice → blog → FAQ → contact. The newsletter lives in the footer (layout).
  * The layout provides <main> and the transparent header that the hero slides under.
  */
-export default async function Home({ params, searchParams }: Props) {
-  const [{ locale }, query] = await Promise.all([params, searchParams]);
+export default async function Home({ params }: Props) {
+  const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const db = getDb();
@@ -91,15 +89,13 @@ export default async function Home({ params, searchParams }: Props) {
   const trainerName = trainer.name || pick(bio?.title, locale);
 
   // The newsletter confirmation link (/api/newsletter/confirm) lands here with ?uudiskiri=kinnitatud | vigane | viga.
+  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice).
   const nl = d.newsletter;
-  const newsletterNotice =
-    query.uudiskiri === "kinnitatud"
-      ? { tone: "ok" as const, title: nl.confirmedTitle, text: nl.confirmedText }
-      : query.uudiskiri === "vigane"
-        ? { tone: "warn" as const, title: nl.linkInvalid }
-        : query.uudiskiri === "viga"
-          ? { tone: "warn" as const, title: d.forms.errorGeneric }
-          : null;
+  const newsletterNotices: Record<string, FlashMessage> = {
+    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText },
+    vigane: { tone: "warn", title: nl.linkInvalid },
+    viga: { tone: "warn", title: d.forms.errorGeneric },
+  };
 
   return (
     <>
@@ -239,7 +235,7 @@ export default async function Home({ params, searchParams }: Props) {
         }}
       />
 
-      {newsletterNotice && <FlashNotice param="uudiskiri" closeLabel={d.common.close} {...newsletterNotice} />}
+      <FlashNotice param="uudiskiri" notices={newsletterNotices} closeLabel={d.common.close} />
 
       {campaign && (
         <CampaignPopup c={campaign} locale={locale} t={{ close: d.common.close, copy: d.campaign.copy, copied: d.campaign.copied, selected: d.campaign.selected }} />

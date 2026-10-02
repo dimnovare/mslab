@@ -8,6 +8,16 @@ import "@/styles/globals.css";
 
 type Props = { children: React.ReactNode; params: Promise<{ locale: string }> };
 
+/**
+ * No page is rendered at build time (that would read the build machine's database); every public page is rendered on
+ * its first visit and then served from the cache until a change revalidates it (open-next.config.ts,
+ * server/public-cache.ts). The empty list is what makes the pages cacheable (incremental static regeneration) rather
+ * than rendered on every request.
+ */
+export function generateStaticParams(): { locale: string }[] {
+  return [];
+}
+
 export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
   const { locale } = await params;
   if (!isLocale(locale)) return {};

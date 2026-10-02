@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { Icon } from "@/components/site/Icon";
 import { PracticeBlock } from "@/components/site/PracticeBlock";
 import { PracticeRequest } from "@/components/site/PracticeRequest";
@@ -32,7 +31,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function PracticePage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
   const p = d.practice;
   const to = (path: string) => href(locale, path);

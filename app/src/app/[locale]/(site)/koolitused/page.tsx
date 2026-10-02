@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { CatalogueFilters, type CatalogueCourse } from "@/components/site/CatalogueFilters";
 import { courseCardData } from "@/components/site/course-card-data";
 import ui from "@/components/site/ui.module.css";
@@ -31,7 +30,6 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
 export default async function CataloguePage({ params }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  await connection();
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const db = getDb();

@@ -70,19 +70,33 @@ if (typeof window !== "undefined") {
   for (const type of ["pointerdown", "keydown", "click"]) window.addEventListener(type, catchUpRouter, true);
 }
 
+// The public pages are rendered once and cached for every visitor, whatever the query (open-next.config.ts), so the
+// server renders them as if the address had no query, and the browser applies it after hydration. On the server,
+// useSearchParams() would also make Next.js give up the server rendering of the page; it is called in the browser only
+// (the choice is fixed per bundle, so the hook order never changes within one).
+function useRouterQueryInBrowser(): string {
+  return useSearchParams().toString();
+}
+function useNoQueryOnServer(): string {
+  return "";
+}
+const useRouterQuery = typeof window === "undefined" ? useNoQueryOnServer : useRouterQueryInBrowser;
+
 /**
  * The page's query string as live state, and a writer for it. The writer replaces the whole query (pass the
  * merged params: other parameters are the caller's to keep) and keeps the path, and the hash unless one is given.
+ * Empty on the server and while the page hydrates (what the cached server rendering shows), the address's own
+ * query right after.
  */
 export function useUrlQuery(): [URLSearchParams, (next: URLSearchParams, hash?: string) => void] {
   const pathname = usePathname();
-  const routerQuery = useSearchParams().toString();
+  const routerQuery = useRouterQuery();
   const query = useSyncExternalStore(
     subscribe,
     // While Next.js renders a navigation to this page, the address bar still shows the page being left: until it
     // shows this page, the router's query is the one to render.
     () => (window.location.pathname === pathname ? new URLSearchParams(window.location.search).toString() : routerQuery),
-    () => routerQuery,
+    () => "",
   );
 
   // A Next.js navigation (a link to this page with another query, Back/Forward) changes useSearchParams, and the

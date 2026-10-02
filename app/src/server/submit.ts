@@ -30,6 +30,7 @@ import {
 import { logFailure } from "./log";
 import { adminUrl, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
+import type { PublicChange } from "./cache-targets";
 import { isTokenShape, newToken, sha256 } from "./token";
 import { upcomingFrom } from "@/domain/calendar";
 
@@ -52,6 +53,8 @@ export type Deps = {
   now: Date;
   /** Runs work after the response has been sent: next/server after() in production, collected and awaited in tests. */
   later: (task: () => Promise<unknown>) => void;
+  /** Told when a stored submission changes what public pages show (the cached pages are revalidated). */
+  changed?: (change: PublicChange) => void;
 };
 
 export type FormName = "contact" | "subscribe" | "register" | "individual" | "interest" | "practice" | "waitlist";
@@ -206,6 +209,7 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
     if (seatState(session, session.confirmed) === "full") return { result: fail({ session: "full" }) };
 
     await createRegistration(deps.db, { ...data, courseId: course.id, courseSessionId: session.id, kind: "group", preferredPeriod: "", message: "" });
+    deps.changed?.({ kind: "seats", course: course.slug });
     const summary = registrationSummary(
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
       admin(deps),
@@ -280,6 +284,7 @@ export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionRe
     if (!row || row.session.status !== "scheduled") return { result: fail({ form: "invalid" }) };
     const { session, course } = row;
     await storeRequest(deps.db, "waitlist", { session: session.id, course: course.slug, ...data });
+    deps.changed?.({ kind: "seats", course: course.slug });
     const summary = waitlistSummary(
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
       admin(deps),

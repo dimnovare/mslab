@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { APIRequestContext } from "@playwright/test";
 import { test, expect } from "./test";
 
@@ -5,6 +6,9 @@ import { test, expect } from "./test";
 // deployment (E2E_BASE_URL). Task 16 items 14 (link preview) and 16 (noindex on every kind of answer).
 
 const NOINDEX = "noindex, nofollow";
+
+/** The site's address (wrangler.jsonc SITE_URL): link previews name it, whichever host served the page (Task 17). */
+const SITE_URL = /"SITE_URL":\s*"([^"]+)"/.exec(readFileSync("wrangler.jsonc", "utf8"))![1];
 
 /** HEAD (as curl -I), without following redirects; GET where the answer to HEAD would not say anything. */
 async function head(request: APIRequestContext, path: string) {
@@ -76,7 +80,7 @@ test.describe("noindex on every kind of answer (item 16)", () => {
 test.describe("link preview of the home page (item 14)", () => {
   test.skip(({ isMobile }) => isMobile, "the same markup for every browser: desktop project only");
 
-  test("/ and /ru carry Open Graph and Twitter card tags with the 1200×630 home picture", async ({ page, baseURL }) => {
+  test("/ and /ru carry Open Graph and Twitter card tags with the 1200×630 home picture", async ({ page }) => {
     for (const [path, locale, title] of [
       ["/", "et_EE", "MS LAB Koolituskeskus — Brow & Lash Academy"],
       ["/ru", "ru_RU", "MS LAB Учебный центр — Brow & Lash Academy"],
@@ -89,7 +93,8 @@ test.describe("link preview of the home page (item 14)", () => {
       expect(await meta("og:locale"), path).toBe(locale);
       expect(new URL((await meta("og:url"))!).pathname, path).toBe(path);
       const image = new URL((await meta("og:image"))!);
-      expect(image.origin, "the picture is on the host the page was opened on").toBe(new URL(baseURL!).origin);
+      // a cached page is the same for every host that serves it (custom domain, workers.dev): absolute links use SITE_URL
+      expect(image.origin, "the picture is on the site's address").toBe(new URL(SITE_URL).origin);
       expect(image.pathname).toBe("/og.jpg");
       expect(await meta("og:image:width")).toBe("1200");
       expect(await meta("og:image:height")).toBe("630");

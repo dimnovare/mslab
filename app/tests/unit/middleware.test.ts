@@ -59,6 +59,16 @@ describe("locale middleware", () => {
     expect(rewrittenTo("/etude")).toBe("/et/etude");
   });
 
+  test("the cart of one course is a page of its own, so that it can be cached by its path (Task 17)", () => {
+    expect(rewrittenTo("/ostukorv?kursus=kulmumeistri-e-koolitus")).toBe("/et/ostukorv/kulmumeistri-e-koolitus?kursus=kulmumeistri-e-koolitus");
+    expect(rewrittenTo("/ru/ostukorv?kursus=kulmumeistri-e-koolitus")).toBe("/ru/ostukorv/kulmumeistri-e-koolitus?kursus=kulmumeistri-e-koolitus");
+    expect(rewrittenTo("/ostukorv?kursus=a%2Fb")).toBe("/et/ostukorv/a%2Fb?kursus=a%2Fb"); // one path segment, whatever it says
+    // without a course: the empty cart
+    expect(rewrittenTo("/ostukorv")).toBe("/et/ostukorv");
+    expect(rewrittenTo("/ostukorv?kursus=")).toBe("/et/ostukorv?kursus=");
+    expect(passesThrough("/ru/ostukorv")).toBe(true);
+  });
+
   test("paths that only start like the hub, a static file or the OG image are Estonian pages", () => {
     for (const p of ["/guidexyz", "/guides", "/p", "/feedback.json", "/feedback.jsx", "/robots.txt.bak", "/og.html", "/og.jpg.html", "/ogx", "/og.svg"])
       expect(rewrittenTo(p), p).toBe(`/et${p}`);
