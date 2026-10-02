@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./test";
 
 // Catalogue (Task 8): Maria's K1–K13. The first test is the brief's test verbatim; the rest cover the
 // remaining checklist items against the seed data (3 contact + 3 e-learning courses).

@@ -370,6 +370,8 @@ export const et = {
     codeLabel: "Sooduskood",
     copy: "Kopeeri",
     copied: "Kopeeritud",
+    // when the browser gives no clipboard: the code is selected for the visitor to copy
+    selected: "Kood on märgitud.",
   },
 
   common: {

@@ -74,6 +74,18 @@ describe("links an admin may store", () => {
     expect(linkFor("/ru?x=1", et, "/koolitused")).toBe("/?x=1");
     expect(linkFor("/ruumid", ru, "/koolitused")).toBe("/ru/ruumid");
   });
+
+  test("a stored path that is another site once its locale is gone ('/ru//evil.example') falls back", () => {
+    const ru = (p: string) => (p === "/" ? "/ru" : `/ru${p}`);
+    const et = (p: string) => p;
+    for (const bad of ["/ru//evil.example", "/et//evil.example/x", "/RU//evil.example", "/ru//", "/ru/\\evil.example", "/et/\\/evil.example"]) {
+      expect(linkFor(bad, et, "/koolitused"), bad).toBe("/koolitused");
+      expect(linkFor(bad, ru, "/koolitused"), bad).toBe("/ru/koolitused");
+    }
+    // a bare locale and a locale with a path still work
+    expect(linkFor("/ru/", et, "/koolitused")).toBe("/");
+    expect(linkFor("/ru/praktika//x", et, "/koolitused")).toBe("/praktika//x");
+  });
 });
 
 describe("focal points", () => {

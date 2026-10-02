@@ -1,4 +1,5 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import { test, expect } from "./test";
 
 // Touch swipes on the phone project (isMobile + hasTouch). The swipes are real touch input: touchStart / touchMove /
 // touchEnd sent through the Chrome DevTools Protocol (Input.dispatchTouchEvent), the same path as a finger on the

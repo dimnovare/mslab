@@ -348,6 +348,7 @@ export const ru: Dict = {
     codeLabel: "Промокод",
     copy: "Копировать",
     copied: "Скопировано",
+    selected: "Код выделен.",
   },
 
   common: {

@@ -88,11 +88,14 @@ export const hasLocalePrefix = (path: string) => LOCALE_PREFIX.test(path);
 /**
  * A stored button link for the page: a site path gets the locale prefix (via `to`), an https address stays; anything
  * else falls back. A path stored with a locale already ("/ru/praktika") loses it first, so it never becomes "/ru/ru/…".
+ * What is left must still be a path on this site: "/ru//evil.example" would lose "/ru" and become "//evil.example",
+ * which a browser opens as another site (as it does "/\evil.example"), so such a value falls back as well.
  */
 export function linkFor(value: string, to: (path: string) => string, fallback: string): string {
   if (!isSiteHref(value)) return to(fallback);
   if (!value.startsWith("/")) return value;
   const bare = value.replace(LOCALE_PREFIX, "");
+  if (/^[/\\]{2}/.test(bare)) return to(fallback);
   return to(bare === "" || /^[?#]/.test(bare) ? `/${bare}` : bare);
 }
 

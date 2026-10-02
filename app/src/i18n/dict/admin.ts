@@ -705,7 +705,7 @@ export const adminEt = {
     copy: "Kopeeri",
     close: "Sulge",
     rules: "Reeglid",
-    rulesList: ["Kuvatakse esilehel 6 sekundi pärast", "Kord külastuse jooksul", "Mitte ostukorvis, tundides ega testides", "Sulgub Esc, ✕ või taustale vajutades"],
+    rulesList: ["Kuvatakse esilehel 6 sekundi pärast", "Kord külastuse jooksul", "Mitte ostukorvis, tundides ega testides", "Sulgub Esc, ✕ või taustale vajutades, telefonis ka alla libistades"],
   },
 
   settings: {

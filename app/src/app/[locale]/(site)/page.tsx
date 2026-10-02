@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { BlogCarousel } from "@/components/site/BlogCarousel";
+import { CampaignPopup } from "@/components/site/CampaignPopup";
 import { ContactBlock } from "@/components/site/ContactBlock";
 import { CourseCard } from "@/components/site/CourseCard";
 import { courseCardData } from "@/components/site/course-card-data";
@@ -18,6 +19,7 @@ import { UpcomingStrip } from "@/components/site/UpcomingStrip";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { getHomeData, listUpcomingSessions } from "@/db/queries/public";
+import { campaignView } from "@/domain/campaign";
 import { firstParagraph, nextSessionByCourse, nextSessions, pickHomeCourses } from "@/domain/home";
 import { linkFor } from "@/domain/site-editor";
 import { formatEUR } from "@/domain/money";
@@ -68,6 +70,9 @@ export default async function Home({ params, searchParams }: Props) {
     // Hybrid is an explanation only: no steps, no facts, no link (Maria C16, K8; controller ruling).
     { key: "h", name: f.hybrid.name, question: f.hybrid.question, definition: f.hybrid.definition },
   ];
+
+  // The campaign popup (Task 14): this page is / and /ru, the only pages that show it; null when switched off.
+  const campaign = campaignView(home.campaign, locale, d.campaign.cta);
 
   const statement = home.pages.statement;
   const bio = home.pages.trainer_bio;
@@ -223,6 +228,10 @@ export default async function Home({ params, searchParams }: Props) {
       />
 
       {newsletterNotice && <FlashNotice param="uudiskiri" closeLabel={d.common.close} {...newsletterNotice} />}
+
+      {campaign && (
+        <CampaignPopup c={campaign} locale={locale} t={{ close: d.common.close, copy: d.campaign.copy, copied: d.campaign.copied, selected: d.campaign.selected }} />
+      )}
     </>
   );
 }

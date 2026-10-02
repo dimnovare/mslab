@@ -305,6 +305,10 @@ test.describe("news", () => {
 });
 
 test.describe("campaign (M2–M5)", () => {
+  // The home page popup (Task 14) is followed here too: these tests change the campaign row, which the popup tests of
+  // campaign.spec.ts read, so they run in this file's late projects. A short delay instead of the site's 6 s.
+  test.use({ campaignPopup: 300 });
+
   test("the uploaded image is stored, /media serves it and the admin preview shows it; a script link is refused", async ({ page, context, visitorIp }, info) => {
     test.skip(phone(info), "one campaign: desktop changes it; the phone project only looks (next test)");
     await changing(["campaign"]);
@@ -347,6 +351,32 @@ test.describe("campaign (M2–M5)", () => {
     await page.reload();
     await expect(page.locator("[data-campaign-preview] img")).toHaveAttribute("src", `/media/${src}`);
     await expect(page.locator("[data-campaign-preview] [data-campaign-card] a")).toHaveText("Leia enda koolitus");
+
+    // the popup on the home page shows the uploaded picture and the saved texts (M1, M5)
+    await page.goto("/");
+    const popup = page.getByRole("dialog", { name: "E2E kampaania" });
+    await expect(popup).toBeVisible();
+    const picture = popup.locator("[data-campaign-card] img");
+    await expect(picture).toHaveAttribute("src", `/media/${src}`);
+    await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0); // R2 served it
+    await expect(popup.locator("[data-campaign-code]")).toHaveText("E2E-10");
+    await expect(popup.getByRole("link", { name: "Leia enda koolitus" })).toHaveAttribute("href", "/koolitused/lash-lift-botox");
+    await expect(popup.getByText("Mitte praegu")).toHaveCount(0);
+  });
+
+  test("a switched-off campaign shows no popup; switched on again, it does", async ({ page }, info) => {
+    test.skip(phone(info), "one campaign: desktop changes it");
+    await changing(["campaign"]);
+    await onLocalDb((sql) => sql`update campaign set active = false where id = 1`);
+    for (const path of ["/", "/ru"]) {
+      await page.goto(path);
+      await page.waitForTimeout(1500);
+      await expect(page.getByRole("dialog"), path).toHaveCount(0);
+      expect(await page.evaluate(() => sessionStorage.getItem("mslab-camp")), path).toBeNull();
+    }
+    await onLocalDb((sql) => sql`update campaign set active = true where id = 1`);
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "−15% Lash Lift BOTOX koolitusele" })).toBeVisible();
   });
 });
 

@@ -1,14 +1,39 @@
 import { test as base, expect } from "@playwright/test";
 import { LOCAL_FIXTURES } from "./fixtures";
 
-// `test` for specs that submit forms.
+// `test` for every spec that opens site pages.
 // - Every test is its own visitor: the forms allow 5 submissions per 10 minutes per visitor IP (KV rate limit), and
 //   against `next dev` the IP comes from x-forwarded-for, so repeated runs do not hit the limit. On Cloudflare the
 //   edge's cf-connecting-ip wins and this header changes nothing.
 // - Against anything but the local dev server (E2E_BASE_URL + E2E_ALLOW_REMOTE=1), every POST is blocked: a deployment's
 //   database and notifications are real, and tests must never submit to it. Tests that submit call submitsForms()
 //   and are skipped there.
-export const test = base.extend<{ visitorIp: string }>({
+// - The campaign popup (Task 14) opens on the home page 6 s after it loads and would cover whatever a test does there.
+//   Unless a spec asks for it (`test.use({ campaignPopup: … })`), every page starts as if this browser session had seen
+//   it already (sessionStorage "mslab-camp": the site's own once-per-session rule). "site" keeps the site's 6 s; a
+//   number sets a shorter delay in ms through the page's test hook (window.__mslabCampaignDelay).
+export type CampaignPopup = "off" | "site" | number;
+
+export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopup; campaignInit: void }>({
+  campaignPopup: ["off", { option: true }],
+  campaignInit: [
+    async ({ context, campaignPopup }, use) => {
+      if (campaignPopup === "off")
+        await context.addInitScript(() => {
+          try {
+            sessionStorage.setItem("mslab-camp", "1");
+          } catch {
+            // a document without storage (about:blank, blocked storage)
+          }
+        });
+      else if (typeof campaignPopup === "number")
+        await context.addInitScript((ms) => {
+          (window as unknown as { __mslabCampaignDelay?: number }).__mslabCampaignDelay = ms;
+        }, campaignPopup);
+      await use();
+    },
+    { auto: true },
+  ],
   visitorIp: [
     async ({ context }, use, info) => {
       if (!LOCAL_FIXTURES) {
