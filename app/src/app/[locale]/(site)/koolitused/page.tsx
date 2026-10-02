@@ -12,6 +12,7 @@ import { pick } from "@/i18n/field";
 import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
 import styles from "./catalogue.module.css";
+import { upcomingFrom } from "@/domain/calendar";
 
 type Props = { params: Promise<{ locale: string }> };
 
@@ -34,7 +35,7 @@ export default async function CataloguePage({ params }: Props) {
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const db = getDb();
-  const [list, sessions] = await Promise.all([listPublishedCourses(db), listUpcomingSessions(db, new Date())]);
+  const [list, sessions] = await Promise.all([listPublishedCourses(db), listUpcomingSessions(db, upcomingFrom(new Date()))]);
 
   const next = nextSessionByCourse(sessions);
   const courses: CatalogueCourse[] = list.map((c) => ({

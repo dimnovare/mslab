@@ -29,6 +29,7 @@ import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "./home.module.css";
+import { upcomingFrom } from "@/domain/calendar";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
 
@@ -44,7 +45,7 @@ export default async function Home({ params, searchParams }: Props) {
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const db = getDb();
-  const [home, sessions] = await Promise.all([getHomeData(db), listUpcomingSessions(db, new Date())]);
+  const [home, sessions] = await Promise.all([getHomeData(db), listUpcomingSessions(db, upcomingFrom(new Date()))]);
 
   const slides: HeroSlideView[] = home.slides.map((s) => ({
     id: s.id,

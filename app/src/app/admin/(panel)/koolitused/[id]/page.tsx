@@ -11,6 +11,7 @@ import { draftFromCourse, newCourseDraft } from "@/domain/course-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick } from "@/i18n/field";
 import { requireAdmin } from "@/server/auth";
+import { upcomingFrom } from "@/domain/calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,7 @@ export default async function CourseEditPage({ params, searchParams }: Props) {
   }
 
   // the card preview's meta line: the next scheduled session of a contact course
-  const detail = course && course.type === "contact" ? await getCourseBySlug(db, course.slug, { includeUnpublished: true, sessionsFrom: new Date() }) : null;
+  const detail = course && course.type === "contact" ? await getCourseBySlug(db, course.slug, { includeUnpublished: true, sessionsFrom: upcomingFrom(new Date()) }) : null;
   const next = detail?.sessions.find((s) => s.status === "scheduled");
   const others: OtherCourse[] = all
     .filter((c) => c.id !== course?.id)

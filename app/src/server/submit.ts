@@ -31,6 +31,7 @@ import { logFailure } from "./log";
 import { adminUrl, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
 import { isTokenShape, newToken, sha256 } from "./token";
+import { upcomingFrom } from "@/domain/calendar";
 
 // The public form submissions without Next.js: actions/public.ts builds the dependencies (database, Worker env,
 // visitor IP, after()) and calls these, and the tests call them with PGlite and fakes.
@@ -198,8 +199,9 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
     const course = await contactCourse(deps.db, slug);
     if (!course || course.priceGroup == null) return { result: fail({ form: "invalid" }) };
     const session = await sessionWithSeats(deps.db, courseSessionId);
-    // Another course's session, a cancelled one or one that has already started cannot be booked.
-    if (!session || session.courseId !== course.id || session.status !== "scheduled" || session.startsAt < deps.now)
+    // Another course's session, a cancelled one or one of an earlier day cannot be booked (upcomingFrom: the same
+    // "upcoming" as the calendar and the course page, so every date they offer can be booked).
+    if (!session || session.courseId !== course.id || session.status !== "scheduled" || session.startsAt < upcomingFrom(deps.now))
       return { result: fail({ session: "unavailable" }) };
     if (seatState(session, session.confirmed) === "full") return { result: fail({ session: "full" }) };
 

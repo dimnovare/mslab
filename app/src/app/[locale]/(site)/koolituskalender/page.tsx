@@ -6,7 +6,7 @@ import type { CalendarRowData } from "@/components/site/CalendarRow";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { listUpcomingSessions } from "@/db/queries/public";
-import { calendarCities, citySlug, contactSessions, startOfDayTallinn } from "@/domain/calendar";
+import { calendarCities, citySlug, contactSessions, upcomingFrom } from "@/domain/calendar";
 import { seatState, seatsLeft } from "@/domain/sessions";
 import { pick } from "@/i18n/field";
 import { formatDayMonth, formatWeekday } from "@/i18n/format";
@@ -34,7 +34,7 @@ export default async function CalendarPage({ params }: Props) {
   await connection();
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
-  const sessions = contactSessions(await listUpcomingSessions(getDb(), startOfDayTallinn(new Date())));
+  const sessions = contactSessions(await listUpcomingSessions(getDb(), upcomingFrom(new Date())));
 
   const c = d.calendar;
   const word = { open: c.stateOpen, few: c.stateFew, full: c.stateFull, cancelled: c.stateCancelled };

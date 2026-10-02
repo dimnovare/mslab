@@ -62,6 +62,15 @@ export function startOfDayTallinn(now: Date): Date {
   return new Date(Date.UTC(y, m - 1, d) - offset);
 }
 
+/**
+ * Where "upcoming" starts, for every public view of the dates and for booking: the beginning of today in Estonian time.
+ * One definition for the calendar, the course page, the catalogue and home cards and the registration check, so a
+ * session that began earlier today is listed (and can be booked) everywhere until the day ends, never in one place only.
+ */
+export function upcomingFrom(now: Date): Date {
+  return startOfDayTallinn(now);
+}
+
 /** Estonian wall-clock parts of an instant. */
 function tallinnWall(instant: Date): { y: number; m: number; d: number; h: number; mi: number; s: number } {
   const parts = TALLINN_PARTS.formatToParts(instant);

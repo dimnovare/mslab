@@ -18,6 +18,8 @@ import {
   type Deps,
 } from "@/server/submit";
 import { fakeKv, stubFetch, type FetchCall } from "../fakes";
+import { getCourseBySlug, listUpcomingSessions } from "@/db/queries/public";
+import { upcomingFrom } from "@/domain/calendar";
 
 // Form submissions end to end without Next.js: PGlite database, in-memory KV, stubbed fetch for Resend and Telegram.
 
@@ -27,7 +29,7 @@ const text = { level: "basic" as const, summary: { et: "" }, body: { et: "" } };
 let db: Db;
 let c: { id: number };
 let s: { id: number };
-const ids = { other: 0, full: 0, cancelled: 0, past: 0, otherCourse: 0, unpublished: 0, groupless: 0 };
+const ids = { other: 0, full: 0, cancelled: 0, past: 0, thisMorning: 0, yesterday: 0, otherCourse: 0, unpublished: 0, groupless: 0 };
 
 beforeAll(async () => {
   db = await makeTestDb();
@@ -52,6 +54,9 @@ beforeAll(async () => {
   ids.full = (await session(c.id, "2026-12-12T08:00:00Z", { capacity: 1 }))[0].id;
   ids.cancelled = (await session(c.id, "2026-12-19T08:00:00Z", { status: "cancelled" }))[0].id;
   ids.past = (await session(c.id, "2026-09-01T08:00:00Z"))[0].id;
+  // NOW is 13:00 on 1.10 in Tallinn: one session began this morning, one yesterday (item 10: "today" is the Estonian date)
+  ids.thisMorning = (await session(c.id, "2026-10-01T07:00:00Z", { city: "Hommik" }))[0].id;
+  ids.yesterday = (await session(c.id, "2026-09-30T07:00:00Z", { city: "Eile" }))[0].id;
   ids.otherCourse = (await session(other.id, "2026-11-20T08:00:00Z"))[0].id;
   ids.unpublished = unpublished.id;
   ids.groupless = groupless.id;
@@ -165,6 +170,18 @@ describe("group registration", () => {
     for (const id of [ids.cancelled, ids.past, ids.otherCourse, 999999])
       expect(await handleRegistration(deps, group({ session: String(id) })), String(id)).toEqual({ ok: false, errors: { session: "unavailable" } });
     expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(0);
+  });
+
+  test("a session that began earlier today can still be booked, as the calendar and the course page still list it (item 10)", async () => {
+    const { deps } = setup();
+    expect(await handleRegistration(deps, group({ session: String(ids.thisMorning) }))).toEqual({ ok: true });
+    expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
+    const listed = await getCourseBySlug(db, "kulmud", { sessionsFrom: upcomingFrom(NOW) });
+    expect(listed?.sessions.map((x) => x.id)).toContain(ids.thisMorning);
+    expect(listed?.sessions.map((x) => x.id)).not.toContain(ids.yesterday);
+    expect((await listUpcomingSessions(db, upcomingFrom(NOW))).map((x) => x.id)).toContain(ids.thisMorning);
+    // yesterday's is gone everywhere, booking included
+    expect(await handleRegistration(setup().deps, group({ session: String(ids.yesterday) }))).toEqual({ ok: false, errors: { session: "unavailable" } });
   });
 
   test("only published contact courses with a group price", async () => {

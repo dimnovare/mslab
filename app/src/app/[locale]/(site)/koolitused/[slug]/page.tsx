@@ -31,6 +31,7 @@ import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "./course.module.css";
+import { upcomingFrom } from "@/domain/calendar";
 
 type Props = {
   params: Promise<{ locale: string; slug: string }>;
@@ -40,7 +41,7 @@ type Props = {
 // One course query per request, shared by generateMetadata and the page. Past sessions are left out.
 const loadCourse = cache(async (slug: string) => {
   await connection();
-  return getCourseBySlug(getDb(), slug, { sessionsFrom: new Date() });
+  return getCourseBySlug(getDb(), slug, { sessionsFrom: upcomingFrom(new Date()) });
 });
 
 export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
@@ -68,7 +69,7 @@ export default async function CoursePage({ params, searchParams }: Props) {
   const db = getDb();
   const [all, upcoming, settings, bio, query] = await Promise.all([
     listPublishedCourses(db),
-    listUpcomingSessions(db, new Date()),
+    listUpcomingSessions(db, upcomingFrom(new Date())),
     getSettings(db),
     getPage(db, "trainer_bio"),
     searchParams,

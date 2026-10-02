@@ -139,7 +139,7 @@ test.describe("calendar", () => {
 test.describe("calendar seat states (test-owned fixtures in the local DB)", () => {
   test.skip(!LOCAL_FIXTURES, "the seat fixtures are only inserted into the local dev database");
 
-  test("a full session: Täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }, info) => {
+  test("a full session: Kohad täis, the Ootenimekirja disclosure and the waitlist form (L3, A3)", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("waitlist", info.project.name);
     await page.goto("/koolituskalender");
@@ -149,7 +149,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(full.locator("[data-city]")).toHaveText("Pärnu");
     const lamiParnu = sampleDayMonth("kulmude-lami", "Pärnu") as string; // local only: these are the local seat fixtures
     await expect(full).toContainText(lamiParnu);
-    await expect(full).toContainText("Täis");
+    await expect(full.locator("[data-seat-state]")).toHaveText("Kohad täis"); // B's wording (item 13)
     expect(await full.locator("[data-seat-state]").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(94, 85, 89)");
     await expect(full.getByRole("link", { name: /Registreeru/ })).toHaveCount(0);
 
@@ -212,7 +212,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     const full = page.locator("[data-session][data-state='full']");
     await expect(full).toHaveCount(1);
     await expect(full).toHaveAttribute("aria-disabled", "true");
-    await expect(full).toContainText("Täis");
+    await expect(full).toContainText("Kohad täis");
     await full.click({ force: true });
     await expect(full).toHaveAttribute("aria-checked", "false");
   });

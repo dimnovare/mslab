@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { calendarCities, citySlug, contactSessions, parseCity, startOfDayTallinn } from "@/domain/calendar";
+import { calendarCities, citySlug, contactSessions, parseCity, startOfDayTallinn, upcomingFrom } from "@/domain/calendar";
 import { parsePackage } from "@/domain/practice";
 
 describe("calendar city filter", () => {
@@ -42,6 +44,33 @@ describe("startOfDayTallinn", () => {
     const now = new Date("2026-11-14T12:00:00Z");
     const session = new Date("2026-11-14T08:00:00Z"); // 10:00 local, already started
     expect(session.getTime()).toBeGreaterThanOrEqual(startOfDayTallinn(now).getTime());
+  });
+});
+
+describe("upcomingFrom: one 'today' for the calendar, the course page, the cards and booking (item 10)", () => {
+  test("is the start of the Estonian day", () => {
+    expect(upcomingFrom(new Date("2026-11-14T15:30:00Z")).toISOString()).toBe("2026-11-13T22:00:00.000Z");
+    expect(upcomingFrom(new Date("2026-11-14T22:30:00Z")).toISOString()).toBe("2026-11-14T22:00:00.000Z"); // 00:30 on 15.11
+  });
+  test("a session that began this morning is still upcoming today, and not tomorrow", () => {
+    const session = new Date("2026-11-14T08:00:00Z"); // 10:00 in Tallinn
+    expect(session >= upcomingFrom(new Date("2026-11-14T13:00:00Z"))).toBe(true); // 15:00 the same day
+    expect(session >= upcomingFrom(new Date("2026-11-14T21:59:00Z"))).toBe(true); // 23:59 the same day
+    expect(session >= upcomingFrom(new Date("2026-11-14T22:00:00Z"))).toBe(false); // 00:00 the next day
+  });
+  test("every public page and the registration check use it (no other definition of 'today')", () => {
+    const files = [
+      "src/app/[locale]/(site)/page.tsx",
+      "src/app/[locale]/(site)/koolitused/page.tsx",
+      "src/app/[locale]/(site)/koolitused/[slug]/page.tsx",
+      "src/app/[locale]/(site)/koolituskalender/page.tsx",
+      "src/server/submit.ts",
+    ];
+    for (const f of files) {
+      const src = readFileSync(join(process.cwd(), f), "utf8");
+      expect(src, f).toMatch(/upcomingFrom\(/);
+      expect(src, f).not.toMatch(/listUpcomingSessions\(\w+(\(\))?, new Date\(\)\)|sessionsFrom:\s*new Date\(\)|startsAt < deps\.now/);
+    }
   });
 });
 

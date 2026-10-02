@@ -199,7 +199,7 @@ export const et = {
     seatsLabel: "Vabu kohti",
     stateOpen: "Vabu kohti",
     stateFew: "Viimased kohad",
-    stateFull: "Täis",
+    stateFull: "Kohad täis", // prototype B's wording (checklist, Task 2 ruling)
     stateCancelled: "Tühistatud",
     register: "Registreeru",
     // Row buttons (prototype A): full → waitlist form, cancelled → the course page with its other dates.
