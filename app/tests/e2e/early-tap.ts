@@ -37,3 +37,26 @@ export async function holdBackRouterHistoryPatch(page: Page): Promise<void> {
     document.addEventListener("pointerdown", () => (armed = true), true);
   });
 }
+
+/**
+ * Makes React's scheduled work (its MessageChannel tasks: transitions, deferred effects) wait `ms` once
+ * `window.__slowScheduler` is set, as on a busy phone. Used to check that a click right after a filter still navigates:
+ * telling Next.js's router about the filter's URL (a RESTORE) after a link click has started a navigation would cancel
+ * that navigation, so it must never be left to late, scheduled work.
+ */
+export async function slowScheduler(page: Page, ms: number): Promise<void> {
+  await page.addInitScript((delay) => {
+    const Native = window.MessageChannel;
+    class SlowChannel extends Native {
+      constructor() {
+        super();
+        const post = this.port2.postMessage.bind(this.port2);
+        this.port2.postMessage = (message: unknown) => {
+          if ((window as unknown as { __slowScheduler?: boolean }).__slowScheduler) setTimeout(() => post(message), delay);
+          else post(message);
+        };
+      }
+    }
+    window.MessageChannel = SlowChannel;
+  }, ms);
+}

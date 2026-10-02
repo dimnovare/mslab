@@ -1,4 +1,4 @@
-import { holdBackRouterHistoryPatch } from "./early-tap";
+import { holdBackRouterHistoryPatch, slowScheduler } from "./early-tap";
 import { sampleDayMonth } from "./seed-sessions";
 import { test, expect } from "./test";
 
@@ -93,6 +93,21 @@ test.describe("catalogue", () => {
     await expect(page).toHaveURL(/\/koolitused\?vorm=k&tase=taiend$/);
     await expect(page.locator("[data-course-card]")).toHaveCount(1);
     await expect(page.locator("[data-filter-row='level']").getByRole("button", { name: "Täiendkoolitused" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("a course card clicked right after a filter still opens, however slow the page's scheduled work is (item 5)", async ({ page }) => {
+    await slowScheduler(page, 1500);
+    await page.goto("/koolitused");
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    await page.evaluate(() => ((window as unknown as { __slowScheduler?: boolean }).__slowScheduler = true));
+    await page.locator("[data-filter-row='format']").getByRole("button", { name: "Kontaktõpe" }).click();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k$/);
+    await page.locator("[data-course-card]", { hasText: "Kulmude LAMI" }).click(); // at once, while React's scheduled work waits
+    await expect(page).toHaveURL(/\/koolitused\/kulmude-lami$/, { timeout: 15_000 });
+    await page.evaluate(() => ((window as unknown as { __slowScheduler?: boolean }).__slowScheduler = false));
+    await page.goBack();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(3);
   });
 
   test("the hybrid note tapped before Next.js follows history changes still shows all courses (race of item 5)", async ({ page }) => {
