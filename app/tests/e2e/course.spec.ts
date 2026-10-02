@@ -106,6 +106,23 @@ test.describe("contact page", () => {
     await expect(rec.nth(2)).toHaveAttribute("data-type", "e_learning");
   });
 
+  test("recommendations never leave one card alone on a row: 3 across at 834, 2 where only 2 fit (N10)", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the desktop project sets each width");
+    for (const [width, perRow] of [[700, 2], [834, 3], [1024, 3], [1440, 3]] as const) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+      const rows = await page.locator("[data-recommendations] [data-course-card]").evaluateAll((cards) => {
+        const tops = new Map<number, number>();
+        for (const c of cards) {
+          const r = c.getBoundingClientRect();
+          if (r.width) tops.set(Math.round(r.top), (tops.get(Math.round(r.top)) ?? 0) + 1);
+        }
+        return [...tops.values()];
+      });
+      expect(rows, `${width}`).toEqual([perRow]);
+    }
+  });
+
   test("participation switch: group lists sessions, individual shows the request form (P12, P13)", async ({ page }) => {
     await page.goto("/koolitused/kulmumeistri-baaskoolitus");
     await expect(page.getByRole("radio", { name: /Grupikoolitus/ })).toHaveAccessibleName(/350 €/);

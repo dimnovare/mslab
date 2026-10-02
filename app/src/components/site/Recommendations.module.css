@@ -23,9 +23,21 @@
   gap: 40px 27px;
 }
 
+/* Three cards never leave one alone on a row (N10): three columns down to tablets (834 included); where only two fit,
+   the third card waits; on phones they stack. */
 @media (max-width: 1180px) {
   .grid {
+    gap: 36px 20px;
+  }
+}
+
+@media (max-width: 760px) {
+  .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid > :nth-child(n + 3) {
+    display: none;
   }
 }
 

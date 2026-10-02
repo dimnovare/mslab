@@ -13,7 +13,7 @@ export function Recommendations({ title, cards }: { title: string; cards: Course
         </h2>
         <div className={styles.grid}>
           {cards.map((c) => (
-            <CourseCard key={c.id} c={c} square sizes="(max-width: 640px) 100vw, (max-width: 1180px) 50vw, 33vw" />
+            <CourseCard key={c.id} c={c} square sizes="(max-width: 640px) 100vw, (max-width: 760px) 50vw, 33vw" />
           ))}
         </div>
       </div>
