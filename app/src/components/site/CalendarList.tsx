@@ -1,9 +1,9 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { citySlug, parseCity } from "@/domain/calendar";
 import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
+import { useUrlQuery } from "@/lib/url-query";
 import { CalendarRow, type CalendarRowData, type CalendarRowTexts } from "./CalendarRow";
 import ui from "./ui.module.css";
 import styles from "./Calendar.module.css";
@@ -20,19 +20,18 @@ export type CalendarTexts = CalendarRowTexts & {
 /**
  * Prototype A calendar: city chips Kõik / Pärnu / Tallinn / Tartu / Viljandi (L5) above the rows.
  * The URL is the single source of truth (as the catalogue filters): the city is read from ?linn=parnu|… with
- * useSearchParams, so links, reload and Back show what the address says. A chip writes the address with
- * history.replaceState, which Next.js syncs into useSearchParams without a server round trip; other parameters are kept.
+ * useUrlQuery, so links, reload and Back show what the address says. A chip writes the address in place
+ * (history.replaceState, no server round trip); other parameters are kept.
  */
 export function CalendarList({ rows, cities, locale, t }: { rows: CalendarRowData[]; cities: string[]; locale: Locale; t: CalendarTexts }) {
-  const params = useSearchParams();
+  const [params, writeQuery] = useUrlQuery();
   const city = parseCity(params.get("linn"), cities);
 
   const pick = (key: string | null) => {
     const live = new URLSearchParams(window.location.search);
     if (key) live.set("linn", key);
     else live.delete("linn");
-    const qs = live.toString();
-    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+    writeQuery(live);
   };
 
   const shown = city ? rows.filter((r) => r.cityKey === city) : rows;

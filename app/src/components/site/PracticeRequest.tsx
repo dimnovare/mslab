@@ -1,10 +1,10 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import { parsePackage } from "@/domain/practice";
 import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
+import { useUrlQuery } from "@/lib/url-query";
 import { submitPractice } from "@/server/actions/public";
 import { Icon } from "./Icon";
 import ui from "./ui.module.css";
@@ -48,11 +48,12 @@ const FIELD_ORDER: Field[] = ["package", "name", "email", "phone", "course", "ti
  * → submitPractice (stored as a `practice` request). It asks for a time; Maria confirms it, nothing is booked.
  *
  * The package follows ?pakett (the home and panel "Registreeru" links, Back/Forward); picking one here writes it
- * back with history.replaceState, so the card outline in the panel and a reload agree with the form.
+ * back in place (useUrlQuery), so the card outline in the panel and a reload agree with the form.
  */
 export function PracticeRequest({ packages, locale, t }: { packages: PracticeOption[]; locale: Locale; t: PracticeRequestTexts }) {
   const id = useId();
-  const fromUrl = parsePackage(useSearchParams().get("pakett"), packages.map((p) => p.code));
+  const [query, writeQuery] = useUrlQuery();
+  const fromUrl = parsePackage(query.get("pakett"), packages.map((p) => p.code));
   const [pkg, setPkg] = useState<string | null>(fromUrl);
   const [seen, setSeen] = useState<string | null>(fromUrl);
   // A new ?pakett (a card's "Registreeru" link while on this page) picks that package.
@@ -95,7 +96,7 @@ export function PracticeRequest({ packages, locale, t }: { packages: PracticeOpt
     setPkg(code);
     const live = new URLSearchParams(window.location.search);
     live.set("pakett", code);
-    window.history.replaceState(null, "", `${window.location.pathname}?${live.toString()}${window.location.hash}`);
+    writeQuery(live);
   };
 
   // Nothing to request without a package (the page does not render the form then either).

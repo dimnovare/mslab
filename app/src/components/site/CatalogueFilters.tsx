@@ -1,9 +1,9 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { catalogueSearch, matchesCatalogue, parseCatalogueQuery, type FormatFilter, type LevelFilter } from "@/domain/catalogue";
 import { fill } from "@/i18n/format";
+import { useUrlQuery } from "@/lib/url-query";
 import { CourseCard, type CourseCardData } from "./CourseCard";
 import { FormatExplainer, type ExplainerFormat, type ExplainerTexts } from "./FormatExplainer";
 import { Icon } from "./Icon";
@@ -31,9 +31,10 @@ export type CatalogueTexts = ExplainerTexts & {
  * the explainer, then the level chips on their own row (K4), then the course grid.
  *
  * The URL is the single source of truth: format, level and search are read from ?vorm=e|k&tase=baas|taiend&otsi=…
- * (useSearchParams), so the home page links, a reload, Back/Forward and the header "Koolitused" link always show
- * what the address says. Changes are written with history.replaceState, which Next.js syncs into useSearchParams
- * without a server round trip (router.replace would re-render the dynamic page on every click and keystroke).
+ * (useUrlQuery), so the home page links, a reload, Back/Forward and the header "Koolitused" link always show
+ * what the address says. Changes are written in place with history.replaceState, without a server round trip
+ * (router.replace would re-render the dynamic page on every click and keystroke); useUrlQuery explains why the value
+ * is read from the address bar and not from useSearchParams alone.
  * Only the text being typed is held locally, while the search field has focus, so typing never lags behind the URL.
  */
 export function CatalogueFilters({
@@ -46,7 +47,7 @@ export function CatalogueFilters({
   t: CatalogueTexts;
 }) {
   const id = useId();
-  const params = useSearchParams();
+  const [params, writeQuery] = useUrlQuery();
   const q = parseCatalogueQuery({ vorm: params.get("vorm") ?? undefined, tase: params.get("tase") ?? undefined, otsi: params.get("otsi") ?? undefined });
   const { vorm, tase } = q;
   const [draft, setDraft] = useState<string | null>(null); // the search text while typing; null = follow the URL
@@ -64,8 +65,7 @@ export function CatalogueFilters({
     live.forEach((value, key) => {
       if (key !== "vorm" && key !== "tase" && key !== "otsi") merged.append(key, value);
     });
-    const qs = merged.toString();
-    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+    writeQuery(merged);
   };
 
   const pickFormat = (v: FormatFilter) => {

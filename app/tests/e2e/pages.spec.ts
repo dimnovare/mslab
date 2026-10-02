@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
+import { holdBackRouterHistoryPatch } from "./early-tap";
 import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
 import { sampleDayMonth, sampleWeekday } from "./seed-sessions";
 
@@ -126,6 +127,21 @@ test.describe("calendar", () => {
     await page.goto("/koolituskalender?linn=narva");
     await expect(rows).toHaveCount(8);
     await expect(chips.first()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("a city chip tapped before Next.js follows history changes still filters and survives Back (race of item 5)", async ({ page }) => {
+    await holdBackRouterHistoryPatch(page);
+    await page.goto("/koolituskalender");
+    const rows = page.locator("[data-calendar-row]");
+    await page.locator("[data-city-filter]").getByRole("button", { name: "Tallinn" }).click();
+    await expect(page).toHaveURL(/\/koolituskalender\?linn=tallinn$/);
+    await expect(rows).toHaveCount(2);
+    await expect(page.locator("[data-city-filter]").getByRole("button", { name: "Tallinn" })).toHaveAttribute("aria-pressed", "true");
+    await rows.first().getByRole("link", { name: /Registreeru/ }).click();
+    await expect(page).toHaveURL(/\/koolitused\/lash-lift-botox\?sessioon=\d+$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/koolituskalender\?linn=tallinn$/);
+    await expect(rows).toHaveCount(2);
   });
 
   test("RU calendar", async ({ page }) => {
@@ -265,6 +281,21 @@ test.describe("practice", () => {
     await expect(page.locator("[data-package='MAXI']")).toHaveAttribute("data-selected", "true");
     await page.reload();
     await expect(form.getByRole("radio", { name: /MAXI/ })).toBeChecked();
+  });
+
+  test("a package picked before Next.js follows history changes moves the card outline and the URL (race of item 5)", async ({ page }) => {
+    await holdBackRouterHistoryPatch(page);
+    await page.goto("/praktika?pakett=MINI#taotlus");
+    const form = page.locator("[data-practice-form]");
+    await form.getByRole("radio", { name: /MAXI/ }).check();
+    await expect(page).toHaveURL(/\/praktika\?pakett=MAXI#taotlus$/);
+    await expect(page.locator("[data-package='MAXI']")).toHaveAttribute("data-selected", "true");
+    await expect(page.locator("[data-package='MINI']")).not.toHaveAttribute("data-selected", "true");
+    // the panel's own "Registreeru MINI" link (a Next.js navigation) still switches back
+    await page.locator("[data-practice]").getByRole("link", { name: /Registreeru MINI/ }).click();
+    await expect(page).toHaveURL(/\/praktika\?pakett=MINI#taotlus$/);
+    await expect(form.getByRole("radio", { name: /MINI/ })).toBeChecked();
+    await expect(page.locator("[data-package='MINI']")).toHaveAttribute("data-selected", "true");
   });
 
   test("home practice cards lead to the form with the package picked", async ({ page }) => {

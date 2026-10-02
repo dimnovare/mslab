@@ -1,3 +1,4 @@
+import { holdBackRouterHistoryPatch } from "./early-tap";
 import { sampleDayMonth } from "./seed-sessions";
 import { test, expect } from "./test";
 
@@ -73,6 +74,35 @@ test.describe("catalogue", () => {
     await expect(search).toHaveValue("");
     await expect(page.locator("[data-course-card]")).toHaveCount(6);
     await expect(page.locator("[data-explainer] [data-format-card]")).toHaveCount(3);
+  });
+
+  test("a chip tapped before Next.js follows history changes still filters, keeps the URL and Back (race of item 5)", async ({ page }) => {
+    await holdBackRouterHistoryPatch(page);
+    await page.goto("/koolitused");
+    await page.locator("[data-filter-row='format']").getByRole("button", { name: "Kontaktõpe" }).click();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(3);
+    await expect(page.locator("[data-filter-row='format']").getByRole("button", { name: "Kontaktõpe" })).toHaveAttribute("aria-pressed", "true");
+    // the router has the new URL too: the next filter starts from it
+    await page.locator("[data-filter-row='level']").getByRole("button", { name: "Täiendkoolitused" }).click();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k&tase=taiend$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await page.locator("[data-course-card]").first().click();
+    await expect(page).toHaveURL(/\/koolitused\/kulmude-lami$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/koolitused\?vorm=k&tase=taiend$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(1);
+    await expect(page.locator("[data-filter-row='level']").getByRole("button", { name: "Täiendkoolitused" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("the hybrid note tapped before Next.js follows history changes still shows all courses (race of item 5)", async ({ page }) => {
+    await holdBackRouterHistoryPatch(page);
+    await page.goto("/koolitused?vorm=k");
+    await page.getByRole("button", { name: /Hübriidõpe/ }).click();
+    await expect(page).toHaveURL(/\/koolitused$/);
+    await expect(page.locator("[data-course-card]")).toHaveCount(6);
+    await expect(page.locator("[data-hybrid-panel]")).toBeVisible();
+    await expect(page.locator("[data-hybrid-panel] h2")).toBeFocused();
   });
 
   test("home links ?vorm=e and level ?tase=baas are honoured on first render", async ({ page }) => {
