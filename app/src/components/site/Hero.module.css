@@ -26,6 +26,12 @@
 
 /* ---- Slides (stacked; the current one fades in) ---- */
 
+/* The slides' box (a live region after a change the visitor made): the hero's own box. */
+.slides {
+  position: absolute;
+  inset: 0;
+}
+
 .slide {
   position: absolute;
   inset: 0;
@@ -183,12 +189,8 @@
 
 /* ---- Responsive (B breakpoints) ---- */
 
+/* Wide screens: the text and the control stay on the page's 1600px column (ui .wrap), aligned with every section below. */
 @media (min-width: 1800px) {
-  .content,
-  .controls {
-    max-width: 1740px;
-  }
-
   .title {
     font-size: 96px;
   }
@@ -239,6 +241,9 @@
     background: linear-gradient(180deg, #f6f3f1 0%, #f6f3f1b8 24%, transparent 65%);
   }
 
+  /* B: a dark slide's picture runs 80% past the right edge (only its left part shows, under the text). With the
+     picture scaled to the hero's height there is no vertical play, and the phone focal point picks which part of the
+     picture's width is in view: about 90% puts the face (brow, eye) in view; the seed and the editor default to that. */
   .slide[data-tone="dark"] .visual {
     inset: 0 -80% 0 0;
   }

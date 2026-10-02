@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { moveItem } from "@/domain/course-editor";
-import { newSlideDraft, SITE_LIMITS, type SlideDraft } from "@/domain/site-editor";
+import { mobileFocalForTone, newSlideDraft, SITE_LIMITS, type SlideDraft } from "@/domain/site-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
 import { mediaUrl } from "@/lib/media";
@@ -156,7 +156,7 @@ export function SlidesEditor({ slides, update, err, hasErrors, links }: Props) {
                         <legend className={ui.legend}>{t.tone}</legend>
                         <div className={ed.choices} data-tone-switch="">
                           {(["light", "dark"] as const).map((tone) => (
-                            <Choice key={tone} className={ed.choice} label={tone === "dark" ? t.dark : t.light} type="radio" name={`${bodyId}-tone`} value={tone} checked={s.tone === tone} onChange={() => edit(s.uid, { tone })} />
+                            <Choice key={tone} className={ed.choice} label={tone === "dark" ? t.dark : t.light} type="radio" name={`${bodyId}-tone`} value={tone} checked={s.tone === tone} onChange={() => edit(s.uid, { tone, imagePosMobile: mobileFocalForTone(s.imagePosMobile, tone) })} />
                           ))}
                         </div>
                         <p className={ui.hint}>{t.toneHint}</p>

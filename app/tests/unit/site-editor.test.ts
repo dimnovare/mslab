@@ -3,6 +3,9 @@ import { trainerSettings, shellSettings } from "@/components/site/settings";
 import {
   campaignDraft,
   contactDraft,
+  DARK_MOBILE_FOCAL,
+  DEFAULT_FOCAL,
+  mobileFocalForTone,
   formatFocal,
   hasLocalePrefix,
   isFocal,
@@ -113,6 +116,22 @@ describe("focal points", () => {
     const upload = trainerSettings({ trainer: { portraitKey: "img/0f8b6c2e-3d4a-4b5c-8d9e-0a1b2c3d4e5f.jpg", portraitPos: "30% 25%", name: "Maria" } }).portraitZoom;
     expect(upload).toBe(false);
     expect(trainerSettings({ trainer: { portraitKey: "/seed/maria-standing.jpg", name: "Maria" } })).toMatchObject({ portraitPos: "50% 20%", portraitZoom: true });
+  });
+});
+
+describe("a dark hero slide's phone focal point (item 6)", () => {
+  test("the default follows the tone; a point set by hand stays", () => {
+    expect(DARK_MOBILE_FOCAL).toBe("90% 50%");
+    expect(mobileFocalForTone(DEFAULT_FOCAL, "dark")).toBe(DARK_MOBILE_FOCAL);
+    expect(mobileFocalForTone(DARK_MOBILE_FOCAL, "light")).toBe(DEFAULT_FOCAL);
+    expect(mobileFocalForTone("73% 50%", "dark")).toBe("73% 50%");
+    expect(mobileFocalForTone("30% 40%", "light")).toBe("30% 40%");
+    expect(mobileFocalForTone(DEFAULT_FOCAL, "light")).toBe(DEFAULT_FOCAL);
+  });
+
+  test("the seed's dark slides use it, the light ones keep B's flower framing", async () => {
+    const { heroSeeds } = await import("@/db/seed-data");
+    for (const s of heroSeeds) expect(s.imagePosMobile, s.imageKey).toBe(s.tone === "dark" ? DARK_MOBILE_FOCAL : "73% 50%");
   });
 });
 

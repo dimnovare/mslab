@@ -3,6 +3,7 @@ import { slugify } from "@/lib/slug";
 import type { Badge } from "./schema";
 import type { CampaignInput, CourseInput, HeroSlideInput, PostInput, PracticePackageInput, SessionInput } from "./queries/admin";
 import { seedSessionStart } from "./seed-dates";
+import { DARK_MOBILE_FOCAL } from "@/domain/site-editor";
 
 /**
  * Prototype content that fills the site on day one (spec section 7). Texts come from prototype B (ET + RU)
@@ -256,6 +257,7 @@ export const heroSeeds: HeroSlideInput[] = [
   },
   {
     imageKey: img("brow-editorial.jpg"),
+    imagePosMobile: DARK_MOBILE_FOCAL,
     tone: "dark",
     kicker: t("Kulmumeistri baaskoolitus", "Базовый курс бровиста"),
     title: t("Täpsusest sünnib\nenesekindlus.", "Уверенность\nначинается с точности."),
@@ -269,6 +271,7 @@ export const heroSeeds: HeroSlideInput[] = [
   },
   {
     imageKey: img("lash-editorial.jpg"),
+    imagePosMobile: DARK_MOBILE_FOCAL,
     tone: "dark",
     kicker: t("Lash Lift BOTOX", "Lash Lift BOTOX"),
     title: t("Väike detail.\nSuur muutus.", "Маленькая деталь.\nБольшая перемена."),
@@ -297,6 +300,7 @@ export const heroSeeds: HeroSlideInput[] = [
   },
   {
     imageKey: img("brow-editorial.jpg"),
+    imagePosMobile: DARK_MOBILE_FOCAL,
     tone: "dark",
     kicker: t("E-õpe", "Онлайн-обучение"),
     title: t("Sinu tempo.\nSinu järgmine samm.", "Ваш темп.\nВаш следующий шаг."),

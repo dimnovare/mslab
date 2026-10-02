@@ -107,15 +107,101 @@ test.describe("hero behaviour", () => {
     await expect(hero.getByText(/^05 \/ 05$/)).toBeVisible();
   });
 
-  test("autoplay advances after 6.5 s and pauses while hovered", async ({ page, isMobile }) => {
+  test("autoplay advances after 6.5 s and waits while the pointer is on the controls", async ({ page, isMobile }) => {
     test.skip(isMobile, "hover");
     await page.goto("/");
     const hero = page.locator("[data-hero]");
     await page.mouse.move(5, 899); // outside the hero
     await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible({ timeout: 9000 });
-    await hero.hover();
+    await hero.getByRole("group", { name: "Esiletõstetud koolitused" }).last().hover(); // the slide control
+    await expect(hero).toHaveAttribute("data-autoplay", "off");
     await page.waitForTimeout(7500);
     await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    // the picture and the text are not controls: autoplay runs while the pointer rests there
+    await page.mouse.move(700, 300);
+    await expect(hero).toHaveAttribute("data-autoplay", "on");
+    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 });
+  });
+
+  test("autoplay resumes after a click on the control; only keyboard focus keeps it waiting (item 6)", async ({ page, isMobile }) => {
+    test.skip(isMobile, "pointer and keyboard");
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await hero.getByRole("button", { name: "Järgmine slaid" }).click();
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    await expect(hero.getByRole("button", { name: "Järgmine slaid" })).toBeFocused(); // the click focused it…
+    await page.mouse.move(5, 899);
+    await expect(hero).toHaveAttribute("data-autoplay", "on"); // …but a pointer focus does not stop autoplay
+    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 });
+    // keyboard focus inside the hero waits; leaving the hero lets it go on
+    await page.keyboard.press("Shift+Tab");
+    await expect(hero).toHaveAttribute("data-autoplay", "off");
+    await page.waitForTimeout(7000);
+    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible();
+    await page.locator("[data-upcoming], main a").last().focus();
+    await expect(hero).toHaveAttribute("data-autoplay", "on");
+  });
+
+  test("a change the visitor makes is announced; autoplay's are not (aria-live)", async ({ page }) => {
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    const slides = hero.locator("[data-hero-slides]");
+    await expect(slides).toHaveAttribute("aria-live", "off");
+    await hero.getByRole("button", { name: "Järgmine slaid" }).click();
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    await expect(slides).toHaveAttribute("aria-live", "polite");
+    await page.mouse.move(5, 5); // off the controls (a phone has no hover at all)
+    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 }); // autoplay
+    await expect(slides).toHaveAttribute("aria-live", "off");
+  });
+
+  test("only the current slide's picture and the next one load; reduced motion loads one", async ({ page, browser }) => {
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    await expect(hero.locator("img")).toHaveCount(2); // slide 1 (eager) and slide 2 (lazy, before autoplay shows it)
+    expect(await hero.locator("[data-hero-slides] > div").first().locator("img").getAttribute("loading")).toBe("eager");
+    expect(await hero.locator("[data-hero-slides] > div").nth(1).locator("img").getAttribute("loading")).toBe("lazy");
+    await hero.getByRole("button", { name: "Slaid 4" }).click();
+    await expect(hero.locator("[data-hero-slides] > div").nth(3).locator("img")).toHaveCount(1);
+    await expect(hero.locator("[data-hero-slides] > div").nth(2).locator("img")).toHaveCount(0); // skipped, never shown
+
+    const ctx = await browser.newContext({ reducedMotion: "reduce", viewport: { width: 1440, height: 900 } });
+    const still = await ctx.newPage();
+    await still.goto("/");
+    await expect(still.locator("[data-hero] img")).toHaveCount(1);
+    await ctx.close();
+  });
+
+  test("slide segments are 44 px touch targets at 390 (full-width row under the counter and arrows)", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "phone layout");
+    await page.goto("/");
+    const segments = page.locator("[data-hero]").getByRole("button", { name: /^Slaid \d$/ });
+    await expect(segments).toHaveCount(5);
+    for (const b of await segments.all()) {
+      const box = (await b.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+    }
+    const counter = (await page.locator("[data-hero]").getByText(/^01 \/ 05$/).boundingBox())!;
+    expect((await segments.first().boundingBox())!.y).toBeGreaterThan(counter.y + counter.height); // own row
+    await segments.nth(2).tap();
+    await expect(page.locator("[data-hero]").getByText(/^03 \/ 05$/)).toBeVisible();
+  });
+
+  test("at 2560 the hero text and control sit on the page's 1600 px column", async ({ page, isMobile }) => {
+    test.skip(isMobile, "wide screen");
+    await page.setViewportSize({ width: 2560, height: 1300 });
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    const column = (2560 - 1600) / 2 + 100; // ui .wrap: 1600 px, padding var(--page) = 100 px
+    const counter = (await hero.getByText(/^01 \/ 05$/).boundingBox())!;
+    const title = (await hero.getByRole("heading", { level: 1 }).boundingBox())!;
+    const next = (await hero.getByRole("button", { name: "Järgmine slaid" }).boundingBox())!;
+    expect(Math.round(counter.x)).toBe(column);
+    expect(Math.round(title.x)).toBe(column);
+    expect(Math.round(next.x + next.width)).toBe(2560 - column);
   });
 
   test("swipe changes the slide", async ({ page, isMobile }) => {

@@ -104,6 +104,19 @@ export function linkFor(value: string, to: (path: string) => string, fallback: s
 
 export type Focal = { x: number; y: number };
 export const DEFAULT_FOCAL = "50% 50%";
+
+/**
+ * A dark hero slide's phone focal point by default. On a phone a dark slide's picture runs 80% past the right edge
+ * (prototype B, Hero.module.css), so its middle (50%) shows the side of the head; about 90% across shows the face.
+ */
+export const DARK_MOBILE_FOCAL = "90% 50%";
+
+/** The phone focal point after a slide's tone changes: the default follows the tone; a point Maria has set stays. */
+export function mobileFocalForTone(current: string, tone: "light" | "dark"): string {
+  if (tone === "dark" && current === DEFAULT_FOCAL) return DARK_MOBILE_FOCAL;
+  if (tone === "light" && current === DARK_MOBILE_FOCAL) return DEFAULT_FOCAL;
+  return current;
+}
 const FOCAL = /^(\d{1,3})% (\d{1,3})%$/;
 
 export function parseFocal(value: string | null | undefined): Focal | null {

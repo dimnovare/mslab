@@ -15,11 +15,15 @@
   white-space: nowrap;
 }
 
+/* The segments' buttons touch each other (no gap), so each one's touch target is as wide as possible; the visible
+   gap between the lines is drawn inside them. The row reaches 4px past its box on both sides and the end lines are
+   inset by the same 4px, so the lines stay where the box is. */
 .segments {
   display: grid;
   flex: 1;
-  gap: 8px;
+  gap: 0;
   min-width: 0;
+  margin-inline: -4px;
 }
 
 /* The button is 44px tall (touch target); the visible segment is a 2px line in the middle. */
@@ -28,7 +32,7 @@
   align-items: center;
   min-width: 0;
   height: 44px;
-  padding: 0;
+  padding: 0 4px;
   border: 0;
   background: none;
   color: inherit;
@@ -98,12 +102,36 @@
   transform: scale(0.96);
 }
 
+/* Phones: the counter and the arrows on one row, the segments on their own full-width row under them, so every
+   segment is at least 44px wide (up to the 8 slides the admin allows: 390px − 2 × 22px + 2 × 4px = 354px ≥ 8 × 44px). */
 @media (max-width: 640px) {
   .control {
-    gap: 14px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "count buttons"
+      "segments segments";
+    row-gap: 6px;
+    align-items: center;
+  }
+
+  .count {
+    grid-area: count;
+  }
+
+  .buttons {
+    grid-area: buttons;
   }
 
   .segments {
-    gap: 6px;
+    grid-area: segments;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segment::after,
+  .prev,
+  .next {
+    transition: none;
   }
 }
