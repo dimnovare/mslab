@@ -57,8 +57,8 @@ function value(r: RequestRow, key: string, lookup: Lookup): React.ReactNode {
   const v = r.payload[key];
   const t = adminEt.requests;
   if (typeof v === "boolean") return v ? adminEt.common.yes : adminEt.common.no;
-  if (key === "email" && typeof v === "string") return <a href={`mailto:${v}`}>{v}</a>;
-  if (key === "phone" && typeof v === "string") return <a href={`tel:${v.replace(/[^\d+]/g, "")}`}>{v}</a>;
+  if (key === "email" && typeof v === "string") return <a className={ui.contactLink} href={`mailto:${v}`}>{v}</a>;
+  if (key === "phone" && typeof v === "string") return <a className={ui.contactLink} href={`tel:${v.replace(/[^\d+]/g, "")}`}>{v}</a>;
   if (key === "locale") return v === "ru" ? adminEt.common.locale.ru : adminEt.common.locale.et;
   // The course of an individual / waitlist / interest request is a slug; the practice form's "course" is free text.
   if (key === "course" && r.kind !== "practice" && typeof v === "string") {

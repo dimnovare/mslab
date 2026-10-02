@@ -293,6 +293,38 @@ test.describe("signed in", () => {
     await expect(waitlist).toContainText(/\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}, Pärnu/);
   });
 
+  test("e-mail and phone links are 44 px touch targets: registrations list and drawer, requests (item 12)", async ({ page, context, visitorIp }, info) => {
+    const f = await fixtures(info.project.name);
+    await signIn(page, context, visitorIp);
+    const targets = async (scope: Locator, min: number) => {
+      const links = scope.locator("a[href^='mailto:'], a[href^='tel:']");
+      await expect(links.nth(min - 1)).toBeVisible();
+      for (const a of await links.all()) {
+        const box = (await a.boundingBox())!;
+        expect(box.height, (await a.getAttribute("href")) ?? "").toBeGreaterThanOrEqual(44);
+        expect(box.width, (await a.getAttribute("href")) ?? "").toBeGreaterThanOrEqual(44);
+      }
+    };
+    const disjoint = async (row: Locator) => {
+      // the name, e-mail and phone targets of one row never overlap (a tap reaches the one it is on)
+      const boxes = await row.locator("a").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as DOMRect));
+      for (let i = 0; i < boxes.length; i++)
+        for (let j = i + 1; j < boxes.length; j++) {
+          const [a, b] = [boxes[i], boxes[j]];
+          expect(a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5 && a.left < b.right - 0.5 && b.left < a.right - 0.5, `${i}/${j}`).toBe(false);
+        }
+    };
+    await page.goto("/admin/registreerimised?vorm=k");
+    const row = page.locator(`[data-registration="${f.registration.id}"]`);
+    await targets(row, 2); // e-mail and phone
+    await disjoint(row.locator('[data-label="Nimi"]'));
+    await row.getByRole("link", { name: `Ava ${f.registration.name}` }).click();
+    await targets(page.getByRole("dialog", { name: `Registreerimine: ${f.registration.name}` }), 2);
+    await page.goto("/admin/paringud?liik=individuaal");
+    await targets(page.locator(`[data-request="${f.individual.id}"]`), 2);
+    expect(await noOverflow(page)).toBe(true);
+  });
+
   test("requests: a failed 'Märgi tehtuks' says so instead of failing silently", async ({ page, context, visitorIp }, info) => {
     const f = await fixtures(info.project.name);
     await signIn(page, context, visitorIp);

@@ -118,6 +118,17 @@
   font-size: 12px;
 }
 
+/* A mailto: / tel: address inside a list or a table cell: a 44px tall touch target (global constraint) with the text
+   in the middle, so a phone call or an e-mail is never a fiddly tap. */
+.contactLink {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
 /* B .link */
 .link {
   display: inline-flex;

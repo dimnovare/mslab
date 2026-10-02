@@ -169,11 +169,11 @@ export default async function RegistrationsPage({ searchParams }: Props) {
                         <Link id={`reg-${r.id}`} className={styles.name} href={href(view, r.id)} scroll={false} aria-label={fill(t.open, { name: r.name })}>
                           {r.name}
                         </Link>
-                        <a className={styles.contact} href={`mailto:${r.email}`}>
+                        <a className={`${ui.contactLink} ${styles.contact}`} href={`mailto:${r.email}`}>
                           {r.email}
                         </a>
                         {r.phone && (
-                          <a className={styles.contact} href={tel(r.phone)}>
+                          <a className={`${ui.contactLink} ${styles.contact}`} href={tel(r.phone)}>
                             {r.phone}
                           </a>
                         )}
@@ -224,8 +224,8 @@ function RegistrationDetail({ r }: { r: RegistrationRow }) {
   const total = registrationPrice(r.course, r.kind);
   const half = total == null ? null : prepaymentDue(total, "half");
   const details: [string, React.ReactNode][] = [
-    [t.email, <a key="e" href={`mailto:${r.email}`}>{r.email}</a>],
-    [t.phone, r.phone ? <a key="p" href={tel(r.phone)}>{r.phone}</a> : adminEt.common.none],
+    [t.email, <a key="e" className={ui.contactLink} href={`mailto:${r.email}`}>{r.email}</a>],
+    [t.phone, r.phone ? <a key="p" className={ui.contactLink} href={tel(r.phone)}>{r.phone}</a> : adminEt.common.none],
     [t.course, pick(r.course.title, "et")],
     [t.session, sessionText(r, true)],
     [t.type, r.course.type === "e_learning" ? adminEt.registrations.type.e : adminEt.registrations.type.k],

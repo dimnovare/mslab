@@ -21,15 +21,16 @@
 .who {
   display: grid;
   justify-items: start;
-  gap: 2px;
+  gap: 0;
   min-width: 180px;
 }
 
-/* A 44px tall target without pushing the e-mail line away: transparent padding, cancelled by negative margins. */
+/* A 44px tall target: transparent padding, its top cancelled by a negative margin (the row's padding is there). The
+   e-mail and phone links under it are 44px tall themselves (ui .contactLink), so the targets never overlap. */
 .name {
   display: inline-block;
   padding: 12px 0 14px;
-  margin: -12px 0 -12px;
+  margin: -12px 0 0;
   line-height: 18px;
   color: var(--ink);
   font-weight: 600;
@@ -53,7 +54,7 @@
 }
 
 .contact {
-  color: #716a6d;
+  color: var(--muted-2);
   font-size: 12px;
   overflow-wrap: break-word;
   word-break: break-word;
@@ -117,7 +118,7 @@
   }
 
   .name {
-    margin: -12px 0 -14px;
+    margin: -12px 0 0;
   }
 }
 
