@@ -47,6 +47,16 @@ const REQUIRED: readonly [RequiredName, string][] = [
   ["MAIL_FROM", "MS LAB <info@send.diipsolutions.eu>"],
 ];
 
+/** Does `new URL` accept it? (A postgres.js URL with several hosts or a socket path does not parse, and is not used here.) */
+function isUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const OPTIONAL = ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
 
 /**
@@ -55,7 +65,9 @@ const OPTIONAL = ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "A
  *
  * In production every required variable must be set: otherwise this throws an error that names the missing variables
  * (all of them) and never shows a value. Outside production (`next dev`, the tests) the required ones fall back to the
- * local values above. `source` and `production` are for the tests; the defaults are process.env and NODE_ENV.
+ * local values above. A DATABASE_URL that is not a URL is an error too ("DATABASE_URL is not a valid URL", no value):
+ * left to postgres.js, its own TypeError would quote the whole string, password included. `source` and `production`
+ * are for the tests; the defaults are process.env and NODE_ENV.
  */
 export function serverEnv(source: Source = process.env, production: boolean = process.env.NODE_ENV === "production"): ServerEnv {
   const read = (name: string): string | undefined => source[name]?.trim() || undefined;
@@ -67,6 +79,7 @@ export function serverEnv(source: Source = process.env, production: boolean = pr
     else env[name] = value;
   }
   if (missing.length) throw new Error(`Missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
+  if (!isUrl(env.DATABASE_URL!)) throw new Error("DATABASE_URL is not a valid URL"); // no cause: the URL error carries the input
   for (const name of OPTIONAL) env[name] = read(name);
   return env as ServerEnv;
 }

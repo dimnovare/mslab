@@ -21,9 +21,9 @@ export type Q = Db | Tx;
  *   instance that was paused between requests is unlikely to reuse a socket the proxy has long dropped.
  * - fetch_types false: the schema has no array or custom column types (jsonb is built in), so the lookup postgres.js
  *   makes on each new connection would only cost a round trip.
- * Prepared statements stay on (postgres.js default): the database is reached directly (Railway's TCP proxy), with no
- * transaction-mode pooler such as PgBouncer in between, which is the one thing that breaks them. If DATABASE_URL ever
- * points at such a pooler, add `prepare: false`.
+ * No `prepare` setting: Drizzle's postgres-js session sends every query through `unsafe()`, which postgres.js never
+ * prepares, so the pool would work behind a transaction-mode pooler such as PgBouncer too. (The database is reached
+ * directly today: Railway's TCP proxy.)
  */
 const POOL = { max: 5, connect_timeout: 5, idle_timeout: 20, fetch_types: false } as const;
 

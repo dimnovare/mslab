@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // app (no sql.end() per request) and never tied to a request. Nothing here connects: postgres.js connects on the first
 // query, and these tests make none.
 
-type Client = { options: { max: number; connect_timeout: number; idle_timeout: number | null; host: string[]; port: number[]; prepare: boolean; fetch_types: boolean }; end: () => Promise<void> };
+type Client = { options: { max: number; connect_timeout: number; idle_timeout: number | null; host: string[]; port: number[]; fetch_types: boolean }; end: () => Promise<void> };
 const clientOf = (db: unknown): Client => (db as { $client: Client }).$client;
 const POOL = "__mslabDb";
 const forget = () => delete (globalThis as Record<string, unknown>)[POOL];
@@ -58,6 +58,19 @@ describe("getDb", () => {
     }
     expect(message).toContain("DATABASE_URL");
     expect(message).not.toContain("admin@example.test");
+  });
+
+  test("a DATABASE_URL that is not a URL fails with an error that names the variable and shows none of the value", async () => {
+    vi.stubEnv("DATABASE_URL", "postgres://app:s3cret-pw#oops@db.example.com:5432/mslab");
+    const getDb = await load();
+    let error: unknown;
+    try {
+      getDb();
+    } catch (e) {
+      error = e;
+    }
+    expect((error as Error).message).toBe("DATABASE_URL is not a valid URL");
+    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain("s3cret-pw"); // message, stack and any cause
   });
 
   test("without DATABASE_URL outside production it is the local development database", async () => {

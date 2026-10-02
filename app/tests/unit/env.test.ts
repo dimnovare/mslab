@@ -76,6 +76,35 @@ describe("serverEnv in production", () => {
   });
 });
 
+describe("a DATABASE_URL that is not a URL", () => {
+  // `#` ends the address early, so "…:s3cret-pw" would be read as a port: postgres.js's own error would quote the whole
+  // string, password included. serverEnv() refuses it first, with an error that never shows the value.
+  const BAD = ["postgres://app:s3cret-pw#oops@db.example.com:5432/mslab", "not a url at all, s3cret-pw", "postgres://app:s3cret-pw@db.example.com:port/mslab"];
+
+  for (const production of [true, false]) {
+    test(`is an error that names the variable and shows none of the value (production ${production})`, () => {
+      for (const url of BAD) {
+        let error: unknown;
+        try {
+          serverEnv({ ...FULL, DATABASE_URL: url }, production);
+        } catch (e) {
+          error = e;
+        }
+        expect(error, url).toBeInstanceOf(Error);
+        const { message, cause } = error as Error;
+        expect(message).toBe("DATABASE_URL is not a valid URL");
+        expect(cause).toBeUndefined(); // the URL error is not chained: it carries the input
+        expect(String((error as Error).stack)).not.toContain("s3cret-pw");
+      }
+    });
+  }
+
+  test("a well-formed one passes, with its parameters (?sslmode=require) and an escaped password", () => {
+    for (const url of [SECRET_URL, LOCAL_DATABASE_URL, "postgresql://postgres:pa%23ss@host.proxy.example:12345/railway?sslmode=require"])
+      expect(serverEnv({ ...FULL, DATABASE_URL: url }, true).DATABASE_URL, url).toBe(url);
+  });
+});
+
 describe("serverEnv outside production (next dev, the tests)", () => {
   test("DATABASE_URL defaults to the local development database; a value that is set wins", () => {
     const local = new URL(serverEnv({}, false).DATABASE_URL);
