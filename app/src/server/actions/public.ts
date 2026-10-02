@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { after } from "next/server";
 import { getDb } from "@/db/client";
 import { logFailure } from "../log";
-import { revalidatePublic } from "../public-cache";
+import { revalidatePublicLater } from "../public-cache";
 import { clientIp } from "../ratelimit";
 import { linkBase, requestOrigin } from "../site";
 import {
@@ -42,8 +42,9 @@ async function run(form: FormName, handler: (deps: Deps, formData: FormData) => 
         now: new Date(),
         // Notifications run after the response (the Worker's waitUntil) and never fail or slow the form.
         later: (task) => after(() => task().catch((e) => logFailure(`[forms] ${form}: notification failed`, e))),
-        // a registration or waitlist entry: the calendar and the course page show the session's seats
-        changed: revalidatePublic,
+        // a registration or waitlist entry: the calendar and the course page show the session's seats (revalidated after
+        // the answer, so the POST never renders a page)
+        changed: revalidatePublicLater,
       };
     },
     handler,

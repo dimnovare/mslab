@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
   // The design-review hub (public/guide, public/p/<dir>) must keep its trailing slash ("/guide/"): its pages use
   // relative asset URLs. Next's own "/x/" → "/x" redirect is off; src/middleware.ts makes it for every other path.
   skipTrailingSlashRedirect: true,
+  experimental: {
+    // How long the browser's client router keeps a cached page it has visited or prefetched (x-nextjs-stale-time) before
+    // asking again: the public pages are cached on the Worker now (open-next.config.ts), and an open tab should see an
+    // admin's change on its next navigation within this time. 30 s is the least Next.js accepts (default 300).
+    staleTimes: { dynamic: 0, static: 30 },
+  },
   env: {
     // Review tools: Maria's comment widget (public/feedback.js) on every public page, posting to /api/feedback.
     // On ("1") for the review builds; switched off ("0") at the mslab.ee launch. Inlined at build time, not a secret.

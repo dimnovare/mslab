@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Notice } from "@/components/site/Notice";
 import { PurchaseInterest } from "@/components/site/PurchaseInterest";
 import ui from "@/components/site/ui.module.css";
@@ -23,11 +24,14 @@ export function cartMetadata(locale: Locale): Metadata {
  * until then the page sums up the course, says payment opens soon and takes an e-mail to tell the visitor.
  * Only e-learning courses can be bought; contact courses are registered on their own page.
  * The middleware serves "?kursus=<slug>" from ./[kursus] (one cached page per course); /ostukorv alone is the empty cart.
+ * A course that does not exist or is not published is a 404 (./[kursus]/not-found.tsx says the cart is empty), so a
+ * made-up address is never stored as a page of its own.
  */
 export async function Cart({ locale, slug }: { locale: Locale; slug: string }) {
   const d = getDict(locale);
   const to = (path: string) => href(locale, path);
   const course = slug ? await getCourseBySlug(getDb(), slug) : null;
+  if (slug && !course) notFound();
 
   if (!course || course.type !== "e_learning" || course.price == null) {
     return <Notice title={d.cart.emptyTitle} text={d.cart.emptyText} links={[{ href: to("/koolitused?vorm=e"), label: d.formats.elearning.link }]} />;

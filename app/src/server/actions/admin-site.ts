@@ -24,7 +24,7 @@ async function run(what: string, change: (result: EditResult) => PublicChange, w
     const result = await work(getDb());
     // not on "stale" or a refusal: the editor keeps the admin's unsaved draft on screen
     if (result.ok) {
-      revalidatePublic(change(result));
+      await revalidatePublic(change(result));
       refresh();
     }
     return result;

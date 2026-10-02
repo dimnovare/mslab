@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { revalidationTargets, targetTag, type PublicChange } from "@/server/cache-targets";
+import { revalidationTargets, type PublicChange } from "@/server/cache-targets";
+import { sqliteD1 } from "../d1-sqlite";
 
 // Task 17: which cached public pages each change makes stale (server/cache-targets.ts), and that the tags written are
 // the ones Next.js gives those pages.
@@ -66,44 +67,77 @@ describe("the revalidation map", () => {
   });
 });
 
-describe("tags", () => {
-  test("as Next.js's revalidatePath writes them", () => {
-    expect(targetTag({ path: `${SITE}/koolituskalender`, type: "page" })).toBe("_N_T_/[locale]/(site)/koolituskalender/page");
-    expect(targetTag({ path: SITE, type: "layout" })).toBe("_N_T_/[locale]/(site)/layout");
-    expect(targetTag({ path: "/et/koolitused/x" })).toBe("_N_T_/et/koolitused/x");
-    expect(targetTag({ path: "/", type: "layout" })).toBe("_N_T_/layout");
-  });
-});
+// The tags these targets write: tests/unit/tag-cache.test.ts checks them against Next.js's own revalidatePath().
 
 describe("revalidatePublic", () => {
+  const CONTEXT = Symbol.for("__cloudflare-context__");
+  const g = globalThis as Record<string | symbol, unknown>;
+
   afterEach(() => {
-    vi.doUnmock("next/cache");
     vi.doUnmock("next/server");
     vi.resetModules();
     vi.useRealTimers();
+    delete g[CONTEXT];
+    delete process.env.OPEN_NEXT_BUILD_ID;
   });
 
-  test("calls revalidatePath for each target now, and again after SETTLE_MS (a render that overlapped the change)", async () => {
-    const calls: [string, string | undefined][] = [];
+  async function load(db: ReturnType<typeof sqliteD1>) {
     const later: (() => Promise<void>)[] = [];
-    vi.doMock("next/cache", () => ({ revalidatePath: (p: string, t?: string) => void calls.push([p, t]) }));
     vi.doMock("next/server", () => ({ after: (fn: () => Promise<void>) => void later.push(fn) }));
-    const { revalidatePublic, SETTLE_MS } = await import("@/server/public-cache");
-    revalidatePublic({ kind: "practice" });
-    const expected: [string, string | undefined][] = [
-      [SITE, "page"],
-      [`${SITE}/praktika`, "page"],
-    ];
-    expect(calls).toEqual(expected);
+    g[CONTEXT] = { env: { NEXT_TAG_CACHE_D1: db.binding }, ctx: {}, cf: {} };
+    process.env.OPEN_NEXT_BUILD_ID = "B1";
+    const mod = await import("@/server/public-cache");
+    return { ...mod, later };
+  }
+
+  test("an admin save: OpenNext's rows are in D1 before the action answers, and written again SETTLE_MS later", async () => {
+    const db = sqliteD1();
+    const { revalidatePublic, SETTLE_MS, later } = await load(db);
+    vi.useFakeTimers({ now: 1_000_000 });
+    await revalidatePublic({ kind: "practice" });
+    const first = db.d1.rows();
+    expect(first).toEqual([
+      { tag: "B1/_N_T_/[locale]/(site)/page", revalidatedAt: 1_000_000, stale: 1_000_000, expire: 1_000_000 },
+      { tag: "B1/_N_T_/[locale]/(site)/praktika/page", revalidatedAt: 1_000_000, stale: 1_000_000, expire: 1_000_000 },
+    ]);
     expect(later).toHaveLength(1);
-    vi.useFakeTimers();
-    const done = later[0]();
+    const settled = later[0]();
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
-    await done;
-    expect(calls).toEqual([...expected, ...expected]);
-    // nothing to revalidate: nothing scheduled
-    revalidatePublic({ kind: "settings", parts: [] });
-    expect(later).toHaveLength(1);
+    await settled;
+    // the second write really reaches the table (a second revalidatePath() of pending tags would be dropped by Next.js)
+    expect(db.d1.rows().map((r) => r.revalidatedAt)).toEqual([1_000_000 + SETTLE_MS, 1_000_000 + SETTLE_MS]);
+  });
+
+  test("a public form: nothing is written before the answer; both writes run after it", async () => {
+    const db = sqliteD1();
+    const { revalidatePublicLater, SETTLE_MS, later } = await load(db);
+    vi.useFakeTimers({ now: 2_000_000 });
+    revalidatePublicLater({ kind: "seats", course: "kulmude-lami" });
+    expect(db.d1.rows()).toEqual([]);
+    const run = later[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(db.d1.rows().map((r) => r.tag)).toEqual(["B1/_N_T_/[locale]/(site)/koolituskalender/page", "B1/_N_T_/et/koolitused/kulmude-lami", "B1/_N_T_/ru/koolitused/kulmude-lami"]);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    await run;
+    expect(new Set(db.d1.rows().map((r) => r.revalidatedAt))).toEqual(new Set([2_000_000 + SETTLE_MS]));
+  });
+
+  test("next dev (no OpenNext build id) and changes that show nowhere write nothing", async () => {
+    const db = sqliteD1();
+    const { revalidatePublic, later } = await load(db);
+    await revalidatePublic({ kind: "settings", parts: [] });
+    delete process.env.OPEN_NEXT_BUILD_ID;
+    await revalidatePublic({ kind: "home" });
+    expect(db.d1.rows()).toEqual([]);
+    expect(later).toEqual([]);
+  });
+
+  test("a failing write is logged, never thrown at the admin whose save is stored", async () => {
+    const db = sqliteD1();
+    const { revalidatePublic } = await load(db);
+    db.d1.exec("DROP TABLE revalidations");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(revalidatePublic({ kind: "home" })).resolves.toBeUndefined();
+    expect(log.mock.calls[0][0]).toContain("[public-cache] revalidation of 1 tags failed");
   });
 });
-

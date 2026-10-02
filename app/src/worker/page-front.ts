@@ -1,4 +1,5 @@
 import { routeSitePath } from "../lib/site-routing";
+import { revalidatedSince, tagKey, tagSelect, type TagRow } from "../server/tag-cache";
 
 // The cached-page front: answers a request for a cached public page straight from R2, before OpenNext and Next.js run.
 //
@@ -11,8 +12,8 @@ import { routeSitePath } from "../lib/site-routing";
 // object's metadata. A request is answered from such an object only when OpenNext would answer it from its own cache
 // with the same bytes: a GET or HEAD for a public page (lib/site-routing.ts, as the middleware routes it), not a server
 // action, revalidation or preview, the object present, not past its revalidate time, and none of its tags revalidated
-// since it was stored (the D1 tag cache rows that revalidatePath writes, read as OpenNext's d1-next-tag-cache reads
-// them). Everything else, and any doubt, goes on to OpenNext unchanged, which then also refreshes what is stale.
+// since its render began (the D1 tag cache rows, read as OpenNext's d1-next-tag-cache reads them: server/tag-cache.ts).
+// Everything else, and any doubt, goes on to OpenNext unchanged, which then also refreshes what is stale.
 
 export const FRONT_PREFIX = "front";
 
@@ -27,6 +28,8 @@ export type FrontMeta = {
   r: string;
   /** headers of the stored page to send again (JSON object), e.g. x-nextjs-stale-time */
   h: string;
+  /** when the page's render began (ms): its date for the revalidation check (server/page-store.ts) */
+  s?: string;
 };
 
 /** The pages the front serves: our own slugs only (lowercase letters, digits, dashes); anything else goes to OpenNext. */
@@ -57,14 +60,6 @@ export function isCdnCacheControl(value: string | null): boolean {
   return !!value && /s-maxage=/.test(value) && /stale-while-revalidate/.test(value);
 }
 
-/** `response` with BROWSER_CACHE_CONTROL in place of a CDN Cache-Control (any other response is returned as it is). */
-export function forBrowsers(response: Response): Response {
-  if (!isCdnCacheControl(response.headers.get("cache-control"))) return response;
-  const out = new Response(response.body, response);
-  out.headers.set("cache-control", BROWSER_CACHE_CONTROL);
-  return out;
-}
-
 /** The page and variant a request asks for, or null when the front must leave it to OpenNext. */
 export function frontRequest(request: Request): { page: string; rewritten: boolean; variant: FrontVariant } | null {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
@@ -81,22 +76,7 @@ export function frontRequest(request: Request): { page: string; rewritten: boole
   return { page: route.page, rewritten: route.rewritten, variant };
 }
 
-/** A D1 tag cache row: [tag, revalidatedAt, stale, expire] (OpenNext d1-next-tag-cache). */
-export type TagRow = [string, number | null, number | null, number | null];
-
-/**
- * Has any of the page's tags been revalidated since the page was stored? Both of OpenNext's checks count:
- * hasBeenRevalidated (an expiry that has come, after the page was stored; or, without one, a revalidation after it)
- * and isStale (a stale-while-revalidate mark after it). Either way the page is left to OpenNext.
- */
-export function revalidatedSince(rows: TagRow[], lastModified: number, now: number): boolean {
-  return rows.some(([, revalidatedAt, , expire]) => (expire != null && expire <= now && expire > lastModified) || (revalidatedAt ?? 0) > lastModified);
-}
-
-/** The D1 key of a tag (OpenNext d1-next-tag-cache: "<buildId>/<tag>"). */
-export const tagKey = (buildId: string, tag: string): string => `${buildId}/${tag}`.replaceAll("//", "/");
-
-/** Is a page stored at `lastModified` past its revalidate time (seconds; null: none)? OpenNext's rule (cacheInterceptor). */
+/** Is a page dated `lastModified` past its revalidate time (seconds; null: none)? OpenNext's rule (cacheInterceptor). */
 export function pastRevalidate(revalidate: number | null, lastModified: number, now: number): boolean {
   return revalidate !== null && Math.round((now - lastModified) / 1000) >= revalidate;
 }
@@ -111,30 +91,45 @@ export function notModified(ifNoneMatch: string | null, etag: string): boolean {
 export type FrontEnv = { NEXT_INC_CACHE_R2_BUCKET?: R2Bucket; NEXT_TAG_CACHE_D1?: D1Database };
 
 /**
- * The cached answer for `request`, or null (then OpenNext answers it). Never throws: a failing R2 or D1 call is a null.
+ * Why the front left a page request to OpenNext (sent as "x-page-cache: miss-<reason>", for diagnosis; nothing in it is
+ * about the visitor): not stored yet, past its revalidate time, a tag revalidated since its render, stored without tags,
+ * no build id or bindings, or a failing R2 / D1 call.
+ */
+export type FrontMiss = "not-stored" | "expired" | "revalidated" | "untagged" | "unavailable" | "error";
+
+/**
+ * The front's answer for `request`: a response, a miss with its reason (a page request OpenNext answers), or null for a
+ * request that is not a cached-page request at all. Never throws.
  * `buildId`: the deployed build (OpenNext sets OPEN_NEXT_BUILD_ID when its bundle loads).
  */
-export async function servePageFromCache(request: Request, env: FrontEnv, buildId: string | undefined, now = Date.now()): Promise<Response | null> {
-  const bucket = env.NEXT_INC_CACHE_R2_BUCKET;
-  const db = env.NEXT_TAG_CACHE_D1;
-  if (!bucket || !db || !buildId) return null;
+export async function frontAnswer(
+  request: Request,
+  env: FrontEnv,
+  buildId: string | undefined,
+  now = Date.now(),
+): Promise<{ response: Response } | { miss: FrontMiss } | null> {
   const want = frontRequest(request);
   if (!want) return null;
+  const bucket = env.NEXT_INC_CACHE_R2_BUCKET;
+  const db = env.NEXT_TAG_CACHE_D1;
+  if (!bucket || !db || !buildId) return { miss: "unavailable" };
   let object: R2ObjectBody | null = null;
   try {
     object = await bucket.get(frontKey(buildId, want.page, want.variant));
-    if (!object) return null;
+    if (!object) return { miss: "not-stored" };
     const meta = object.customMetadata as Partial<FrontMeta> | undefined;
     const tags = (meta?.t ?? "").split(",").filter(Boolean);
     const revalidate = meta?.r ? Number(meta.r) : null;
-    const lastModified = object.uploaded.getTime();
-    if (tags.length === 0 || (revalidate !== null && !Number.isFinite(revalidate))) return discard(object);
-    if (pastRevalidate(revalidate, lastModified, now)) return discard(object); // OpenNext serves it once more and refreshes it
+    // dated by when its render began (server/page-store.ts); R2's upload time for an object written before that
+    const started = Number(meta?.s);
+    const lastModified = Number.isFinite(started) && started > 0 ? started : object.uploaded.getTime();
+    if (tags.length === 0 || (revalidate !== null && !Number.isFinite(revalidate))) return discard(object, "untagged");
+    if (pastRevalidate(revalidate, lastModified, now)) return discard(object, "expired"); // OpenNext serves it once more and refreshes it
     const rows = await db
-      .prepare(`SELECT tag, revalidatedAt, stale, expire FROM revalidations WHERE tag IN (${tags.map(() => "?").join(", ")})`)
+      .prepare(tagSelect(tags.length))
       .bind(...tags.map((t) => tagKey(buildId, t)))
       .raw<TagRow>();
-    if (revalidatedSince(rows, lastModified, now)) return discard(object);
+    if (revalidatedSince(rows, lastModified, now)) return discard(object, "revalidated");
 
     const headers = new Headers({ "cache-control": BROWSER_CACHE_CONTROL, "content-type": want.variant.kind === "html" ? "text/html; charset=utf-8" : "text/x-component" });
     for (const [k, v] of Object.entries(parseHeaders(meta?.h))) headers.set(k, v);
@@ -154,22 +149,42 @@ export async function servePageFromCache(request: Request, env: FrontEnv, buildI
     headers.set("x-page-cache", "front");
     if (notModified(request.headers.get("if-none-match"), etag)) {
       await object.body.cancel();
-      return new Response(null, { status: 304, headers });
+      return { response: new Response(null, { status: 304, headers }) };
     }
     if (request.method === "HEAD") {
       await object.body.cancel();
-      return new Response(null, { status: 200, headers });
+      return { response: new Response(null, { status: 200, headers }) };
     }
-    return new Response(object.body, { status: 200, headers });
-  } catch {
+    return { response: new Response(object.body, { status: 200, headers }) };
+  } catch (e) {
+    console.error("[page-front] cache read failed, left to OpenNext:", e instanceof Error ? e.message : String(e));
     if (object) await object.body.cancel().catch(() => {});
-    return null;
+    return { miss: "error" };
   }
 }
 
-async function discard(object: R2ObjectBody): Promise<null> {
+/** The cached answer for `request`, or null (then OpenNext answers it). */
+export async function servePageFromCache(request: Request, env: FrontEnv, buildId: string | undefined, now = Date.now()): Promise<Response | null> {
+  const answer = await frontAnswer(request, env, buildId, now);
+  return answer && "response" in answer ? answer.response : null;
+}
+
+/**
+ * OpenNext's answer to a request the front did not answer: BROWSER_CACHE_CONTROL in place of a CDN Cache-Control, and
+ * for a page request the front's reason in "x-page-cache: miss-<reason>".
+ */
+export function afterFront(response: Response, miss: FrontMiss | null): Response {
+  const cdn = isCdnCacheControl(response.headers.get("cache-control"));
+  if (!cdn && !miss) return response;
+  const out = new Response(response.body, response);
+  if (cdn) out.headers.set("cache-control", BROWSER_CACHE_CONTROL);
+  if (miss) out.headers.set("x-page-cache", `miss-${miss}`);
+  return out;
+}
+
+async function discard(object: R2ObjectBody, miss: FrontMiss): Promise<{ miss: FrontMiss }> {
   await object.body.cancel().catch(() => {});
-  return null;
+  return { miss };
 }
 
 function parseHeaders(json: string | undefined): Record<string, string> {

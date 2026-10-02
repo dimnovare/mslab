@@ -14,14 +14,15 @@ import { isLocale } from "@/i18n/locales";
  */
 export const revalidate = 86400;
 
-// Footer contact and newsletter discount come from the settings (a settings save revalidates every page).
+// Footer contact and newsletter discount come from the settings (a settings save revalidates every page). A failing
+// read is not replaced by defaults: the page is cached once rendered, and a footer without the contact details would
+// stay for a day. Failing, the render keeps the page's previous copy in use (and a page never rendered shows the error).
 async function loadShellSettings(): Promise<ShellSettings> {
   try {
     return shellSettings(await getSiteSettings());
   } catch (err) {
-    // The shell must not take the whole site down; fall back to defaults.
     console.error("site shell: settings unavailable:", err instanceof Error ? err.message : err);
-    return shellSettings({});
+    throw err;
   }
 }
 

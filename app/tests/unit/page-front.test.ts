@@ -1,19 +1,18 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { revalidatedSince, tagKey, type TagRow } from "@/server/tag-cache";
 import {
+  afterFront,
   BROWSER_CACHE_CONTROL,
-  forBrowsers,
+  frontAnswer,
   frontKey,
   frontRequest,
   isCdnCacheControl,
   isFrontPage,
   notModified,
   pastRevalidate,
-  revalidatedSince,
   servePageFromCache,
-  tagKey,
   VARY,
   type FrontMeta,
-  type TagRow,
 } from "@/worker/page-front";
 
 // The cached-page front (src/worker/page-front.ts): what it answers, and that it leaves everything else to OpenNext.
@@ -90,7 +89,7 @@ describe("freshness, as OpenNext's D1 tag cache decides it", () => {
   });
 });
 
-describe("browsers never keep a page past its next request", () => {
+describe("OpenNext's answers after the front", () => {
   test("OpenNext's CDN Cache-Control (s-maxage + stale-while-revalidate) is replaced; others are left alone", () => {
     expect(isCdnCacheControl("s-maxage=86400, stale-while-revalidate=31449600")).toBe(true);
     expect(isCdnCacheControl("s-maxage=1, stale-while-revalidate=2592000")).toBe(true);
@@ -99,11 +98,19 @@ describe("browsers never keep a page past its next request", () => {
     expect(isCdnCacheControl(null)).toBe(false);
 
     const isr = new Response("x", { status: 200, headers: { "cache-control": "s-maxage=86400, stale-while-revalidate=31449600", "x-nextjs-cache": "MISS" } });
-    const out = forBrowsers(isr);
+    const out = afterFront(isr, null);
     expect(out.headers.get("cache-control")).toBe(BROWSER_CACHE_CONTROL);
     expect(out.headers.get("x-nextjs-cache")).toBe("MISS");
+    expect(out.headers.get("x-page-cache")).toBeNull();
     const admin = new Response("x", { headers: { "cache-control": "no-store" } });
-    expect(forBrowsers(admin)).toBe(admin);
+    expect(afterFront(admin, null)).toBe(admin);
+  });
+
+  test("a page request the front left to OpenNext says why (x-page-cache: miss-<reason>)", () => {
+    const rendered = afterFront(new Response("x", { headers: { "cache-control": "s-maxage=86400, stale-while-revalidate=1" } }), "revalidated");
+    expect(rendered.headers.get("x-page-cache")).toBe("miss-revalidated");
+    expect(rendered.headers.get("cache-control")).toBe(BROWSER_CACHE_CONTROL);
+    expect(afterFront(new Response("x"), "not-stored").headers.get("x-page-cache")).toBe("miss-not-stored");
   });
 });
 
@@ -179,21 +186,38 @@ describe("servePageFromCache", () => {
     expect(same.headers.get("cache-control")).toBe(BROWSER_CACHE_CONTROL);
   });
 
-  test("left to OpenNext: not stored, revalidated, past its time, no tags, no build id, no bindings, a failing call", async () => {
-    expect(await servePageFromCache(req("/koolitused"), fakes({}).env, "B1", NOW)).toBeNull();
-    const revalidated = fakes({ "front/B1/et/koolitused#html": stored }, [["B1/_N_T_/layout", NOW - 1000, NOW - 1000, NOW - 1000]]);
-    expect(await servePageFromCache(req("/koolitused"), revalidated.env, "B1", NOW)).toBeNull();
-    const old = fakes({ "front/B1/et/koolitused#html": { ...stored, uploaded: NOW - 86_400_000 } });
-    expect(await servePageFromCache(req("/koolitused"), old.env, "B1", NOW)).toBeNull();
-    const untagged = fakes({ "front/B1/et/koolitused#html": { ...stored, meta: { ...meta, t: "" } } });
-    expect(await servePageFromCache(req("/koolitused"), untagged.env, "B1", NOW)).toBeNull();
-    expect(await servePageFromCache(req("/koolitused"), fakes({ "front/B1/et/koolitused#html": stored }).env, undefined, NOW)).toBeNull();
-    expect(await servePageFromCache(req("/koolitused"), {}, "B1", NOW)).toBeNull();
+  test("left to OpenNext, with the reason: not stored, revalidated, past its time, no tags, no build id or bindings, a failing call", async () => {
+    const miss = async (f: ReturnType<typeof fakes>["env"] | Record<string, never>, noBuild = false) => {
+      const a = await frontAnswer(req("/koolitused"), f, noBuild ? undefined : "B1", NOW);
+      return a && "miss" in a ? a.miss : a;
+    };
+    expect(await miss(fakes({}).env)).toBe("not-stored");
+    expect(await miss(fakes({ "front/B1/et/koolitused#html": stored }, [["B1/_N_T_/layout", NOW - 1000, NOW - 1000, NOW - 1000]]).env)).toBe("revalidated");
+    expect(await miss(fakes({ "front/B1/et/koolitused#html": { ...stored, meta: { ...meta, s: String(NOW - 86_400_000) } } }).env)).toBe("expired");
+    expect(await miss(fakes({ "front/B1/et/koolitused#html": { ...stored, meta: { ...meta, t: "" } } }).env)).toBe("untagged");
+    expect(await miss(fakes({ "front/B1/et/koolitused#html": stored }).env, true)).toBe("unavailable");
+    expect(await miss({})).toBe("unavailable");
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const failing = { NEXT_INC_CACHE_R2_BUCKET: { get: async () => Promise.reject(new Error("R2 down")) } as unknown as R2Bucket, NEXT_TAG_CACHE_D1: fakes({}).env.NEXT_TAG_CACHE_D1 };
+    expect(await miss(failing)).toBe("error");
     expect(await servePageFromCache(req("/koolitused"), failing, "B1", NOW)).toBeNull();
-    // and the admin, API and server actions are never even looked up
+    vi.restoreAllMocks();
+    // and the admin, API and server actions are not page requests: never even looked up, no reason given
     const f = fakes({});
-    for (const r of [req("/admin"), req("/api/feedback"), req("/koolitused", { method: "POST" })]) expect(await servePageFromCache(r, f.env, "B1", NOW)).toBeNull();
+    for (const r of [req("/admin"), req("/api/feedback"), req("/koolitused", { method: "POST" })]) expect(await frontAnswer(r, f.env, "B1", NOW)).toBeNull();
     expect(f.reads).toEqual([]);
+  });
+
+  test("a page is dated by when its render began (meta s), not by its upload: a save during the render makes it stale", async () => {
+    // render began at NOW - 3000, the save's revalidation at NOW - 2000, the objects were uploaded at NOW - 1000
+    const rows: TagRow[] = [["B1/_N_T_/layout", NOW - 2000, NOW - 2000, NOW - 2000]];
+    const during = fakes({ "front/B1/et/koolitused#html": { ...stored, uploaded: NOW - 1000, meta: { ...meta, s: String(NOW - 3000) } } }, rows);
+    expect(await frontAnswer(req("/koolitused"), during.env, "B1", NOW)).toEqual({ miss: "revalidated" });
+    // a render that began after the save is fresh
+    const after = fakes({ "front/B1/et/koolitused#html": { ...stored, uploaded: NOW - 500, meta: { ...meta, s: String(NOW - 1500) } } }, rows);
+    expect((await frontAnswer(req("/koolitused"), after.env, "B1", NOW))).toHaveProperty("response");
+    // an object written before render dating existed (no s): its upload time
+    const older = fakes({ "front/B1/et/koolitused#html": { ...stored, uploaded: NOW - 1000 } }, rows);
+    expect((await frontAnswer(req("/koolitused"), older.env, "B1", NOW))).toHaveProperty("response");
   });
 });

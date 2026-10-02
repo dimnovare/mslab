@@ -20,7 +20,7 @@ async function run(what: string, change: PublicChange, work: (db: Db) => Promise
     const result = await work(getDb());
     // not on "stale": the editor keeps the admin's unsaved draft on screen (reloading is her choice)
     if (result.ok) {
-      revalidatePublic(change);
+      await revalidatePublic(change);
       refresh();
     }
     return result;
