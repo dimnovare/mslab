@@ -30,6 +30,14 @@ export function deleteLocalComments(ids: string[]): Promise<void> {
   });
 }
 
+/**
+ * Deletes the rate limit counters (`rl:<form>:<ip>`) of the local KV: every e2e test is its own visitor, so a run leaves
+ * dozens of them (10-minute counters that hold visitor addresses) in the local database. Returns how many there were.
+ */
+export function removeRateLimitRows(): Promise<number> {
+  return withLocalKv(async (sql) => (await sql`delete from kv_entries where key like 'rl:%' returning key`).length);
+}
+
 /** Deletes every e2e comment still in the local KV; returns how many there were. */
 export function removeLeftoverComments(): Promise<number> {
   return withLocalKv(async (sql) => {

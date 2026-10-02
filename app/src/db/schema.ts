@@ -1,5 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import { pgTable, serial, text, integer, boolean, jsonb, timestamp, pgEnum, uniqueIndex, index, primaryKey, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, jsonb, timestamp, pgEnum, uniqueIndex, index, primaryKey, customType, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type { I18n } from "@/i18n/field";
 
 export const courseType = pgEnum("course_type", ["e_learning", "contact"]);
@@ -198,8 +198,19 @@ export const clientFavourites = pgTable("client_favourites", {
 
 export const mailQuota = pgTable("mail_quota", { day: text("day").primaryKey(), sent: integer("sent").notNull().default(0) });
 
-/** The text key-value store of the forms' rate limits, the review comments and the Telegram chat id (server/kv.ts). `expiresAt` null = never. */
-export const kvEntries = pgTable("kv_entries", { key: text("key").primaryKey(), value: text("value").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }) });
+/** text compared byte by byte (collation "C"): the KV keys sort as in Cloudflare KV, and a LIKE 'prefix%' can use the primary key index. */
+const byteText = customType<{ data: string }>({ dataType: () => 'text COLLATE "C"' });
+
+/**
+ * The text key-value store of the forms' rate limits, the review comments and the Telegram chat id (server/kv.ts).
+ * `expiresAt` null = never. The partial index serves the delete of expired rows that every TTL write runs (rate limit rows
+ * hold visitors' IP addresses, which must not outlive their window).
+ */
+export const kvEntries = pgTable(
+  "kv_entries",
+  { key: byteText("key").primaryKey(), value: text("value").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }) },
+  (t) => [index("kv_entries_expires_at").on(t.expiresAt).where(sql`${t.expiresAt} is not null`)],
+);
 export const settings = pgTable("settings", { key: text("key").primaryKey(), value: jsonb("value").notNull() });
 // keys: "contact" {email, phone, address, instagram, facebook}, "newsletter" {discountLabel}, "trainer" {portraitKey, name, role: I18n, stats: [{value,label:I18n}]}
 

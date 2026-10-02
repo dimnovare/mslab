@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { makeTestDb } from "./helpers";
 import { kvEntries } from "@/db/schema";
 import { PgKv } from "@/server/kv";
@@ -60,24 +60,86 @@ test("a page of exactly `limit` keys is complete, with no cursor", async () => {
   expect(page.cursor).toBeUndefined();
 });
 
-test("a put sweeps the expired rows on about 1 in 100 calls", async () => {
-  const db = await makeTestDb();
-  const old = new PgKv(db, () => new Date("2026-10-02T10:00:00Z"));
-  await old.put("stale", "x", { expirationTtl: 60 });
-  const rows = async () => (await db.select().from(kvEntries)).map((r) => r.key).sort();
-  const later = () => new Date("2026-10-02T11:00:00Z");
-
-  await new PgKv(db, later, () => 0.5).put("fresh1", "x");
-  expect(await rows()).toEqual(["fresh1", "stale"]); // no sweep: the expired row is only ignored by reads
-
-  await new PgKv(db, later, () => 0.005).put("fresh2", "x");
-  expect(await rows()).toEqual(["fresh1", "fresh2"]); // swept; live rows stay
+test("a prefix with a backslash is literal too", async () => {
+  const kv = new PgKv(await makeTestDb());
+  await kv.put("a\\b", "1");
+  await kv.put("a\\c", "2");
+  await kv.put("abx", "3");
+  await kv.put("a\\", "4");
+  expect((await kv.list({ prefix: "a\\" })).keys.map((k) => k.name)).toEqual(["a\\", "a\\b", "a\\c"]);
+  expect((await kv.list({ prefix: "a\\b" })).keys.map((k) => k.name)).toEqual(["a\\b"]);
+  expect((await kv.list({ prefix: "a%" })).keys).toEqual([]);
 });
 
-test("a failing sweep does not fail the put", async () => {
+test("keys list in byte order (collation C), with a cursor that agrees with it", async () => {
+  const kv = new PgKv(await makeTestDb());
+  for (const k of ["b", "B", "a", "A", "_", "-", "~", "é", "10", "9"]) await kv.put(k, "x");
+  const all = (await kv.list({})).keys.map((k) => k.name);
+  expect(all).toEqual(["-", "10", "9", "A", "B", "_", "a", "b", "~", "é"]);
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await kv.list({ limit: 3, cursor });
+    seen.push(...page.keys.map((k) => k.name));
+    cursor = page.cursor;
+  } while (cursor);
+  expect(seen).toEqual(all);
+});
+
+test("limit below 1 gives one key instead of an error", async () => {
+  const kv = new PgKv(await makeTestDb());
+  await kv.put("p:1", "1");
+  await kv.put("p:2", "2");
+  for (const limit of [0, -5]) {
+    const page = await kv.list({ prefix: "p:", limit });
+    expect(page.keys.map((k) => k.name)).toEqual(["p:1"]);
+    expect(page.list_complete).toBe(false);
+    expect(page.cursor).toBe("p:1");
+  }
+});
+
+const physicalKeys = async (db: Awaited<ReturnType<typeof makeTestDb>>) => (await db.select().from(kvEntries)).map((r) => r.key).sort();
+
+test("a put with a TTL physically deletes the expired rows; future-expiry and no-expiry rows stay", async () => {
   const db = await makeTestDb();
-  const failingDelete = Object.assign(Object.create(db), { delete: () => { throw new Error("delete failed"); } }) as typeof db;
-  const kv = new PgKv(failingDelete, undefined, () => 0); // always sweeps
-  await expect(kv.put("k", "v")).resolves.toBeUndefined();
-  expect(await kv.get("k")).toBe("v");
+  const t0 = new PgKv(db, () => new Date("2026-10-02T10:00:00Z"));
+  await t0.put("rl:form:203.0.113.7", "1", { expirationTtl: 600 }); // expires 10:10
+  await t0.put("rl:form:203.0.113.8", "1", { expirationTtl: 3600 }); // expires 11:00
+  await t0.put("tg:chat", "42"); // never
+  expect(await physicalKeys(db)).toEqual(["rl:form:203.0.113.7", "rl:form:203.0.113.8", "tg:chat"]);
+
+  const t1 = new PgKv(db, () => new Date("2026-10-02T10:30:00Z")); // the first row has expired, the second has not
+  expect(await t1.get("rl:form:203.0.113.7")).toBeNull(); // reads already ignore it, but the row is still stored
+  expect(await physicalKeys(db)).toContain("rl:form:203.0.113.7");
+  await t1.put("rl:form:203.0.113.9", "1", { expirationTtl: 600 });
+  expect(await physicalKeys(db)).toEqual(["rl:form:203.0.113.8", "rl:form:203.0.113.9", "tg:chat"]); // gone, the others stay
+  expect(await t1.get("rl:form:203.0.113.8")).toBe("1");
+  expect(await t1.get("tg:chat")).toBe("42");
+});
+
+test("sweep() on its own deletes only what has expired", async () => {
+  const db = await makeTestDb();
+  const t0 = new PgKv(db, () => new Date("2026-10-02T10:00:00Z"));
+  await t0.put("old", "x", { expirationTtl: 60 });
+  await t0.put("later", "x", { expirationTtl: 7200 });
+  await t0.put("never", "x");
+  await new PgKv(db, () => new Date("2026-10-02T10:01:00Z")).sweep(); // exactly at its expiry: no longer readable, so deleted
+  expect(await physicalKeys(db)).toEqual(["later", "never"]);
+});
+
+test("a failing sweep is logged without values and does not fail the put", async () => {
+  const db = await makeTestDb();
+  const failingDelete = Object.assign(Object.create(db), { delete: () => { throw new Error("delete failed for 203.0.113.7"); } }) as typeof db;
+  const kv = new PgKv(failingDelete);
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await expect(kv.put("rl:form:203.0.113.7", "1", { expirationTtl: 600 })).resolves.toBeUndefined();
+    expect(await kv.get("rl:form:203.0.113.7")).toBe("1");
+    expect(logged).toHaveBeenCalledTimes(1);
+    const line = String(logged.mock.calls[0][0]);
+    expect(line).toContain("[kv] sweeping expired entries failed");
+    expect(line).not.toContain("203.0.113.7");
+  } finally {
+    logged.mockRestore();
+  }
 });

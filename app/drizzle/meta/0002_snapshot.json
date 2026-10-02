@@ -1,5 +1,5 @@
 {
-  "id": "43d4590c-a91c-454e-8c83-ddae7577ad3c",
+  "id": "3c42e408-4107-4e92-b949-fba27d80573c",
   "prevId": "6aca779a-5fd4-4171-8f06-f816c73c162a",
   "version": "7",
   "dialect": "postgresql",
@@ -1045,7 +1045,7 @@
       "columns": {
         "key": {
           "name": "key",
-          "type": "text",
+          "type": "text COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
@@ -1062,7 +1062,24 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "kv_entries_expires_at": {
+          "name": "kv_entries_expires_at",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"kv_entries\".\"expires_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

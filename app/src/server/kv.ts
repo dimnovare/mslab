@@ -1,19 +1,16 @@
-import { and, asc, eq, gt, isNull, like, lt, or } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, like, lte, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { getDb } from "@/db/client";
 import { kvEntries } from "@/db/schema";
 import type { FeedbackKv } from "./feedback";
+import { logFailure } from "./log";
 import type { TextKv } from "./ratelimit";
-
-/** Share of `put` calls that also delete the expired rows (nothing else removes them; reads already ignore them). */
-const SWEEP_SHARE = 0.01;
 
 /** The Cloudflare-KV-shaped store the forms, comments and notifications use, kept in Postgres. */
 export class PgKv implements TextKv, FeedbackKv {
   constructor(
     private readonly db: Db,
     private readonly now: () => Date = () => new Date(),
-    private readonly random: () => number = Math.random,
   ) {}
 
   /** Rows that have no expiry or have not reached it. */
@@ -26,20 +23,24 @@ export class PgKv implements TextKv, FeedbackKv {
     return row?.value ?? null;
   }
 
-  /** Stores the value; `expirationTtl` is in seconds. Without it the entry never expires (a put replaces an earlier expiry, as in Cloudflare KV). */
+  /**
+   * Stores the value; `expirationTtl` is in seconds. Without it the entry never expires (a put replaces an earlier expiry,
+   * as in Cloudflare KV). A put with a TTL also deletes the expired rows: the rate limit rows hold visitors' IP addresses,
+   * which must not outlive their window (the partial index on expires_at keeps that delete cheap).
+   */
   async put(key: string, value: string, opts: { expirationTtl?: number } = {}): Promise<void> {
     const expiresAt = opts.expirationTtl ? new Date(this.now().getTime() + opts.expirationTtl * 1000) : null;
     await this.db.insert(kvEntries).values({ key, value, expiresAt }).onConflictDoUpdate({ target: kvEntries.key, set: { value, expiresAt } });
-    if (this.random() < SWEEP_SHARE) await this.sweep();
+    if (expiresAt) await this.sweep();
   }
 
   async delete(key: string): Promise<void> {
     await this.db.delete(kvEntries).where(eq(kvEntries.key, key));
   }
 
-  /** Keys with the prefix in key order, at most `limit` (1000) per page; pass the returned `cursor` for the next page. */
+  /** Keys with the prefix in byte order, 1 to 1000 (default 1000) per page; pass the returned `cursor` for the next page. */
   async list(opts: { prefix?: string; cursor?: string; limit?: number } = {}): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }> {
-    const limit = Math.min(opts.limit ?? 1000, 1000);
+    const limit = Math.max(1, Math.min(Math.trunc(opts.limit ?? 1000), 1000));
     const rows = await this.db
       .select({ key: kvEntries.key })
       .from(kvEntries)
@@ -51,12 +52,12 @@ export class PgKv implements TextKv, FeedbackKv {
     return { keys: page.map((r) => ({ name: r.key })), list_complete: done, cursor: done ? undefined : page.at(-1)!.key };
   }
 
-  /** Deletes the expired rows. Housekeeping only: a failure is not the caller's problem, the next sweep tries again. */
+  /** Deletes the expired rows. A failure is logged (no values) and never fails the caller: the next TTL put sweeps again, and reads ignore expired rows meanwhile. */
   async sweep(): Promise<void> {
     try {
-      await this.db.delete(kvEntries).where(lt(kvEntries.expiresAt, this.now()));
-    } catch {
-      // not worth failing a put for
+      await this.db.delete(kvEntries).where(lte(kvEntries.expiresAt, this.now()));
+    } catch (e) {
+      logFailure("[kv] sweeping expired entries failed", e);
     }
   }
 }
