@@ -18,7 +18,7 @@
     { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "mslab-next-cache" }
   ],
   "kv_namespaces": [{ "binding": "KV", "id": "325a989613294fa19c86451afd8f6fa3" }],
-  // when each cached page was made stale (open-next.config.ts: tag cache; revalidatePath writes here)
+  // when each cached page was made stale (open-next.config.ts: tag cache; the saves and the cron write here: src/server/tag-cache.ts)
   "d1_databases": [{ "binding": "NEXT_TAG_CACHE_D1", "database_name": "mslab-next-tags", "database_id": "aae2ec02-d883-49f8-b9b5-b5b46178f1fb" }],
   // the daily background refresh of a cached page is a request to the Worker itself (open-next.config.ts: queue)
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "mslab-web" }],

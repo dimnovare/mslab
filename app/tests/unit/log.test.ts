@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { errorSummary } from "@/server/log";
@@ -11,4 +13,19 @@ test("errorSummary keeps the class, SQLSTATE and HTTP status, never the message 
   expect(errorSummary({ name: "has spaces and mari@example.com" })).toBe("object");
   expect(errorSummary("mari@example.com")).toBe("string");
   expect(errorSummary(Object.assign(new Error("x"), { code: "mari@example.com is bad" }))).toBe("Error");
+});
+
+test("pages, layouts, routes and components log failures through logFailure only, never with console.error (final review M5)", () => {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(join(dir, e.name));
+      else if (/\.tsx?$/.test(e.name)) files.push(join(dir, e.name));
+    }
+  };
+  walk("src/app");
+  walk("src/components");
+  const offenders = files.filter((f) => /console\.(error|warn)\(/.test(readFileSync(f, "utf8")));
+  expect(offenders).toEqual([]);
+  expect(readFileSync("src/app/[locale]/(site)/layout.tsx", "utf8")).toContain('logFailure("site shell: settings unavailable", err)');
 });

@@ -14,7 +14,7 @@ export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /** The database or an open transaction: queries that also run inside a caller's transaction take this. */
 export type Q = Db | Tx;
 
-/** Seconds to wait for a connection, so a slow or unreachable database cannot hang the page (the shell falls back). */
+/** Seconds to wait for a connection, so a slow or unreachable database cannot hang the page (it fails, then shows the error page). */
 const CONNECT_TIMEOUT = 5;
 /** Seconds that in-flight queries get to finish when the per-request client is closed. */
 const END_TIMEOUT = 5;
@@ -23,8 +23,9 @@ const END_TIMEOUT = 5;
  * `prepare: false`: Hyperdrive caches read queries for 60 s (+15 s stale) and does not invalidate them on writes, so
  * after Maria saves a course the catalogue, the calendar and the editor itself could show the old data for a minute.
  * Hyperdrive does not cache the queries of a postgres.js client without prepared statements (Hyperdrive docs,
- * "Uncached queries"), so every read sees the latest write. The pooling stays. (Turning caching off on the Hyperdrive
- * configuration itself, `wrangler hyperdrive update <id> --caching-disabled`, would make the same guarantee explicit.)
+ * "Uncached queries"), so every read sees the latest write. The pooling stays. Caching is also turned off on the
+ * Hyperdrive configuration itself (`wrangler hyperdrive update <id> --caching-disabled`), so the guarantee does not
+ * rest on this option alone.
  */
 const client = (url: string) => postgres(url, { max: 5, fetch_types: false, connect_timeout: CONNECT_TIMEOUT, prepare: false });
 

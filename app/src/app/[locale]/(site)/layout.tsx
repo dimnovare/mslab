@@ -4,6 +4,7 @@ import { Footer } from "@/components/site/Footer";
 import { Header } from "@/components/site/Header";
 import { SiteReady } from "@/components/site/SiteReady";
 import { shellSettings, type ShellSettings } from "@/components/site/settings";
+import { logFailure } from "@/server/log";
 import { getSiteSettings } from "@/server/site-data";
 import { isLocale, type Locale } from "@/i18n/locales";
 
@@ -24,7 +25,7 @@ async function loadShellSettings(locale: Locale): Promise<ShellSettings> {
   try {
     return shellSettings(await getSiteSettings(), locale);
   } catch (err) {
-    console.error("site shell: settings unavailable:", err instanceof Error ? err.message : err);
+    logFailure("site shell: settings unavailable", err); // never the message (server/log.ts): it can name the database host
     throw err;
   }
 }
