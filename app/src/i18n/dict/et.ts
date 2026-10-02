@@ -35,6 +35,8 @@ export const et = {
     slide: "Slaid",
     prevSlide: "Eelmine slaid",
     nextSlide: "Järgmine slaid",
+    // the pause toggle (WCAG 2.2.2): aria-pressed says whether the slides are paused
+    pauseSlides: "Peata slaidide vahetumine",
   },
 
   // Section headings that only appear on the home page.

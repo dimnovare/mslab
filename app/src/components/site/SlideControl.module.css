@@ -61,6 +61,27 @@
   gap: 8px;
 }
 
+/* The pause toggle: quiet next to the round buttons (no frame), the glyph in the slide's text colour. */
+.toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.toggle:hover,
+.toggle[aria-pressed="true"] {
+  opacity: 1;
+}
+
 .prev,
 .next {
   display: grid;
@@ -129,6 +150,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* nothing plays: nothing to pause */
+  .toggle {
+    display: none;
+  }
+
   .segment::after,
   .prev,
   .next {

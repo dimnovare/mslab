@@ -28,6 +28,7 @@ export type HeroTexts = {
   slide: string;
   prevSlide: string;
   nextSlide: string;
+  pauseSlides: string;
   calendarLabel: string;
   calendarHref: string;
 };
@@ -43,6 +44,7 @@ function subscribeReducedMotion(onChange: () => void) {
   return () => mq.removeEventListener("change", onChange);
 }
 const reducedMotionNow = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const noop = () => () => {};
 
 /** Slide titles are stored with "\n" line breaks. */
 function Lines({ text }: { text: string }) {
@@ -67,19 +69,25 @@ const keyboardFocusIn = (el: HTMLElement) => {
  * Every slide is rendered; the current one is shown, the others are hidden and inert. The current tone is written
  * to <html data-hero-tone> for the header (G5).
  *
- * Autoplay every 6.5 s; it restarts after every change, also after a click or a tap. It waits only while the pointer
- * is on the controls (the slide control and the slide's buttons, so a slide never changes under a click) and while
- * keyboard focus is inside the hero; never with reduced motion. Swipe on touch screens; arrow keys inside the hero.
- * A change the visitor makes is announced (the slides are a polite live region then); autoplay's changes are not.
- * Only the current slide's image and, while autoplay runs, the next one's are loaded; a slide keeps its image once
- * shown.
+ * Autoplay every 6.5 s; it restarts after every change, also after a click or a tap. It waits while the pointer is on
+ * the controls (the slide control and the slide's buttons, so a slide never changes under a click) and while keyboard
+ * focus is inside the hero, and stops for good with the pause toggle (WCAG 2.2.2) until that is pressed again; never
+ * with reduced motion. Swipe on touch screens; arrow keys inside the hero.
+ * A change the visitor makes is announced: the slides are a polite live region whenever autoplay is not running, and
+ * from the moment a visitor presses a control, touches the hero or uses a key, so before the change happens; autoplay's
+ * own changes are not announced.
+ * The page loads the first slide's picture only; the next one while autoplay runs, and the rest once the browser is
+ * idle (lazy, low priority), so Back, a swipe or a jump never shows an empty slide.
  */
 export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
   const count = slides.length;
   const [index, setIndex] = useState(0);
   const [onControls, setOnControls] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
-  const [announce, setAnnounce] = useState(false); // the last change was the visitor's
+  const [paused, setPaused] = useState(false); // the pause toggle
+  const [announce, setAnnounce] = useState(false); // the visitor is working the hero: their changes are announced
+  const [idle, setIdle] = useState(false); // the page has loaded and the browser is idle: the other pictures may load
+  const hydrated = useSyncExternalStore(noop, () => true, () => false);
   const [shown, setShown] = useState<ReadonlySet<number>>(() => new Set([0]));
   const reduced = useSyncExternalStore(subscribeReducedMotion, reducedMotionNow, () => true);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -89,13 +97,14 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
     (n: number, byVisitor: boolean) => {
       const next = ((n % count) + count) % count;
       setIndex(next);
-      setAnnounce(byVisitor);
+      if (!byVisitor) setAnnounce(false);
       setShown((s) => (s.has(next) ? s : new Set(s).add(next)));
     },
     [count],
   );
   const tone = slides[index]?.tone ?? "light";
   const autoplay = !reduced && count > 1;
+  const running = autoplay && !paused && !onControls && !keyboard;
 
   // Header colour follows the slide (G5); the attribute is removed when the hero leaves the page.
   useEffect(() => {
@@ -108,21 +117,41 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
     [],
   );
 
-  // Autoplay; restarts after every change, waits while the pointer is on a control or keyboard focus is in the hero.
+  // Autoplay; restarts after every change, waits while the pointer is on a control or keyboard focus is in the hero,
+  // stops while paused.
   useEffect(() => {
-    if (!autoplay || onControls || keyboard) return;
+    if (!running) return;
     const timer = window.setTimeout(() => go(index + 1, false), AUTOPLAY_MS);
     return () => window.clearTimeout(timer);
-  }, [index, autoplay, onControls, keyboard, go]);
+  }, [index, running, go]);
+
+  // The other pictures, once the page has loaded and the browser has a moment (not competing with the first one).
+  useEffect(() => {
+    let cancelled = false;
+    let handle: number | undefined;
+    const later = () => {
+      if (cancelled) return;
+      const idleCallback = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+      handle = idleCallback ? idleCallback(() => !cancelled && setIdle(true), { timeout: 3000 }) : window.setTimeout(() => !cancelled && setIdle(true), 1500);
+    };
+    if (document.readyState === "complete") later();
+    else window.addEventListener("load", later, { once: true });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("load", later);
+      if (handle !== undefined) window.clearTimeout(handle);
+    };
+  }, []);
 
   // No active slides: keep the page content clear of the transparent header.
   if (count === 0) return <div className={styles.empty} />;
 
   const next = (index + 1) % count;
-  const withImage = (i: number) => shown.has(i) || (autoplay && i === next);
+  const withImage = (i: number) => i === 0 || shown.has(i) || (hydrated && (idle || (autoplay && i === next)));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     setKeyboard(true); // working in the hero with the keyboard: wait
+    setAnnounce(true);
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     e.preventDefault();
@@ -130,6 +159,7 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
+    setAnnounce(true); // a swipe may follow: announce it
     const p = e.touches[0];
     touchStart.current = p ? { x: p.clientX, y: p.clientY } : null;
   };
@@ -155,11 +185,14 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
       className={styles.hero}
       data-hero=""
       data-tone={tone}
-      data-autoplay={autoplay && !onControls && !keyboard ? "on" : "off"}
+      data-autoplay={running ? "on" : "off"}
       aria-roledescription={t.carousel}
       aria-label={t.carouselLabel}
       onKeyDown={onKeyDown}
       onPointerOver={onPointerOver}
+      onPointerDown={(e) => {
+        if ((e.target as Element).closest("[data-hero-controls]")) setAnnounce(true); // before the click's change
+      }}
       onPointerLeave={() => setOnControls(false)}
       onFocus={() => setKeyboard(keyboardFocusIn(root.current!))}
       onBlur={(e) => {
@@ -168,7 +201,7 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      <div className={styles.slides} aria-live={announce ? "polite" : "off"} data-hero-slides="">
+      <div className={styles.slides} aria-live={announce || !running ? "polite" : "off"} data-hero-slides="">
         {slides.map((s, i) => {
           const active = i === index;
           const Heading = i === 0 ? "h1" : "h2";
@@ -227,10 +260,12 @@ export function Hero({ slides, t }: { slides: HeroSlideView[]; t: HeroTexts }) {
         <SlideControl
           count={count}
           index={index}
+          paused={paused}
           onSelect={(i) => go(i, true)}
           onPrev={() => go(index - 1, true)}
           onNext={() => go(index + 1, true)}
-          labels={{ group: t.carouselLabel, slide: t.slide, prev: t.prevSlide, next: t.nextSlide }}
+          onTogglePause={() => setPaused((p) => !p)}
+          labels={{ group: t.carouselLabel, slide: t.slide, prev: t.prevSlide, next: t.nextSlide, pause: t.pauseSlides }}
         />
       </div>
     </section>

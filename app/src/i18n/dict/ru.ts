@@ -36,6 +36,7 @@ export const ru: Dict = {
     slide: "Слайд",
     prevSlide: "Предыдущий слайд",
     nextSlide: "Следующий слайд",
+    pauseSlides: "Остановить смену слайдов",
   },
 
   home: {

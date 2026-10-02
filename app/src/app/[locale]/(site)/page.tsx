@@ -112,6 +112,7 @@ export default async function Home({ params, searchParams }: Props) {
           slide: d.hero.slide,
           prevSlide: d.hero.prevSlide,
           nextSlide: d.hero.nextSlide,
+          pauseSlides: d.hero.pauseSlides,
           calendarLabel: d.hero.secondaryCta,
           calendarHref: to("/koolituskalender"),
         }}

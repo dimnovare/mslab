@@ -142,34 +142,81 @@ test.describe("hero behaviour", () => {
     await expect(hero).toHaveAttribute("data-autoplay", "on");
   });
 
-  test("a change the visitor makes is announced; autoplay's are not (aria-live)", async ({ page }) => {
+  test("the slides are a polite live region before a change the visitor makes, and not during autoplay (aria-live)", async ({ page, isMobile }) => {
     await page.goto("/");
     const hero = page.locator("[data-hero]");
     const slides = hero.locator("[data-hero-slides]");
-    await expect(slides).toHaveAttribute("aria-live", "off");
-    await hero.getByRole("button", { name: "Järgmine slaid" }).click();
+    await expect(hero).toHaveAttribute("data-autoplay", "on");
+    await expect(slides).toHaveAttribute("aria-live", "off"); // autoplay running: its changes are not announced
+    // record aria-live at the very moment the shown slide changes
+    await page.evaluate(() => {
+      const box = document.querySelector("[data-hero-slides]")!;
+      const seen: string[] = [];
+      (window as unknown as { __liveAtChange: string[] }).__liveAtChange = seen;
+      new MutationObserver((list) => {
+        if (list.some((m) => m.attributeName === "aria-hidden")) seen.push(box.getAttribute("aria-live") ?? "");
+      }).observe(box, { subtree: true, attributes: true, attributeFilter: ["aria-hidden"] });
+    });
+    const next = hero.getByRole("button", { name: "Järgmine slaid" });
+    if (isMobile) await next.tap();
+    else await next.click();
     await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
-    await expect(slides).toHaveAttribute("aria-live", "polite");
-    await page.mouse.move(5, 5); // off the controls (a phone has no hover at all)
-    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 }); // autoplay
+    const seen = await page.evaluate(() => (window as unknown as { __liveAtChange: string[] }).__liveAtChange);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((v) => v === "polite"), JSON.stringify(seen)).toBe(true); // set before the change, so it is announced
+    if (!isMobile) await page.mouse.move(5, 5); // off the controls
+    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 }); // autoplay again
     await expect(slides).toHaveAttribute("aria-live", "off");
   });
 
-  test("only the current slide's picture and the next one load; reduced motion loads one", async ({ page, browser }) => {
+  test("the pause toggle stops autoplay until pressed again; prev / next do not undo it (WCAG 2.2.2, phone)", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "touch: the toggle is the only way to stop it there");
     await page.goto("/");
     const hero = page.locator("[data-hero]");
-    await expect(hero.locator("img")).toHaveCount(2); // slide 1 (eager) and slide 2 (lazy, before autoplay shows it)
-    expect(await hero.locator("[data-hero-slides] > div").first().locator("img").getAttribute("loading")).toBe("eager");
-    expect(await hero.locator("[data-hero-slides] > div").nth(1).locator("img").getAttribute("loading")).toBe("lazy");
-    await hero.getByRole("button", { name: "Slaid 4" }).click();
-    await expect(hero.locator("[data-hero-slides] > div").nth(3).locator("img")).toHaveCount(1);
-    await expect(hero.locator("[data-hero-slides] > div").nth(2).locator("img")).toHaveCount(0); // skipped, never shown
+    const toggle = hero.getByRole("button", { name: "Peata slaidide vahetumine" });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    const box = (await toggle.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(hero).toHaveAttribute("data-autoplay", "off");
+    await page.waitForTimeout(8000); // longer than one interval (6.5 s)
+    await expect(hero.getByText(/^01 \/ 05$/)).toBeVisible();
+    await hero.getByRole("button", { name: "Järgmine slaid" }).tap(); // a manual change keeps it paused
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    await page.waitForTimeout(7500);
+    await expect(hero.getByText(/^02 \/ 05$/)).toBeVisible();
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(hero).toHaveAttribute("data-autoplay", "on");
+    await expect(hero.getByText(/^03 \/ 05$/)).toBeVisible({ timeout: 9000 });
+  });
 
+  test("the pause toggle has its RU label and is hidden with reduced motion (nothing plays)", async ({ page, browser }) => {
+    await page.goto("/ru");
+    await expect(page.locator("[data-hero]").getByRole("button", { name: "Остановить смену слайдов" })).toBeVisible();
     const ctx = await browser.newContext({ reducedMotion: "reduce", viewport: { width: 1440, height: 900 } });
     const still = await ctx.newPage();
     await still.goto("/");
-    await expect(still.locator("[data-hero] img")).toHaveCount(1);
+    await expect(still.locator("[data-slide-pause]")).toBeHidden();
     await ctx.close();
+  });
+
+  test("the page loads the first picture only; the others follow when the browser is idle (lazy, low priority)", async ({ page, request }) => {
+    const html = await (await request.get("/")).text();
+    const heroHtml = html.slice(html.indexOf("data-hero=\"\""), html.indexOf("data-slide-pause"));
+    expect(heroHtml.match(/<img /g) ?? []).toHaveLength(1); // the server sends slide 1's picture only
+    await page.goto("/");
+    const hero = page.locator("[data-hero]");
+    const pictures = hero.locator("[data-hero-slides] > div");
+    await expect(hero.locator("img")).toHaveCount(5, { timeout: 10_000 }); // all, once idle: Back / jumps never empty
+    expect(await pictures.first().locator("img").getAttribute("loading")).toBe("eager");
+    expect(await pictures.first().locator("img").getAttribute("fetchpriority")).toBe("high");
+    for (let i = 1; i < 5; i++) {
+      expect(await pictures.nth(i).locator("img").getAttribute("loading")).toBe("lazy");
+      expect(await pictures.nth(i).locator("img").getAttribute("fetchpriority")).toBe("low");
+    }
   });
 
   test("slide segments are 44 px touch targets at 390 (full-width row under the counter and arrows)", async ({ page, isMobile }) => {
