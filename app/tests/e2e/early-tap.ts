@@ -7,30 +7,32 @@ import type { Page } from "@playwright/test";
  * the old URL (useSearchParams, and the list filtered from it, stayed on the old query), and the history entry lost
  * Next.js's state (Back to it did nothing).
  *
- * The page's own patch is held back until the first replaceState after the first pointer press, and put in place as
- * soon as that call returns: the tap's own replaceState reaches the browser unpatched, exactly as in the race, and the
- * patch is there before anything React does next, as on a real page (React flushes the hydration effects, the patch
- * among them, before its next render). Putting it in place a microtask later was not faithful: React may render and
- * run the tap's effects at the end of the click, before that microtask.
+ * The page's own patch is caught by a setter on History.prototype (so window.history has no replaceState of its own,
+ * as before the real patch) and held back until the first replaceState after the first pointer press. It is put in
+ * place as soon as that call returns: the tap's own replaceState reaches the browser unpatched, exactly as in the race,
+ * and the patch is there before anything React does next, as on a real page (React flushes the hydration effects, the
+ * patch among them, before its next render).
  */
 export async function holdBackRouterHistoryPatch(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const native = History.prototype.replaceState;
+    const proto = History.prototype;
+    const native = proto.replaceState;
     let held: History["replaceState"] | undefined;
     let armed = false;
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
-      delete (window.history as Partial<History>).replaceState; // the accessor below; History.prototype's is native
-      if (held) window.history.replaceState = held;
+      Object.defineProperty(proto, "replaceState", { value: native, writable: true, configurable: true, enumerable: true });
+      if (held) window.history.replaceState = held; // Next.js's patch, an own property of window.history, as it would be
     };
     function beforeRouterPatch(this: History, data: unknown, unused: string, url?: string | URL | null) {
-      native.call(window.history, data, unused, url);
+      native.call(this, data, unused, url);
       if (armed) release();
     }
-    Object.defineProperty(window.history, "replaceState", {
+    Object.defineProperty(proto, "replaceState", {
       configurable: true,
+      enumerable: true,
       get: () => beforeRouterPatch,
       set: (fn: History["replaceState"]) => {
         held = fn; // Next.js's patch (and its Strict Mode re-run in dev): the last one assigned is the one to install

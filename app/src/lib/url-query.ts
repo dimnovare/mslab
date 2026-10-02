@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 
 // Page state kept in the query string (catalogue and calendar filters, the practice package), changed in place with
 // history.replaceState: no server round trip, and the address bar, a reload, Back/Forward and links all agree.
@@ -13,9 +13,12 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "r
 // nothing). The e2e filter tests failed this way under parallel load. So:
 // - the value comes from the address bar itself, re-read after every write, on popstate and after every Next.js
 //   navigation (useSearchParams only says *when* one happened);
-// - a write keeps Next.js's history state on the entry, so Back works whatever the timing;
-// - the router is told about the new URL in an effect after the write's render. By then its patch is in place: React
-//   flushes the effects of the hydration commit (the App Router's patch among them) before it renders again.
+// - when Next.js follows history changes (its patch is in place), a write goes through its replaceState at once: it
+//   copies its state onto the entry and moves its router to the new URL within the click;
+// - before that, a write keeps Next.js's history state on the entry itself, and the router is caught up at the start
+//   of the visitor's next press, key or click (capture phase: before any link handler). Never later than that, and never
+//   from an effect: telling the router while a link's navigation is pending cancels the navigation (Next.js lets the
+//   newer URL win), and an effect can run after the next click.
 
 const CHANGED = "mslab:query";
 
@@ -32,6 +35,26 @@ const notify = (): void => {
   window.dispatchEvent(new Event(CHANGED));
 };
 
+/** Next.js follows history.replaceState: its App Router's patch is an own property of window.history. */
+const routerFollows = (): boolean => Object.prototype.hasOwnProperty.call(window.history, "replaceState");
+
+/** The address bar moved on (an early write) while Next.js's router still has the previous URL. */
+let routerBehind = false;
+
+/**
+ * Catches Next.js's router up with the address bar, once it follows history changes. `null` state: its replaceState
+ * copies its own state over and moves its router to this URL (useSearchParams, the URL it writes back later).
+ */
+function catchUpRouter(): void {
+  if (!routerBehind || !routerFollows()) return;
+  routerBehind = false;
+  window.history.replaceState(null, "", window.location.href);
+}
+
+if (typeof window !== "undefined") {
+  for (const type of ["pointerdown", "keydown", "click"]) window.addEventListener(type, catchUpRouter, true);
+}
+
 /**
  * The page's query string as live state, and a writer for it. The writer replaces the whole query (pass the
  * merged params: other parameters are the caller's to keep) and keeps the path, and the hash unless one is given.
@@ -46,26 +69,22 @@ export function useUrlQuery(): [URLSearchParams, (next: URLSearchParams, hash?: 
     () => (window.location.pathname === pathname ? new URLSearchParams(window.location.search).toString() : routerQuery),
     () => routerQuery,
   );
-  const tellRouter = useRef(false);
 
   // A Next.js navigation (a link to this page with another query, Back/Forward) changes useSearchParams, and the
   // address bar in the same commit: read it again now that it has.
   useEffect(notify, [routerQuery]);
 
-  useEffect(() => {
-    if (!tellRouter.current) return;
-    tellRouter.current = false;
-    // `null` state: Next.js's replaceState copies its own state over and moves its router to this URL (useSearchParams,
-    // the URL it writes back on its next navigation).
-    window.history.replaceState(null, "", window.location.href);
-  }, [query]);
-
   const write = useCallback((next: URLSearchParams, hash: string = window.location.hash) => {
     const qs = next.toString();
     if (qs === new URLSearchParams(window.location.search).toString() && hash === window.location.hash) return; // nothing changes
-    // Next.js's history state stays on the entry (its own replaceState passes it through unchanged).
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${hash}`);
-    tellRouter.current = true;
+    const url = `${window.location.pathname}${qs ? `?${qs}` : ""}${hash}`;
+    if (routerFollows()) {
+      routerBehind = false; // this write brings the router up to date as well
+      window.history.replaceState(null, "", url); // through Next.js: entry state and router follow at once
+    } else {
+      window.history.replaceState(window.history.state, "", url); // Next.js's state stays on the entry
+      routerBehind = true;
+    }
     notify();
   }, []);
 
