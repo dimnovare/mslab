@@ -74,3 +74,12 @@ export async function signInAsAdmin(page: Page, context: BrowserContext, ip: str
   expect(cookie, "session cookie").toBeTruthy();
   created.sessions.add(cookie!.value);
 }
+
+/**
+ * Waits until the admin page has hydrated (<html data-admin-ready>, set by the shell after React's commit). Typing into
+ * a controlled editor field before that can be overwritten by the field's server value (seen once under load: a filled
+ * textarea came back with the stored text spliced into it).
+ */
+export async function adminReady(page: Page): Promise<void> {
+  await expect(page.locator("html[data-admin-ready]")).toBeAttached({ timeout: 15_000 });
+}

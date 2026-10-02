@@ -2,6 +2,7 @@ import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
 import { adminFirstName } from "@/server/auth";
 import { getAdminCounts } from "./data";
+import { ReadyMark } from "./ReadyMark";
 import { SECTIONS, type Section } from "./sections";
 import { Sidebar, type NavItem } from "./Sidebar";
 import styles from "./Shell.module.css";
@@ -24,6 +25,7 @@ export async function Shell({ email, active, children }: { email: string; active
 
   return (
     <div className={styles.layout}>
+      <ReadyMark />
       <a href="#main" className={styles.skip}>
         {t.skip}
       </a>

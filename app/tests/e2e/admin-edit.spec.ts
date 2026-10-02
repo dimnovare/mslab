@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Locator, Page, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
-import { signInAsAdmin } from "./admin-login";
+import { adminReady, signInAsAdmin } from "./admin-login";
 import {
   courseOrder,
   EDIT_CITY_PREFIX,
@@ -77,6 +77,7 @@ test.describe("course editor", () => {
     await signIn(page, context, visitorIp);
 
     await page.goto("/admin/koolitused");
+    await adminReady(page);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Koolitused");
     const row = page.locator(`[data-course-row="${c.slug}"]`);
     await expect(row.locator("[data-course-state]")).toHaveText("Avaldatud");
@@ -113,6 +114,7 @@ test.describe("course editor", () => {
 
     // the Russian title: the RU tab shows the ET text as its placeholder and "tõlge tulekul" until it is written
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
     const langs = page.getByRole("group", { name: "Keel: Koolituse nimi" });
     await expect(langs.getByRole("button", { name: /RU/ })).toContainText("tõlge tulekul");
     await langs.getByRole("button", { name: /RU/ }).click();
@@ -134,6 +136,7 @@ test.describe("course editor", () => {
     const id = await changing(c.slug);
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
 
     const editor = page.locator("[data-badge-editor]");
     await expect(editor.getByRole("heading", { name: "Koolituse märgis" })).toBeVisible();
@@ -163,10 +166,12 @@ test.describe("course editor", () => {
     await page.goto(`/koolitused/${c.slug}`);
     await expect(page.locator("[data-course-tags]").getByText("Uus", { exact: true })).toBeVisible();
     await page.goto("/admin/koolitused");
+    await adminReady(page);
     await expect(page.locator(`[data-course-row="${c.slug}"] [data-badge]`)).toHaveText("Uus");
 
     // an own text in Ploom, then none at all
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
     await own.fill("Sügise hitt");
     await editor.getByRole("button", { name: "Tuhkroos" }).click();
     await expect(preview.getByText("Sügise hitt", { exact: true })).toHaveCSS("color", "rgb(34, 34, 34)"); // ink on rose: AA
@@ -188,6 +193,7 @@ test.describe("course editor", () => {
     const before = await storedCourse(c.slug);
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
 
     // e-learning: price, access, videos, discount, modules — no group / individual price, duration or includes
     const typeSwitch = page.locator("[data-type-switch]");
@@ -224,6 +230,7 @@ test.describe("course editor", () => {
     const booked = await storedCourse("kulmumeistri-baaskoolitus"); // seed sessions point to it
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${booked.id}`);
+    await adminReady(page);
     const typeSwitch = page.locator("[data-type-switch]");
     await expect(typeSwitch.getByRole("radio", { name: "Kontaktõpe", exact: true })).toBeChecked();
     await expect(typeSwitch.getByRole("radio", { name: "E-õpe", exact: true })).toBeDisabled();
@@ -244,6 +251,7 @@ test.describe("course editor", () => {
     const id = await changing(c.slug);
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
     const modules = page.locator('[data-list-editor="modules"]');
     const rows = modules.locator("[data-row]");
     const count = await rows.count();
@@ -281,6 +289,7 @@ test.describe("course editor", () => {
     const id = await changing(c.slug);
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
     const gallery = page.locator("[data-gallery-editor]");
     const items = gallery.locator("[data-gallery-item]");
     const before = await items.count();
@@ -353,6 +362,7 @@ test.describe("course editor", () => {
     const id = await changing(c.slug);
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${id}`);
+    await adminReady(page);
     // every upload answer waits a little, so the second pick surely comes while the first is still running
     await page.route("**/api/admin/upload", async (route) => {
       await new Promise((r) => setTimeout(r, 700));
@@ -404,6 +414,7 @@ test.describe("course editor", () => {
   test("'Lisa koolitus' creates a draft (not on the public site) with a slug made from its name", async ({ page, context, visitorIp }, info) => {
     await signIn(page, context, visitorIp);
     await page.goto("/admin/koolitused");
+    await adminReady(page);
     await page.locator("[data-add-course]").click();
     await expect(page).toHaveURL(/\/admin\/koolitused\/uus$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Uus koolitus");
@@ -423,6 +434,7 @@ test.describe("course editor", () => {
     expect((await courseOrder()).indexOf(slug)).toBeGreaterThanOrEqual(6); // after the six seed courses
     expect((await page.request.get(`/koolitused/${slug}`)).status()).toBe(404); // a draft
     await page.goto("/admin/koolitused");
+    await adminReady(page);
     await expect(page.locator(`[data-course-row="${slug}"] [data-course-state]`)).toHaveText("Mustand");
   });
 
@@ -437,6 +449,7 @@ test.describe("course editor", () => {
     const at = order.indexOf(c.slug);
     expect(at).toBeGreaterThan(0);
     await page.goto("/admin/koolitused");
+    await adminReady(page);
     await page.getByRole("button", { name: `Liiguta üles: ${c.title}` }).click();
     await expect.poll(seedOrder).toEqual([...order.slice(0, at - 1), c.slug, order[at - 1], ...order.slice(at + 1)]);
     await expect(page.getByRole("button", { name: `Liiguta üles: ${c.title}` })).toBeFocused();
@@ -444,6 +457,7 @@ test.describe("course editor", () => {
     await page.goto("/koolitused");
     await expect(page.locator("[data-course-card]").nth(at - 1)).toHaveAttribute("href", `/koolitused/${c.slug}`);
     await page.goto("/admin/koolitused");
+    await adminReady(page);
     await expect(page.locator("[data-course-row]").first().getByRole("button", { name: /Liiguta üles/ })).toHaveAttribute("aria-disabled", "true");
     await page.getByRole("button", { name: `Liiguta alla: ${c.title}` }).click();
     await expect.poll(seedOrder).toEqual(order);
@@ -458,6 +472,7 @@ test.describe("calendar", () => {
     const city = `${EDIT_CITY_PREFIX}${info.project.name} ${unique()}`;
     await signIn(page, context, visitorIp);
     await page.goto("/admin/kalender");
+    await adminReady(page);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kalender");
     expect(await noOverflow(page)).toBe(true);
     await page.locator("[data-add-session]").click();
@@ -504,6 +519,7 @@ test.describe("calendar", () => {
 
     // edit: cancelled, 3 seats
     await page.goto("/admin/kalender");
+    await adminReady(page);
     await page.getByRole("link", { name: `Muuda toimumist: ${COURSE.title}, ${when.shown}, ${city}` }).click();
     const edit = page.getByRole("dialog", { name: `Toimumine: ${COURSE.title}, ${when.shown}` });
     await expect(edit).toBeVisible();
@@ -519,6 +535,7 @@ test.describe("calendar", () => {
 
     // delete, after a confirmation
     await page.goto(`/admin/kalender?id=${stored.id}`);
+    await adminReady(page);
     const del = page.getByRole("dialog");
     await del.getByRole("button", { name: "Kustuta toimumine" }).click();
     await expect(del.getByText("Kas kustutan selle toimumise?")).toBeFocused();
@@ -538,12 +555,14 @@ test.describe("calendar", () => {
     await signIn(page, context, visitorIp);
     // an upcoming session opened from the "Möödunud" list still shows its registrations
     await page.goto(`/admin/kalender?aeg=moodunud&id=${id}`);
+    await adminReady(page);
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(COURSE.title);
     await expect(dialog.locator("[data-session-registrations]")).toHaveText("Registreerimisi: 0 kinnitatud, 1 ootab ettemaksu.");
     await dialog.getByRole("button", { name: "Sulge" }).click();
     await expect(page).toHaveURL(/\/admin\/kalender\?aeg=moodunud$/);
     await page.goto(`/admin/kalender?id=${id}`);
+    await adminReady(page);
     await expect(dialog.locator("[data-session-registrations]")).toHaveText("Registreerimisi: 0 kinnitatud, 1 ootab ettemaksu.");
     await dialog.getByRole("button", { name: "Kustuta toimumine" }).click();
     await dialog.getByRole("button", { name: "Jah, kustuta" }).click();
@@ -564,6 +583,7 @@ test.describe("calendar", () => {
 
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/kalender?id=${id}`);
+    await adminReady(page);
     const dialog = page.getByRole("dialog", { name: new RegExp(`^Toimumine: ${online.title},`) });
     await expect(dialog.getByRole("heading", { level: 2 })).toHaveText(online.title);
     const course = dialog.getByLabel("Koolitus");

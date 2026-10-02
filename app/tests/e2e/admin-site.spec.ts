@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Page, Route, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
-import { signInAsAdmin } from "./admin-login";
+import { adminReady, signInAsAdmin } from "./admin-login";
 import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows } from "./fixtures";
 
 // Task 13B: the site content editors (home page, practice, trainer, news, campaign, settings), each followed through to
@@ -54,6 +54,7 @@ test.describe("practice packages (A8, R3)", () => {
     await changing(["practice_packages", { column: "code", value: pkg.code }]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/praktika");
+    await adminReady(page);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Praktikapaketid");
     const card = page.locator(`[data-practice-editor] [data-package="${pkg.code}"]`);
     const duration = card.getByRole("textbox", { name: "Kestus (eesti keeles)", exact: true });
@@ -88,6 +89,7 @@ test.describe("practice packages (A8, R3)", () => {
     await changing(["practice_packages", { column: "code", value: "MAXI" }]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/praktika");
+    await adminReady(page);
     // another admin saves MAXI in the meantime
     await onLocalDb((sql) => sql`update practice_packages set duration_label = ${sql.json({ et: "7 ak" })} where code = 'MAXI'`);
     await page.locator('[data-package="MAXI"]').getByRole("textbox", { name: "Kestus (eesti keeles)", exact: true }).fill("10 ak");
@@ -111,6 +113,7 @@ test.describe("home page", () => {
 
     await signIn(page, context, visitorIp);
     await page.goto("/admin/avaleht");
+    await adminReady(page);
     const slides = page.locator("[data-slide]");
     await expect(slides).toHaveCount(5);
     // a new slide without a picture: refused, it is marked and gets the focus; nothing is saved
@@ -168,6 +171,7 @@ test.describe("home page", () => {
     await changing(["faq"]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/avaleht");
+    await adminReady(page);
     const faq = page.locator("[data-faq-editor]");
     const rows = faq.locator("[data-faq-row]");
     const count = await rows.count();
@@ -206,6 +210,7 @@ test.describe("trainer page (T1–T4)", () => {
 
     await signIn(page, context, visitorIp);
     await page.goto("/admin/koolitaja");
+    await adminReady(page);
     const portrait = page.locator('[data-single-image="portrait"]');
     await portrait.locator('input[type="file"]').setInputFiles([jpeg("maria-seated.jpg")]);
     await expect(portrait.locator("[data-upload-status]")).toHaveText("Pilt lisatud.");
@@ -238,6 +243,7 @@ test.describe("trainer page (T1–T4)", () => {
     await changing(["pages", { column: "key", value: "center_story" }]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/koolitaja");
+    await adminReady(page);
     const story = page.locator('[data-story-editor="center_story"]');
     await story.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E lugu");
     await story.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true }).fill("Esimene E2E lõik.\n\nTeine E2E lõik.");
@@ -254,6 +260,7 @@ test.describe("news", () => {
   test("a new post: the address from its title, a draft until published, the cover required to publish; delete", async ({ page, context, visitorIp }, info) => {
     await signIn(page, context, visitorIp);
     await page.goto("/admin/uudised");
+    await adminReady(page);
     await expect(page.locator("[data-post-row]")).not.toHaveCount(0);
     await page.locator("[data-add-post]").click();
     await expect(page).toHaveURL(/\/admin\/uudised\/uus$/);
@@ -314,6 +321,7 @@ test.describe("campaign (M2–M5)", () => {
     await changing(["campaign"]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/kampaania");
+    await adminReady(page);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kampaania hüpikaken");
     const preview = page.locator("[data-campaign-preview]");
     await expect(preview.getByRole("heading")).toHaveText("−15% Lash Lift BOTOX koolitusele");
@@ -386,6 +394,7 @@ test.describe("settings", () => {
     await changing(["settings", { column: "key", value: "contact" }], ["settings", { column: "key", value: "newsletter" }]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/seaded");
+    await adminReady(page);
     const instagram = page.getByRole("textbox", { name: "Instagram", exact: true });
     await instagram.fill("javascript:alert(1)");
     await page.getByRole("button", { name: "Salvesta", exact: true }).click();
@@ -411,6 +420,7 @@ test.describe("settings", () => {
     await changing(["pages", { column: "key", value: "privacy" }]);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/seaded");
+    await adminReady(page);
     const admins = page.locator("[data-admin-emails] li");
     await expect(admins).toHaveText(["dim@example.test", "maria@example.test"]);
     await expect(page.locator("[data-admin-emails] input")).toHaveCount(0);
@@ -458,6 +468,7 @@ test.describe("every editor at phone width", () => {
     }
     // the campaign preview: the card, D's wording, no "Mitte praegu"
     await page.goto("/admin/kampaania");
+    await adminReady(page);
     await expect(page.locator("[data-campaign-preview] [data-campaign-card]")).toBeVisible();
     await expect(page.getByText("Mitte praegu")).toHaveCount(0);
   });
