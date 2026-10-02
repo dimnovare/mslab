@@ -18,6 +18,7 @@ import {
   storedSession,
 } from "./fixtures";
 import { laterSaturday } from "./seed-sessions";
+import { PROD_BUILD } from "./target";
 
 // Task 13A: the course editor, the badge editor, the image upload and the admin calendar, each followed through to the
 // public site. These tests change real seed content (a title, a badge, the gallery, the order, sessions of a seed
@@ -333,6 +334,17 @@ test.describe("course editor", () => {
     expect(media.headers()["content-type"]).toBe("image/jpeg");
     expect(media.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
     expect(media.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(media.headers()["x-robots-tag"]).toBe("noindex, nofollow");
+    if (PROD_BUILD) {
+      // the Worker entry answers it before OpenNext (src/worker/media-front.ts, final review I1): from R2, or already
+      // from the edge cache (the browser has shown the image above); from then on from the edge cache
+      expect(["r2", "edge"]).toContain(media.headers()["x-media-cache"]);
+      const again = await page.request.get(`/media/${jpgKey}`);
+      expect(again.headers()["x-media-cache"]).toBe("edge");
+      expect(again.headers()["content-type"]).toBe("image/jpeg");
+      expect(again.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect(Buffer.compare(await again.body(), await media.body())).toBe(0);
+    }
     const body = await media.body();
     expect([...body.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
     expect(body.includes(marker)).toBe(false);

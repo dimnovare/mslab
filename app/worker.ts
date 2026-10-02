@@ -1,9 +1,11 @@
 // Not type-checked with the app (tsconfig.json excludes it): it imports the generated .open-next/worker.js, which exists
 // only after `opennextjs-cloudflare build`. The logic is in src/ (typed and unit-tested); wrangler bundles this file.
-// The Worker's entry (wrangler.jsonc "main"): the cached-page front first, OpenNext for everything else, and the cron.
+// The Worker's entry (wrangler.jsonc "main"): uploaded images and the cached-page front first, OpenNext for everything
+// else, and the cron.
 import process from "node:process";
 import openNext from "./.open-next/worker.js";
 import { runAsRequest } from "./src/worker/request-context";
+import { mediaAnswer } from "./src/worker/media-front";
 import { afterFront, frontAnswer } from "./src/worker/page-front";
 import { onSchedule } from "./src/worker/session-starts";
 
@@ -12,6 +14,9 @@ export { DOQueueHandler, DOShardedTagCache, BucketCachePurge } from "./.open-nex
 
 const worker = {
   async fetch(request: Request, env: CloudflareEnv, ctx: ExecutionContext): Promise<Response> {
+    // An uploaded image: from the edge cache or R2, without OpenNext and Next.js (src/worker/media-front.ts)
+    const media = await mediaAnswer(request, env, { cache: caches.default, waitUntil: (p) => ctx.waitUntil(p) });
+    if (media) return media;
     // Before any I/O: a page rendered by this request is dated by it (src/server/page-store.ts).
     return runAsRequest(Date.now(), async () => {
       // OPEN_NEXT_BUILD_ID is set when OpenNext's bundle loads (imported above)
