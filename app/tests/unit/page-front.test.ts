@@ -145,7 +145,7 @@ describe("servePageFromCache", () => {
     expect(Object.fromEntries(res.headers)).toMatchObject({
       "cache-control": BROWSER_CACHE_CONTROL,
       "content-type": "text/html; charset=utf-8",
-      etag: 'W/"etag-1"', // weak: Cloudflare keeps it on HTML
+      etag: 'W/"etag-1"',
       vary: VARY,
       "x-nextjs-stale-time": "300",
       "x-robots-tag": "noindex, nofollow",

@@ -138,8 +138,8 @@ export async function servePageFromCache(request: Request, env: FrontEnv, buildI
 
     const headers = new Headers({ "cache-control": BROWSER_CACHE_CONTROL, "content-type": want.variant.kind === "html" ? "text/html; charset=utf-8" : "text/x-component" });
     for (const [k, v] of Object.entries(parseHeaders(meta?.h))) headers.set(k, v);
-    // weak: Cloudflare drops a strong ETag from an HTML answer (its HTML features may change the bytes), so the
-    // browser would never have one to send back in If-None-Match
+    // For If-None-Match (a 304 below). Cloudflare drops every ETag from an HTML answer, weak or strong, so in practice
+    // this serves the RSC payloads and prefetch segments; a document is always sent in full. Weak: it validates only.
     const etag = `W/${object.httpEtag}`;
     headers.set("etag", etag);
     headers.set("vary", VARY);

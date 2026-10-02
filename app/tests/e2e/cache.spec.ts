@@ -41,31 +41,34 @@ test("a page, its navigation payload and its prefetch tree come from the cache f
     expect(tree.headers()["x-page-cache"], `${path} tree`).toBe("front");
     expect(tree.headers()["x-nextjs-prerender"]).toBe("1");
 
-    // the browser's copy is confirmed with a 304
-    const again = await request.get(path, { headers: { "If-None-Match": html.headers()["etag"] } });
+    // the browser's copy of a payload is confirmed with a 304 (Cloudflare drops any ETag from HTML answers, so
+    // documents are sent in full; RSC payloads and prefetches keep theirs)
+    const etag = rsc.headers()["etag"];
+    expect(etag, `${path} RSC ETag`).toBeTruthy();
+    const again = await request.get(`${path}?_rsc=x`, { headers: { RSC: "1", "If-None-Match": etag } });
     expect(again.status(), `${path} If-None-Match`).toBe(304);
   }
 });
 
 test("per-visitor addresses share the one cached page, and nothing of the query is in it", async ({ request }) => {
-  const plain = await frontHit(request, "/");
+  const plain = await (await frontHit(request, "/")).text();
   const notice = await request.get("/?uudiskiri=kinnitatud");
   expect(notice.headers()["x-page-cache"]).toBe("front");
-  expect(notice.headers()["etag"]).toBe(plain.headers()["etag"]);
-  // the newsletter notice is put in by the browser (FlashNotice), never by the server: its region is empty in the HTML
   const html = await notice.text();
+  expect(html, "the same cached page").toBe(plain);
+  // the newsletter notice is put in by the browser (FlashNotice), never by the server: its region is empty in the HTML
   expect(html).toContain('data-flash-notice=""');
   expect(html).not.toMatch(/data-flash-notice="(ok|warn)"/);
 
-  const page = await frontHit(request, COURSE);
-  const linked = await request.get(`${COURSE}?sessioon=1`);
-  expect(linked.headers()["etag"]).toBe(page.headers()["etag"]);
-  expect(await linked.text(), "no date is picked in the server's HTML").not.toMatch(/data-session="\d+"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-session="\d+"/);
+  const page = await (await frontHit(request, COURSE)).text();
+  const linked = await (await request.get(`${COURSE}?sessioon=1`)).text();
+  expect(linked, "the same cached page").toBe(page);
+  expect(linked, "no date is picked in the server's HTML").not.toMatch(/data-session="\d+"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-session="\d+"/);
 
   // the cart of one course is a page of its own (the middleware maps ?kursus to it)
-  const cart = await frontHit(request, "/ostukorv?kursus=kulmumeistri-e-koolitus");
-  expect(await cart.text()).toContain("Kulmumeistri e-koolitus");
-  expect((await frontHit(request, "/ostukorv")).headers()["etag"]).not.toBe(cart.headers()["etag"]);
+  const cart = await (await frontHit(request, "/ostukorv?kursus=kulmumeistri-e-koolitus")).text();
+  expect(cart).toContain("Kulmumeistri e-koolitus");
+  expect(await (await frontHit(request, "/ostukorv")).text()).not.toBe(cart);
 });
 
 test("admin pages, the API and unknown addresses never come from the page cache", async ({ request }) => {
