@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
 import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
+import { sampleDayMonth, sampleWeekday } from "./seed-sessions";
 
 // Task 9: calendar (L1–L5), practice (R1–R5), trainer (T1–T4), blog (B1), contact and legal pages.
 // The first three tests are the brief's tests, verbatim except one locator: `getByText(/ak/)` first matched the header's
@@ -49,8 +50,8 @@ test.describe("calendar", () => {
     await expect(first.locator("[data-course-name]")).toHaveText("Kulmumeistri baaskoolitus");
     await expect(first.locator("[data-city]")).toHaveText("Pärnu");
     await expect(first).toContainText("MS LAB stuudio, Rüütli 12");
-    await expect(first).toContainText("14.11");
-    await expect(first).toContainText("laupäev");
+    await expect(first).toContainText(sampleDayMonth("kulmumeistri-baaskoolitus", "Pärnu"));
+    await expect(first).toContainText(sampleWeekday("kulmumeistri-baaskoolitus", "Pärnu"));
     await expect(first).toContainText("Kontaktõpe");
     await expect(first).toContainText("Vabu kohti · 4");
     // Course name at A's city size (Jost 26px), before the city in reading order (L2, L3).
@@ -146,7 +147,8 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(full).toHaveCount(1);
     await expect(full.locator("[data-course-name]")).toHaveText("Kulmude LAMI");
     await expect(full.locator("[data-city]")).toHaveText("Pärnu");
-    await expect(full).toContainText("23.01");
+    const lamiParnu = sampleDayMonth("kulmude-lami", "Pärnu") as string; // local only: these are the local seat fixtures
+    await expect(full).toContainText(lamiParnu);
     await expect(full).toContainText("Täis");
     expect(await full.locator("[data-seat-state]").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(94, 85, 89)");
     await expect(full.getByRole("link", { name: /Registreeru/ })).toHaveCount(0);
@@ -160,7 +162,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator(`[id="${await toggle.getAttribute("aria-controls")}"]`)).toBeVisible();
     await expect(form.getByLabel("Nimi")).toBeFocused();
-    await expect(form).toContainText("Kulmude LAMI · 23.01 · Pärnu");
+    await expect(form).toContainText(`Kulmude LAMI · ${lamiParnu} · Pärnu`);
     await expect(form).toHaveAttribute("method", "post");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");

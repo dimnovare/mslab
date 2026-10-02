@@ -6,6 +6,9 @@ import type { Db } from "@/db/client";
 import { courseSessions, courses, registrations } from "@/db/schema";
 import { applySeed } from "@/db/seed-apply";
 import * as seedData from "@/db/seed-data";
+import { SEEDED_AT } from "@/db/seed-data";
+import { seedSessionStart } from "@/db/seed-dates";
+import { formatWeekday } from "@/i18n/format";
 import { getCourseBySlug, getGallery, getHomeData, getPage, getPracticePackages, getSettings, listPosts, listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
 import { upsertCourse } from "@/db/queries/admin";
 import { fromPrice, priceOptions } from "@/domain/course";
@@ -99,15 +102,17 @@ describe("prototype seed", () => {
     ]);
   });
 
-  test("sessions: eight rows on the contact courses, Nov 2026 to Jan 2027, one cancelled, capacity 4-6", async () => {
-    const sessions = await listUpcomingSessions(db, new Date("2026-10-01T00:00:00Z"));
+  test("sessions: eight upcoming rows on the contact courses, ten weeks from a Saturday about six weeks ahead, one cancelled, capacity 4-6", async () => {
+    const sessions = await listUpcomingSessions(db, new Date());
     expect(sessions).toHaveLength(8);
     expect(sessions.every((s) => s.course.type === "contact")).toBe(true);
     expect(sessions.filter((s) => s.status === "cancelled")).toHaveLength(1);
     expect(new Set(sessions.map((s) => s.city))).toEqual(new Set(["Pärnu", "Tallinn", "Tartu", "Viljandi"]));
     expect(sessions.every((s) => s.capacity >= 4 && s.capacity <= 6)).toBe(true);
-    expect(sessions[0].startsAt.toISOString()).toBe("2026-11-14T08:00:00.000Z");
-    expect(sessions[sessions.length - 1].startsAt.toISOString()).toBe("2027-01-23T08:00:00.000Z");
+    // relative to the seed day (seed-dates.ts): made on 1.10.2026 these were prototype D's 14.11.2026 and 23.01.2027
+    expect(sessions[0].startsAt.toISOString()).toBe(seedSessionStart(SEEDED_AT, 0).toISOString());
+    expect(sessions[sessions.length - 1].startsAt.toISOString()).toBe(seedSessionStart(SEEDED_AT, 70).toISOString());
+    expect(sessions.map((s) => formatWeekday(s.startsAt, "et"))).toEqual(["laupäev", "laupäev", "laupäev", "laupäev", "kolmapäev", "laupäev", "laupäev", "laupäev"]);
     expect(sessions.every((s) => s.confirmed === 0)).toBe(true);
   });
 

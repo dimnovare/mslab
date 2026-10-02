@@ -1,3 +1,4 @@
+import { sampleDayMonth } from "./seed-sessions";
 import { test, expect } from "./test";
 
 // Catalogue (Task 8): Maria's K1–K13. The first test is the brief's test verbatim; the rest cover the
@@ -116,7 +117,8 @@ test.describe("catalogue", () => {
     await page.goto("/koolitused");
     const brow = page.locator("[data-course-card]", { hasText: "Kulmumeistri baaskoolitus" });
     await expect(brow.getByText("Populaarne")).toBeVisible();
-    await expect(brow).toContainText("14.11 · Pärnu");
+    const next = sampleDayMonth("kulmumeistri-baaskoolitus", "Pärnu");
+    await expect(brow).toContainText(typeof next === "string" ? `${next} · Pärnu` : /\d{2}\.\d{2} · Pärnu/);
     await expect(brow).toHaveAttribute("href", "/koolitused/kulmumeistri-baaskoolitus");
     await expect(page.locator("[data-course-card]", { hasText: "Kulmumeistri e-koolitus" })).toContainText("Veebis · alusta kohe");
     // Catalogue cards are square (1:1).

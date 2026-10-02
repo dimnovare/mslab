@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { applySeatFixtures, LOCAL_FIXTURES, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { applySeatFixtures, LOCAL_FIXTURES, scheduleSampleSessions, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { assertLocalDatabases } from "./local-db";
 import { removeLeftoverComments } from "./local-kv";
 
 // Runs once per `playwright test` run (whatever the file or --grep filter): seat fixtures for the calendar tests, and
@@ -13,6 +14,7 @@ export default async function globalSetup(): Promise<void> {
     return;
   }
   refuseMailSecrets();
+  assertLocalDatabases(); // before any write: the fixtures' database and the dev server's are both on this machine
   await removeFormRows();
   await removeAdminRows(); // e2e-auth-… leftovers of an interrupted run
   await removeAdminFixtures(); // e2e-admin-… inbox fixtures of an interrupted run
@@ -21,6 +23,7 @@ export default async function globalSetup(): Promise<void> {
   await removePostRows(); // and the posts the site editor tests made
   await removeEditRows(); // its "E2E …" sessions and "e2e-uus-…" course
   await removeLeftoverComments(); // review comments (dev server's local KV) of an interrupted feedback test
+  await scheduleSampleSessions(); // the sample sessions on today's schedule: the calendar never runs out of dates
   await applySeatFixtures();
 }
 

@@ -1,4 +1,5 @@
 import { LOCAL_FIXTURES, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, removeSeatFixtures, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { assertLocalDatabases } from "./local-db";
 import { removeLeftoverComments } from "./local-kv";
 
 // Removes the seat fixtures, the rows the form and admin sign-in tests stored, the admin inbox fixtures and the content
@@ -6,6 +7,7 @@ import { removeLeftoverComments } from "./local-kv";
 // (The sign-in tests delete the token and session rows of the real admin addresses themselves, by hash.)
 export default async function globalTeardown(): Promise<void> {
   if (!LOCAL_FIXTURES) return;
+  assertLocalDatabases();
   // a course still snapshotted means a content test did not restore it (restored now, but the run fails)
   const left = (await removeFormRows()) + (await removeAdminRows()) + (await removeAdminFixtures()) + (await removeEditRows()) + (await restoreLeftoverCourses()) + (await restoreLeftoverRows()) + (await removePostRows());
   await removeSeatFixtures();

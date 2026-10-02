@@ -2,6 +2,7 @@ import type { I18n } from "@/i18n/field";
 import { slugify } from "@/lib/slug";
 import type { Badge } from "./schema";
 import type { CampaignInput, CourseInput, HeroSlideInput, PostInput, PracticePackageInput, SessionInput } from "./queries/admin";
+import { seedSessionStart } from "./seed-dates";
 
 /**
  * Prototype content that fills the site on day one (spec section 7). Texts come from prototype B (ET + RU)
@@ -59,8 +60,11 @@ export type SeedImage = { key: string; alt: I18n };
 export type SeedSession = Omit<SessionInput, "id" | "courseId">;
 export type SeedCourse = Omit<CourseInput, "id" | "published" | "isSample" | "sort"> & { images: SeedImage[]; sessions?: SeedSession[] };
 
-// Prototype D SESS (8 rows), mapped onto the three contact courses.
-const day = (iso: string): Date => new Date(`${iso}T10:00:00+02:00`); // Estonia is UTC+2 from November to March
+// Prototype D SESS (8 rows), mapped onto the three contact courses. D's dates were 14.11.2026 … 23.01.2027; they are
+// kept as days after the first one (a Saturday about six weeks ahead, seed-dates.ts), so a seed made on any day gets an
+// upcoming calendar with the same weekdays and spacing. Made on 1.10.2026 the dates are exactly D's.
+export const SEEDED_AT = new Date();
+const day = (offset: number): Date => seedSessionStart(SEEDED_AT, offset);
 const studio = "MS LAB stuudio, Rüütli 12";
 
 const manualImage: SeedImage = { key: img("course-manual.jpg"), alt: t("MS LAB õppematerjal") };
@@ -90,9 +94,9 @@ export const courseSeeds: SeedCourse[] = [
     badge: badgePopular,
     images: [{ key: img("brow-editorial.jpg"), alt: t("Kulmumeistri baaskoolitus", "Базовый курс бровиста") }, manualImage, certWhite, giftImage],
     sessions: [
-      { startsAt: day("2026-11-14"), city: "Pärnu", venue: studio, language: "ET", capacity: 4 },
-      { startsAt: day("2026-12-05"), city: "Pärnu", venue: studio, language: "ET", capacity: 4 },
-      { startsAt: day("2026-12-12"), city: "Tallinn", venue: "Stuudio Kalamaja", language: "RU", capacity: 6 },
+      { startsAt: day(0), city: "Pärnu", venue: studio, language: "ET", capacity: 4 },
+      { startsAt: day(21), city: "Pärnu", venue: studio, language: "ET", capacity: 4 },
+      { startsAt: day(28), city: "Tallinn", venue: "Stuudio Kalamaja", language: "RU", capacity: 6 },
     ],
   },
   {
@@ -112,9 +116,9 @@ export const courseSeeds: SeedCourse[] = [
     badge: badgeNew,
     images: [{ key: img("lash-editorial.jpg"), alt: t("Lash Lift BOTOX baaskoolitus", "Базовый курс Lash Lift BOTOX") }, manualImage, certWhite, giftImage],
     sessions: [
-      { startsAt: day("2026-11-21"), city: "Tallinn", venue: "Stuudio Kalamaja", language: "ET", capacity: 4 },
-      { startsAt: day("2026-12-09"), city: "Viljandi", venue: "Salong Lossi", language: "ET", capacity: 4 },
-      { startsAt: day("2027-01-16"), city: "Tartu", venue: "Ilusalong Emajõe", language: "ET", capacity: 4, status: "cancelled" },
+      { startsAt: day(7), city: "Tallinn", venue: "Stuudio Kalamaja", language: "ET", capacity: 4 },
+      { startsAt: day(25), city: "Viljandi", venue: "Salong Lossi", language: "ET", capacity: 4 },
+      { startsAt: day(63), city: "Tartu", venue: "Ilusalong Emajõe", language: "ET", capacity: 4, status: "cancelled" },
     ],
   },
   {
@@ -134,8 +138,8 @@ export const courseSeeds: SeedCourse[] = [
     badge: null,
     images: [{ key: img("brow-closeup.jpg"), alt: t("Kulmude LAMI", "Ламинирование бровей") }, manualImage, certWhite, giftImage],
     sessions: [
-      { startsAt: day("2026-11-28"), city: "Tartu", venue: "Ilusalong Emajõe", language: "ET / RU", capacity: 6 },
-      { startsAt: day("2027-01-23"), city: "Pärnu", venue: studio, language: "ET / RU", capacity: 6 },
+      { startsAt: day(14), city: "Tartu", venue: "Ilusalong Emajõe", language: "ET / RU", capacity: 6 },
+      { startsAt: day(70), city: "Pärnu", venue: studio, language: "ET / RU", capacity: 6 },
     ],
   },
   {

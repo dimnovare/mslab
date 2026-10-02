@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
+import { courseSeeds } from "../../src/db/seed-data";
+import { assertLocalDatabases, isLocalDbUrl } from "./local-db";
+import { TARGET } from "./target";
 
 // Test-owned seat fixtures for the calendar e2e tests. The seed never contains registrations (the real database will
 // hold real ones), so the "full" and "few" seat states are produced here: global-setup inserts confirmed registrations
@@ -12,7 +15,7 @@ import postgres from "postgres";
 // - full: Kulmude LAMI, Pärnu (the course's later date; the Tartu one stays open);
 // - few:  Lash Lift BOTOX, Viljandi (2 seats left — still bookable, so the course page's radio tests are unaffected).
 
-const baseURL = process.env.E2E_BASE_URL ?? "";
+const baseURL = TARGET;
 
 /** Fixtures are applied only when the tests run against a local server (the default `npm run dev`). */
 export const LOCAL_FIXTURES = !baseURL || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(baseURL);
@@ -20,19 +23,14 @@ export const LOCAL_FIXTURES = !baseURL || /^https?:\/\/(localhost|127\.0\.0\.1|\
 export const FIXTURE_NOTE = "e2e-fixture:seats";
 const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/mslab";
 
-/** Fixtures and test rows are written to and deleted from a local database only, never a shared one. */
-function assertLocalDb(url: string): void {
-  const host = new URL(url).hostname;
-  if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) throw new Error(`e2e: refusing to use a non-local database (${host})`);
-}
-
 export const FIXTURES = {
   full: { slug: "kulmude-lami", city: "Pärnu", leave: 0 },
   few: { slug: "lash-lift-botox", city: "Viljandi", leave: 2 },
 } as const;
 
+/** Fixtures and test rows are written to and deleted from a local database only, never a shared one (local-db.ts). */
 const connect = () => {
-  assertLocalDb(DB_URL);
+  if (!isLocalDbUrl(DB_URL)) assertLocalDatabases([{ source: "E2E_DATABASE_URL", url: DB_URL }]);
   return postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
 };
 
@@ -71,6 +69,43 @@ export async function removeSeatFixtures(): Promise<void> {
   try {
     const left = await clear(sql);
     if (left !== 0) throw new Error(`e2e fixtures: ${left} fixture registrations are still in the database`);
+  } finally {
+    await sql.end();
+  }
+}
+
+// ---------- sample session dates ----------
+// The seed dates the sample sessions relative to the day it runs (src/db/seed-dates.ts). A local database seeded weeks
+// ago would by now have sessions in the past (the calendar hides them), so every run first moves the LOCAL database's
+// sample sessions onto today's schedule; the tests' expected dates come from the same schedule (seed-sessions.ts).
+// A sample session is found by its course, city and venue (the seed's), in date order within each such group.
+
+/** Puts the local database's sample sessions on today's schedule; returns how many rows were moved. */
+export async function scheduleSampleSessions(): Promise<number> {
+  const sql = connect();
+  try {
+    let moved = 0;
+    for (const course of courseSeeds) {
+      const groups = new Map<string, { city: string; venue: string; starts: Date[] }>();
+      for (const s of course.sessions ?? []) {
+        const key = JSON.stringify([s.city, s.venue ?? ""]);
+        const group = groups.get(key) ?? { city: s.city, venue: s.venue ?? "", starts: [] };
+        group.starts.push(s.startsAt);
+        groups.set(key, group);
+      }
+      for (const { city, venue, starts } of groups.values()) {
+        const rows = await sql<{ id: number; startsAt: Date }[]>`
+          select s.id, s.starts_at as "startsAt" from course_sessions s join courses c on c.id = s.course_id
+          where c.slug = ${course.slug} and s.city = ${city} and s.venue = ${venue} order by s.starts_at, s.id`;
+        const wanted = [...starts].sort((a, b) => a.getTime() - b.getTime());
+        for (const [i, row] of rows.slice(0, wanted.length).entries()) {
+          if (row.startsAt.getTime() === wanted[i].getTime()) continue;
+          await sql`update course_sessions set starts_at = ${wanted[i]} where id = ${row.id}`;
+          moved++;
+        }
+      }
+    }
+    return moved;
   } finally {
     await sql.end();
   }

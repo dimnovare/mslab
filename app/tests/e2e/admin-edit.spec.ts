@@ -16,6 +16,7 @@ import {
   storedCourse,
   storedSession,
 } from "./fixtures";
+import { laterSaturday } from "./seed-sessions";
 
 // Task 13A: the course editor, the badge editor, the image upload and the admin calendar, each followed through to the
 // public site. These tests change real seed content (a title, a badge, the gallery, the order, sessions of a seed
@@ -471,7 +472,8 @@ test.describe("calendar", () => {
     for (const text of ["Vali koolitus.", "Sisesta kuupäev.", "Sisesta kellaaeg, näiteks 10:00.", "Sisesta linn."]) await expect(dialog.getByText(text)).toBeVisible();
 
     await dialog.getByLabel("Koolitus").selectOption({ label: COURSE.title });
-    await dialog.getByLabel("Kuupäev").fill("2027-03-13");
+    const when = laterSaturday("11:30"); // after every sample session, whatever the day of the run (was 13.03.2027)
+    await dialog.getByLabel("Kuupäev").fill(when.input);
     await dialog.getByLabel("Algus").fill("11:30");
     await dialog.getByLabel("Linn").fill(city);
     await dialog.getByLabel("Toimumiskoht").fill("E2E saal");
@@ -483,29 +485,29 @@ test.describe("calendar", () => {
     await expect(dialog).toBeHidden();
     const row = page.locator("[data-session-row][data-highlight]");
     await expect(row).toContainText(city);
-    await expect(row).toContainText("13.03.2027");
+    await expect(row).toContainText(when.shown);
     await expect(row).toContainText("0 / 5 kinnitatud");
     const stored = (await storedSession(city))!;
-    expect(stored.startsAt.toISOString()).toBe("2027-03-13T09:30:00.000Z"); // 11:30 in Estonian winter time
+    expect(stored.startsAt.toISOString()).toBe(when.at.toISOString()); // 11:30 Estonian time
     expect(stored).toMatchObject({ capacity: 5, status: "scheduled", venue: "E2E saal" });
 
     // public: the course page offers it, the calendar lists it
     await page.goto(`/koolitused/${COURSE.slug}`);
     const option = page.locator(`[data-session="${stored.id}"]`);
     await expect(option).toContainText(city);
-    await expect(option).toContainText("13.03.2027");
+    await expect(option).toContainText(when.shown);
     await page.goto("/koolituskalender");
     const calRow = page.locator("[data-calendar-row]", { hasText: city });
-    await expect(calRow).toContainText("13.03");
+    await expect(calRow).toContainText(when.dayMonth);
     await expect(calRow).toContainText("Vabu kohti · 5");
     await expect(calRow).toContainText(COURSE.title);
 
     // edit: cancelled, 3 seats
     await page.goto("/admin/kalender");
-    await page.getByRole("link", { name: `Muuda toimumist: ${COURSE.title}, 13.03.2027, ${city}` }).click();
-    const edit = page.getByRole("dialog", { name: `Toimumine: ${COURSE.title}, 13.03.2027` });
+    await page.getByRole("link", { name: `Muuda toimumist: ${COURSE.title}, ${when.shown}, ${city}` }).click();
+    const edit = page.getByRole("dialog", { name: `Toimumine: ${COURSE.title}, ${when.shown}` });
     await expect(edit).toBeVisible();
-    await expect(edit.getByLabel("Kuupäev")).toHaveValue("2027-03-13");
+    await expect(edit.getByLabel("Kuupäev")).toHaveValue(when.input);
     await expect(edit.getByLabel("Algus")).toHaveValue("11:30");
     await edit.getByLabel("Kohti").fill("3");
     await edit.getByRole("radio", { name: "Tühistatud" }).check();
