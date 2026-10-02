@@ -33,7 +33,11 @@ test.describe("desktop", () => {
   });
 
   test("home header is transparent over the hero and follows the hero tone (G3, G5)", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" }); // no autoplay changing the tone while the test sets it
     await page.goto("/");
+    // The hero writes its slide's tone to <html> when it mounts: wait for that, or it can overwrite the test's value
+    // (seen once under parallel load: "load" fired before the hero's effect ran).
+    await expect(page.locator("html")).toHaveAttribute("data-hero-tone", "light");
     const header = page.locator("header");
     expect(await header.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
     const ink = await header.evaluate((el) => getComputedStyle(el).color);
