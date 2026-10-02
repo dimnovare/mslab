@@ -38,9 +38,10 @@ The users are brow and lash students, many not confident with computers, mostly 
 3. **Signed out elsewhere = one tap back.** The message "Sinu konto avati teises seadmes" has one button "Saada uus kood" that sends a code to the same e-mail and opens the code field.
 4. **No account set-up.** No password, no profile form, no confirmation step. The first login lands straight on "Minu koolitused" with everything already linked by e-mail. Name and phone come from the registration if present.
 5. **Every course card says what to do next**, in one plain sentence plus at most one button: e.g. "Tasu ettemaks 175 € — vaata juhiseid", "Koolitus on kinnitatud. Kohtume 14.11 kell 10:00, Pärnu", "Ava koolitus". Prepayment instructions come from a new admin setting (receiver, IBAN, payment reference = registration number); if it is empty the card says "Maria saadab sulle arve".
-6. **Few words, big targets.** Plain ET/RU, no jargon ("sessioon", "staatus", "ligipääs" only where unavoidable). Buttons ≥ 48 px high on phones, one primary button per card. Empty states explain the one thing to do ("Lisa koolitus lemmikuks ♡ koolituse lehel").
+6. **Few words, clear targets.** Plain ET/RU, no jargon ("sessioon", "staatus", "ligipääs" only where unavoidable). One primary button per card, using the site's existing button styles (touch targets ≥ 44 px, the current rule). Empty states explain the one thing to do ("Lisa koolitus lemmikuks ♡ koolituse lehel").
 7. **Mobile first.** Designed at 390 px first; bottom tab bar with icons + labels; nothing needs horizontal scrolling except the swipeable course list.
 8. **Forgiving forms.** E-mail is trimmed and lower-cased; obvious typos in common domains (gmial.com, gmail.ee …) get a "Kas mõtlesid …?" suggestion before sending. Errors say what to do, never only what went wrong.
+10. **Same design as the site (Dim).** Simplicity means fewer steps and words, not a new look: the client area follows the current design rules — prototype B's dashboard (`site/p/b`), the public site's components, fonts (Jost/Manrope), colour tokens and button styles. No new visual language.
 9. **Dangerous actions are rare and clear.** Only "Kustuta konto" needs a confirmation; it sits at the very bottom of "Minu andmed".
 
 ## 3. Architecture — fit the Free plan
@@ -48,13 +49,13 @@ The users are brow and lash students, many not confident with computers, mostly 
 Personal pages cannot come from the shared page cache, and a server render costs 40–60 ms CPU. So the client area is split:
 
 - **Shell pages** `/konto`, `/konto/lemmikud`, `/konto/andmed`, `/konto/kursus/[slug]`, `/konto/sisene` (and `/ru/…`) are ordinary cached pages: identical for every visitor, no personal data, served by the existing cache front.
-- **Personal data** comes from small JSON endpoints under `/api/konto/*`, answered **in the Worker entry before OpenNext** (like `/media`), because OpenNext's own path alone costs 4–9 ms. Each call opens its own request-scoped Postgres client (closed with `ctx.waitUntil`), does at most two indexed queries and no React rendering. The same handler is also mounted as a Next route for `next dev`. Budget: **≤ 8 ms CPU per call**, measured on the deployed Worker.
+- **Personal data** comes from small JSON endpoints under `/api/konto/*`, answered **in the Worker entry before OpenNext** (like `/media`), because OpenNext's own path alone costs 4–9 ms. Each call opens its own request-scoped Postgres client (closed with `ctx.waitUntil`), does a few small indexed queries (run in parallel) and no React rendering. The same handler is also mounted as a Next route for `next dev`. Budget: **≤ 8 ms CPU per call**, measured on the deployed Worker.
 - Client components fetch the JSON after load and show skeleton placeholders meanwhile. Unauthenticated → the shell redirects to `/konto/sisene` (client-side). "Replaced by another device" → a 401 with `reason: "replaced"` → the message, then the login page.
 - Mutations are POSTs to `/api/konto/*` with the same Origin check the admin uses. No server actions here, because they render a page in the response.
 
 ## 4. Data model (new tables; Drizzle migration)
 
-- `clients` — id, email (unique, lowercased), name, phone, locale (`et`/`ru`), created_at, deleted_at.
+- `clients` — id, email (unique, lowercased), name, phone, locale (`et`/`ru`), created_at. Deleting an account deletes the row (section 6).
 - `client_login_tokens` — hash (SHA-256 of a 256-bit token), code_hash (SHA-256 of the 6-digit code + per-token salt), email, expires_at (30 min), attempts, used_at. Single use (link or code, whichever comes first), consumed atomically; a code allows 5 wrong attempts, then the token is dead.
 - `client_sessions` — id_hash, client_id, created_at, expires_at (180 days, sliding), ended_at, end_reason (`logout` / `replaced` / `deleted`). A login inserts a session and sets `ended_at = now, end_reason = 'replaced'` on every other open session of that client, in one transaction.
 - `course_access` — client_id, course_id, granted_by (admin e-mail or `payment`), granted_at, expires_at, revoked_at.
