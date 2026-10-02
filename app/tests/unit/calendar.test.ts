@@ -47,16 +47,15 @@ describe("startOfDayTallinn", () => {
   });
 });
 
-describe("upcomingFrom: one 'today' for the calendar, the course page, the cards and booking (item 10)", () => {
-  test("is the start of the Estonian day", () => {
-    expect(upcomingFrom(new Date("2026-11-14T15:30:00Z")).toISOString()).toBe("2026-11-13T22:00:00.000Z");
-    expect(upcomingFrom(new Date("2026-11-14T22:30:00Z")).toISOString()).toBe("2026-11-14T22:00:00.000Z"); // 00:30 on 15.11
-  });
-  test("a session that began this morning is still upcoming today, and not tomorrow", () => {
-    const session = new Date("2026-11-14T08:00:00Z"); // 10:00 in Tallinn
-    expect(session >= upcomingFrom(new Date("2026-11-14T13:00:00Z"))).toBe(true); // 15:00 the same day
-    expect(session >= upcomingFrom(new Date("2026-11-14T21:59:00Z"))).toBe(true); // 23:59 the same day
-    expect(session >= upcomingFrom(new Date("2026-11-14T22:00:00Z"))).toBe(false); // 00:00 the next day
+describe("upcomingFrom: one 'upcoming' for the calendar, the course page, the cards and booking (item 10, ruling)", () => {
+  test("a session counts until it begins (startsAt > now)", () => {
+    const now = new Date("2026-11-14T08:00:00Z");
+    expect(upcomingFrom(now).toISOString()).toBe("2026-11-14T08:00:00.001Z");
+    const at10 = new Date("2026-11-14T08:00:00Z"); // 10:00 in Tallinn
+    const isUpcoming = (startsAt: Date, at: Date) => startsAt >= upcomingFrom(at);
+    expect(isUpcoming(at10, new Date("2026-11-14T07:59:59Z"))).toBe(true); // 09:59:59
+    expect(isUpcoming(at10, at10)).toBe(false); // it begins
+    expect(isUpcoming(at10, new Date("2026-11-14T18:00:00Z"))).toBe(false); // 20:00 the same day
   });
   test("every public page and the registration check use it (no other definition of 'today')", () => {
     const files = [

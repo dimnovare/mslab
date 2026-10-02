@@ -199,8 +199,8 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
     const course = await contactCourse(deps.db, slug);
     if (!course || course.priceGroup == null) return { result: fail({ form: "invalid" }) };
     const session = await sessionWithSeats(deps.db, courseSessionId);
-    // Another course's session, a cancelled one or one of an earlier day cannot be booked (upcomingFrom: the same
-    // "upcoming" as the calendar and the course page, so every date they offer can be booked).
+    // Another course's session, a cancelled one or one that has begun cannot be booked (upcomingFrom: the same
+    // "upcoming" as the calendar and the course page, so they offer exactly the dates that can be booked).
     if (!session || session.courseId !== course.id || session.status !== "scheduled" || session.startsAt < upcomingFrom(deps.now))
       return { result: fail({ session: "unavailable" }) };
     if (seatState(session, session.confirmed) === "full") return { result: fail({ session: "full" }) };

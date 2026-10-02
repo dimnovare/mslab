@@ -63,12 +63,13 @@ export function startOfDayTallinn(now: Date): Date {
 }
 
 /**
- * Where "upcoming" starts, for every public view of the dates and for booking: the beginning of today in Estonian time.
- * One definition for the calendar, the course page, the catalogue and home cards and the registration check, so a
- * session that began earlier today is listed (and can be booked) everywhere until the day ends, never in one place only.
+ * Where "upcoming" starts, for every public view of the dates and for booking: the earliest start that still counts,
+ * one millisecond after `now` (a session counts while startsAt > now). One definition for the calendar, the course page,
+ * the catalogue and home cards and the registration check: a session is listed and can be booked until it begins, and
+ * nowhere after that (a 10:00 session is not bookable at 20:00 the same day). Queries use startsAt >= upcomingFrom(now).
  */
 export function upcomingFrom(now: Date): Date {
-  return startOfDayTallinn(now);
+  return new Date(now.getTime() + 1);
 }
 
 /** Estonian wall-clock parts of an instant. */

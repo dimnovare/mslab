@@ -29,7 +29,7 @@ const text = { level: "basic" as const, summary: { et: "" }, body: { et: "" } };
 let db: Db;
 let c: { id: number };
 let s: { id: number };
-const ids = { other: 0, full: 0, cancelled: 0, past: 0, thisMorning: 0, yesterday: 0, otherCourse: 0, unpublished: 0, groupless: 0 };
+const ids = { other: 0, full: 0, cancelled: 0, past: 0, thisMorning: 0, yesterday: 0, thisEvening: 0, otherCourse: 0, unpublished: 0, groupless: 0 };
 
 beforeAll(async () => {
   db = await makeTestDb();
@@ -54,9 +54,10 @@ beforeAll(async () => {
   ids.full = (await session(c.id, "2026-12-12T08:00:00Z", { capacity: 1 }))[0].id;
   ids.cancelled = (await session(c.id, "2026-12-19T08:00:00Z", { status: "cancelled" }))[0].id;
   ids.past = (await session(c.id, "2026-09-01T08:00:00Z"))[0].id;
-  // NOW is 13:00 on 1.10 in Tallinn: one session began this morning, one yesterday (item 10: "today" is the Estonian date)
+  // NOW is 13:00 on 1.10 in Tallinn: one session began this morning, one yesterday, one begins this evening (item 10)
   ids.thisMorning = (await session(c.id, "2026-10-01T07:00:00Z", { city: "Hommik" }))[0].id;
   ids.yesterday = (await session(c.id, "2026-09-30T07:00:00Z", { city: "Eile" }))[0].id;
+  ids.thisEvening = (await session(c.id, "2026-10-01T15:00:00Z", { city: "Õhtu" }))[0].id;
   ids.otherCourse = (await session(other.id, "2026-11-20T08:00:00Z"))[0].id;
   ids.unpublished = unpublished.id;
   ids.groupless = groupless.id;
@@ -172,16 +173,17 @@ describe("group registration", () => {
     expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(0);
   });
 
-  test("a session that began earlier today can still be booked, as the calendar and the course page still list it (item 10)", async () => {
+  test("a session that began earlier today is no longer listed or bookable; one later today is (item 10, ruling)", async () => {
+    // NOW is 13:00 on 1.10 in Tallinn: one session began at 10:00, one begins at 18:00
     const { deps } = setup();
-    expect(await handleRegistration(deps, group({ session: String(ids.thisMorning) }))).toEqual({ ok: true });
-    expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
-    const listed = await getCourseBySlug(db, "kulmud", { sessionsFrom: upcomingFrom(NOW) });
-    expect(listed?.sessions.map((x) => x.id)).toContain(ids.thisMorning);
-    expect(listed?.sessions.map((x) => x.id)).not.toContain(ids.yesterday);
-    expect((await listUpcomingSessions(db, upcomingFrom(NOW))).map((x) => x.id)).toContain(ids.thisMorning);
-    // yesterday's is gone everywhere, booking included
+    expect(await handleRegistration(deps, group({ session: String(ids.thisMorning) }))).toEqual({ ok: false, errors: { session: "unavailable" } });
     expect(await handleRegistration(setup().deps, group({ session: String(ids.yesterday) }))).toEqual({ ok: false, errors: { session: "unavailable" } });
+    const listed = await getCourseBySlug(db, "kulmud", { sessionsFrom: upcomingFrom(NOW) });
+    expect(listed?.sessions.map((x) => x.id)).not.toContain(ids.thisMorning);
+    expect(listed?.sessions.map((x) => x.id)).toContain(ids.thisEvening);
+    expect((await listUpcomingSessions(db, upcomingFrom(NOW))).map((x) => x.id)).not.toContain(ids.thisMorning);
+    expect(await handleRegistration(setup().deps, group({ session: String(ids.thisEvening) }))).toEqual({ ok: true });
+    expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
   });
 
   test("only published contact courses with a group price", async () => {
