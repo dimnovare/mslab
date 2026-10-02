@@ -1,0 +1,3 @@
+# Never upload local tool caches as public files.
+.wrangler
+**/.wrangler
