@@ -15,10 +15,17 @@ test.skip(({ isMobile }) => isMobile, "the same answers for every browser: deskt
 const COURSE = "/koolitused/kulmumeistri-baaskoolitus";
 const BROWSER = "public, max-age=0, must-revalidate";
 
-/** Asks until the page comes from the cache front (the first request after a change renders and stores it). */
+/**
+ * Asks until the page comes from the cache front. When it does not (another test's change made it stale), the page's
+ * document is requested once: that renders it and stores the document, the RSC payload and the prefetch segments. (A
+ * test's own RSC request is not a real router's: Next.js answers it with a redirect to its cache-busting address.)
+ */
 async function frontHit(request: import("@playwright/test").APIRequestContext, path: string, headers: Record<string, string> = {}) {
-  let res = await request.get(path, { headers });
-  for (let i = 0; i < 3 && res.headers()["x-page-cache"] !== "front"; i++) res = await request.get(path, { headers });
+  let res = await request.get(path, { headers, maxRedirects: 0, failOnStatusCode: false });
+  for (let i = 0; i < 3 && res.headers()["x-page-cache"] !== "front"; i++) {
+    await request.get(path.split("?")[0]);
+    res = await request.get(path, { headers, maxRedirects: 0, failOnStatusCode: false });
+  }
   return res;
 }
 
@@ -72,10 +79,14 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
 });
 
 test("admin pages, the API and unknown addresses never come from the page cache", async ({ request }) => {
-  for (const path of ["/admin/login", "/api/feedback", "/olematu-leht"]) {
+  for (const path of ["/admin/login", "/api/feedback"]) {
     const res = await request.get(path, { maxRedirects: 0, failOnStatusCode: false });
-    expect(res.headers()["x-page-cache"], path).toBeUndefined();
+    expect(res.headers()["x-page-cache"], `${path}: not a page request`).toBeUndefined();
   }
+  // an unknown address looks like a page: the front finds nothing stored and says so
+  const unknown = await request.get("/olematu-leht", { failOnStatusCode: false });
+  expect(unknown.status()).toBe(404);
+  expect(unknown.headers()["x-page-cache"]).toBe("miss-not-stored");
 });
 
 test("a registration makes the course page and the calendar render again (seat counts)", async ({ page, request }, info) => {
@@ -92,11 +103,31 @@ test("a registration makes the course page and the calendar render again (seat c
   await page.getByLabel("E-post", { exact: true }).fill(testEmail("cache-register", info.project.name));
   await page.getByLabel("Telefon").fill("+3725555555");
   await page.getByLabel(/tingimustega/).check();
+  const action = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes(COURSE));
   await page.getByRole("button", { name: "Registreeru" }).click();
   await expect(page.getByText(/koht kinnitub pärast ettemaksu/)).toBeVisible();
-  // revalidated: the next request renders the page (not from the front), the one after is cached again
+  // the action's answer is the result only: no page rendered into it (a revalidatePath() in the action would make
+  // Next.js render the course page there, 70–150 ms CPU after the registration was stored)
+  const answer = await action;
+  expect(answer.headers()["x-action-revalidated"], "no revalidation inside the action").toBeUndefined();
+  expect((await answer.request().sizes()).responseBodySize, "the action's answer carries no page").toBeLessThan(2000);
+  // revalidated after the answer: the next request renders the page (the front says why), the one after is cached again
   for (const path of checked) {
-    expect((await request.get(path)).headers()["x-page-cache"], path).toBeUndefined();
+    await expect.poll(async () => (await request.get(path)).headers()["x-page-cache"], { message: path, timeout: 10_000 }).toBe("miss-revalidated");
     expect((await frontHit(request, path)).headers()["x-page-cache"], path).toBe("front");
+  }
+});
+
+test("a cart for a course that does not exist is a 404 that says the cart is empty, and is not stored", async ({ request }) => {
+  const res = await request.get("/ostukorv?kursus=ei-ole-olemas-e2e");
+  expect(res.status()).toBe(404);
+  expect(await res.text()).toContain("Ostukorv on tühi");
+  expect((await request.get("/ostukorv?kursus=ei-ole-olemas-e2e")).headers()["x-page-cache"]).not.toBe("front");
+});
+
+test("the client router keeps a cached page for 30 s at most (x-nextjs-stale-time)", async ({ request }) => {
+  for (const path of ["/", COURSE]) {
+    const rsc = await frontHit(request, `${path}?_rsc=st`, { RSC: "1" });
+    expect(Number(rsc.headers()["x-nextjs-stale-time"]), path).toBeLessThanOrEqual(30);
   }
 });

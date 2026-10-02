@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { applySeatFixtures, LOCAL_FIXTURES, scheduleSampleSessions, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { assertLocalUpstream } from "./local-cache";
 import { assertLocalDatabases } from "./local-db";
 import { removeLeftoverComments } from "./local-kv";
 
@@ -15,6 +16,7 @@ export default async function globalSetup(): Promise<void> {
   }
   refuseMailSecrets();
   assertLocalDatabases(); // before any write: the fixtures' database and the dev server's are both on this machine
+  await assertLocalUpstream(); // the local production build believes it is localhost, never the live domain
   await removeFormRows();
   await removeAdminRows(); // e2e-auth-… leftovers of an interrupted run
   await removeAdminFixtures(); // e2e-admin-… inbox fixtures of an interrupted run

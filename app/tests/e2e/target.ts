@@ -20,3 +20,10 @@ export const LOCAL_URL = "http://localhost:3000";
  * admin-auth.spec (the devLink itself) and feedback.spec (the dev review key) need `next dev`.
  */
 export const PROD_BUILD = process.env.E2E_PROD_BUILD === "1";
+
+/** True for a server on this machine: http(s)://localhost / 127.0.0.1 / [::1], any port. */
+export const isLocalTarget = (url: string): boolean => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(url);
+
+// The production-build mode signs in by writing to the database and writes the tag cache: never against a deployment.
+if (PROD_BUILD && !isLocalTarget(TARGET))
+  throw new Error(`e2e: E2E_PROD_BUILD=1 is for the local production build only, but E2E_BASE_URL is "${TARGET || "(unset)"}" — use http://localhost:8787`);
