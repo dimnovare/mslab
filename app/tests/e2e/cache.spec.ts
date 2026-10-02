@@ -90,9 +90,10 @@ test("unknown addresses share their locale's one cached 404 page: status 404, no
     ["et", "Lehte ei leitud", ["/olematu-leht", "/wp-admin", "/.env", "/koolitused/a/b", `/e2e-${Date.now()}`]],
     ["ru", "Страница не найдена", ["/ru/net-takoj", "/ru/wp-login.php", `/ru/e2e-${Date.now()}`]],
   ] as const) {
-    // the first one may render it (once per locale, also after a change made it stale); every other address is then
+    // the first one may render it (once per locale, also after a change made it stale: on a deployment OpenNext may
+    // answer that once from its stale copy and store the new render a moment later); every other address is then
     // answered from the same stored page
-    await request.get(paths[0], { failOnStatusCode: false });
+    await expect.poll(async () => (await request.get(paths[0], { failOnStatusCode: false })).headers()["x-page-cache"], { message: `${locale}: stored` }).toBe("front");
     for (const path of paths) {
       const res = await request.get(path, { failOnStatusCode: false });
       expect(res.status(), path).toBe(404);
