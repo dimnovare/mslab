@@ -23,10 +23,12 @@ const read = (): string => {
 };
 
 /**
- * ♡ "Lisa lemmikutesse" (Maria C33, C44 / P6): a toggle button kept in this browser (localStorage "mslab-fav",
- * an array of course slugs). Phase 2 shows the same list in the student dashboard. The server renders it unpressed.
+ * ♡ "Lisa lemmikutesse" (Maria C33, C44 / P6): a toggle button kept in this browser (localStorage "mslab-fav", an array
+ * of course slugs). Pressed (aria-pressed), it says "Lemmikutes" with a filled heart and offers "Eemalda lemmikutest" as
+ * its hint. The server renders it unpressed; the stored state shows as soon as the page is interactive, and every
+ * button for the same course (this tab or another) follows a change. Phase 2 shows the list in the student dashboard.
  */
-export function FavouriteButton({ slug, t }: { slug: string; t: { add: string; remove: string } }) {
+export function FavouriteButton({ slug, t }: { slug: string; t: { add: string; added: string; remove: string } }) {
   const raw = useSyncExternalStore(subscribe, read, () => "");
   const pressed = parseFavourites(raw).includes(slug);
 
@@ -40,9 +42,9 @@ export function FavouriteButton({ slug, t }: { slug: string; t: { add: string; r
   };
 
   return (
-    <button type="button" className={styles.action} aria-pressed={pressed} title={pressed ? t.remove : t.add} onClick={toggle}>
+    <button type="button" className={styles.action} aria-pressed={pressed} title={pressed ? t.remove : t.add} onClick={toggle} data-favourite="">
       <Icon name="heart" size={18} filled={pressed} className={styles.heart} />
-      {t.add}
+      {pressed ? t.added : t.add}
     </button>
   );
 }

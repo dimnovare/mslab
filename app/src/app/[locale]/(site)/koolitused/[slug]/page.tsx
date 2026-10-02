@@ -192,7 +192,7 @@ export default async function CoursePage({ params, searchParams }: Props) {
             <h1 className={styles.title}>{title}</h1>
             <p className={styles.summary}>{pick(course.summary, locale)}</p>
             <div className={styles.actions}>
-              <FavouriteButton slug={course.slug} t={{ add: c.favourite, remove: c.unfavourite }} />
+              <FavouriteButton slug={course.slug} t={{ add: c.favourite, added: c.favourited, remove: c.unfavourite }} />
               <ShareButton title={title} t={{ label: c.share, copied: c.shareCopied }} />
             </div>
 

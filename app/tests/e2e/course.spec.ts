@@ -266,17 +266,35 @@ test.describe("both types", () => {
     expect(shared?.title).toBe("Kulmude LAMI");
   });
 
-  test("favourite toggles and is remembered in this browser (P6)", async ({ page }) => {
+  test("favourite toggles, says so, and is remembered in this browser across a reload and in Russian (P6)", async ({ page }) => {
+    const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("mslab-fav") ?? "[]"));
     await page.goto("/koolitused/kulmude-lami");
-    const fav = page.getByRole("button", { name: "Lisa lemmikutesse" });
+    const fav = page.locator("[data-favourite]");
     await expect(fav).toHaveAttribute("aria-pressed", "false");
+    await expect(fav).toHaveText("Lisa lemmikutesse");
+    await expect(fav).toHaveAccessibleName("Lisa lemmikutesse");
     await fav.click();
     await expect(fav).toHaveAttribute("aria-pressed", "true");
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mslab-fav") ?? "[]"))).toEqual(["kulmude-lami"]);
+    await expect(fav).toHaveText("Lemmikutes");
+    await expect(fav).toHaveAttribute("title", "Eemalda lemmikutest");
+    expect(await stored()).toEqual(["kulmude-lami"]);
+
     await page.reload();
-    await expect(page.getByRole("button", { name: "Lisa lemmikutesse" })).toHaveAttribute("aria-pressed", "true");
-    await page.getByRole("button", { name: "Lisa lemmikutesse" }).click();
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mslab-fav") ?? "[]"))).toEqual([]);
+    await expect(fav).toHaveAttribute("aria-pressed", "true"); // the stored state, shown on load
+    await expect(fav).toHaveText("Lemmikutes");
+    // another course is not a favourite; the same course in Russian is
+    await page.goto("/koolitused/lash-lift-botox");
+    await expect(fav).toHaveAttribute("aria-pressed", "false");
+    await page.goto("/ru/koolitused/kulmude-lami");
+    await expect(fav).toHaveAttribute("aria-pressed", "true");
+    await expect(fav).toHaveText("В избранном");
+
+    await fav.click();
+    await expect(fav).toHaveAttribute("aria-pressed", "false");
+    await expect(fav).toHaveText("В избранное");
+    expect(await stored()).toEqual([]);
+    await page.reload();
+    await expect(fav).toHaveAttribute("aria-pressed", "false");
   });
 
   test("gallery: main 5:4, thumbnails open the lightbox at that image; arrows, focus trap, Esc (P2)", async ({ page }) => {

@@ -174,6 +174,7 @@ export const ru: Dict = {
     share: "Поделиться курсом",
     shareCopied: "Ссылка скопирована.",
     favourite: "В избранное",
+    favourited: "В избранном",
     unfavourite: "Убрать из избранного",
     recommendations: "Вам может быть интересно",
     galleryLabel: "Фотографии курса",

@@ -183,7 +183,9 @@ export const et = {
     // Both types
     share: "Jaga koolitust",
     shareCopied: "Koolituse link kopeeritud.",
+    // ♡ toggle (P6): "favourite" until pressed, then "favourited"; "unfavourite" is the pressed button's hint
     favourite: "Lisa lemmikutesse",
+    favourited: "Lemmikutes",
     unfavourite: "Eemalda lemmikutest",
     recommendations: "Sulle võiksid huvi pakkuda",
     galleryLabel: "Koolituse pildid",
