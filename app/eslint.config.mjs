@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "cloudflare-env.d.ts",
     ".open-next/**",
     ".wrangler/**",
+    // The static design-review hub and its comment widget (copied from site/, plain browser scripts):
+    "public/**",
   ]),
 ]);
 

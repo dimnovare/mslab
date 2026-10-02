@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { applySeatFixtures, LOCAL_FIXTURES, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { removeLeftoverComments } from "./local-kv";
 
 // Runs once per `playwright test` run (whatever the file or --grep filter): seat fixtures for the calendar tests, and
 // leftovers of an interrupted run's form submissions removed.
@@ -19,6 +20,7 @@ export default async function globalSetup(): Promise<void> {
   await restoreLeftoverRows(); // site content (slides, packages, pages, settings …) it left changed
   await removePostRows(); // and the posts the site editor tests made
   await removeEditRows(); // its "E2E …" sessions and "e2e-uus-…" course
+  await removeLeftoverComments(); // review comments (dev server's local KV) of an interrupted feedback test
   await applySeatFixtures();
 }
 

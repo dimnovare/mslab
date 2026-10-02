@@ -2,6 +2,7 @@
 # Static files are served before the worker, so next.config headers() do not reach them.
 /*
   X-Robots-Tag: noindex, nofollow
+  Referrer-Policy: strict-origin-when-cross-origin
 
 /_next/static/*
   Cache-Control: public,max-age=31536000,immutable

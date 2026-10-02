@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="et">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>MS LAB — kommentaarid</title>
+<link rel="icon" href="/p/d/assets/favicon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#F6F4F5;color:#222;font:400 15px/1.55 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:32px 16px 64px}
+h1{font:500 clamp(30px,5vw,44px)/1.1 "Inter Tight",sans-serif;letter-spacing:-.02em;margin:0}
+.top{display:flex;justify-content:space-between;align-items:end;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.muted{color:#675D62}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{min-height:36px;padding:0 14px;border-radius:999px;border:1px solid #E6E1E3;background:#fff;font:500 13px Inter;cursor:pointer}
+.chips button[aria-pressed=true]{background:#222;color:#fff;border-color:#222}
+.card{background:#fff;border-radius:18px;padding:18px 20px;margin-top:12px;display:grid;gap:8px}
+.card.done{opacity:.55}
+.meta{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px;color:#675D62;align-items:center}
+.meta b{color:#222}
+.tag{padding:3px 9px;border-radius:6px;background:#EBE8E9;font-size:12px;font-weight:500;color:#3A3437}
+.mood-good{background:#DDEBE3}.mood-bad{background:#F0DCDC}.mood-change{background:#DDD4DC}
+.txt{white-space:pre-wrap;font-size:16px}
+.place{font-size:13px;color:#3A3437;background:#F6F4F5;border-radius:10px;padding:8px 10px}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.acts a,.acts button{min-height:36px;padding:0 14px;border-radius:999px;border:1px solid #222;background:#222;color:#fff;font:500 13px Inter;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer}
+.acts button{background:#fff;color:#222}
+form{display:flex;gap:8px;max-width:420px;margin-top:24px}
+input{flex:1;min-height:44px;border-radius:12px;border:1px solid #D5D0D3;padding:0 12px;font-size:15px}
+form button{min-height:44px;padding:0 18px;border-radius:999px;border:0;background:#222;color:#fff;font-weight:600;cursor:pointer}
+.empty{background:#fff;border-radius:18px;padding:32px;text-align:center;color:#675D62}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><div><p class="muted" style="margin:0 0 6px;font-size:13px;letter-spacing:.14em;text-transform:uppercase;font-weight:600">MS LAB · disainisuunad</p><h1>Kommentaarid</h1></div>
+    <div class="chips" id="flt"></div></div>
+  <div id="out"></div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var DIRS = { a:"A · Pehme toimetus", b:"B · Õppeteekond", c:"C · Kunst pilgus", d:"D · Studio", a0:"A · 1. versioon", b0:"B · 1. versioon", moodboard:"Visuaalsed uuringud", hub:"Juhend", site:"Põhileht" };
+  var MOODS = { good:"Meeldib", bad:"Ei meeldi", change:"Muuta" };
+  var DEV = { desk:"arvuti", tab:"tahvel", mob:"telefon" };
+  var out = document.getElementById("out"), flt = document.getElementById("flt");
+  var key = "", items = [], filter = "open";
+  try { key = localStorage.getItem("mslab-fb-admin") || ""; } catch(e){}
+  var hk = new URLSearchParams(location.hash.slice(1)).get("key");
+  if (hk) { key = hk; try { localStorage.setItem("mslab-fb-admin", key); } catch(e){} history.replaceState(null, "", location.pathname); }
+
+  function el(tag, cls, text){ var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function askKey(msg){
+    out.innerHTML = "";
+    var p = el("p", "muted", msg || "Sisesta ligipääsuvõti."); out.appendChild(p);
+    var f = el("form"); var i = el("input"); i.type = "password"; i.placeholder = "Võti"; i.autocomplete = "current-password";
+    var b = el("button", null, "Ava"); f.appendChild(i); f.appendChild(b); out.appendChild(f);
+    f.onsubmit = function(e){ e.preventDefault(); key = i.value.trim(); try { localStorage.setItem("mslab-fb-admin", key); } catch(er){} load(); };
+    i.focus();
+  }
+  function load(){
+    if (!key) return askKey();
+    fetch("/api/feedback", { headers: { "x-key": key } }).then(function(r){
+      if (r.status === 401) { key = ""; return askKey("Vale võti."); }
+      return r.json().then(function(d){ items = d.items || []; render(); });
+    }).catch(function(){ out.textContent = "Laadimine ebaõnnestus."; });
+  }
+  function render(){
+    var open = items.filter(function(x){ return !x.done; }).length;
+    flt.innerHTML = "";
+    [["open","Avatud ("+open+")"],["all","Kõik ("+items.length+")"],["done","Tehtud ("+(items.length-open)+")"]].forEach(function(f){
+      var b = el("button", null, f[1]); b.setAttribute("aria-pressed", filter === f[0]); b.onclick = function(){ filter = f[0]; render(); }; flt.appendChild(b);
+    });
+    var list = items.filter(function(x){ return filter === "all" || (filter === "done" ? x.done : !x.done); });
+    out.innerHTML = "";
+    if (!list.length) { out.appendChild(el("div", "empty", "Kommentaare pole.")); return; }
+    list.forEach(function(x){
+      var c = el("article", "card" + (x.done ? " done" : ""));
+      var m = el("div", "meta");
+      m.appendChild(el("b", null, x.name || "Anonüümne"));
+      m.appendChild(el("span", null, new Date(x.at).toLocaleString("et-EE", { dateStyle:"short", timeStyle:"short" })));
+      m.appendChild(el("span", "tag", DIRS[x.dir] || x.dir));
+      if (x.title) m.appendChild(el("span", "tag", x.title));
+      if (x.device) m.appendChild(el("span", "tag", DEV[x.device] + (x.width ? " " + x.width + "px" : "")));
+      if (x.mood) m.appendChild(el("span", "tag mood-" + x.mood, MOODS[x.mood]));
+      c.appendChild(m);
+      c.appendChild(el("div", "txt", x.text));
+      if (x.el && (x.el.label || x.el.snippet)) c.appendChild(el("div", "place", "📍 " + (x.el.label || "") + (x.el.snippet && x.el.snippet !== x.el.label ? " — «" + x.el.snippet.slice(0, 140) + "»" : "")));
+      var a = el("div", "acts");
+      var go = el("a", null, "Näita kohta"); go.href = x.link; go.target = "_blank"; go.rel = "noopener"; a.appendChild(go);
+      var d = el("button", null, x.done ? "Märgi avatuks" : "Tehtud ✓"); d.type = "button";
+      d.onclick = function(){ fetch("/api/feedback/" + x.id, { method:"PATCH", headers:{ "x-key": key, "content-type":"application/json" }, body: JSON.stringify({ done: !x.done }) }).then(function(r){ if (r.ok) { x.done = !x.done; render(); } }); };
+      a.appendChild(d); c.appendChild(a);
+      out.appendChild(c);
+    });
+  }
+  load();
+})();
+</script>
+</body>
+</html>

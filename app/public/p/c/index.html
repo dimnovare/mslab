@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="et">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>MS LAB Koolituskeskus — Kulmu- ja ripsmekoolitused</title>
+  <meta name="description" content="MS LAB Koolituskeskus — kulmu- ja ripsmetehnikate koolitused Maria Sosninaga. Õpilase edu on meie eesmärk!">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@400;500;600&family=Urbanist:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=5">
+</head>
+<body>
+  <a class="skip-link" href="#main">Liigu sisu juurde</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#/" aria-label="MS LAB Koolituskeskus — avaleht">
+        <span class="logo-crop"><img src="assets/logo.png" alt="MS LAB Koolituskeskus" width="200" height="200"></span>
+      </a>
+      <nav class="main-nav" aria-label="Peamenüü">
+        <ul id="nav-list"></ul>
+      </nav>
+      <div class="header-actions">
+        <div class="lang" role="group" aria-label="Keel / Язык">
+          <button type="button" data-lang="et" aria-pressed="true">ET</button>
+          <button type="button" data-lang="ru" aria-pressed="false">RU</button>
+        </div>
+        <button type="button" class="cart-btn" data-open-cart aria-label="Ostukorv">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          <span class="label" data-i18n="cart">Ostukorv</span>
+          <span class="cart-count" data-cart-count data-zero>0</span>
+        </button>
+        <a class="btn btn--primary btn--sm login-btn" href="#/oppimine" data-i18n="login">Logi sisse</a>
+        <button type="button" class="icon-btn icon-btn--plain burger" aria-label="Ava menüü" aria-expanded="false" aria-controls="mobile-menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="mobile-menu" id="mobile-menu" aria-label="Menüü">
+    <div class="container">
+      <nav id="mobile-nav" aria-label="Mobiilimenüü"></nav>
+      <div class="menu-foot">
+        <div class="lang" role="group" aria-label="Keel / Язык">
+          <button type="button" data-lang="et" aria-pressed="true">ET</button>
+          <button type="button" data-lang="ru" aria-pressed="false">RU</button>
+        </div>
+        <a class="btn btn--primary" href="#/oppimine" data-i18n="login">Logi sisse</a>
+      </div>
+    </div>
+  </div>
+
+  <main id="main" tabindex="-1"></main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <span class="logo-crop logo-crop--invert"><img src="assets/logo.png" alt="MS LAB Koolituskeskus" width="200" height="200" loading="lazy"></span>
+          <p class="slogan">Õpilase edu on meie eesmärk!</p>
+        </div>
+        <div>
+          <h4>Koolitused</h4>
+          <ul>
+            <li><a href="#/koolitus/brow">Kulmumeistri baaskoolitus</a></li>
+            <li><a href="#/koolitus/lashlift">Lash Lift BOTOX</a></li>
+            <li><a href="#/koolitus/lami">Kulmude LAMI</a></li>
+            <li><a href="#/koolitused">Kõik koolitused</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Info</h4>
+          <ul>
+            <li><a href="#/koolituskalender">Koolituskalender</a></li>
+            <li><a href="#/praktika">Praktika</a></li>
+            <li><a href="#/oppimine">Õppimine (õpilasele)</a></li>
+            <li><a href="#/admin">Admin</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Kontakt</h4>
+          <ul>
+            <li><a href="mailto:info@mslab.ee">info@mslab.ee</a></li>
+            <li><a href="#/koolituskalender">Pärnu · Tallinn · Tartu</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 MS LAB Koolituskeskus · Maria Sosnina</span>
+        <span>Hinnad ja kuupäevad on näidisandmed</span>
+      </div>
+    </div>
+  </footer>
+
+  <div class="scrim" data-scrim></div>
+  <aside class="drawer" id="cart-drawer" aria-label="Ostukorv" aria-hidden="true">
+    <div class="drawer-head">
+      <h2 data-i18n="cart">Ostukorv</h2>
+      <button type="button" class="icon-btn" data-close-cart aria-label="Sulge ostukorv">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body" data-cart-body></div>
+    <div class="drawer-foot" data-cart-foot></div>
+  </aside>
+
+  <dialog class="article" id="article-dialog" aria-labelledby="article-title"></dialog>
+
+  <dialog class="campaign" id="campaign-dialog" aria-labelledby="campaign-title">
+    <div class="campaign-media"><img src="assets/gift-promo.jpg" alt="MS LAB kingitus: MAXEYELASH seerum"></div>
+    <div class="campaign-body">
+      <button type="button" class="icon-btn campaign-close" data-close-campaign aria-label="Sulge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <span class="campaign-kicker">Ainult sel nädalal</span>
+      <h2 id="campaign-title">−15% Lash Lift BOTOX koolitusele</h2>
+      <p>Kasuta ostukorvis koodi</p>
+      <div class="campaign-code">TALV15</div>
+      <a class="btn btn--primary btn--block campaign-cta" href="#/koolitus/lashlift" data-close-campaign>Vaata koolitust</a>
+      <p class="campaign-note">Näidispakkumine · kuvatakse kord külastuse jooksul</p>
+    </div>
+  </dialog>
+
+  <div class="toast" role="status" aria-live="polite" data-toast></div>
+
+
+  <script src="app.js?v=5"></script>
+<script src="/feedback.js?v=3" defer></script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+import type { Page } from "@playwright/test";
+import { DEV_REVIEW_KEY } from "../../src/server/review-key";
+import { LOCAL_FIXTURES } from "./fixtures";
+import { deleteLocalComments, E2E_COMMENT } from "./local-kv";
+import { expect, submitsForms, test } from "./test";
+
+// Task 15: the design-review hub (/guide/, /p/<dir>/, /guide/tagasiside/) and its comment API (/api/feedback) inside
+// the app, and the comment widget on the main site's public pages (never in /admin).
+// Against `next dev` there is no ADMIN_KEY: the list accepts the local development key (src/server/review-key.ts), and
+// the comments go to the dev server's local KV (miniflare), from which each test deletes its own again.
+
+type Item = { id: string; dir: string; route?: string; title?: string; device?: string; name?: string; mood?: string; text: string; done: boolean; link: string; el: { label?: string; sel?: string } };
+
+const listComments = async (page: Page, key: string | null = DEV_REVIEW_KEY) => page.request.get("/api/feedback", { headers: key === null ? {} : { "x-key": key } });
+
+async function commentById(page: Page, id: string): Promise<Item | undefined> {
+  const res = await listComments(page);
+  expect(res.status()).toBe(200);
+  return ((await res.json()) as { items: Item[] }).items.find((x) => x.id === id);
+}
+
+test.describe("design-review hub", () => {
+  test("/guide redirects to /guide/, which shows the four directions with their pictures", async ({ page }) => {
+    const res = await page.goto("/guide");
+    expect(res?.status()).toBe(200);
+    expect(new URL(page.url()).pathname).toBe("/guide/");
+    expect(res?.headers()["x-robots-tag"]).toContain("noindex");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Vali oma veebilehe suund.");
+    const dirs = page.locator("#dirs article");
+    await expect(dirs).toHaveCount(4);
+    await expect(dirs.getByRole("heading", { level: 3 })).toHaveText(["A · Pehme toimetus", "B · Õppeteekond", "C · Kunst pilgus", "D · Studio"]);
+    // relative asset URLs resolve under /guide/
+    const thumb = dirs.first().locator("img").first();
+    await thumb.scrollIntoViewIfNeeded();
+    await expect(thumb).toHaveJSProperty("complete", true);
+    expect(await thumb.evaluate((img: HTMLImageElement) => [new URL(img.src).pathname, img.naturalWidth > 0])).toEqual(["/guide/thumbs/a-d.jpg", true]);
+    await expect(page.getByRole("button", { name: "Jäta kommentaar" })).toBeVisible(); // the widget, as before
+  });
+
+  test("/p/d/ renders the prototype with its own styles and script", async ({ page }) => {
+    const res = await page.goto("/p/d/");
+    expect(res?.status()).toBe(200);
+    await expect(page).toHaveTitle("Avaleht — MS LAB Koolituskeskus"); // set by the prototype's app.js for its home view
+    await expect(page.locator("#main h1").first()).toBeVisible();
+    const css = await page.request.get("/p/d/styles.css");
+    expect(css.status()).toBe(200);
+    expect(await page.evaluate(() => [...document.styleSheets].some((s) => s.href?.endsWith("/p/d/styles.css") && s.cssRules.length > 0))).toBe(true);
+    expect((await page.goto("/p/d"))?.url()).toMatch(/\/p\/d\/$/);
+  });
+
+  test("/guide/tagasiside/ asks for the key and refuses a wrong one", async ({ page }) => {
+    await page.goto("/guide/tagasiside/");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kommentaarid");
+    await expect(page.getByText("Sisesta ligipääsuvõti.")).toBeVisible();
+    test.skip(!LOCAL_FIXTURES, "a wrong key is only tried against the local dev server");
+    await page.getByPlaceholder("Võti").fill("vale-võti");
+    await page.getByRole("button", { name: "Ava" }).click();
+    await expect(page.getByText("Vale võti.")).toBeVisible();
+  });
+});
+
+test.describe("comment API", () => {
+  test("no body → 400, list without or with a wrong key → 401, unknown comment → 404", async ({ page }) => {
+    submitsForms();
+    for (const res of [
+      await page.request.post("/api/feedback", { headers: { "content-type": "application/json" } }),
+      await page.request.post("/api/feedback", { data: { name: "x" } }),
+    ])
+      expect(res.status()).toBe(400);
+    expect((await listComments(page, null)).status()).toBe(401);
+    expect((await listComments(page, "wrong-key")).status()).toBe(401);
+    expect((await page.request.patch("/api/feedback/zzzzzzzzzzzzzz", { data: { done: true } })).status()).toBe(401);
+    expect((await page.request.get("/api/feedback/zzzzzzzzzzzzzz")).status()).toBe(404);
+    const big = await page.request.post("/api/feedback", { data: { text: `${E2E_COMMENT} ${"x".repeat(20_000)}` } });
+    expect(big.status()).toBe(413);
+  });
+});
+
+test.describe("comment widget on the main site", () => {
+  test("is on the public pages, not in /admin", async ({ page }) => {
+    await page.goto("/koolitused");
+    await expect(page.locator('script[src="/feedback.js?v=3"]')).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Jäta kommentaar" })).toBeVisible();
+    await page.goto("/admin/login");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.locator('script[src*="feedback.js"]')).toHaveCount(0);
+    await expect(page.locator("#mslab-fb")).toHaveCount(0);
+  });
+
+  test("a comment marked on /koolitused is listed as a main-site comment, opens at its place and can be marked done", async ({ page }, info) => {
+    submitsForms();
+    const text = `${E2E_COMMENT} ${info.project.name} ${Date.now().toString(36)} Pealkiri võiks olla suurem`;
+    const ids: string[] = [];
+    try {
+      await page.goto("/koolitused");
+      const heading = page.getByRole("heading", { level: 1 });
+      await expect(heading).toBeVisible();
+      await page.getByRole("button", { name: "Jäta kommentaar" }).click();
+      const panel = page.getByRole("dialog", { name: "Jäta kommentaar" });
+      await panel.getByLabel("Sinu nimi").fill("E2E Maria");
+      await panel.getByRole("button", { name: "Muuta" }).click();
+
+      // marking a place: the bar sits above the sticky header, the outline follows the pointer
+      await panel.getByRole("button", { name: /Märgi koht lehel/ }).click();
+      const bar = page.locator("#mslab-fb .fb-bar");
+      await expect(bar).toBeVisible();
+      const onTop = await bar.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+      });
+      expect(onTop).toBe(true);
+      const box = (await heading.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      const headingText = (await heading.textContent())!.trim();
+      await expect(panel.getByText(`Koht: ${headingText}`)).toBeVisible();
+
+      await panel.getByLabel("Kommentaar").fill(text);
+      const sent = page.waitForResponse((r) => r.url().endsWith("/api/feedback") && r.request().method() === "POST");
+      await panel.getByRole("button", { name: "Saada" }).click();
+      const res = await sent;
+      expect(res.status()).toBe(200);
+      const body = (await res.json()) as { ok: boolean; id: string; stored: boolean; telegram: boolean };
+      ids.push(body.id);
+      expect(body).toMatchObject({ ok: true, stored: true, telegram: false }); // no TELEGRAM_BOT_TOKEN locally
+      await expect(page.getByText("Aitäh! Kommentaar on saadetud ✓")).toBeVisible();
+
+      // listed with the key, as a main-site comment linking back to the page
+      const item = await commentById(page, body.id);
+      expect(item).toMatchObject({
+        dir: "site",
+        route: "/koolitused",
+        title: "Koolitused",
+        device: info.project.name.startsWith("mobile") ? "mob" : "desk",
+        name: "E2E Maria",
+        mood: "change",
+        text,
+        done: false,
+        el: { label: headingText },
+      });
+      expect(item!.link).toBe(new URL(`/koolitused?fb=${body.id}`, page.url()).href);
+
+      // "Näita kohta": the page outlines the marked heading and shows the comment next to it
+      await page.goto(new URL(item!.link).pathname + new URL(item!.link).search);
+      const note = page.locator("#mslab-fb .fb-note");
+      await expect(note).toContainText(text);
+      await expect(note).toContainText("E2E Maria");
+      await expect(note).not.toContainText("täpset kohta ei leitud");
+      const outline = page.locator("#mslab-fb .fb-hl");
+      await expect(outline).toBeVisible();
+      const [o, h] = [(await outline.boundingBox())!, (await heading.boundingBox())!];
+      expect(Math.abs(o.y + 4 - h.y)).toBeLessThan(2);
+      expect(Math.abs(o.height - 8 - h.height)).toBeLessThan(2);
+
+      // PATCH round trip (the list page's "Tehtud ✓"), and without the key nothing changes
+      expect((await page.request.patch(`/api/feedback/${body.id}`, { data: { done: true } })).status()).toBe(401);
+      expect((await commentById(page, body.id))!.done).toBe(false);
+      const done = await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": DEV_REVIEW_KEY }, data: { done: true } });
+      expect(done.status()).toBe(200);
+      expect((await commentById(page, body.id))!.done).toBe(true);
+      expect((await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": DEV_REVIEW_KEY }, data: { done: "yes" } })).status()).toBe(400);
+      expect((await page.request.patch(`/api/feedback/${body.id}`, { headers: { "x-key": DEV_REVIEW_KEY }, data: { done: false } })).status()).toBe(200);
+
+      // the list page shows it under "Põhileht" with the link, and marks it done
+      await page.goto(`/guide/tagasiside/#key=${DEV_REVIEW_KEY}`);
+      const card = page.locator("article.card").filter({ hasText: text });
+      await expect(card).toBeVisible();
+      await expect(card.getByText("Põhileht", { exact: true })).toBeVisible();
+      await expect(card.getByRole("link", { name: "Näita kohta" })).toHaveAttribute("href", item!.link);
+      await card.getByRole("button", { name: "Tehtud ✓" }).click();
+      await expect(card).toHaveCount(0); // the default filter shows open comments only
+      expect((await commentById(page, body.id))!.done).toBe(true);
+    } finally {
+      if (ids.length) await deleteLocalComments(ids);
+    }
+    expect(await commentById(page, ids[0])).toBeUndefined();
+  });
+});

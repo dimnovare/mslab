@@ -42,7 +42,8 @@ next-env.d.ts
 
 # opennext / cloudflare
 /.open-next/
-/.wrangler/
+# at any depth: a wrangler cache inside a copied folder (public/…/.wrangler) is never committed
+.wrangler/
 .dev.vars*
 !.dev.vars.example
 !.env.example

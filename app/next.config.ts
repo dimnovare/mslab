@@ -4,6 +4,14 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 const nextConfig: NextConfig = {
   // Don't let `next dev` write AGENTS.md / CLAUDE.md into the project.
   agentRules: false,
+  // The design-review hub (public/guide, public/p/<dir>) must keep its trailing slash ("/guide/"): its pages use
+  // relative asset URLs. Next's own "/x/" → "/x" redirect is off; src/middleware.ts makes it for every other path.
+  skipTrailingSlashRedirect: true,
+  env: {
+    // Review tools: Maria's comment widget (public/feedback.js) on every public page, posting to /api/feedback.
+    // On ("1") for the review builds; switched off ("0") at the mslab.ee launch. Inlined at build time, not a secret.
+    NEXT_PUBLIC_REVIEW_TOOLS: "1",
+  },
   // The whole host stays out of search engines until launch on mslab.ee (static files: public/_headers).
   // The admin area and the login endpoints answer per visitor and are never cached (by the browser or the edge).
   async headers() {

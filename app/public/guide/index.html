@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="et">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#ffffff">
+<title>MS LAB — disainisuunad</title>
+<meta name="description" content="MS LAB Koolituskeskuse veebilehe disainisuunad: vaata ja võrdle arvuti-, tahvli- ja telefonivaates.">
+<link rel="canonical" href="https://mslab.diipsolutions.eu/guide/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MS LAB Koolituskeskus">
+<meta property="og:locale" content="et_EE">
+<meta property="og:url" content="https://mslab.diipsolutions.eu/guide/">
+<meta property="og:title" content="MS LAB — vali oma veebilehe suund">
+<meta property="og:description" content="Neli klikitavat prototüüpi MS LAB Koolituskeskuse uuele veebilehele — vaata arvutis, tahvlis ja telefonis.">
+<meta property="og:image" content="https://mslab.diipsolutions.eu/guide/og.jpg?v=1">
+<meta property="og:image:secure_url" content="https://mslab.diipsolutions.eu/guide/og.jpg?v=1">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MS LAB disainisuunad A, B, C ja D">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MS LAB — vali oma veebilehe suund">
+<meta name="twitter:description" content="Neli klikitavat prototüüpi — vaata arvutis, tahvlis ja telefonis.">
+<meta name="twitter:image" content="https://mslab.diipsolutions.eu/guide/og.jpg?v=1">
+<link rel="icon" href="/p/d/assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#222;--ink2:#3A3437;--muted:#675D62;--rose:#9E8993;--fog:#C0B7BB;--heather:#D5D0D3;--first:#EBE8E9;--orchid:#DDD4DC;--canvas:#F6F4F5;--line:#E6E1E3;--ease:cubic-bezier(.2,.7,.2,1);--gut:clamp(16px,4vw,48px);--disp:"Inter Tight",system-ui,-apple-system,sans-serif;--body:"Inter",system-ui,-apple-system,sans-serif}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:#fff;color:var(--ink);font:400 16px/1.6 var(--body);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+img{display:block;max-width:100%}
+a{color:inherit}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--rose);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 var(--gut)}
+.top{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.86);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:16px;height:64px}
+.top img{height:32px;width:auto}
+.top .t{font:500 15px/1 var(--body);color:var(--muted);padding-left:16px;border-left:1px solid var(--line)}
+.top .d{margin-left:auto;font-size:13px;color:var(--muted)}
+.hero{padding:clamp(56px,9vw,120px) 0 clamp(40px,6vw,72px)}
+.eyebrow{font:600 12px/1.2 var(--body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+h1{font:500 clamp(40px,6.4vw,84px)/1.02 var(--disp);letter-spacing:-.03em;margin:0;max-width:900px;text-wrap:balance}
+.lead{font-size:clamp(17px,1.5vw,21px);line-height:1.55;color:var(--ink2);max-width:720px;margin:22px 0 0}
+.how{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:40px}
+.how div{background:var(--canvas);border-radius:20px;padding:22px 24px;font-size:15px;color:var(--ink2)}
+.how b{display:block;font:500 13px/1 var(--disp);color:var(--muted);margin-bottom:10px;letter-spacing:.04em}
+@media (max-width:760px){.how{grid-template-columns:1fr}}
+h2{font:500 clamp(28px,3.4vw,44px)/1.08 var(--disp);letter-spacing:-.022em;margin:0}
+.dirs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:36px}
+@media (max-width:860px){.dirs{grid-template-columns:1fr}}
+.dir{border:1px solid var(--line);border-radius:28px;overflow:hidden;display:flex;flex-direction:column;background:#fff;transition:box-shadow .45s var(--ease),transform .45s var(--ease)}
+.dir:hover{box-shadow:0 24px 50px -30px rgba(34,34,34,.45);transform:translateY(-3px)}
+.shot{position:relative;aspect-ratio:16/10;background:var(--canvas);overflow:hidden;cursor:pointer;border:0;padding:0;width:100%;display:block}
+.shot>img{width:100%;height:100%;object-fit:cover;object-position:50% 0;transition:transform .9s var(--ease)}
+.dir:hover .shot>img{transform:scale(1.03)}
+.shot .ph{position:absolute;right:18px;bottom:-24px;width:21%;aspect-ratio:390/760;border-radius:18px;border:5px solid #1b1b1b;background:#1b1b1b;overflow:hidden;box-shadow:0 14px 30px -12px rgba(0,0,0,.45)}
+.shot .ph img{width:100%;height:100%;object-fit:cover;object-position:50% 0;border-radius:12px}
+.letter{position:absolute;top:16px;left:16px;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:#fff;font:600 16px/1 var(--disp);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.new{position:absolute;top:22px;left:66px;padding:6px 11px;border-radius:999px;background:var(--ink);color:#fff;font:600 11px/1 var(--body);letter-spacing:.06em;text-transform:uppercase}
+.body{padding:26px 28px 28px;display:flex;flex-direction:column;gap:12px;flex:1}
+.body .src{font:500 12px/1 var(--body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.body h3{font:500 28px/1.1 var(--disp);letter-spacing:-.02em;margin:0}
+.body ul{margin:4px 0 0;padding:0;list-style:none;display:grid;gap:8px}
+.body li{display:flex;gap:10px;font-size:15px;color:var(--ink2);line-height:1.45}
+.body li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--rose);margin-top:8px}
+.font{margin:6px 0 0;font-size:13px;color:var(--muted);line-height:1.45}.font b{color:var(--ink);font-weight:600}
+.acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:auto;padding-top:14px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:0 22px;border-radius:999px;border:1px solid var(--ink);background:var(--ink);color:#fff;font:500 15px/1 var(--body);text-decoration:none;transition:all .3s var(--ease)}
+.btn:hover{background:#000}
+.btn.g{background:#fff;color:var(--ink)}
+.btn.g:hover{background:var(--ink);color:#fff}
+.btn svg{width:15px;height:15px}
+.arch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:28px}
+@media (max-width:860px){.arch{grid-template-columns:1fr}}
+.ar{display:flex;gap:16px;align-items:center;border:1px solid var(--line);border-radius:20px;padding:12px;text-decoration:none;background:#fff;text-align:left;width:100%;transition:border-color .3s}
+.ar:hover{border-color:var(--fog)}
+.ar img{width:112px;aspect-ratio:16/10;border-radius:12px;object-fit:cover;object-position:50% 0;flex:none;background:var(--canvas)}
+.ar b{display:block;font:500 17px/1.25 var(--disp)}
+.ar span{font-size:13px;color:var(--muted);line-height:1.4;display:block;margin-top:4px}
+.qa{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:32px}
+.qa>div{border:1px solid var(--line);border-radius:22px;padding:24px 26px}
+.qa h3{font:500 19px/1.3 var(--disp);margin:0 0 8px}
+.qa p{margin:0;font-size:15px;color:var(--ink2)}
+@media (max-width:760px){.qa{grid-template-columns:1fr}}
+.notes{margin:clamp(56px,8vw,96px) 0 0;padding:clamp(28px,4vw,48px);background:var(--canvas);border-radius:28px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 48px}
+.notes h3{font:500 20px/1.2 var(--disp);margin:0 0 10px}
+.notes p,.notes li{font-size:15px;color:var(--ink2);margin:0}
+.notes ul{margin:0;padding-left:18px;display:grid;gap:6px}
+@media (max-width:760px){.notes{grid-template-columns:1fr}}
+footer{padding:48px 0 56px;color:var(--muted);font-size:13px}
+section{padding-bottom:clamp(40px,6vw,72px)}
+
+/* Viewer */
+.viewer{position:fixed;inset:0;z-index:50;background:#1c1b1c;display:flex;flex-direction:column}
+.viewer[hidden]{display:none}
+.vbar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;padding:10px 14px;background:#111;color:#EBE8E9;border-bottom:1px solid #2a2a2a}
+.vbar .grp{display:flex;gap:4px;padding:3px;border-radius:999px;background:#262526;overflow-x:auto;scrollbar-width:none;max-width:100%}
+.vbar .grp::-webkit-scrollbar{display:none}
+.vbar .grp button,.vbar .grp a{min-height:36px;padding:0 14px;border:0;border-radius:999px;background:transparent;color:#D5D0D3;font:500 13px/1 var(--body);white-space:nowrap;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.vbar .grp button:hover,.vbar .grp a:hover{color:#fff}
+.vbar .grp [aria-pressed="true"]{background:#EBE8E9;color:#111}
+.vbar .grp svg{width:15px;height:15px}
+.vbar .sp{flex:1}
+.vbar .x{width:40px;height:40px;border-radius:50%;border:1px solid #3a3a3a;background:transparent;color:#fff;font-size:20px;line-height:1;display:grid;place-items:center}
+.vbar .open{min-height:40px;padding:0 16px;border-radius:999px;border:1px solid #3a3a3a;color:#EBE8E9;text-decoration:none;font:500 13px/1 var(--body);display:inline-flex;align-items:center;gap:6px}
+.vbar [hidden]{display:none}
+.vbar .open:hover{border-color:#777}
+.pages{display:flex;gap:6px;align-items:center;padding:8px 14px;background:#151415;border-bottom:1px solid #2a2a2a;overflow-x:auto;scrollbar-width:none}
+.pages::-webkit-scrollbar{display:none}
+.pages[hidden]{display:none}
+.pages span{font:600 11px/1 var(--body);letter-spacing:.12em;text-transform:uppercase;color:#8d8488;margin-right:6px;white-space:nowrap}
+.pages button{min-height:32px;padding:0 12px;border-radius:999px;border:1px solid #333;background:transparent;color:#D5D0D3;font:500 12px/1 var(--body);white-space:nowrap}
+.pages button:hover{border-color:#777;color:#fff}
+.stage{flex:1;position:relative;overflow:hidden;display:flex;align-items:flex-start;justify-content:center;padding:16px}
+.frame{position:relative;background:#fff;transform-origin:top center;box-shadow:0 30px 80px -30px rgba(0,0,0,.7);flex:none}
+.frame.mob{border-radius:44px;border:12px solid #0b0b0b;box-shadow:0 0 0 1px #333,0 30px 80px -30px rgba(0,0,0,.8)}
+.frame.tab{border-radius:28px;border:14px solid #0b0b0b;box-shadow:0 0 0 1px #333,0 30px 80px -30px rgba(0,0,0,.8)}
+.frame.desk{border-radius:10px;overflow:hidden}
+.frame iframe{display:block;border:0;width:100%;height:100%;background:#fff}
+.frame.mob iframe{border-radius:32px}
+.frame.tab iframe{border-radius:14px}
+.vinfo{position:absolute;left:16px;bottom:12px;font:500 12px/1 var(--body);color:#8d8488}
+.nomob{display:none}
+@media (max-width:700px){.vbar .lab{display:none}.nomob{display:inline}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap"><img src="/p/d/assets/logo-trim.png" alt="MS LAB Koolituskeskus" width="83" height="32"><span class="t">Disainisuunad</span><span class="d">29.09.2026</span></div></header>
+
+<main>
+<section class="hero"><div class="wrap">
+  <p class="eyebrow">Tere, Maria!</p>
+  <h1>Vali oma veebilehe suund.</h1>
+  <p class="lead">Siin on kõik disainisuunad ühes kohas. Iga suund on klikitav prototüüp — saad lehtedel ringi liikuda, filtreid proovida ja vaadata, kuidas leht näeb välja arvutis, tahvlis ja telefonis.</p>
+  <div class="how">
+    <div><b>01</b>Vajuta „Vaata“ — suund avaneb eelvaates. Üleval saad valida Arvuti, Tahvel või Telefon.</div>
+    <div><b>02</b>Liigu lehtedel nagu päris lehel. Kiirlingid viivad otse koolituste, kalendri, praktika ja õppija vaatesse. „% Kampaania“ näitab sooduspakkumise akent.</div>
+    <div><b>03</b>Kirjuta, milline suund meeldib — või mis osa millisest. Suundi saab ka kombineerida.</div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <p class="eyebrow">Neli suunda</p>
+  <h2>Disainisuunad</h2>
+  <div class="dirs" id="dirs"></div>
+</div></section>
+
+
+<section><div class="wrap">
+  <p class="eyebrow">Sinu küsimused</p>
+  <h2>Vastused sinu tagasisidele</h2>
+  <div class="qa"><div><h3>Kas menüü ja logo värv muutub vastavalt bänneri taustale?</h3><p>Jah. Päris lehel märgid igale bännerile töölaual „hele“ või „tume“ ning menüü, logo ja nupud muutuvad vastavalt. See on kindlam kui pildi automaatne tuvastamine. Proovi suundades A ja D.</p></div><div><h3>Kas saan MINI ja MAXI paketi sisu ise muuta?</h3><p>Jah, oma töölaualt — punkte saab lisada, muuta ja eemaldada. Proovi: D → Admin → Praktikapaketid, või B → Admin.</p></div><div><h3>Kuidas näeb õpilase vaade välja, kui tal on mitu koolitust?</h3><p>Kõik ostetud koolitused on ühes vaates eraldi kaartidena — igaühel oma edenemine, kontaktpäev ja järgmine samm. Vaata D, B või C → Õppija.</p></div><div><h3>Kas saan koolitustele ise märgiseid lisada?</h3><p>Jah: vali valmis silt („Uus“, „Populaarne“, „Bestseller“ …) või kirjuta oma, vali värv ja salvesta. Arendajat pole vaja. Proovi: D → Admin.</p></div><div><h3>Tunnistus</h3><p>Teeme tööriista, mis loob tunnistuse automaatselt: õpilase nimi sinu tunnistuse kirjas, kuupäev ja tunnistuse number. Selleks on vaja Canva linki või puhast tausta ja kirja faili.</p></div><div><h3>Pisikesed kirjad bänneril olid udused</h3><p>D-s on bänneri kiri suurem. Lõplikus versioonis kasutame teravaid originaalpilte ja logo vektorfaili (SVG).</p></div></div>
+</div></section>
+
+<section><div class="wrap">
+  <p class="eyebrow">Arhiiv</p>
+  <h2>Varasemad versioonid</h2>
+  <p class="lead" style="font-size:17px">Need on eelmised etapid. Nende põhjal on ülal olevad suunad edasi arendatud — vaatamiseks, mitte valimiseks.</p>
+  <div class="arch" id="arch"></div>
+
+  <div class="notes">
+    <div><h3>Mis on näidis</h3><p>Kõik hinnad, kuupäevad, kohtade arvud, arvustused ja õpilaste nimed on näidisandmed. Maksmine, sisselogimine ja admin on ainult eelvaade — päris lehel tulevad need andmebaasist ja sinu töölaualt.</p></div>
+    <div><h3>Pildid</h3><p>Osa pilte on sinu saadetud (Maria, õppematerjal, tunnistus, kingikott), osa on ajutised näidispildid. Telegrami kaudu saadetud fotod on tihendatud — lõpliku lehe jaoks palun originaalfailid.</p></div>
+    <div><h3>Sinu tagasiside on sees</h3><ul><li>Koolituskalendris on igas reas linn</li><li>Praktika selgitus ja praktikaprotokoll</li><li>E-õpe / kontaktõpe / hübriidõpe koos 01–05 sammudega</li><li>Baas- ja täiendkoolituste filter</li><li>Koolituse märgised, mida saad ise lisada</li><li>Mitu koolitust õppija vaates</li></ul></div>
+    <div><h3>Vene keel</h3><p>Prototüübid on eesti keeles. RU nupp on nähtav, lõplik leht tuleb täielikult kakskeelne.</p></div>
+  </div>
+</div></section>
+</main>
+<footer><div class="wrap">MS LAB Koolituskeskus · disaini eelvaade · ei ole avalik veebileht</div></footer>
+
+<div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-label="Disaini eelvaade">
+  <div class="vbar">
+    <div class="grp" id="vDirs" aria-label="Suund"></div>
+    <div class="grp" id="vDev" aria-label="Seade">
+      <button data-dev="desk" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg><span class="lab">Arvuti</span></button>
+      <button data-dev="tab" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="3" width="14" height="18" rx="2"/></svg><span class="lab">Tahvel</span></button>
+      <button data-dev="mob" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="3" width="10" height="18" rx="2"/></svg><span class="lab">Telefon</span></button>
+    </div>
+    <span class="sp"></span>
+    <button class="open" id="vCamp" type="button" style="background:transparent">% Kampaania</button>
+    <a class="open" id="vOpen" target="_blank" rel="noopener">Ava uues aknas ↗</a>
+    <button class="x" id="vClose" aria-label="Sulge eelvaade">×</button>
+  </div>
+  <div class="pages" id="vPages"></div>
+  <div class="stage" id="stage"><div class="frame desk" id="frame"><iframe id="ifr" title="Prototüüp"></iframe></div><span class="vinfo" id="vInfo"></span></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DIRS = [
+    { key:"a", font:"Jost + Manrope (Google Fonts) — sobib eesti ja vene tähtedega", L:"A", name:"Pehme toimetus", src:"Sinu tagasiside põhjal", url:"/p/a/",
+      pts:["Seda suunda nägid 25.09 piltidel — nüüd sinu tagasisidega täiendatud: linn kalendris, praktika selgitus ja protokoll, 01–06 sammud, märgised","Täislaiuses bännerid, menüü ja logo muutuvad heledal ja tumedal pildil","Oma prototüübi riba üleval: vali ekraan ja „Mobiil 390“"],
+      pages:null },
+    { key:"b", font:"Segoe UI (Windowsi süsteemifont) — iPhone’is ja Macis näeb kiri veidi teistsugune välja", L:"B", name:"Õppeteekond", src:"Õppeteekonna rõhuga", url:"/p/b/",
+      pts:["Toimetuslik lillebänner, rahulik ja õhuline","Rõhk õppeteekonnal: vormide selgitused ja sammud koolituste lehel","Admin: märgiste nimed ja värvid, MINI/MAXI sisu, praktikaaruande näidis"],
+      pages:[["Avaleht","#/"],["Koolitused","#/courses"],["Kalender","#/calendar"],["Praktika","#/practice"],["Õppija","#/account"],["Admin","#/admin/experience"]] },
+    { key:"c", font:"Urbanist + Epilogue — vene tähti ei toeta, RU jaoks tuleks font vahetada", L:"C", name:"Kunst pilgus", src:"Julge ja ajakirjalik", url:"/p/c/",
+      pts:["Julge suur kiri ja Maria portree kohe esilehel","Kolm lähimat koolitust otse bänneri all","Õppija vaates kiire vahetus koolituste vahel"],
+      pages:[["Avaleht","#/"],["Koolitused","#/koolitused"],["Kalender","#/koolituskalender"],["Praktika","#/praktika"],["Õppija","#/oppimine"],["Admin","#/admin"]] },
+    { key:"d", font:"Inter Tight + Inter — Apple’i stiilis, sobib eesti ja vene tähtedega", L:"D", name:"Studio", src:"Uus suund", url:"/p/d/", isNew:true,
+      pts:["Apple'i stiilis: äärest ääreni bännerid, mis vahetuvad ise (peatatav), suurem ja loetavam kiri","Sinu saadetud näidete järgi: tume blogikarussell, MINI/MAXI tumedas kastis, KKK ja kontaktivorm; sinu värvipalett ja fotod","Kõik sinu soovid sees: linnad, 01–05 sammud, baas/täiend, praktikaprotokoll, märgiste haldus, 4 koolitust õppija vaates"],
+      pages:[["Avaleht","#/"],["Koolitused","#/koolitused"],["E-õpe","#/koolitused?f=e"],["Koolitus","#/koolitus/kulmumeister"],["Kalender","#/kalender"],["Praktika","#/praktika"],["Blogi","#/uudis/1"],["Õppija","#/oppija"],["Admin","#/admin"]] }
+  ];
+  var ARCH = [
+    { key:"a0", name:"Suund A — 1. versioon", note:"Enne sinu tagasisidet. Suund A on selle edasiarendus.", url:"/p/a0/", pages:null },
+    { key:"b0", name:"Suund B — 1. versioon", note:"Enne õppeteekonna lisamist. Suund B on selle edasiarendus.", url:"/p/b0/", pages:[["Avaleht","#/"],["Koolitused","#/courses"],["Kalender","#/calendar"],["Praktika","#/practice"],["Õppija","#/account"],["Admin","#/admin"]] },
+    { key:"moodboard", name:"Visuaalsed uuringud", note:"Kolm meeleolu: pehme toimetus, raamitud ateljee, süsihall stuudio.", url:"/p/moodboard/", pages:null }
+  ];
+  var ALL = DIRS.concat(ARCH);
+  // How each prototype opens its campaign popup (all same-origin, so we can reach into the iframe).
+  function clickText(doc, t){ var els = doc.querySelectorAll("span,button,a"); for (var i=0;i<els.length;i++) if (els[i].textContent.trim()===t){ els[i].click(); return true; } return false; }
+  function bCamp(w){ if (w.location.hash !== "#/" ) { w.location.hash = "#/"; setTimeout(function(){ var b = w.document.querySelector('[data-action="campaign"]'); b && b.click(); }, 400); } else { var b = w.document.querySelector('[data-action="campaign"]'); b && b.click(); } }
+  var CAMP = { "a": function(w){ clickText(w.document, "Kampaania"); }, "a0": function(w){ clickText(w.document, "Kampaania"); },
+    "b": bCamp, "b0": bCamp, "c": function(w){ w.openCampaign && w.openCampaign(); }, "d": function(w){ w.openCampaign && w.openCampaign(); } };
+  var DEV = { desk:[1440,900], tab:[834,1112], mob:[390,844] };
+  var ext = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+  var $ = function(s){ return document.querySelector(s); };
+
+  $("#dirs").innerHTML = DIRS.map(function(d){
+    return '<article class="dir"><button class="shot" data-view="'+d.key+'" aria-label="Vaata suunda '+d.L+': '+d.name+'"><img src="thumbs/'+d.key+'-d.jpg" alt="" loading="lazy"><span class="ph"><img src="thumbs/'+d.key+'-m.jpg" alt="" loading="lazy"></span><span class="letter">'+d.L+'</span>'+(d.isNew?'<span class="new">Uus</span>':'')+'</button>'+
+      '<div class="body"><span class="src">'+d.src+'</span><h3>'+d.L+' · '+d.name+'</h3><ul>'+d.pts.map(function(p){return '<li>'+p+'</li>';}).join("")+'</ul>'+(d.font?'<p class="font"><b>Kiri:</b> '+d.font+'</p>':'')+
+      '<div class="acts"><button class="btn" data-view="'+d.key+'">Vaata</button><a class="btn g" href="'+d.url+'" target="_blank" rel="noopener">Ava uues aknas '+ext+'</a></div></div></article>';
+  }).join("");
+  $("#arch").innerHTML = ARCH.map(function(d){
+    return '<button class="ar" data-view="'+d.key+'"><img src="thumbs/'+d.key+'-d.jpg" alt="" loading="lazy"><div><b>'+d.name+'</b><span>'+d.note+'</span></div></button>';
+  }).join("");
+
+  var viewer = $("#viewer"), frame = $("#frame"), ifr = $("#ifr"), stage = $("#stage");
+  var cur = null, dev = "desk", lastFocus = null;
+  function find(k){ for (var i=0;i<ALL.length;i++) if (ALL[i].key===k) return ALL[i]; return DIRS[0]; }
+  function fit(){
+    // On a real phone the phone view needs no bezel: fill the screen at true width.
+    var bare = dev==="mob" && window.innerWidth <= 500;
+    stage.style.padding = bare ? "0" : "";
+    if (bare){
+      frame.className = "frame bare"; frame.style.transform = "none";
+      frame.style.width = stage.clientWidth+"px"; frame.style.height = stage.clientHeight+"px";
+      $("#vInfo").textContent = ""; return;
+    }
+    var s = DEV[dev], bw = dev==="desk"?0:(dev==="tab"?28:24);
+    var W = s[0]+bw, H = s[1]+bw;
+    var aw = stage.clientWidth-32, ah = stage.clientHeight-32;
+    var sc = Math.min(1, aw/W, dev==="desk"?1:ah/H);
+    var h = dev==="desk" ? Math.max(s[1], (ah)/sc) : H;
+    frame.style.width = W+"px"; frame.style.height = h+"px";
+    frame.style.transform = "scale("+sc+")";
+    frame.className = "frame "+dev;
+    $("#vInfo").textContent = s[0]+" px"+(sc<1?" · vähendatud "+Math.round(sc*100)+"%":"");
+  }
+  function hashState(){ history.replaceState(null,"","#vaade="+cur.key+"&seade="+dev); }
+  function show(k, d, page, fbId){
+    cur = find(k); if (d) dev = d;
+    $("#vDirs").innerHTML = DIRS.map(function(x){ return '<button data-k="'+x.key+'" aria-pressed="'+(x.key===cur.key)+'">'+x.L+'<span class="lab"> · '+x.name+'</span></button>'; }).join("") +
+      (DIRS.indexOf(cur)<0 ? '<button aria-pressed="true">'+cur.name+'</button>' : '');
+    [].forEach.call(document.querySelectorAll("#vDirs [data-k]"), function(b){ b.onclick = function(){ show(b.dataset.k); }; });
+    [].forEach.call(document.querySelectorAll("#vDev button"), function(b){ b.setAttribute("aria-pressed", b.dataset.dev===dev); });
+    var pg = $("#vPages");
+    if (cur.pages){ pg.hidden = false; pg.innerHTML = '<span>Lehed</span>'+cur.pages.map(function(p){ return '<button data-h="'+p[1]+'">'+p[0]+'</button>'; }).join("");
+      [].forEach.call(pg.querySelectorAll("button"), function(b){ b.onclick = function(){ try { ifr.contentWindow.location.hash = b.dataset.h; } catch(e){ ifr.src = cur.url + b.dataset.h; } }; }); }
+    else { pg.hidden = true; pg.innerHTML = ""; }
+    var want = cur.url + (fbId ? "?fb=" + fbId : "") + (page || (cur.pages ? "#/" : ""));
+    if (ifr.getAttribute("src") !== want) ifr.src = want;
+    $("#vOpen").href = cur.url;
+    $("#vCamp").hidden = !CAMP[cur.key];
+    if (viewer.hidden){ lastFocus = document.activeElement; viewer.hidden = false; document.body.style.overflow = "hidden"; document.body.classList.add("viewing"); }
+    fit(); hashState();
+  }
+  function close(){ viewer.hidden = true; document.body.style.overflow = ""; document.body.classList.remove("viewing"); ifr.removeAttribute("src"); history.replaceState(null,"",location.pathname); if (lastFocus) lastFocus.focus(); }
+  [].forEach.call(document.querySelectorAll("[data-view]"), function(b){ b.onclick = function(){ show(b.dataset.view, window.innerWidth < 700 ? "mob" : null); }; });
+  [].forEach.call(document.querySelectorAll("#vDev button"), function(b){ b.onclick = function(){ dev = b.dataset.dev; show(cur.key, dev, ""); }; });
+  $("#vClose").onclick = close;
+  $("#vCamp").onclick = function(){ try { CAMP[cur.key](ifr.contentWindow); } catch(e){} };
+  document.addEventListener("keydown", function(e){ if (e.key==="Escape" && !viewer.hidden) close(); });
+  window.addEventListener("resize", function(){ if (!viewer.hidden) fit(); });
+  // #vaade=<dir>&seade=<device>&leht=<route>, plus ?fb=<id> from a comment's "Näita kohta" link.
+  var hp = new URLSearchParams(location.hash.slice(1)), fbId = new URLSearchParams(location.search).get("fb");
+  if (hp.get("vaade")) show(hp.get("vaade"), DEV[hp.get("seade")] ? hp.get("seade") : null, hp.get("leht") || null, fbId && /^[a-z0-9]{6,20}$/.test(fbId) ? fbId : null);
+})();
+</script>
+<script src="/feedback.js?v=3" defer></script>
+</body>
+</html>

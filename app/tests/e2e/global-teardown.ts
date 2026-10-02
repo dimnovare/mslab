@@ -1,4 +1,5 @@
 import { LOCAL_FIXTURES, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, removeSeatFixtures, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { removeLeftoverComments } from "./local-kv";
 
 // Removes the seat fixtures, the rows the form and admin sign-in tests stored, the admin inbox fixtures and the content
 // tests' sessions / course (and restores a course they left changed), and fails the run if any of them was left behind.
@@ -9,4 +10,7 @@ export default async function globalTeardown(): Promise<void> {
   const left = (await removeFormRows()) + (await removeAdminRows()) + (await removeAdminFixtures()) + (await removeEditRows()) + (await restoreLeftoverCourses()) + (await restoreLeftoverRows()) + (await removePostRows());
   await removeSeatFixtures();
   if (left !== 0) throw new Error(`e2e: ${left} rows of the form / sign-in / admin inbox / content tests were left in the database`);
+  // review comments the feedback tests posted to the dev server's local KV (each test deletes its own)
+  const comments = await removeLeftoverComments();
+  if (comments !== 0) throw new Error(`e2e: ${comments} review comments of the feedback tests were left in the local KV`);
 }
