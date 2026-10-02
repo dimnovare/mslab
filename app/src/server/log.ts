@@ -35,3 +35,8 @@ export function errorSummary(e: unknown): string {
 export function logFailure(where: string, e: unknown): void {
   console.error(`${where}: ${errorSummary(e)}`);
 }
+
+/** console.error with a fixed message and nothing else: for a state that is not an error object, such as missing configuration. */
+export function logNote(message: string): void {
+  console.error(message);
+}

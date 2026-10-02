@@ -52,3 +52,6 @@ next-env.d.ts
 /playwright-report/
 # the visual suite's screenshots (npm run visual)
 /visual-shots/
+
+# uploaded images of local development (src/server/media-local.ts)
+/.media-local/

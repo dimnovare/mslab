@@ -1,7 +1,8 @@
-// Uploaded images in the R2 bucket `mslab-media` (binding MEDIA). The admin's browser shrinks and re-encodes every image
-// before it is sent (components/admin/ImageUpload.tsx), but the server trusts none of that: putImage checks the declared
-// type, the size and the file's first bytes itself. Keys are img/<random uuid>.<ext>, never the visitor's file name, and
-// /media serves nothing else (isMediaKey).
+// Uploaded images, kept in a MediaStore: the Cloudflare R2 bucket through its S3 API (server/r2.ts), or a folder in
+// development (server/media-local.ts); server/media-store.ts picks one. The admin's browser shrinks and re-encodes every
+// image before it is sent (components/admin/ImageUpload.tsx), but the server trusts none of that: putImage checks the
+// declared type, the size and the file's first bytes itself. Keys are img/<random uuid>.<ext>, never the visitor's file
+// name, and /media serves nothing else (isMediaKey).
 
 /** Largest upload accepted (bytes). The browser sends images of at most 2400 px, far below this. */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -20,10 +21,24 @@ export class UploadError extends Error {
   }
 }
 
-/** The part of the R2 binding putImage uses (tests pass an in-memory fake). */
-export type ImageBucket = {
-  put(key: string, value: ArrayBuffer, options: { httpMetadata: { contentType: string } }): Promise<unknown>;
-};
+/**
+ * What a store hands back for a key. `contentType` is the type the object was stored with (null: it has none) and
+ * `etag` the store's tag for its bytes. A store that does not know them may leave them out: serveMedia then goes by the
+ * key's extension and sends no ETag.
+ */
+export type MediaObject = { body: ReadableStream | ArrayBuffer; contentType?: string | null; etag?: string | null };
+
+/** The reading half of a store: all /media needs. */
+export type MediaSource = { get(key: string): Promise<MediaObject | null> };
+
+/**
+ * Where images are kept. `put` stores the bytes under the key with their content type (a second put of a key replaces
+ * the first); `get` is null when there is no such key, and throws when the store cannot be reached.
+ */
+export type MediaStore = MediaSource & { put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void> };
+
+/** A store with nothing in it: /media answers 404 for every key (production without R2 variables). */
+export const NO_MEDIA: MediaSource = { get: async () => null };
 
 const MEDIA_KEY = /^img\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/;
 
@@ -54,11 +69,11 @@ export function hasImageSignature(type: ImageType, head: Uint8Array): boolean {
 const isImageType = (type: string): type is ImageType => Object.hasOwn(IMAGE_TYPES, type);
 
 /**
- * Stores an uploaded image in R2 and returns its key (img/<uuid>.<ext>). Throws UploadError when the declared type is
- * not JPEG/PNG/WebP, the file is empty or over 8 MB, or its first bytes are not that type. The content type is kept in
- * the object's httpMetadata, so /media answers with it.
+ * Stores an uploaded image in the store and returns its key (img/<uuid>.<ext>). Throws UploadError when the declared type
+ * is not JPEG/PNG/WebP, the file is empty or over 8 MB, or its first bytes are not that type; whatever the store throws
+ * is the store's error. The content type is kept with the object, so /media answers with it.
  */
-export async function putImage(env: { MEDIA: ImageBucket }, file: File): Promise<{ key: string }> {
+export async function putImage(store: MediaStore, file: File): Promise<{ key: string }> {
   const type = file.type;
   if (!isImageType(type)) throw new UploadError("type");
   if (file.size === 0) throw new UploadError("empty");
@@ -66,16 +81,11 @@ export async function putImage(env: { MEDIA: ImageBucket }, file: File): Promise
   const bytes = await file.arrayBuffer();
   if (!hasImageSignature(type, new Uint8Array(bytes, 0, Math.min(16, bytes.byteLength)))) throw new UploadError("content");
   const key = `img/${crypto.randomUUID()}.${IMAGE_TYPES[type]}`;
-  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: type } });
+  await store.put(key, bytes, type);
   return { key };
 }
 
 // ---------- GET /media/<key> ----------
-
-/** The part of the R2 binding serveMedia uses. */
-export type MediaSource = {
-  get(key: string): Promise<{ body: ReadableStream; httpEtag: string; httpMetadata?: { contentType?: string } } | null>;
-};
 
 /** A key never changes its bytes (a new upload gets a new key), so browsers and the edge may keep it for a year. */
 export const MEDIA_CACHE = "public, max-age=31536000, immutable";
@@ -87,17 +97,17 @@ const notFound = () => new Response("Not found", { status: 404, headers: { "cont
  * the stored image type (or the one of the extension when the stored one is not an image type we allow), nosniff, and
  * the immutable cache header.
  */
-export async function serveMedia(bucket: MediaSource, key: string): Promise<Response> {
+export async function serveMedia(store: MediaSource, key: string): Promise<Response> {
   if (!isMediaKey(key)) return notFound();
-  const object = await bucket.get(key);
+  const object = await store.get(key);
   if (!object) return notFound();
-  const stored = object.httpMetadata?.contentType ?? "";
+  const stored = object.contentType ?? "";
   const contentType = isImageType(stored) && stored === contentTypeOfKey(key) ? stored : contentTypeOfKey(key);
   return new Response(object.body, {
     headers: {
       "content-type": contentType,
       "cache-control": MEDIA_CACHE,
-      etag: object.httpEtag,
+      ...(object.etag ? { etag: object.etag } : {}),
       "x-content-type-options": "nosniff",
       // An image is only ever shown inside our pages; this keeps a stray SVG-like payload from running as a document.
       "content-security-policy": "default-src 'none'; sandbox",

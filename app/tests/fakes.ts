@@ -42,3 +42,27 @@ export function stubFetch(respond: (url: string, init: RequestInit | undefined) 
   vi.stubGlobal("fetch", fn);
   return { calls, fn, restore: () => vi.unstubAllGlobals() };
 }
+
+/** One object of fakeMediaStore. */
+export type FakeMedia = { bytes: Uint8Array; contentType: string | null };
+
+/**
+ * An in-memory MediaStore (server/media.ts) that remembers what was put and which keys were asked for. `initial` objects
+ * (bytes as a number list) are there from the start.
+ */
+export function fakeMediaStore(initial: Record<string, { bytes: number[]; contentType?: string }> = {}) {
+  const objects = new Map<string, FakeMedia>(Object.entries(initial).map(([key, o]) => [key, { bytes: new Uint8Array(o.bytes), contentType: o.contentType ?? null }]));
+  const requested: string[] = [];
+  return {
+    objects,
+    requested,
+    async put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void> {
+      objects.set(key, { bytes: new Uint8Array(bytes.slice(0)), contentType });
+    },
+    async get(key: string) {
+      requested.push(key);
+      const o = objects.get(key);
+      return o ? { body: new Blob([o.bytes as BlobPart]).stream(), contentType: o.contentType, etag: '"e1"' } : null;
+    },
+  };
+}
