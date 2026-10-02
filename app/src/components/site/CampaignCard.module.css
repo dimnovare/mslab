@@ -45,7 +45,9 @@
   padding-right: 36px;
   font: 400 clamp(28px, 3vw, 42px) / 1.08 var(--font-display);
   letter-spacing: -0.02em;
-  text-wrap: balance;
+  /* "pretty", not "balance": balancing evened the lines out by breaking inside a name ("−15% Lash / Lift BOTOX /
+     koolitusele"); filling each line keeps D's "−15% Lash Lift / BOTOX / koolitusele" and only avoids a lone last word (N6) */
+  text-wrap: pretty;
   overflow-wrap: anywhere;
 }
 

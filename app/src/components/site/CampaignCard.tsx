@@ -4,12 +4,13 @@ import type { CampaignView } from "@/domain/campaign";
 import { linkFor } from "@/domain/site-editor";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
+import { Icon } from "./Icon";
 import ui from "./ui.module.css";
 import styles from "./CampaignCard.module.css";
 
 /**
  * The campaign popup's card (prototype D `campHtml`, Maria C37/C38): picture, kicker, Jost title, text, the code in a
- * dashed pill and the button ("Leia enda koolitus", M4) — without D's "Mitte praegu" (M3). Presentational only: the
+ * dashed pill and the button ("Leia enda koolitus", M4; B's dark pill with →) — without D's "Mitte praegu" (M3). Presentational only: the
  * dialog around it (when it opens, closing, focus) is the popup's own; the admin shows this card as its live preview.
  * Two columns when the card has room (container query), picture on top otherwise (D's phone sheet).
  * `codeAction`: the copy button next to the code; `close`: the close button in the corner. The button's link is made
@@ -39,8 +40,10 @@ export function CampaignCard({ c, locale, titleId, codeAction, close }: { c: Cam
             </div>
           )}
           <div className={styles.actions}>
-            <Link className={ui.btn} href={cta}>
+            {/* B's primary dark pill with the arrow, as the hero's first button (C40/C41) */}
+            <Link className={ui.btn} href={cta} data-campaign-cta="">
               {c.ctaLabel}
+              <Icon name="arrow" />
             </Link>
           </div>
         </div>

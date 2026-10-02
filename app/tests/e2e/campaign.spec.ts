@@ -91,6 +91,12 @@ test.describe("the dialog", () => {
     await expect(card.locator("[data-campaign-code]")).toHaveText("TALV15");
     await expect(p.getByRole("link", { name: "Leia enda koolitus" })).toHaveAttribute("href", "/koolitused/lash-lift-botox");
     await expect(p.getByRole("button")).toHaveText(["", "Kopeeri"]); // ✕ (an icon) and Kopeeri: nothing else
+    // C40/C41: B's primary dark pill with the → arrow, the same button as the hero's first one
+    const button = p.locator("[data-campaign-cta]");
+    await expect(button.locator("svg")).toHaveCount(1);
+    const look = (l: Locator) => l.evaluate((e) => { const c = getComputedStyle(e); return { radius: c.borderRadius, height: c.minHeight, padding: c.padding, font: c.font, gap: c.gap }; });
+    expect(await look(button)).toEqual(await look(page.locator("[data-hero] a").first()));
+    expect(await button.evaluate((e) => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color])).toEqual(["rgb(34, 34, 34)", "rgb(255, 255, 255)"]);
     await expect(page.getByText("Mitte praegu")).toHaveCount(0);
 
     const close = p.getByRole("button", { name: "Sulge" });
@@ -254,9 +260,9 @@ test.describe("short delay", () => {
     await expect(popup(page)).toBeVisible();
   });
 
-  test("no sideways scrolling at 390, 834, 1440 and 2560; the picture beside the text when there is room; controls ≥ 44 px", async ({ page, isMobile }) => {
+  test("no sideways scrolling at 360–2560; the picture beside the text when there is room; controls ≥ 44 px; Lash Lift unbroken", async ({ page, isMobile }) => {
     test.skip(isMobile, "the desktop project sets each width");
-    for (const [w, h] of [[390, 844], [834, 1112], [1440, 900], [2560, 1440]] as const) {
+    for (const [w, h] of [[360, 740], [390, 844], [834, 1112], [1024, 768], [1280, 800], [1440, 900], [2560, 1440]] as const) {
       await page.setViewportSize({ width: w, height: h });
       await page.goto("/");
       const p = popup(page);
@@ -271,6 +277,16 @@ test.describe("short delay", () => {
         expect(b.width, `${w}: ${await el.textContent()}`).toBeGreaterThanOrEqual(44);
         expect(b.x + b.width, `${w}: inside the window`).toBeLessThanOrEqual(w);
       }
+      // N6: the title never breaks inside "Lash Lift" (D: "−15% Lash Lift / BOTOX / koolitusele")
+      const lineOf = (word: string) =>
+        p.getByRole("heading", { level: 2 }).evaluate((h, word) => {
+          const range = document.createRange();
+          const at = h.textContent!.indexOf(word);
+          range.setStart(h.firstChild!, at);
+          range.setEnd(h.firstChild!, at + word.length);
+          return Math.round(range.getClientRects()[0].top);
+        }, word);
+      expect(await lineOf("Lift"), `${w}: Lash Lift on one line`).toBe(await lineOf("Lash"));
       const photo = (await p.locator("[data-campaign-card] img").boundingBox())!;
       const title = (await p.getByRole("heading", { level: 2 }).boundingBox())!;
       const box = (await panel.boundingBox())!;
