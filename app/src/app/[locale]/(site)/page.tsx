@@ -39,7 +39,8 @@ type Props = { params: Promise<{ locale: string }>; searchParams: Promise<Record
 export async function generateMetadata({ params }: Pick<Props, "params">): Promise<Metadata> {
   const { locale } = await params;
   if (!isLocale(locale)) return {};
-  return shareMetadata(locale, "/");
+  const d = getDict(locale);
+  return shareMetadata(locale, { path: "/", title: d.meta.title, description: d.meta.description });
 }
 
 /**

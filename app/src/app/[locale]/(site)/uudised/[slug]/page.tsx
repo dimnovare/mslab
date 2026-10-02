@@ -16,6 +16,7 @@ import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "../news.module.css";
+import { shareMetadata } from "@/server/share-meta";
 
 type Props = { params: Promise<{ locale: string; slug: string }> };
 
@@ -34,7 +35,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = await loadPost(slug);
   if (!post) return {};
   const d = getDict(locale);
-  return { title: `${pick(post.title, locale)} — ${d.common.siteName}`, description: pick(post.excerpt, locale) };
+  const title = pick(post.title, locale);
+  const description = pick(post.excerpt, locale);
+  // the post's own link preview: its title, excerpt and cover
+  const share = await shareMetadata(locale, { path: `/uudised/${post.slug}`, title, description, image: mediaUrl(post.coverKey) || undefined });
+  return { title: `${title} — ${d.common.siteName}`, description, ...share };
 }
 
 /**

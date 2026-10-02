@@ -32,6 +32,7 @@ import { getDict, isLocale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import styles from "./course.module.css";
 import { upcomingFrom } from "@/domain/calendar";
+import { shareMetadata } from "@/server/share-meta";
 
 type Props = {
   params: Promise<{ locale: string; slug: string }>;
@@ -50,7 +51,11 @@ export async function generateMetadata({ params }: Pick<Props, "params">): Promi
   const course = await loadCourse(slug);
   if (!course) return {};
   const d = getDict(locale);
-  return { title: `${pick(course.title, locale)} — ${d.common.siteName}`, description: pick(course.summary, locale) };
+  const title = pick(course.title, locale);
+  const description = pick(course.summary, locale);
+  // the course's own link preview ("Jaga koolitust"): its title, summary and first picture
+  const share = await shareMetadata(locale, { path: `/koolitused/${course.slug}`, title, description, image: mediaUrl(course.images[0]?.key ?? "") || undefined });
+  return { title: `${title} — ${d.common.siteName}`, description, ...share };
 }
 
 /**

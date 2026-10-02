@@ -64,12 +64,12 @@ test.describe("noindex on every kind of answer (item 16)", () => {
     const groups = text.split(/\n\s*\n/).map((g) => g.replace(/^#.*$/gm, "").trim()).filter(Boolean);
     const all = groups.find((g) => /^User-agent:\s*\*$/im.test(g));
     expect(all, "a group for every other robot").toMatch(/^Disallow:\s*\/\s*$/im);
-    const PREVIEW = /^(facebookexternalhit|Facebot|Twitterbot|LinkedInBot|TelegramBot|WhatsApp|Slackbot-LinkExpanding|Slackbot|Discordbot|Applebot|SkypeUriPreview|vkShare|Pinterestbot|redditbot)$/i;
+    const PREVIEW = /^(facebookexternalhit|Facebot|Twitterbot|LinkedInBot|TelegramBot|WhatsApp|Slackbot-LinkExpanding|Slackbot|Discordbot|SkypeUriPreview|vkShare|Pinterestbot|redditbot)$/i;
     for (const g of groups.filter((x) => x !== all)) {
       const agents = [...g.matchAll(/^User-agent:\s*(.+)$/gim)].map((m) => m[1].trim());
       for (const a of agents) expect(a, "only link-preview bots are allowed in").toMatch(PREVIEW);
     }
-    expect(text).not.toMatch(/Googlebot|bingbot|Yandex/i);
+    expect(text).not.toMatch(/Googlebot|bingbot|Yandex|Applebot/i); // search crawlers (Applebot feeds Siri / Spotlight search)
   });
 });
 
@@ -96,6 +96,39 @@ test.describe("link preview of the home page (item 14)", () => {
       expect(await meta("og:image:alt"), path).toBeTruthy();
       expect(await meta("twitter:card")).toBe("summary_large_image");
       expect(new URL((await meta("twitter:image"))!).pathname).toBe("/og.jpg");
+    }
+  });
+
+  test("a course and a post preview themselves; other pages name the site only, never the home page's title (fix round 1)", async ({ page }) => {
+    const meta = (key: string) => page.locator(`meta[property="${key}"], meta[name="${key}"]`).first().getAttribute("content");
+    const count = (key: string) => page.locator(`meta[property="${key}"], meta[name="${key}"]`).count();
+    const home = "MS LAB Koolituskeskus — Brow & Lash Academy";
+    for (const [path, title, description, image] of [
+      ["/koolitused/kulmumeistri-baaskoolitus", "Kulmumeistri baaskoolitus", "Tugev vundament sinu teekonnale kulmumeistrina.", "/seed/brow-editorial.jpg"],
+      ["/uudised/kuidas-valida-endale-sobiv-kulmukoolitus", "Kuidas valida endale sobiv kulmukoolitus?", "Baas- või täiendkoolitus, e-õpe või kontaktpäev — lühike juhend, kust alustada.", "/seed/brow-editorial.jpg"],
+    ] as const) {
+      await page.goto(path);
+      expect(await meta("og:title"), path).toBe(title);
+      expect(await meta("og:description"), path).toBe(description);
+      expect(await meta("twitter:title"), path).toBe(title);
+      expect(await meta("twitter:description"), path).toBe(description);
+      expect(new URL((await meta("og:url"))!).pathname, path).toBe(path);
+      expect(new URL((await meta("og:image"))!).pathname, path).toBe(image);
+      expect(new URL((await meta("twitter:image"))!).pathname, path).toBe(image);
+      expect(await meta("og:site_name"), path).toBe("MS LAB Koolituskeskus");
+    }
+    // other pages: the layout adds the site's name, language and picture; Next.js fills in each page's own title and
+    // description (never the home page's)
+    for (const path of ["/praktika", "/koolitused", "/kontakt", "/ru/koolituskalender"]) {
+      await page.goto(path);
+      const own = await page.title();
+      expect(own, path).not.toBe(home);
+      expect(await meta("og:title"), path).toBe(own);
+      expect(await meta("twitter:title"), path).toBe(own);
+      expect(await meta("og:description"), path).toBe(await meta("description"));
+      expect(await count("og:url"), path).toBe(0);
+      expect(new URL((await meta("og:image"))!).pathname, path).toBe("/og.jpg");
+      expect(await meta("og:site_name"), path).toMatch(/^MS LAB/);
     }
   });
 

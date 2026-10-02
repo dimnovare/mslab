@@ -27,9 +27,6 @@ Allow: /
 User-agent: Discordbot
 Allow: /
 
-User-agent: Applebot
-Allow: /
-
 User-agent: SkypeUriPreview
 Allow: /
 
