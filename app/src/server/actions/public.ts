@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { after } from "next/server";
 import { getDb } from "@/db/client";
 import { logFailure } from "../log";
-import { revalidatePublicLater } from "../public-cache";
+import { revalidatePublic } from "../public-cache";
 import { clientIp } from "../ratelimit";
 import { linkBase, requestOrigin } from "../site";
 import {
@@ -42,9 +42,10 @@ async function run(form: FormName, handler: (deps: Deps, formData: FormData) => 
         now: new Date(),
         // Notifications run after the response (the Worker's waitUntil) and never fail or slow the form.
         later: (task) => after(() => task().catch((e) => logFailure(`[forms] ${form}: notification failed`, e))),
-        // a registration or waitlist entry: the calendar and the course page show the session's seats (revalidated after
-        // the answer, so the POST never renders a page)
-        changed: revalidatePublicLater,
+        // a registration or waitlist entry: the calendar and the course page show the session's seats. Their tag rows
+        // are written before the answer (a D1 write, no page render in the POST), so the very next request shows the
+        // new count; once more SETTLE_MS later, after the answer.
+        changed: revalidatePublic,
       };
     },
     handler,

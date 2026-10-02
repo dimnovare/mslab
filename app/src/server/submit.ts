@@ -53,8 +53,11 @@ export type Deps = {
   now: Date;
   /** Runs work after the response has been sent: next/server after() in production, collected and awaited in tests. */
   later: (task: () => Promise<unknown>) => void;
-  /** Told when a stored submission changes what public pages show (the cached pages are revalidated). */
-  changed?: (change: PublicChange) => void;
+  /**
+   * Told when a stored submission changes what public pages show; awaited before the answer, so the very next request
+   * already renders those pages again (writes the tag cache's rows, no page render; public-cache.ts).
+   */
+  changed?: (change: PublicChange) => Promise<void> | void;
 };
 
 export type FormName = "contact" | "subscribe" | "register" | "individual" | "interest" | "practice" | "waitlist";
@@ -209,7 +212,7 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
     if (seatState(session, session.confirmed) === "full") return { result: fail({ session: "full" }) };
 
     await createRegistration(deps.db, { ...data, courseId: course.id, courseSessionId: session.id, kind: "group", preferredPeriod: "", message: "" });
-    deps.changed?.({ kind: "seats", course: course.slug });
+    await deps.changed?.({ kind: "seats", course: course.slug });
     const summary = registrationSummary(
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
       admin(deps),
@@ -281,10 +284,12 @@ export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionRe
       .innerJoin(courses, eq(courseSessions.courseId, courses.id))
       .where(and(eq(courseSessions.id, sessionId), eq(courses.published, true)))
       .limit(1);
-    if (!row || row.session.status !== "scheduled") return { result: fail({ form: "invalid" }) };
+    // As for a registration: a cancelled session or one that has begun takes no waitlist entries (upcomingFrom: the
+    // calendar's own "upcoming", so it never offers the form for such a date).
+    if (!row || row.session.status !== "scheduled" || row.session.startsAt < upcomingFrom(deps.now)) return { result: fail({ form: "invalid" }) };
     const { session, course } = row;
     await storeRequest(deps.db, "waitlist", { session: session.id, course: course.slug, ...data });
-    deps.changed?.({ kind: "seats", course: course.slug });
+    await deps.changed?.({ kind: "seats", course: course.slug });
     const summary = waitlistSummary(
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
       admin(deps),

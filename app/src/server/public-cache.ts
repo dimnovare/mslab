@@ -55,21 +55,12 @@ function job(change: PublicChange): Job | null {
 
 /**
  * Marks the pages that show `change` stale now (before the action answers: the next request renders them), and once
- * more SETTLE_MS later. For admin saves, once the change is stored.
+ * more SETTLE_MS later. For admin saves and the public forms (seat counts), once the change is stored. Only D1 rows
+ * are written: no page is rendered into the action's answer.
  */
 export async function revalidatePublic(change: PublicChange): Promise<void> {
   const j = job(change);
   if (!j) return;
   await j.write();
   after(j.settled);
-}
-
-/** The same, entirely after the answer: for the public forms, whose POST should not wait for it (seat counts). */
-export function revalidatePublicLater(change: PublicChange): void {
-  const j = job(change);
-  if (!j) return;
-  after(async () => {
-    await j.write();
-    await j.settled();
-  });
 }

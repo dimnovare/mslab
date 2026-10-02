@@ -352,6 +352,34 @@ describe("requests", () => {
       expect(await handleWaitlist(deps, form({ session: String(session), name: "T", email: "t@example.com" }))).toEqual({ ok: false, errors: { form: "invalid" } });
     expect(changes).toHaveLength(1); // nothing stored, nothing to revalidate
   });
+
+  test("no waitlist entry for a session that has begun: the same start-time rule as a registration (round 2 item 16)", async () => {
+    // NOW is 13:00 on 1.10 in Tallinn: one session began at 10:00 today, one yesterday, one long ago; one is at 18:00
+    const { deps, changes } = setup();
+    for (const session of [ids.thisMorning, ids.yesterday, ids.past])
+      expect(await handleWaitlist(deps, form({ session: String(session), name: "T", email: "begun@example.com" })), String(session)).toEqual({ ok: false, errors: { form: "invalid" } });
+    expect(await db.select().from(requests).where(sql`${requests.payload}->>'email' = 'begun@example.com'`)).toHaveLength(0);
+    expect(changes).toEqual([]);
+    expect(await handleWaitlist(setup().deps, form({ session: String(ids.thisEvening), name: "T", email: "begun@example.com" }))).toEqual({ ok: true });
+  });
+
+  test("the cached pages are marked stale before the form answers: the next request shows the new seats (round 2 item 22)", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const order: string[] = [];
+    const slowChange = (deps: Deps): Deps => ({
+      ...deps,
+      changed: async (c) => {
+        await new Promise((r) => setTimeout(r, 20)); // the D1 write
+        order.push(`stale:${c.kind}`);
+      },
+    });
+    const registered = handleRegistration(slowChange(setup().deps), group({ session: String(ids.thisEvening), email: "order@example.com" })).then((r) => (order.push("answer"), r));
+    expect(await registered).toEqual({ ok: true });
+    const waitlisted = handleWaitlist(slowChange(setup().deps), form({ session: String(ids.full), name: "T", email: "order@example.com" })).then((r) => (order.push("answer"), r));
+    expect(await waitlisted).toEqual({ ok: true });
+    expect(order).toEqual(["stale:seats", "answer", "stale:seats", "answer"]);
+    await db.delete(registrations).where(eq(registrations.email, "order@example.com"));
+  });
 });
 
 describe("failures are logged without personal data", () => {

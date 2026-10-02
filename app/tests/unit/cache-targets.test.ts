@@ -108,17 +108,17 @@ describe("revalidatePublic", () => {
     expect(db.d1.rows().map((r) => r.revalidatedAt)).toEqual([1_000_000 + SETTLE_MS, 1_000_000 + SETTLE_MS]);
   });
 
-  test("a public form: nothing is written before the answer; both writes run after it", async () => {
+  test("a public form (seats): the rows are in D1 before the answer, so the next request shows the new count; again later", async () => {
     const db = sqliteD1();
-    const { revalidatePublicLater, SETTLE_MS, later } = await load(db);
+    const { revalidatePublic, SETTLE_MS, later } = await load(db);
     vi.useFakeTimers({ now: 2_000_000 });
-    revalidatePublicLater({ kind: "seats", course: "kulmude-lami" });
-    expect(db.d1.rows()).toEqual([]);
-    const run = later[0]();
-    await vi.advanceTimersByTimeAsync(0);
+    await revalidatePublic({ kind: "seats", course: "kulmude-lami" });
     expect(db.d1.rows().map((r) => r.tag)).toEqual(["B1/_N_T_/[locale]/(site)/koolituskalender/page", "B1/_N_T_/et/koolitused/kulmude-lami", "B1/_N_T_/ru/koolitused/kulmude-lami"]);
+    expect(new Set(db.d1.rows().map((r) => r.revalidatedAt))).toEqual(new Set([2_000_000]));
+    expect(later).toHaveLength(1);
+    const settled = later[0]();
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
-    await run;
+    await settled;
     expect(new Set(db.d1.rows().map((r) => r.revalidatedAt))).toEqual(new Set([2_000_000 + SETTLE_MS]));
   });
 
