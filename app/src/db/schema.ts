@@ -198,6 +198,8 @@ export const clientFavourites = pgTable("client_favourites", {
 
 export const mailQuota = pgTable("mail_quota", { day: text("day").primaryKey(), sent: integer("sent").notNull().default(0) });
 
+/** The text key-value store of the forms' rate limits, the review comments and the Telegram chat id (server/kv.ts). `expiresAt` null = never. */
+export const kvEntries = pgTable("kv_entries", { key: text("key").primaryKey(), value: text("value").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }) });
 export const settings = pgTable("settings", { key: text("key").primaryKey(), value: jsonb("value").notNull() });
 // keys: "contact" {email, phone, address, instagram, facebook}, "newsletter" {discountLabel}, "trainer" {portraitKey, name, role: I18n, stats: [{value,label:I18n}]}
 

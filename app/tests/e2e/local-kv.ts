@@ -1,52 +1,47 @@
-import { getPlatformProxy } from "wrangler";
+import postgres from "postgres";
+import { assertLocalDatabases, isLocalDbUrl } from "./local-db";
 
-// The local KV of `next dev` (miniflare, .wrangler/state — never the deployed namespace): the review comment e2e tests
-// remove the comments they post. The comment API has no delete, so this opens the same local store the dev server uses.
+// The KV store of the dev server (the kv_entries table of the LOCAL database, server/kv.ts — never a shared one): the
+// review comment e2e tests remove the comments they post. The comment API has no delete, so this opens the same
+// database the dev server uses.
 
 /** Text every e2e comment starts with, so a run can find the leftovers of an interrupted one. */
 export const E2E_COMMENT = "[e2e-kommentaar]";
 
-async function withLocalKv<T>(fn: (kv: KVNamespace) => Promise<T>): Promise<T> {
-  // the placeholder secrets (wrangler.jsonc secrets.required would be reported missing); no remote bindings (local
-  // persistence only)
-  const { env, dispose } = await getPlatformProxy<{ KV: KVNamespace }>({ envFiles: [".dev.vars.example"], remoteBindings: false });
-  try {
-    return await fn(env.KV);
-  } finally {
-    await dispose();
-  }
-}
+const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/mslab";
 
-async function deleteRecord(kv: KVNamespace, id: string): Promise<boolean> {
-  const key = await kv.get(`id:${id}`);
-  if (key) await kv.delete(key);
-  await kv.delete(`id:${id}`);
-  return !!key;
+async function withLocalKv<T>(fn: (sql: postgres.Sql) => Promise<T>): Promise<T> {
+  if (!isLocalDbUrl(DB_URL)) assertLocalDatabases([{ source: "E2E_DATABASE_URL", url: DB_URL }]);
+  const sql = postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
+  try {
+    return await fn(sql);
+  } finally {
+    await sql.end();
+  }
 }
 
 /** Deletes these comments (record and id index) from the local KV. */
 export function deleteLocalComments(ids: string[]): Promise<void> {
-  return withLocalKv(async (kv) => {
-    for (const id of ids) await deleteRecord(kv, id);
+  return withLocalKv(async (sql) => {
+    for (const id of ids) {
+      await sql`delete from kv_entries where key = (select value from kv_entries where key = ${`id:${id}`})`;
+      await sql`delete from kv_entries where key = ${`id:${id}`}`;
+    }
   });
 }
 
 /** Deletes every e2e comment still in the local KV; returns how many there were. */
 export function removeLeftoverComments(): Promise<number> {
-  return withLocalKv(async (kv) => {
+  return withLocalKv(async (sql) => {
+    const rows = await sql<{ key: string; value: string }[]>`select key, value from kv_entries where key like 'fb:%'`;
     let n = 0;
-    let cursor: string | undefined;
-    do {
-      const page = await kv.list({ prefix: "fb:", cursor });
-      for (const { name } of page.keys) {
-        const rec = await kv.get<{ id?: string; text?: string }>(name, "json");
-        if (!rec?.text?.startsWith(E2E_COMMENT)) continue;
-        await kv.delete(name);
-        if (rec.id) await kv.delete(`id:${rec.id}`);
-        n++;
-      }
-      cursor = page.list_complete ? undefined : page.cursor;
-    } while (cursor);
+    for (const { key, value } of rows) {
+      const rec = JSON.parse(value) as { id?: string; text?: string };
+      if (!rec.text?.startsWith(E2E_COMMENT)) continue;
+      await sql`delete from kv_entries where key = ${key}`;
+      if (rec.id) await sql`delete from kv_entries where key = ${`id:${rec.id}`}`;
+      n++;
+    }
     return n;
   });
 }

@@ -15,6 +15,13 @@
       "when": 1790960705039,
       "tag": "0001_client_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790961341123,
+      "tag": "0002_kv_entries",
+      "breakpoints": true
     }
   ]
 }

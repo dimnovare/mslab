@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { after } from "next/server";
 import { getDb } from "@/db/client";
+import { serverKv } from "@/server/kv";
 import { logFailure } from "@/server/log";
 import { handleLoginRequest } from "@/server/login";
 import { clientIp } from "@/server/ratelimit";
@@ -19,7 +20,7 @@ export async function POST(request: Request): Promise<Response> {
   // A cross-site <form> cannot send application/json (a fetch could, but only after a CORS preflight that fails).
   if (!h.get("content-type")?.toLowerCase().startsWith("application/json")) return json({ ok: false, error: "type" }, 415);
   try {
-    const { env } = getCloudflareContext();
+    const env = { ...getCloudflareContext().env, KV: serverKv() };
     const result = await handleLoginRequest(
       {
         db: getDb(),

@@ -7,7 +7,7 @@ import { expect, submitsForms, test } from "./test";
 // Task 15: the design-review hub (/guide/, /p/<dir>/, /guide/tagasiside/) and its comment API (/api/feedback) inside
 // the app, and the comment widget on the main site's public pages (never in /admin).
 // Against `next dev` there is no ADMIN_KEY: the list accepts the local development key (src/server/review-key.ts), and
-// the comments go to the dev server's local KV (miniflare), from which each test deletes its own again.
+// the comments go to the dev server's KV (the kv_entries table of the local database), from which each test deletes its own again.
 
 type Item = { id: string; dir: string; route?: string; title?: string; device?: string; name?: string; mood?: string; text: string; done: boolean; link: string; el: { label?: string; sel?: string } };
 

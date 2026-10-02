@@ -15,7 +15,7 @@ import { keyMatches } from "./review-key";
 // KV: `fb:<at>:<id>` holds the record (JSON), `id:<id>` the key of the record. Storage is the contract; the Telegram
 // ping is best effort, and the request fails (502) only when both fail. Logs carry no names, texts or addresses.
 
-/** The KV operations the comments use (a Worker KVNamespace satisfies it). */
+/** The KV operations the comments use (server/kv.ts PgKv satisfies it). */
 export type FeedbackKv = TextKv & {
   list(options: { prefix: string; cursor?: string }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
 };

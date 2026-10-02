@@ -1,8 +1,8 @@
-// Fixed-window counter in KV: `limit` accepted submissions per key, the window restarting with each accepted one.
-// KV is eventually consistent, so a burst from several edge locations can pass a little more than `limit`; that is
-// fine for spam control of contact forms (storage stays the source of truth).
+// Fixed-window counter in the KV store (server/kv.ts, Postgres): `limit` accepted submissions per key, the window
+// restarting with each accepted one. The count is read and then written, so a burst of simultaneous requests can pass
+// a little more than `limit`; that is fine for spam control of contact forms (storage stays the source of truth).
 
-/** The part of a KV namespace (text values) the forms use; the Worker's KVNamespace binding satisfies it. */
+/** The part of the KV store (text values) the forms use; server/kv.ts PgKv satisfies it. */
 export type TextKv = {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
