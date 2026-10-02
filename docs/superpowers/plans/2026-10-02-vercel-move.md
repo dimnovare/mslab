@@ -100,7 +100,7 @@ export class PgKv {
 export const serverKv = (): PgKv => new PgKv(getDb());
 ```
 
-Adjust the `FeedbackKv` type in `feedback.ts` if it uses fields `PgKv` lacks; expired rows are swept opportunistically (`delete … where expires_at < now()` on 1 % of `put` calls).
+Adjust the `FeedbackKv` type in `feedback.ts` if it uses fields `PgKv` lacks; expired rows are deleted on every `put` that carries a TTL (partial index on `expires_at`; Dim ruling, Task 1 review).
 
 - [ ] **Step 3:** Swap every `env.KV` use for `serverKv()` (or pass `PgKv` through the existing deps objects — tests already inject fakes); keep `TG_CHAT_KEY` semantics. Run all unit/DB tests; commit `feat(kv): Postgres-backed KV store`.
 
