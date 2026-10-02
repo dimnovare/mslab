@@ -32,7 +32,7 @@ async function untilReady(page: Page, response: Response | null, waitUntil: stri
 }
 
 export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopup; campaignInit: void }>({
-  page: async ({ page }, use) => {
+  page: async ({ page }, provide) => {
     const goto = page.goto.bind(page);
     const reload = page.reload.bind(page);
     page.goto = async (url, options) => {
@@ -45,7 +45,7 @@ export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopu
       await untilReady(page, response, options?.waitUntil);
       return response;
     };
-    await use(page);
+    await provide(page);
   },
   campaignPopup: ["off", { option: true }],
   campaignInit: [
