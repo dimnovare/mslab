@@ -39,6 +39,14 @@ describe("page store", () => {
     expect(frontObjects("/et/koolitused", { ...page, revalidate: false }, 123)!.meta.r).toBe("");
   });
 
+  test("the site's one 404 page per locale is kept with its status (round 2 item 21); a 200 there is not", () => {
+    const notFound = { ...page, meta: { ...page.meta, status: 404 } };
+    expect(frontObjects("/et/leidmata", notFound, 123)!.meta).toMatchObject({ c: "404", s: "123" });
+    expect(frontObjects("/ru/leidmata", notFound, 123)!.meta.c).toBe("404");
+    expect(frontObjects("/et/leidmata", page, 123)).toBeNull();
+    expect(frontObjects("/et/koolitused", page, 123)!.meta).not.toHaveProperty("c");
+  });
+
   test("but not a 404 page, a postponed (PPR) one, one without tags, a page the front does not serve, or another entry kind", () => {
     expect(frontObjects("/et/koolitused/x", { ...page, meta: { ...page.meta, status: 404 } }, 123)).toBeNull();
     expect(frontObjects("/et/koolitused", { ...page, meta: { ...page.meta, postponed: "x" } }, 123)).toBeNull();

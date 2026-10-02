@@ -39,6 +39,30 @@ export function cartPage(pathname: string, search: URLSearchParams): string | nu
   return `/${m[1] ? "ru" : "et"}/ostukorv/${encodeURIComponent(course)}`;
 }
 
+/** The pages of app/[locale]/(site) without their locale (tests/unit/site-routing.test.ts checks them against the app). */
+const STATIC_PAGES = new Set(["", "/kontakt", "/konto", "/koolitaja", "/koolitused", "/koolituskalender", "/ostukorv", "/praktika", "/privaatsus", "/tingimused", "/uudised"]);
+/** Pages with a slug of ours (lowercase letters, digits, dashes); the cart takes whatever ?kursus= says (its own 404). */
+const SLUG_PAGE = /^\/(koolitused|uudised)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const CART_PAGE = /^\/ostukorv\/[^/]+$/;
+
+/**
+ * Every address without a page of its own is served from this one page per locale (app/[locale]/(site)/[...rest] →
+ * not-found.tsx, status 404): rendered once and cached like any page, instead of a render per unknown address (a scan
+ * of /wp-admin, /.env and the like would otherwise cost a render each, and could not fill the cache either).
+ */
+export const NOT_FOUND_SEGMENT = "leidmata";
+
+/** Does `page` ("/et/koolitused/x") name a page of the site? false: it is served from the locale's 404 page. */
+export function isKnownPage(page: string): boolean {
+  const rest = page.replace(/^\/(et|ru)(?=\/|$)/, "");
+  return STATIC_PAGES.has(rest) || SLUG_PAGE.test(rest) || CART_PAGE.test(rest);
+}
+
+/** The 404 page of a locale ("/et/leidmata"). */
+export const notFoundPage = (page: string): string => `/${page.startsWith("/ru") ? "ru" : "et"}/${NOT_FOUND_SEGMENT}`;
+
+export const isNotFoundPage = (page: string): boolean => page === `/et/${NOT_FOUND_SEGMENT}` || page === `/ru/${NOT_FOUND_SEGMENT}`;
+
 export type SiteRoute =
   /** the design-review hub (static files; the middleware serves its index pages under `next dev`) */
   | { kind: "hub" }
@@ -61,7 +85,12 @@ export function routeSitePath(pathname: string, search: URLSearchParams): SiteRo
   if (path !== pathname) return { kind: "redirect", path };
   const cart = cartPage(pathname, search);
   if (cart) return { kind: "page", page: cart, rewritten: true };
-  if (/^\/ru(\/|$)/.test(pathname)) return { kind: "page", page: pathname, rewritten: false }; // app/[locale]=ru directly
+  if (/^\/ru(\/|$)/.test(pathname)) return known(pathname, false); // app/[locale]=ru directly
   if (PASS.test(pathname)) return { kind: "other" };
-  return { kind: "page", page: "/et" + (pathname === "/" ? "" : pathname), rewritten: true };
+  return known("/et" + (pathname === "/" ? "" : pathname), true);
+}
+
+/** A page of the site as it is, or else its locale's 404 page (the address bar keeps the visitor's URL). */
+function known(page: string, rewritten: boolean): SiteRoute {
+  return isKnownPage(page) ? { kind: "page", page, rewritten } : { kind: "page", page: notFoundPage(page), rewritten: true };
 }

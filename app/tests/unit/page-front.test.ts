@@ -41,8 +41,13 @@ describe("which requests the front may answer", () => {
     expect(frontRequest(req("/et/koolitused", { headers: { "x-prerender-revalidate": "id" } }))).toBeNull();
     expect(frontRequest(req("/", { headers: { cookie: "a=1; __prerender_bypass=x" } }))).toBeNull();
     expect(frontRequest(req("/", { headers: { cookie: "__next_preview_data=x" } }))).toBeNull();
-    for (const p of ["/admin", "/admin/koolitused", "/api/feedback", "/media/img/a.jpg", "/_next/static/a.js", "/robots.txt", "/guide/", "/koolitused/", "/et/koolitused", "/KOOLITUSED", "/koolitused/%C3%B5", "/ostukorv?kursus=%C3%B5"])
+    for (const p of ["/admin", "/admin/koolitused", "/api/feedback", "/media/img/a.jpg", "/_next/static/a.js", "/robots.txt", "/guide/", "/koolitused/", "/et/koolitused", "/ostukorv?kursus=%C3%B5"])
       expect(frontRequest(req(p)), p).toBeNull();
+  });
+
+  test("an unknown address asks for its locale's one 404 page (round 2 item 21)", () => {
+    for (const p of ["/KOOLITUSED", "/koolitused/%C3%B5", "/wp-admin", "/.env", "/leidmata"]) expect(frontRequest(req(p))?.page, p).toBe("/et/leidmata");
+    expect(frontRequest(req("/ru/net-takoj"))).toEqual({ page: "/ru/leidmata", rewritten: true, variant: { kind: "html" } });
   });
 
   test("an admin's session cookie does not matter: public pages are the same for everyone", () => {
@@ -184,6 +189,22 @@ describe("servePageFromCache", () => {
     const weak = (await servePageFromCache(req("/koolitused", { headers: { "if-none-match": 'W/"etag-1"' } }), f.env, "B1", NOW))!;
     expect(weak.status).toBe(304); // what a browser sends back
     expect(same.headers.get("cache-control")).toBe(BROWSER_CACHE_CONTROL);
+  });
+
+  test("an unknown address gets its locale's cached 404 page with status 404, never a 304 (round 2 item 21)", async () => {
+    const notFound = { body: "<html>Lehte ei leitud</html>", meta: { ...meta, t: "_N_T_/layout,_N_T_/et/leidmata", c: "404" }, uploaded: NOW - 60_000 };
+    const f = fakes({ "front/B1/et/leidmata#html": notFound });
+    for (const path of ["/wp-admin", "/.env", "/olematu-leht"]) {
+      const res = (await servePageFromCache(req(path), f.env, "B1", NOW))!;
+      expect(res.status, path).toBe(404);
+      expect(await res.text()).toBe("<html>Lehte ei leitud</html>");
+      expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    }
+    const head = (await servePageFromCache(req("/wp-admin", { method: "HEAD" }), f.env, "B1", NOW))!;
+    expect([head.status, head.body]).toEqual([404, null]);
+    const again = (await servePageFromCache(req("/wp-admin", { headers: { "if-none-match": 'W/"etag-1"' } }), f.env, "B1", NOW))!;
+    expect(again.status).toBe(404);
+    expect(f.reads.every((k) => k === "front/B1/et/leidmata#html")).toBe(true); // one object for every unknown address
   });
 
   test("left to OpenNext, with the reason: not stored, revalidated, past its time, no tags, no build id or bindings, a failing call", async () => {

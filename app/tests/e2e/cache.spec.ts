@@ -78,15 +78,31 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
   expect(await (await frontHit(request, "/ostukorv")).text()).not.toBe(cart);
 });
 
-test("admin pages, the API and unknown addresses never come from the page cache", async ({ request }) => {
+test("admin pages and the API never come from the page cache", async ({ request }) => {
   for (const path of ["/admin/login", "/api/feedback"]) {
     const res = await request.get(path, { maxRedirects: 0, failOnStatusCode: false });
     expect(res.headers()["x-page-cache"], `${path}: not a page request`).toBeUndefined();
   }
-  // an unknown address looks like a page: the front finds nothing stored and says so
-  const unknown = await request.get("/olematu-leht", { failOnStatusCode: false });
-  expect(unknown.status()).toBe(404);
-  expect(unknown.headers()["x-page-cache"]).toBe("miss-not-stored");
+});
+
+test("unknown addresses share their locale's one cached 404 page: status 404, noindex, the site's own 404 (round 2 item 21)", async ({ request }) => {
+  for (const [locale, title, paths] of [
+    ["et", "Lehte ei leitud", ["/olematu-leht", "/wp-admin", "/.env", "/koolitused/a/b", `/e2e-${Date.now()}`]],
+    ["ru", "Страница не найдена", ["/ru/net-takoj", "/ru/wp-login.php", `/ru/e2e-${Date.now()}`]],
+  ] as const) {
+    // the first one may render it (once per locale, also after a change made it stale); every other address is then
+    // answered from the same stored page
+    await request.get(paths[0], { failOnStatusCode: false });
+    for (const path of paths) {
+      const res = await request.get(path, { failOnStatusCode: false });
+      expect(res.status(), path).toBe(404);
+      expect(res.headers()["x-page-cache"], `${path} (${locale})`).toBe("front");
+      expect(res.headers()["x-robots-tag"], path).toBe("noindex, nofollow");
+      expect(await res.text(), path).toContain(title);
+      const head = await request.head(path, { failOnStatusCode: false });
+      expect(head.status(), `HEAD ${path}`).toBe(404);
+    }
+  }
 });
 
 test("a registration makes the course page and the calendar render again (seat counts)", async ({ page, request }, info) => {
@@ -111,14 +127,15 @@ test("a registration makes the course page and the calendar render again (seat c
   const answer = await action;
   expect(answer.headers()["x-action-revalidated"], "no revalidation inside the action").toBeUndefined();
   expect((await answer.request().sizes()).responseBodySize, "the action's answer carries no page").toBeLessThan(2000);
-  // revalidated after the answer: the next request renders the page (the front says why), the one after is cached again
+  // revalidated before the answer (round 2 item 22): the very next request renders the page (the front says why), the
+  // one after is cached again
   for (const path of checked) {
-    await expect.poll(async () => (await request.get(path)).headers()["x-page-cache"], { message: path, timeout: 10_000 }).toBe("miss-revalidated");
+    expect((await request.get(path)).headers()["x-page-cache"], path).toBe("miss-revalidated");
     expect((await frontHit(request, path)).headers()["x-page-cache"], path).toBe("front");
   }
 });
 
-test("a cart for a course that does not exist is a 404 that says the cart is empty, and is not stored", async ({ request }) => {
+test("a cart for a course that does not exist is a 404 that says the cart is empty, never served by the front", async ({ request }) => {
   const res = await request.get("/ostukorv?kursus=ei-ole-olemas-e2e");
   expect(res.status()).toBe(404);
   expect(await res.text()).toContain("Ostukorv on tühi");

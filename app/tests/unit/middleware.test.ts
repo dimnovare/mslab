@@ -54,9 +54,9 @@ describe("locale middleware", () => {
       expect(passesThrough(p), p).toBe(true);
   });
 
-  test("paths that only start like a locale are still Estonian pages", () => {
-    expect(rewrittenTo("/russia")).toBe("/et/russia");
-    expect(rewrittenTo("/etude")).toBe("/et/etude");
+  test("paths that only start like a locale are still Estonian pages (the Estonian 404 page: they name no page)", () => {
+    expect(rewrittenTo("/russia")).toBe("/et/leidmata");
+    expect(rewrittenTo("/etude")).toBe("/et/leidmata");
   });
 
   test("the cart of one course is a page of its own, so that it can be cached by its path (Task 17)", () => {
@@ -69,9 +69,19 @@ describe("locale middleware", () => {
     expect(passesThrough("/ru/ostukorv")).toBe(true);
   });
 
-  test("paths that only start like the hub, a static file or the OG image are Estonian pages", () => {
+  test("paths that only start like the hub, a static file or the OG image are Estonian pages (here: the 404 page)", () => {
     for (const p of ["/guidexyz", "/guides", "/p", "/feedback.json", "/feedback.jsx", "/robots.txt.bak", "/og.html", "/og.jpg.html", "/ogx", "/og.svg"])
-      expect(rewrittenTo(p), p).toBe(`/et${p}`);
+      expect(rewrittenTo(p), p).toBe("/et/leidmata");
+  });
+
+  test("every address without a page of its own is served from its locale's one 404 page (round 2 item 21)", () => {
+    for (const p of ["/wp-admin", "/wp-login.php", "/.env", "/xmlrpc.php", "/olematu-leht", "/koolitused/Suur", "/koolitused/a/b", "/uudised/x.php", "/leidmata"])
+      expect(rewrittenTo(p), p).toBe("/et/leidmata");
+    for (const p of ["/ru/net-takoj", "/ru/wp-admin", "/ru/koolitused/a/b"]) expect(rewrittenTo(p), p).toBe("/ru/leidmata");
+    // the pages themselves stay as they are
+    expect(rewrittenTo("/koolitused/kulmumeistri-baaskoolitus")).toBe("/et/koolitused/kulmumeistri-baaskoolitus");
+    expect(rewrittenTo("/uudised/x")).toBe("/et/uudised/x");
+    expect(rewrittenTo("/ru/koolituskalender")).toBeNull(); // /ru/* renders as it is
   });
 });
 
@@ -153,7 +163,7 @@ describe("trailing slash (Next's own redirect is off for the hub: next.config sk
       expect(new URL(location.pathname, "https://mslab.example").origin, from).toBe("https://mslab.example");
     }
     // without a trailing slash or /et there is nothing to redirect: an Estonian page (a 404)
-    expect(rewrittenTo("/%2F%2Fevil.com")).toBe("/et/%2F%2Fevil.com");
+    expect(rewrittenTo("/%2F%2Fevil.com")).toBe("/et/leidmata");
   });
 
   test("canonicalPath: one slash in front, none at the end, no /et prefix", () => {

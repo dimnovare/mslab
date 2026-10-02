@@ -1,6 +1,7 @@
 import type { IncrementalCache } from "@opennextjs/aws/types/overrides.js";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import r2IncrementalCache from "@opennextjs/cloudflare/overrides/incremental-cache/r2-incremental-cache";
+import { isNotFoundPage } from "../lib/site-routing";
 import { frontKey, isFrontPage, type FrontMeta, type FrontVariant } from "../worker/page-front";
 import { requestStartedAt } from "./request-start";
 
@@ -42,20 +43,22 @@ const TAGS_HEADER = "x-next-cache-tags";
 
 /**
  * The front's objects for a page entry ([variant, body] and their shared metadata), or null when the front should not
- * serve it: not a page the front knows, not a complete 200 page, or tags too long for the metadata. `startedAt`: when the
- * rendering request began (the page's date).
+ * serve it: not a page the front knows, not a complete 200 page (the site's 404 page: 404), or tags too long for the
+ * metadata. `startedAt`: when the rendering request began (the page's date).
  */
 export function frontObjects(page: string, value: unknown, startedAt: number): { meta: FrontMeta; objects: [FrontVariant, string][] } | null {
   const v = value as AppPage;
   if (!isFrontPage(page) || v?.type !== "app" || typeof v.html !== "string" || typeof v.rsc !== "string") return null;
-  if ((v.meta?.status ?? 200) !== 200 || v.meta?.postponed) return null;
+  const status = v.meta?.status ?? 200;
+  if (status !== (isNotFoundPage(page) ? 404 : 200) || v.meta?.postponed) return null;
   const headers = { ...(v.meta?.headers ?? {}) };
   const tags = headers[TAGS_HEADER];
   delete headers[TAGS_HEADER];
   if (typeof tags !== "string" || !tags) return null;
   const replay = Object.fromEntries(Object.entries(headers).filter((e): e is [string, string] => typeof e[1] === "string"));
-  const meta = { t: tags, r: typeof v.revalidate === "number" ? String(v.revalidate) : "", h: JSON.stringify(replay), s: String(startedAt) } satisfies FrontMeta;
-  if (meta.t.length + meta.r.length + meta.h.length + meta.s.length > META_MAX) return null;
+  const meta: FrontMeta = { t: tags, r: typeof v.revalidate === "number" ? String(v.revalidate) : "", h: JSON.stringify(replay), s: String(startedAt) };
+  if (status !== 200) meta.c = String(status);
+  if (meta.t.length + meta.r.length + meta.h.length + (meta.s?.length ?? 0) + (meta.c?.length ?? 0) > META_MAX) return null;
   const objects: [FrontVariant, string][] = [
     [{ kind: "html" }, v.html],
     [{ kind: "rsc" }, v.rsc],

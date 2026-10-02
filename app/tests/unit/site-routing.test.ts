@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { routeSitePath } from "@/lib/site-routing";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { isKnownPage, routeSitePath } from "@/lib/site-routing";
 
 // lib/site-routing.ts: the middleware's decisions as plain functions. The Worker's cached-page front reads the page the
 // middleware would render (tests/unit/middleware.test.ts checks the middleware's answers themselves).
@@ -17,7 +19,27 @@ describe("routeSitePath", () => {
     expect(route("/ru/praktika?pakett=MAXI")).toEqual({ kind: "page", page: "/ru/praktika", rewritten: false });
     expect(route("/ostukorv?kursus=x")).toEqual({ kind: "page", page: "/et/ostukorv/x", rewritten: true });
     expect(route("/ru/ostukorv?kursus=x")).toEqual({ kind: "page", page: "/ru/ostukorv/x", rewritten: true });
-    expect(route("/olematu")).toEqual({ kind: "page", page: "/et/olematu", rewritten: true }); // the 404 page, as before
+    // an address without a page of its own: its locale's one 404 page (round 2 item 21)
+    expect(route("/olematu")).toEqual({ kind: "page", page: "/et/leidmata", rewritten: true });
+    expect(route("/ru/olematu")).toEqual({ kind: "page", page: "/ru/leidmata", rewritten: true });
+  });
+
+  test("the known pages are exactly the pages of app/[locale]/(site) (round 2 item 21)", () => {
+    const root = join(process.cwd(), "src/app/[locale]/(site)");
+    const pages: string[] = [];
+    const walk = (dir: string, path: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) walk(join(dir, e.name), `${path}/${e.name}`);
+        else if (e.name === "page.tsx") pages.push(path);
+      }
+    };
+    walk(root, "");
+    expect(pages.sort()).toEqual(
+      ["", "/[...rest]", "/kontakt", "/konto", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
+    );
+    for (const p of pages.filter((x) => !x.includes("["))) expect(isKnownPage(`/et${p}`), p).toBe(true);
+    for (const p of ["/koolitused/x", "/uudised/y-2", "/ostukorv/whatever"]) expect(isKnownPage(`/ru${p}`), p).toBe(true);
+    for (const p of ["/et/leidmata", "/et/koolitused/x/y", "/ru/kontakt/x", "/et/KONTAKT", "/etude", "/et/uudised/Y"]) expect(isKnownPage(p), p).toBe(false);
   });
 
   test("redirects, the hub, the API and everything served as it is", () => {

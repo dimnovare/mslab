@@ -30,6 +30,8 @@ export type FrontMeta = {
   h: string;
   /** when the page's render began (ms): its date for the revalidation check (server/page-store.ts) */
   s?: string;
+  /** the status to answer with when not 200: "404" for the site's 404 page (lib/site-routing.ts NOT_FOUND_SEGMENT) */
+  c?: string;
 };
 
 /** The pages the front serves: our own slugs only (lowercase letters, digits, dashes); anything else goes to OpenNext. */
@@ -147,15 +149,17 @@ export async function frontAnswer(
     headers.set("x-robots-tag", ROBOTS);
     headers.set("x-opennext-cache", "HIT");
     headers.set("x-page-cache", "front");
-    if (notModified(request.headers.get("if-none-match"), etag)) {
+    // the 404 page: the same page for every unknown address, answered with its status (and never as "not modified")
+    const status = meta?.c === "404" ? 404 : 200;
+    if (status === 200 && notModified(request.headers.get("if-none-match"), etag)) {
       await object.body.cancel();
       return { response: new Response(null, { status: 304, headers }) };
     }
     if (request.method === "HEAD") {
       await object.body.cancel();
-      return { response: new Response(null, { status: 200, headers }) };
+      return { response: new Response(null, { status, headers }) };
     }
-    return { response: new Response(object.body, { status: 200, headers }) };
+    return { response: new Response(object.body, { status, headers }) };
   } catch (e) {
     console.error("[page-front] cache read failed, left to OpenNext:", e instanceof Error ? e.message : String(e));
     if (object) await object.body.cancel().catch(() => {});
