@@ -59,6 +59,9 @@ describe("group registration form", () => {
       terms: "required",
     });
   });
+  test("instalment is not a payment choice yet (P14: shown disabled; a forged form is refused)", () => {
+    expect(errors(parseGroupRegistration(form({ ...base, session: "3", payment: "instalment" })))).toEqual({ payment: "required" });
+  });
   test("phone is required", () => {
     expect(errors(parseGroupRegistration(form({ ...base, session: "3", phone: "" })))).toEqual({ phone: "required" });
   });

@@ -270,6 +270,8 @@ export const ru: Dict = {
     paymentLabel: "Оплата",
     payFull: "100% сразу",
     payHalf: "50% при регистрации + 50% в день обучения",
+    payInstalment: "Рассрочка — скоро",
+    payInstalmentNote: "Эта возможность появится позже.",
     preferredPeriod: "Желаемый период или дата",
     preferredPeriodPlaceholder: "Например, вторая половина декабря или 12.12",
     optional: "необязательно",

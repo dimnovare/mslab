@@ -233,6 +233,8 @@ export default async function CoursePage({ params }: Props) {
                   paymentLabel: d.forms.paymentLabel,
                   payFull: d.forms.payFull,
                   payHalf: d.forms.payHalf,
+                  payInstalment: d.forms.payInstalment,
+                  payInstalmentNote: d.forms.payInstalmentNote,
                   modelHelp: d.forms.modelHelp,
                   createAccount: d.forms.createAccount,
                   terms: d.forms.terms,

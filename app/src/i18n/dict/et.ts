@@ -286,6 +286,9 @@ export const et = {
     paymentLabel: "Tasumine",
     payFull: "100% kohe",
     payHalf: "50% registreerimisel + 50% koolituspäeval",
+    // P14: shown on contact courses, disabled (as the e-course's instalment) until the instalment partner arrives
+    payInstalment: "Järelmaks — tulekul",
+    payInstalmentNote: "See võimalus lisandub hiljem.",
     // Individual request, waitlist, cart interest
     preferredPeriod: "Soovitud periood või kuupäev",
     preferredPeriodPlaceholder: "Nt detsembri teine pool või 12.12",

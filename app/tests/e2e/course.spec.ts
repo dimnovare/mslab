@@ -196,6 +196,13 @@ test.describe("contact page", () => {
     const form = page.locator("[data-register-form]");
     await expect(form.getByRole("radio", { name: "100% kohe" })).toBeChecked();
     await expect(form.getByRole("radio", { name: /50% registreerimisel \+ 50% koolituspäeval/ })).toBeVisible();
+    // P14: the third way, instalment, is shown but disabled (as on the e-course) with its "later" note
+    const instalment = form.getByRole("radio", { name: "Järelmaks — tulekul" });
+    await expect(instalment).toBeDisabled();
+    await expect(instalment).toHaveAccessibleDescription("See võimalus lisandub hiljem.");
+    await form.locator("[data-pay-instalment]").click();
+    await expect(instalment).not.toBeChecked();
+    await expect(form.getByRole("radio", { name: "100% kohe" })).toBeChecked();
     await expect(form.getByLabel("Loo mulle kohe konto MS LAB keskkonda")).toBeVisible();
     await expect(form.getByText("Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.")).toBeVisible();
     // Submitting without a date and fields shows errors instead of a success screen, and keeps what was chosen.

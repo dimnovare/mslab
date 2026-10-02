@@ -43,6 +43,8 @@ export type ContactRegisterTexts = {
   paymentLabel: string;
   payFull: string;
   payHalf: string;
+  payInstalment: string;
+  payInstalmentNote: string;
   modelHelp: string;
   createAccount: string;
   terms: string;
@@ -369,6 +371,17 @@ export function ContactRegister({
                     <span className={styles.optionName}>{p === "full" ? t.payFull : t.payHalf}</span>
                   </label>
                 ))}
+                {/* P14: instalment is shown, disabled like the e-course's, until the partner arrives. A disabled radio is
+                    never sent, and the server accepts only "full" and "half". */}
+                <div className={`${styles.option} ${styles.optionDisabled}`} data-pay-instalment="">
+                  <input id={`${id}-instalment`} type="radio" name="payment" value="instalment" disabled checked={false} readOnly aria-describedby={`${id}-instalment-note`} />
+                  <label htmlFor={`${id}-instalment`} className={styles.optionName}>
+                    {t.payInstalment}
+                  </label>
+                  <small id={`${id}-instalment-note`} className={styles.optionNote}>
+                    {t.payInstalmentNote}
+                  </small>
+                </div>
               </div>
             </fieldset>
           )}
