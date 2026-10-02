@@ -6,6 +6,8 @@
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   // mslab.diipsolutions.eu moved here from mslab-guide (the old hub Worker) on 02.10.2026.
   "routes": [{ "pattern": "mslab.diipsolutions.eu", "custom_domain": true }],
+  // and keep the workers.dev address (with routes set, wrangler would switch it off): previews and read-only test runs
+  "workers_dev": true,
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "5004509b7b08431b8a053d9f8fce2335", "localConnectionString": "postgres://postgres:postgres@localhost:5432/mslab" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "mslab-media" }],
   "kv_namespaces": [{ "binding": "KV", "id": "325a989613294fa19c86451afd8f6fa3" }],
