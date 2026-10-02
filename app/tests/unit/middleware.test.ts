@@ -125,6 +125,27 @@ describe("trailing slash (Next's own redirect is off for the hub: next.config sk
     }
   });
 
+  test("encoded slashes and backslashes stay part of a same-origin path (%2F, %5C are not separators)", () => {
+    for (const [from, to] of [
+      ["/%2F%2Fevil.com/", "/%2F%2Fevil.com"],
+      ["/%5C%5Cevil.com/", "/%5C%5Cevil.com"],
+      ["/et/%2F%2Fevil.com/", "/%2F%2Fevil.com"],
+      ["/et/%2F%2Fevil.com", "/%2F%2Fevil.com"],
+    ]) {
+      const res = run(from);
+      expect(res.status, from).toBe(308);
+      const raw = res.headers.get("location")!;
+      const location = new URL(raw);
+      expect(location.origin, from).toBe("http://localhost");
+      expect(location.pathname, from).toBe(to);
+      expect(location.pathname.startsWith("//") || location.pathname.startsWith("/\\"), from).toBe(false);
+      // as a browser resolves the relative Location Next.js sends (path only): still this site
+      expect(new URL(location.pathname, "https://mslab.example").origin, from).toBe("https://mslab.example");
+    }
+    // without a trailing slash or /et there is nothing to redirect: an Estonian page (a 404)
+    expect(rewrittenTo("/%2F%2Fevil.com")).toBe("/et/%2F%2Fevil.com");
+  });
+
   test("canonicalPath: one slash in front, none at the end, no /et prefix", () => {
     expect(canonicalPath("//evil.example/")).toBe("/evil.example");
     expect(canonicalPath("/\\evil.example")).toBe("/evil.example");

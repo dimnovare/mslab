@@ -5,7 +5,8 @@ import { LOCAL_FIXTURES } from "./fixtures";
 // - Every test is its own visitor: the forms allow 5 submissions per 10 minutes per visitor IP (KV rate limit), and
 //   against `next dev` the IP comes from x-forwarded-for, so repeated runs do not hit the limit. On Cloudflare the
 //   edge's cf-connecting-ip wins and this header changes nothing.
-// - Against anything but the local dev server (E2E_BASE_URL + E2E_ALLOW_REMOTE=1), every POST is blocked: a deployment's
+// - Against anything but the local dev server (E2E_BASE_URL + E2E_ALLOW_REMOTE=1), every request but GET and HEAD is
+//   blocked in the browser: a deployment's
 //   database and notifications are real, and tests must never submit to it. Tests that submit call submitsForms()
 //   and are skipped there.
 // - The campaign popup (Task 14) opens on the home page 6 s after it loads and would cover whatever a test does there.
@@ -37,7 +38,8 @@ export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopu
   visitorIp: [
     async ({ context }, use, info) => {
       if (!LOCAL_FIXTURES) {
-        await context.route("**/*", (route) => (route.request().method() === "POST" ? route.abort("blockedbyclient") : route.fallback()));
+        // read-only: only GET and HEAD reach a deployment (no POST, PUT, PATCH, DELETE, …)
+        await context.route("**/*", (route) => (["GET", "HEAD"].includes(route.request().method()) ? route.fallback() : route.abort("blockedbyclient")));
       }
       // the run-unique part first: the server keeps 64 characters of the address, and a key that is the same in every run
       // would collect the rate limit of repeated runs (5 per 10 minutes)
