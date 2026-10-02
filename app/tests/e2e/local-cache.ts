@@ -15,11 +15,14 @@ function databaseId(): string {
   return m[1];
 }
 
-/** Marks every cached page of the local production build stale (nothing to do against `next dev`). */
-export async function revalidateLocalPages(): Promise<void> {
+/**
+ * Marks every cached page of the local production build stale (nothing to do against `next dev`), or only the pages
+ * carrying `tag` (a page's own path tag is "_N_T_" + its path as the app sees it, e.g. "_N_T_/et/koolitaja").
+ */
+export async function revalidateLocalPages(tag = "_N_T_/layout"): Promise<void> {
   if (!PROD_BUILD) return;
   const buildId = readFileSync(".next/BUILD_ID", "utf8").trim();
-  const [row] = tagRows(buildId, ["_N_T_/layout"], Date.now());
+  const [row] = tagRows(buildId, [tag], Date.now());
   const res = await fetch(`${new URL(TARGET).origin}/cdn-cgi/local/explorer/api/d1/database/${databaseId()}/raw`, {
     method: "POST",
     headers: { "content-type": "application/json" },
