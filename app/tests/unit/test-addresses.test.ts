@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 // Guard: no real e-mail address in any tracked file under app/, tools/ or docs/ (the repository is public). Personal
-// addresses are Worker secrets (wrangler.jsonc "secrets"); the tests, local development and the docs use placeholders
-// (.env.example, "Dim's address" / "Maria's address" in prose).
+// addresses are environment variables of the deployment (Vercel project settings), never a file of the repository; the
+// tests, local development and the docs use placeholders (.env.example, "Dim's address" / "Maria's address" in prose).
 //
 // Allowed: addresses at domains reserved for examples (example.com / example.<tld> and their subdomains, the .test,
 // .example, .invalid and .localhost names, RFC 2606 / 6761), GitHub's noreply addresses, and the few public,

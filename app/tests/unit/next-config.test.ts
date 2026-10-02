@@ -52,7 +52,17 @@ describe("next.config.ts headers()", () => {
   });
 
   test("the e2e page cache only when the e2e run's production build asks for it (E2E_PAGE_CACHE)", async () => {
-    expect((await config({ E2E_PAGE_CACHE: undefined })).cacheHandler).toBeUndefined();
-    expect((await config({ E2E_PAGE_CACHE: "/tmp/stale" })).cacheHandler).toMatch(/tests[\\/]e2e[\\/]page-cache\.cjs$/);
+    expect((await config({ E2E_PAGE_CACHE: undefined, VERCEL: undefined })).cacheHandler).toBeUndefined();
+    expect((await config({ E2E_PAGE_CACHE: "/tmp/stale", VERCEL: undefined })).cacheHandler).toMatch(/tests[\\/]e2e[\\/]page-cache\.cjs$/);
+  });
+
+  test("...and never in a Vercel build: VERCEL set switches it off whatever E2E_PAGE_CACHE says", async () => {
+    for (const vercel of ["1", "production"]) {
+      const cfg = await config({ E2E_PAGE_CACHE: "/tmp/stale", VERCEL: vercel });
+      expect(cfg.cacheHandler, `VERCEL=${vercel}`).toBeUndefined();
+      expect(Object.keys(cfg), `VERCEL=${vercel}`).not.toContain("cacheHandler");
+    }
+    // VERCEL set to nothing is not a Vercel build
+    expect((await config({ E2E_PAGE_CACHE: "/tmp/stale", VERCEL: "" })).cacheHandler).toMatch(/page-cache\.cjs$/);
   });
 });

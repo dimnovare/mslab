@@ -5,9 +5,10 @@ import { MEDIA_CSP } from "./src/server/media";
 /**
  * The e2e run's production build (E2E_PROD_BUILD=1, tests/e2e/target.ts) keeps its pages in Next.js's own file cache
  * through a thin wrapper that lets the tests mark every page stale after writing to the database directly
- * (tests/e2e/page-cache.cjs). Only when the e2e run builds and starts the app with E2E_PAGE_CACHE set; never on Vercel.
+ * (tests/e2e/page-cache.cjs). Only when the e2e run builds and starts the app with E2E_PAGE_CACHE set, and never in a
+ * Vercel build (VERCEL is set there), whatever the project's variables say.
  */
-const e2ePageCache = process.env.E2E_PAGE_CACHE ? { cacheHandler: resolve(process.cwd(), "tests/e2e/page-cache.cjs") } : {};
+const e2ePageCache = process.env.E2E_PAGE_CACHE && !process.env.VERCEL ? { cacheHandler: resolve(process.cwd(), "tests/e2e/page-cache.cjs") } : {};
 
 const nextConfig: NextConfig = {
   // Don't let `next dev` write AGENTS.md / CLAUDE.md into the project.

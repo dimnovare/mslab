@@ -24,7 +24,7 @@ export function siteBase(): string {
 /**
  * Link preview tags (Open Graph and the Twitter / X card). Absolute addresses use the site's address (SITE_URL), not
  * the host the page was opened on: a page is rendered once and cached for every host that serves it (the custom domain
- * and workers.dev), so nothing in it may depend on the request.
+ * and the Vercel addresses), so nothing in it may depend on the request.
  *
  * Without `page` (the locale layout, so every public page): the site's name, language, type and the home page picture
  * only; a crawler takes the title and description from the page's own <title> and description. With `page` (the home

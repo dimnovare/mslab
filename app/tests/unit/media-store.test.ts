@@ -13,8 +13,12 @@ const KEY = "img/0f8b6c2e-3d4a-4b5c-8d9e-0a1b2c3d4e5f.jpg";
 
 const NOTES = "__mslabMediaNotes";
 const forgetNotes = () => delete (globalThis as Record<string, unknown>)[NOTES];
-beforeEach(forgetNotes);
+beforeEach(() => {
+  forgetNotes();
+  vi.stubEnv("VERCEL", undefined); // these tests run on a developer machine or in CI, never "on Vercel" unless one says so
+});
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   forgetNotes();
@@ -67,6 +71,33 @@ describe("mediaStore", () => {
     // partly set R2 stays a mistake: no store
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(mediaStore({ ...R2, R2_BUCKET: undefined, MEDIA_LOCAL: "1" }, true)).toBeNull();
+  });
+
+  test("MEDIA_LOCAL=1 is ignored on Vercel (VERCEL is set): no folder on a function, so no store; R2 and development are not affected", async () => {
+    vi.stubEnv("VERCEL", "1");
+    // the same answer as without MEDIA_LOCAL: uploads refused (503 storage), /media 404
+    expect(mediaStore({ ...NONE, MEDIA_LOCAL: "1" }, true)).toBeNull();
+    // R2 still wins, and a development run keeps its folder
+    const fetch = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await mediaStore({ ...R2, MEDIA_LOCAL: "1" }, true)!.get(KEY)).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const dir = await mkdtemp(join(tmpdir(), "mslab-store-"));
+    try {
+      expect(mediaStore({ ...NONE, MEDIA_LOCAL: "1" }, false, dir)).not.toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    // off Vercel (VERCEL unset or empty) MEDIA_LOCAL=1 works as before
+    for (const vercel of [undefined, ""]) {
+      vi.stubEnv("VERCEL", vercel);
+      const local = await mkdtemp(join(tmpdir(), "mslab-store-"));
+      try {
+        expect(mediaStore({ ...NONE, MEDIA_LOCAL: "1" }, true, local), `VERCEL=${vercel}`).not.toBeNull();
+      } finally {
+        await rm(local, { recursive: true, force: true });
+      }
+    }
   });
 
   test("partly set R2 variables are a mistake, not a reason to use the folder: no store, in production and in development", () => {
