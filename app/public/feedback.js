@@ -102,14 +102,36 @@
 
     var mood = null, picked = null, pickedEl = null, sending = false, panel = null, hl = null;
 
+    // The button never covers the host page's own bottom-right UI: a prototype's .sticky-buy bar, and on the main site
+    // anything marked [data-fab-avoid] while it is on screen (the copy/share toast, the newsletter notice, the campaign
+    // sheet). It moves up above the highest of them that shares its corner; re-checked whenever the page changes.
     function liftFab() {
       var sb = document.querySelector(".sticky-buy");
       var lift = sb && sb.offsetHeight && getComputedStyle(sb).display !== "none" ? sb.offsetHeight + 12 : 16;
+      var vh = window.innerHeight, fr = fab.getBoundingClientRect(), right = window.innerWidth - 16, left = right - Math.max(fr.width, 48);
+      [].forEach.call(document.querySelectorAll("[data-fab-avoid]"), function (el) {
+        var r = el.getBoundingClientRect();
+        if (!r.width || !r.height || r.bottom <= 0 || r.top >= vh) return; // not on screen
+        if (r.right <= left || r.left >= right || r.bottom < vh - lift - 48) return; // not in the button's corner
+        lift = Math.max(lift, Math.round(vh - r.top + 12));
+      });
+      lift = Math.min(lift, Math.max(16, vh - 48 - 8)); // the button itself stays on screen
       fab.style.bottom = lift + "px";
       if (panel) panel.style.bottom = lift + 60 + "px";
     }
-    window.addEventListener("resize", liftFab);
+    var liftQueued = false;
+    function queueLift() {
+      if (liftQueued) return;
+      liftQueued = true;
+      requestAnimationFrame(function () { liftQueued = false; liftFab(); });
+    }
+    window.addEventListener("resize", queueLift);
     window.addEventListener("hashchange", function () { setTimeout(liftFab, 300); });
+    document.addEventListener("transitionend", queueLift, true);
+    if (window.MutationObserver)
+      new MutationObserver(function (list) {
+        for (var i = 0; i < list.length; i++) if (!root.contains(list[i].target)) return queueLift();
+      }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "open", "hidden", "data-on", "data-fab-avoid"] });
     setTimeout(liftFab, 600);
 
     function clearMark() { if (hl) { hl.remove(); hl = null; } pickedEl = null; }

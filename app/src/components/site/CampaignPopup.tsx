@@ -203,7 +203,7 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignView; locale: Lo
       }}
     >
       <div className={styles.backdrop} data-campaign-backdrop="" aria-hidden="true" />
-      <div ref={panelRef} className={styles.panel} data-campaign-panel="">
+      <div ref={panelRef} className={styles.panel} data-campaign-panel="" data-fab-avoid="">
         <CampaignCard
           c={c}
           locale={locale}

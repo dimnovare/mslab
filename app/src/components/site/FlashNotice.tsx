@@ -37,7 +37,7 @@ export function FlashNotice({
   return (
     <div className={styles.region} role="status" data-flash-notice={tone}>
       {hydrated && open && (
-        <div className={styles.notice} data-tone={tone}>
+        <div className={styles.notice} data-tone={tone} data-fab-avoid="">
           <span className={styles.mark} aria-hidden="true">
             <Icon name={tone === "ok" ? "check" : "close"} size={16} />
           </span>

@@ -79,7 +79,7 @@ test.describe("comment API", () => {
 test.describe("comment widget on the main site", () => {
   test("is on the public pages, not in /admin", async ({ page }) => {
     await page.goto("/koolitused");
-    await expect(page.locator('script[src="/feedback.js?v=3"]')).toHaveCount(1);
+    await expect(page.locator('script[src="/feedback.js?v=4"]')).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Jäta kommentaar" })).toBeVisible();
     await page.goto("/admin/login");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -174,5 +174,51 @@ test.describe("comment widget on the main site", () => {
       if (ids.length) await deleteLocalComments(ids);
     }
     expect(await commentById(page, ids[0])).toBeUndefined();
+  });
+});
+
+// Task 16 item 11: the comment button moves up so that it never covers the site's own bottom-right messages.
+test.describe("the comment button keeps clear of the site's messages", () => {
+  const fab = (page: Page) => page.getByRole("button", { name: "Jäta kommentaar" });
+  /** The button is entirely above `el` (or beside it): no overlap. */
+  async function clearOf(page: Page, el: import("@playwright/test").Locator) {
+    await expect(el).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [a, b] = [await fab(page).boundingBox(), await el.boundingBox()];
+        if (!a || !b) return "no box";
+        const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+        return overlap ? `overlap: button ${JSON.stringify(a)} message ${JSON.stringify(b)}` : "clear";
+      })
+      .toBe("clear");
+    expect((await fab(page).boundingBox())!.y).toBeGreaterThanOrEqual(0); // still on screen
+  }
+
+  test("above the course page's share toast", async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "share", { value: undefined, configurable: true })); // the toast path
+    await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+    await expect(fab(page)).toBeVisible();
+    await page.getByRole("button", { name: "Jaga koolitust" }).first().click();
+    await clearOf(page, page.locator("[data-fab-avoid][role='status']").filter({ hasText: /\S/ }).first());
+    // and back down once the toast is gone (2.6 s)
+    await expect.poll(async () => (await fab(page).evaluate((e) => getComputedStyle(e).bottom)), { timeout: 6000 }).toBe("16px");
+  });
+
+  test("above the newsletter notice", async ({ page }) => {
+    await page.goto("/?uudiskiri=kinnitatud");
+    await expect(fab(page)).toBeVisible();
+    await clearOf(page, page.locator("[data-flash-notice] [data-fab-avoid]"));
+  });
+
+  test.describe("campaign", () => {
+    test.use({ campaignPopup: 1500 }); // the popup after 1.5 s (test hook), once the widget is on the page
+
+    test("above the campaign sheet on a phone", async ({ page, isMobile }) => {
+      test.skip(!isMobile, "the bottom sheet is the phone layout");
+      await page.goto("/");
+      await expect(fab(page)).toBeVisible();
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+      await clearOf(page, page.locator("[data-campaign-panel]"));
+    });
   });
 });

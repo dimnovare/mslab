@@ -43,7 +43,7 @@ export function ShareButton({ title, t }: { title: string; t: { label: string; c
         <Icon name="up" size={17} />
         {t.label}
       </button>
-      <p className={toast ? `${styles.toast} ${styles.toastShow}` : styles.toast} role="status">
+      <p className={toast ? `${styles.toast} ${styles.toastShow}` : styles.toast} role="status" data-fab-avoid="">
         {toast}
       </p>
     </>
