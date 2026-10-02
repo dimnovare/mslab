@@ -12,6 +12,15 @@ Phase 1 is live as a **prototype** on https://mslab.diipsolutions.eu (Worker `ms
 - [ ] Regenerate `cf-typegen` after the vars change.
 - [ ] Retire the old hub: Worker `mslab-guide`, `site/`, `worker/`, root `wrangler.jsonc` (rollback only; the hub itself now lives in the app).
 
+## 1b. Domain, e-mail and Google (mslab.ee is at Elkdata today: DNS, MX, old site)
+- [ ] Confirm with Maria: does a mailbox on mslab.ee exist (e.g. info@mslab.ee — MX points to Elkdata, but the mail service may not be ordered) and who can log in to Elkdata.
+- [ ] Business Google account with the mslab.ee address as login (owned by Maria, Dim added as user/owner) for Search Console, Business Profile, Analytics if used.
+- [ ] Search Console **now** on the current mslab.ee (Domain property, DNS TXT at Elkdata): collect the old site's indexed URLs and traffic → 301 redirect map from old WordPress URLs to the new pages at launch.
+- [ ] Move mslab.ee DNS to Cloudflare (needed for the Worker custom domain) — copy every mail record first (MX, SPF, DKIM, DMARC) so e-mail keeps working.
+- [ ] Site e-mail on `send.mslab.ee` in Resend (DKIM/SPF/return-path records), separate from the main mailbox. Do not use Resend as Maria's personal SMTP (shared 100/day free quota).
+- [ ] Optional: mailbox in Gmail via forwarding + "Send mail as" through the mailbox host's SMTP.
+- [ ] Analytics: prefer Cloudflare Web Analytics (free, cookieless, no consent banner) over GA4.
+
 ## 2. Stay inside the Free plan (owner rules out paid plans)
 - [ ] Abuse/quota hardening: Turnstile (free) on public forms; a global daily cap on outgoing mail (Resend Free: 100/day); consider D1 counters instead of KV for rate limits (KV Free: 1,000 writes/day, limits fail open when exhausted); one Cloudflare rate-limiting rule or Bot Fight Mode for scanners.
 - [ ] Cache housekeeping: R2 lifecycle rule on `mslab-next-cache` (old builds pile up; e.g. 7 days); stop storing 404 entries except the two `leidmata` pages (junk addresses create R2 writes).
