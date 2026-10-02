@@ -78,6 +78,7 @@ export function entryDate(value: unknown, uploaded: number | undefined): number 
   return typeof started === "number" && Number.isFinite(started) ? started : uploaded;
 }
 
+// Task 4: the page cache bucket goes with the Cloudflare layer (Next.js ISR replaces it)
 const bucket = () => getCloudflareContext().env.NEXT_INC_CACHE_R2_BUCKET as R2Bucket | undefined;
 
 /** Logs a failed copy without its content (keys are page paths, never personal data). */

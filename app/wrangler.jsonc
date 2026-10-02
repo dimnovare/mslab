@@ -28,7 +28,7 @@
     "SITE_URL": "https://mslab.diipsolutions.eu",
     "MAIL_FROM": "MS LAB <info@send.diipsolutions.eu>"
   },
-  // Personal e-mail addresses are Worker secrets, never in the repository (.dev.vars.example says how to set them):
+  // Personal e-mail addresses are Worker secrets, never in the repository (.env.example says how to set them):
   // ADMIN_EMAILS  the sign-in allow-list, comma-separated;
   // ADMIN_NAMES   the greeting name of each admin, "<address>=<name>,…";
   // MARIA_EMAIL   where form notifications go (Dim's address until the mslab.ee launch, then Maria's).

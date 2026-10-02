@@ -1,9 +1,9 @@
 "use server";
 
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { headers } from "next/headers";
 import { after } from "next/server";
 import { getDb } from "@/db/client";
+import { serverEnv } from "../env";
 import { serverKv } from "../kv";
 import { logFailure } from "../log";
 import { revalidatePublic } from "../public-cache";
@@ -32,7 +32,7 @@ async function run(form: FormName, handler: (deps: Deps, formData: FormData) => 
   return runSubmission(
     form,
     async (): Promise<Deps> => {
-      const env = { ...getCloudflareContext().env, KV: serverKv() };
+      const env = { ...serverEnv(), KV: serverKv() };
       const h = await headers();
       return {
         db: getDb(),

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { href } from "@/i18n/href";
 import { getDict, type Locale } from "@/i18n/locales";
+import { serverEnv } from "./env";
 
 /** The link preview picture (public/og.jpg, made from the home page by tools/og-home.cjs). ?v= changes with the file. */
 export const OG_IMAGE = { url: "/og.jpg?v=1", width: 1200, height: 630, type: "image/jpeg" } as const;
@@ -18,13 +18,7 @@ export type SharePage = {
 
 /** The site's own address for absolute links in the page (SITE_URL), without a trailing slash. */
 export function siteBase(): string {
-  let siteUrl = "https://mslab.diipsolutions.eu";
-  try {
-    siteUrl = getCloudflareContext().env.SITE_URL || siteUrl;
-  } catch {
-    // outside a request (build): the default
-  }
-  return siteUrl.replace(/\/+$/, "");
+  return serverEnv().SITE_URL.replace(/\/+$/, "");
 }
 
 /**

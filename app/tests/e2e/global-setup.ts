@@ -35,7 +35,7 @@ export default async function globalSetup(): Promise<void> {
  */
 function refuseMailSecrets(): void {
   const secret = /^\s*(RESEND_API_KEY|TELEGRAM_BOT_TOKEN)\s*=\s*\S/m;
-  for (const file of [".dev.vars", ".env", ".env.local", ".env.development"]) {
+  for (const file of [".dev.vars", ".env", ".env.local", ".env.development", ".env.development.local"]) {
     if (existsSync(file) && secret.test(readFileSync(file, "utf8")))
       throw new Error(`e2e: ${file} sets RESEND_API_KEY or TELEGRAM_BOT_TOKEN — the form tests would send real e-mails / Telegram messages`);
   }

@@ -2,49 +2,45 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import postgres from "postgres";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { perRequest } from "../server/per-request";
+import { serverEnv } from "../server/env";
 import * as schema from "./schema";
 
-/** Query functions take a Db as their first parameter. Production passes the Hyperdrive client; tests pass PGlite. */
+/** Query functions take a Db as their first parameter. The server passes the pool of getDb(); tests pass PGlite. */
 export type Db = PostgresJsDatabase<typeof schema> | PgliteDatabase<typeof schema>;
 /** An open transaction of the Db. */
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /** The database or an open transaction: queries that also run inside a caller's transaction take this. */
 export type Q = Db | Tx;
 
-/** Seconds to wait for a connection, so a slow or unreachable database cannot hang the page (it fails, then shows the error page). */
-const CONNECT_TIMEOUT = 5;
-
 /**
- * `prepare: false`: Hyperdrive caches read queries for 60 s (+15 s stale) and does not invalidate them on writes, so
- * after Maria saves a course the catalogue, the calendar and the editor itself could show the old data for a minute.
- * Hyperdrive does not cache the queries of a postgres.js client without prepared statements (Hyperdrive docs,
- * "Uncached queries"), so every read sees the latest write. The pooling stays. Caching is also turned off on the
- * Hyperdrive configuration itself (`wrangler hyperdrive update <id> --caching-disabled`), so the guarantee does not
- * rest on this option alone.
+ * The pool's settings, in postgres.js seconds.
+ * - max 5: one function instance serves a few requests at a time, and Postgres allows 100 connections by default, shared
+ *   by every instance Vercel has running.
+ * - connect_timeout 5: a slow or unreachable database fails (and shows the error page) instead of hanging the page.
+ * - idle_timeout 20: an idle connection is closed after 20 s, so a quiet site holds no Postgres connection slots, and an
+ *   instance that was paused between requests is unlikely to reuse a socket the proxy has long dropped.
+ * - fetch_types false: the schema has no array or custom column types (jsonb is built in), so the lookup postgres.js
+ *   makes on each new connection would only cost a round trip.
+ * Prepared statements stay on (postgres.js default): the database is reached directly (Railway's TCP proxy), with no
+ * transaction-mode pooler such as PgBouncer in between, which is the one thing that breaks them. If DATABASE_URL ever
+ * points at such a pooler, add `prepare: false`.
  */
-const client = (url: string) => postgres(url, { max: 5, fetch_types: false, connect_timeout: CONNECT_TIMEOUT, prepare: false });
+const POOL = { max: 5, connect_timeout: 5, idle_timeout: 20, fetch_types: false } as const;
 
-// `next dev` is one long-lived Node process: a client per request would keep its sockets open until Postgres
-// refuses new clients ("too many clients already"), so dev reuses a single pool (kept across hot reloads).
-const devGlobal = globalThis as typeof globalThis & { __mslabDevDb?: Db };
+// The pool lives on globalThis, not in a module variable: `next dev` evaluates the module again on every hot reload (a
+// pool each time would keep its sockets open until Postgres refuses new clients, "too many clients already"), and the
+// production build may bundle the module into more than one server chunk.
+const shared = globalThis as typeof globalThis & { __mslabDb?: Db };
 
 /**
- * The client of this Worker request, one per request (server/per-request.ts; not React's cache(), which after a CPU-limit
- * kill handed requests a client that another request had already closed). Hyperdrive pools the real connections.
+ * The database: one postgres.js pool for the whole process, made from DATABASE_URL on first use (so a build that never
+ * queries needs no database). Without DATABASE_URL, production throws an error that names the variable; `next dev` and
+ * the tests use the local database (server/env.ts).
  *
- * The app does not close it: the Workers runtime closes a request's sockets when the request is over (response sent,
- * waitUntil work done), as in Cloudflare's Hyperdrive + postgres.js examples, which never call end(). An explicit end()
- * makes postgres.js reject every later query (CONNECTION_ENDED), and a request's last query may come after its response
- * (OpenNext storing the rendered page, `after()` work).
+ * Nothing closes the pool and nothing is tied to a request: a request's last query may come after its response (the
+ * rendered page being stored, `after()` work), and an end() would make postgres.js reject every later query
+ * (CONNECTION_ENDED). The process ending closes the sockets.
  */
-const requestClient = perRequest((): Db => drizzle(client(getCloudflareContext().env.HYPERDRIVE.connectionString), { schema }));
-
-/** The database: this Worker request's client (production), or the one pool of `next dev`. */
 export function getDb(): Db {
-  if (process.env.NODE_ENV === "development") {
-    return (devGlobal.__mslabDevDb ??= drizzle(client(getCloudflareContext().env.HYPERDRIVE.connectionString), { schema }));
-  }
-  return requestClient();
+  return (shared.__mslabDb ??= drizzle(postgres(serverEnv().DATABASE_URL, POOL), { schema }));
 }

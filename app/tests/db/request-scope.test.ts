@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { makeTestDb } from "./helpers";
 
@@ -10,7 +10,7 @@ vi.mock("react", async (original) => (await import("../lost-react-request")).los
 const state = vi.hoisted(() => ({ db: null as unknown, cookie: undefined as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Host-mslab_admin" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
 vi.mock("@/db/client", () => ({ getDb: () => state.db }));
-vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext: () => ({ env: { ADMIN_EMAILS: "admin@example.test,second.admin@example.com" } }) }));
+vi.stubEnv("ADMIN_EMAILS", "admin@example.test,second.admin@example.com"); // the sign-in allow-list: server/env.ts reads process.env
 
 import { createSession, currentAdminEmail } from "@/server/auth";
 import { runAsRequest } from "@/worker/request-context";
@@ -19,6 +19,7 @@ let db: Db;
 beforeAll(async () => {
   db = await makeTestDb();
 });
+afterAll(() => vi.unstubAllEnvs());
 beforeEach(() => {
   state.db = db;
   state.cookie = undefined;

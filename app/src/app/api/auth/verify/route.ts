@@ -1,7 +1,7 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db/client";
 import { SESSION_COOKIE, SESSION_TTL_MS, redeemLoginToken, sessionCookieOptions } from "@/server/auth";
+import { serverEnv } from "@/server/env";
 import { logFailure } from "@/server/log";
 
 /** A browser or proxy fetching the link ahead of the click (Chrome's `Sec-Purpose: prefetch`, older `Purpose: prefetch`). */
@@ -21,7 +21,7 @@ export async function GET(request: Request): Promise<Response> {
   if (!isPrefetch(request.headers)) {
     try {
       // The allow-list is checked again inside: an address taken off the list since the link was sent does not get in.
-      session = await redeemLoginToken(getDb(), url.searchParams.get("t") ?? "", getCloudflareContext().env.ADMIN_EMAILS);
+      session = await redeemLoginToken(getDb(), url.searchParams.get("t") ?? "", serverEnv().ADMIN_EMAILS);
       target = session ? "/admin" : "/admin/login?viga=link";
     } catch (e) {
       logFailure("[auth] verify failed", e); // never the message: it holds the token hash and the e-mail

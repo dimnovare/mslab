@@ -1,0 +1,123 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { LOCAL_DATABASE_URL, serverEnv } from "@/server/env";
+import { parseEnvFile } from "../local-secrets";
+
+// serverEnv() is the one place the server reads its configuration (process.env on Vercel and under `next dev`). In
+// production a missing required variable is an error that names the variable and never shows a value.
+
+// Placeholder values only (the address guard rejects real addresses); the secrets are made-up strings the tests look for in messages.
+const SECRET_URL = "postgres://app:s3cret-pw@db.example.com:5432/mslab";
+const SECRET_KEY = "re_s3cret_resend_key";
+const FULL = {
+  DATABASE_URL: SECRET_URL,
+  SITE_URL: "https://mslab.example.com",
+  ADMIN_EMAILS: "admin@example.test,second.admin@example.test",
+  ADMIN_NAMES: "admin@example.test=Dim,second.admin@example.test=Maria",
+  MARIA_EMAIL: "maria@example.test",
+  MAIL_FROM: "MS LAB <info@example.test>",
+};
+const without = (...names: (keyof typeof FULL)[]) => Object.fromEntries(Object.entries(FULL).filter(([k]) => !names.includes(k as keyof typeof FULL)));
+const failure = (source: Record<string, string | undefined>, production = true): string => {
+  try {
+    serverEnv(source, production);
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  throw new Error("serverEnv did not throw");
+};
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("serverEnv in production", () => {
+  test("returns the six required values as given; every optional one is undefined when not set", () => {
+    const env = serverEnv(FULL, true);
+    expect(env).toMatchObject(FULL);
+    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const)
+      expect(env[name], name).toBeUndefined();
+  });
+
+  test("optional values are passed through; blank ones count as not set", () => {
+    const env = serverEnv(
+      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media" },
+      true,
+    );
+    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media" });
+    expect(serverEnv({ ...FULL, RESEND_API_KEY: "  ", ADMIN_KEY: "" }, true)).toMatchObject({ RESEND_API_KEY: undefined, ADMIN_KEY: undefined });
+  });
+
+  test("a missing required variable is an error that names it", () => {
+    for (const name of Object.keys(FULL) as (keyof typeof FULL)[]) expect(failure(without(name)), name).toContain(name);
+  });
+
+  test("blank or whitespace-only counts as missing", () => {
+    expect(failure({ ...FULL, DATABASE_URL: "" })).toContain("DATABASE_URL");
+    expect(failure({ ...FULL, SITE_URL: "   " })).toContain("SITE_URL");
+  });
+
+  test("every missing variable is named at once, and only the missing ones", () => {
+    const message = failure(without("DATABASE_URL", "MARIA_EMAIL"));
+    expect(message).toContain("DATABASE_URL");
+    expect(message).toContain("MARIA_EMAIL");
+    for (const present of ["SITE_URL", "ADMIN_EMAILS", "ADMIN_NAMES", "MAIL_FROM"]) expect(message, present).not.toContain(present);
+  });
+
+  test("the message never holds a value: not the ones that are set, not the secrets", () => {
+    const message = failure({ ...without("ADMIN_EMAILS"), RESEND_API_KEY: SECRET_KEY });
+    expect(message).toContain("ADMIN_EMAILS");
+    for (const value of [...Object.values(FULL), SECRET_KEY, "s3cret-pw"]) expect(message).not.toContain(value);
+    expect(failure({})).not.toMatch(/postgres:|localhost|@/); // and with nothing set, no default value shows either
+  });
+
+  test("production has no defaults: an empty environment names all six", () => {
+    const message = failure({});
+    for (const name of Object.keys(FULL)) expect(message, name).toContain(name);
+  });
+});
+
+describe("serverEnv outside production (next dev, the tests)", () => {
+  test("DATABASE_URL defaults to the local development database; a value that is set wins", () => {
+    const local = new URL(serverEnv({}, false).DATABASE_URL);
+    expect(local.hostname).toBe("localhost");
+    expect(serverEnv({}, false).DATABASE_URL).toBe(LOCAL_DATABASE_URL);
+    expect(serverEnv({ DATABASE_URL: "postgres://u:p@127.0.0.1:5433/other" }, false).DATABASE_URL).toBe("postgres://u:p@127.0.0.1:5433/other");
+  });
+
+  test("the other required values may be missing: nobody is an admin and nothing is sent until they are set", () => {
+    const env = serverEnv({}, false);
+    expect(env.ADMIN_EMAILS).toBe("");
+    expect(env.ADMIN_NAMES).toBe("");
+    expect(env.MARIA_EMAIL).toBe("");
+    expect(env.SITE_URL).toBe("https://mslab.diipsolutions.eu"); // public: what wrangler.jsonc's vars gave next dev before
+    expect(env.MAIL_FROM).toBe("MS LAB <info@send.diipsolutions.eu>");
+    expect(serverEnv(FULL, false)).toMatchObject(FULL);
+  });
+});
+
+describe("serverEnv() with no arguments", () => {
+  test("reads process.env, and NODE_ENV decides whether there are defaults", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const [k, v] of Object.entries(FULL)) vi.stubEnv(k, v);
+    expect(serverEnv()).toMatchObject(FULL);
+    vi.stubEnv("DATABASE_URL", "");
+    expect(() => serverEnv()).toThrow("DATABASE_URL");
+    vi.stubEnv("NODE_ENV", "development");
+    expect(serverEnv().DATABASE_URL).toBe(LOCAL_DATABASE_URL);
+  });
+});
+
+describe(".env.example", () => {
+  const text = readFileSync(join(process.cwd(), ".env.example"), "utf8");
+  const values = parseEnvFile(text);
+
+  test("documents every variable serverEnv() reads, the optional ones as comments", () => {
+    for (const name of Object.keys(serverEnv({}, false))) expect(text, name).toMatch(new RegExp(`^(# )?${name}=`, "m"));
+  });
+
+  test("is a complete production configuration, and its database is the local one", () => {
+    expect(() => serverEnv(values, true)).not.toThrow();
+    expect(values.DATABASE_URL).toBe(LOCAL_DATABASE_URL);
+    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN"]) expect(values[name], `${name} is never set in the example`).toBeUndefined();
+  });
+});

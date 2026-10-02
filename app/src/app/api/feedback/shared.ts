@@ -1,4 +1,4 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { serverEnv } from "@/server/env";
 import type { FeedbackEnv, Reply } from "@/server/feedback";
 import { serverKv } from "@/server/kv";
 import { reviewKey } from "@/server/review-key";
@@ -10,7 +10,7 @@ export const reply = (r: Reply) => Response.json(r.body, { status: r.status, hea
 
 /** The env (its KV is the Postgres store), the base of the comment links (allow-listed Host, else SITE_URL) and the list key for this request. */
 export function feedbackContext(request: Request) {
-  const env: FeedbackEnv = { ...(getCloudflareContext().env as FeedbackEnv), KV: serverKv() };
+  const env: FeedbackEnv = { ...serverEnv(), KV: serverKv() };
   const h = request.headers;
   return {
     env,

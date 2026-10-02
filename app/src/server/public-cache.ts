@@ -33,6 +33,7 @@ function tagCache(): { db: D1Database; buildId: string } | null {
   const buildId = process.env.OPEN_NEXT_BUILD_ID;
   if (!buildId) return null;
   try {
+    // Task 4: the D1 tag cache goes with the Cloudflare layer (revalidatePath replaces it)
     const db = getCloudflareContext().env.NEXT_TAG_CACHE_D1 as D1Database | undefined;
     return db ? { db, buildId } : null;
   } catch {

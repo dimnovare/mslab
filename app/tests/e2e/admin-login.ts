@@ -10,7 +10,7 @@ import { expect } from "./test";
 
 // Signing in during the e2e tests (local dev server only).
 //
-// - Only the first placeholder admin of .dev.vars.example is ever used to ask for a login link, never a real address
+// - Only the first placeholder admin of .env.example is ever used to ask for a login link, never a real address
 //   (tests/unit/test-addresses.test.ts keeps every real address out of the repository). Locally the link comes back in
 //   the answer (devLink) and is never e-mailed (server/login.ts).
 // - One address may hold at most 3 unused links at a time (server/auth.ts LOGIN_TOKEN_CAP), and the workers sign in in

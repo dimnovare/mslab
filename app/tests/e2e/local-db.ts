@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 
 // The e2e run writes to a database in two ways: directly (fixtures.ts: seat fixtures, test rows, snapshots) and through
-// the local dev server (the form and admin tests submit to it; its Hyperdrive binding then uses its local connection
-// string). Both must be a database on this machine, never a shared one (Railway): the run refuses to start otherwise.
+// the local dev server (the form and admin tests submit to it; it uses DATABASE_URL, which the run sets to the local
+// database: tests/local-secrets.ts). Both must be a database on this machine, never a shared one (Railway): the run refuses to start otherwise.
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -27,7 +27,7 @@ function hostOf(url: string): string {
 /** The settings that point the run at a database: environment variables, and the dev server's own sources. */
 const ENV_KEYS = [
   "E2E_DATABASE_URL", // fixtures.ts
-  "DATABASE_URL", // the seed / drizzle CLI; refused too, so a shell left pointing at Railway cannot be used by mistake
+  "DATABASE_URL", // the dev server (server/env.ts), the seed / drizzle CLI; refused too, so a shell left pointing at Railway cannot be used by mistake
   "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE", // the dev server's Hyperdrive binding (overrides wrangler.jsonc)
   "WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE", // its older name
 ] as const;

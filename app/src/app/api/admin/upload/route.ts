@@ -22,6 +22,7 @@ export const POST = withAdmin(async (request) => {
   const file = form?.get("file");
   if (!(file instanceof File)) return json({ ok: false, error: "missing" }, 400);
   try {
+    // Task 3: the MEDIA R2 binding becomes the S3 client
     const { key } = await putImage(getCloudflareContext().env, file);
     return json({ ok: true, key }, 201);
   } catch (e) {

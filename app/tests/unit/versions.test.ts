@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 //   front, the admin saves and the session cron read and write directly.
 // package.json pins them exactly. Before changing a version here, after the upgrade:
 //   1. npx vitest run tests/unit/tag-cache.test.ts tests/unit/page-store.test.ts tests/unit/page-front.test.ts
-//   2. npx opennextjs-cloudflare build && npx wrangler dev --port 8787 --local-upstream localhost:8787 --env-file .dev.vars.example
+//   2. npx opennextjs-cloudflare build && npx wrangler dev --port 8787 --local-upstream localhost:8787 --env-file .env.example
 //   3. E2E_PROD_BUILD=1 E2E_BASE_URL=http://localhost:8787 npx playwright test tests/e2e/cache.spec.ts
 //      tests/e2e/admin-edit.spec.ts tests/e2e/admin-site.spec.ts   (the production-build cache, admin-edit, admin-site specs)
 // and only then update the versions below.

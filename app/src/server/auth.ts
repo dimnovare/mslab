@@ -2,10 +2,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, count, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb, type Db } from "@/db/client";
 import { adminSessions, authTokens } from "@/db/schema";
 import type * as schema from "@/db/schema";
+import { serverEnv } from "./env";
 import { logFailure } from "./log";
 import { perRequest } from "./per-request";
 import { isTokenShape, newToken, sha256 } from "./token";
@@ -15,7 +15,7 @@ import { isTokenShape, newToken, sha256 } from "./token";
 // The database holds only the SHA-256 hashes of tokens and session ids, never the values themselves.
 //
 // The functions up to `adminFirstName` take a Db and a clock and run without Next.js (tests/db/auth.test.ts); the
-// guards below them read the cookie and the Worker bindings.
+// guards below them read the cookie and the environment.
 
 /** `__Host-`: browsers accept the cookie only with Secure, Path=/ and no Domain, so a sibling subdomain cannot plant or shadow it. */
 export const SESSION_COOKIE = "__Host-mslab_admin";
@@ -141,11 +141,11 @@ export async function deleteSession(db: Db, raw: string | undefined): Promise<vo
   await db.delete(adminSessions).where(eq(adminSessions.idHash, await sha256(raw)));
 }
 
-// ---------- guards (cookie + Worker bindings) ----------
+// ---------- guards (cookie + environment) ----------
 
-/** The greeting name of a signed-in admin (the Worker secret ADMIN_NAMES), or "". */
+/** The greeting name of a signed-in admin (the environment variable ADMIN_NAMES), or "". */
 export function adminName(email: string): string {
-  return adminFirstName(email, getCloudflareContext().env.ADMIN_NAMES);
+  return adminFirstName(email, serverEnv().ADMIN_NAMES);
 }
 
 /**
@@ -159,7 +159,7 @@ export const currentAdminEmail = perRequest(async (): Promise<string | null> => 
   if (!raw) return null;
   try {
     const email = await getSessionEmail(getDb(), raw);
-    return email && isAllowedAdmin(email, getCloudflareContext().env.ADMIN_EMAILS) ? email : null;
+    return email && isAllowedAdmin(email, serverEnv().ADMIN_EMAILS) ? email : null;
   } catch (e) {
     logFailure("[auth] session lookup failed", e);
     throw new Error("admin session lookup failed");

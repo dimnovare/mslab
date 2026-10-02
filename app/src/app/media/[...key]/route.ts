@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: Request, ctx: { params: Promise<{ key: string[] }> }): Promise<Response> {
   const { key } = await ctx.params;
   try {
+    // Task 3: the MEDIA R2 binding becomes the S3 client
     return await serveMedia(getCloudflareContext().env.MEDIA, key.join("/"));
   } catch (e) {
     logFailure("[media] read failed", e);

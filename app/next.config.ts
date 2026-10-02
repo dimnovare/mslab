@@ -43,5 +43,5 @@ const nextConfig: NextConfig = {
 
 export default nextConfig;
 
-// Makes getCloudflareContext() (and the Hyperdrive / R2 / KV bindings) work under `next dev`.
+// Makes getCloudflareContext() work under `next dev`, for the bindings that are left (MEDIA, the page cache): removed with them.
 initOpenNextCloudflareForDev();

@@ -1,13 +1,13 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { makeTestDb } from "./helpers";
 
-// withAdmin, adminAction and requireAdmin(Email) with the cookie, the database and the Worker env faked.
+// withAdmin, adminAction and requireAdmin(Email) with the cookie, the database and the environment faked.
 
 const state = vi.hoisted(() => ({ db: null as unknown, cookie: undefined as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Host-mslab_admin" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
 vi.mock("@/db/client", () => ({ getDb: () => state.db }));
-vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext: () => ({ env: { ADMIN_EMAILS: "admin@example.test,second.admin@example.com" } }) }));
+vi.stubEnv("ADMIN_EMAILS", "admin@example.test,second.admin@example.com"); // the sign-in allow-list: server/env.ts reads process.env
 
 import { adminAction, createSession, isCrossSite, requireAdmin, requireAdminEmail, withAdmin } from "@/server/auth";
 
@@ -15,6 +15,7 @@ let db: Db;
 beforeAll(async () => {
   db = await makeTestDb();
 });
+afterAll(() => vi.unstubAllEnvs());
 beforeEach(() => {
   state.db = db;
   state.cookie = undefined;

@@ -174,7 +174,7 @@ test.describe("login page", () => {
   });
 });
 
-// The test admin only (written loosely, as people type it), greeted by its ADMIN_NAMES name (.dev.vars.example).
+// The test admin only (written loosely, as people type it), greeted by its ADMIN_NAMES name (.env.example).
 for (const [address, name] of [[` ${ADMIN.toUpperCase()} `, "Dim"]] as const) {
   test(`${name}: the link from the e-mail signs in; the session lasts 30 days; logout ends it`, async ({ page, context, request, baseURL, isMobile }) => {
     submitsForms();

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { adminTitle } from "@/components/admin/sections";
 import { SettingsEditor } from "@/components/admin/SettingsEditor";
 import { Shell } from "@/components/admin/Shell";
@@ -7,6 +6,7 @@ import { getDb } from "@/db/client";
 import { adminEt } from "@/i18n/dict/admin";
 import { loadSettings } from "@/server/admin-site";
 import { requireAdmin } from "@/server/auth";
+import { serverEnv } from "@/server/env";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: adminTitle(adminEt.nav.settings) };
@@ -15,9 +15,9 @@ export const metadata: Metadata = { title: adminTitle(adminEt.nav.settings) };
 export default async function SettingsEditPage() {
   const email = await requireAdmin();
   const initial = await loadSettings(getDb());
-  // the sign-in allow-list (the Worker secret ADMIN_EMAILS): shown, never edited here
-  const admins = (getCloudflareContext().env.ADMIN_EMAILS ?? "")
-    .split(",")
+  // the sign-in allow-list (the environment variable ADMIN_EMAILS): shown, never edited here
+  const admins = serverEnv()
+    .ADMIN_EMAILS.split(",")
     .map((a) => a.trim())
     .filter(Boolean);
   return (
