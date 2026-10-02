@@ -298,6 +298,31 @@ test.describe("practice", () => {
     await expect(page.locator("[data-package='MINI']")).toHaveAttribute("data-selected", "true");
   });
 
+  test("on the practice page a card's Registreeru picks its package in place (no navigation, one #taotlus)", async ({ page }) => {
+    // Landing on ?pakett=MINI#taotlus, picking MAXI and then the panel's "Registreeru MINI" used to be a Next.js
+    // navigation back to the landing address, which on the Worker doubled the hash (#taotlus#taotlus).
+    await page.goto("/praktika?pakett=MINI#taotlus");
+    const form = page.locator("[data-practice-form]");
+    await form.getByRole("radio", { name: /MAXI/ }).check();
+    await expect(page).toHaveURL(/\/praktika\?pakett=MAXI#taotlus$/);
+    const rsc: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("_rsc=")) rsc.push(r.url());
+    });
+    await page.locator("[data-practice]").getByRole("link", { name: /Registreeru MINI/ }).click();
+    await expect(page).toHaveURL(/\/praktika\?pakett=MINI#taotlus$/);
+    expect(new URL(page.url()).hash).toBe("#taotlus");
+    await expect(form.getByRole("radio", { name: /MINI/ })).toBeChecked();
+    await expect(page.locator("[data-package='MINI']")).toHaveAttribute("data-selected", "true");
+    await expect(page.locator("#taotlus")).toBeInViewport();
+    expect(rsc).toEqual([]); // picked in place
+    // a Ctrl/⌘ click is still the browser's: a new tab with that package
+    const [tab] = await Promise.all([page.context().waitForEvent("page"), page.locator("[data-practice]").getByRole("link", { name: /Registreeru MAXI/ }).click({ modifiers: ["ControlOrMeta"] })]);
+    await tab.waitForURL(/\/praktika\?pakett=MAXI#taotlus$/);
+    await tab.close();
+    await expect(page).toHaveURL(/\/praktika\?pakett=MINI#taotlus$/);
+  });
+
   test("home practice cards lead to the form with the package picked", async ({ page }) => {
     await page.goto("/");
     await page.locator("[data-practice]").getByRole("link", { name: /Registreeru MAXI/ }).click();

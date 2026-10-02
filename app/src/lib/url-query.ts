@@ -34,9 +34,9 @@ const notify = (): void => {
 
 /**
  * The page's query string as live state, and a writer for it. The writer replaces the whole query (pass the
- * merged params: other parameters are the caller's to keep) and keeps the path and hash.
+ * merged params: other parameters are the caller's to keep) and keeps the path, and the hash unless one is given.
  */
-export function useUrlQuery(): [URLSearchParams, (next: URLSearchParams) => void] {
+export function useUrlQuery(): [URLSearchParams, (next: URLSearchParams, hash?: string) => void] {
   const pathname = usePathname();
   const routerQuery = useSearchParams().toString();
   const query = useSyncExternalStore(
@@ -60,11 +60,11 @@ export function useUrlQuery(): [URLSearchParams, (next: URLSearchParams) => void
     window.history.replaceState(null, "", window.location.href);
   }, [query]);
 
-  const write = useCallback((next: URLSearchParams) => {
+  const write = useCallback((next: URLSearchParams, hash: string = window.location.hash) => {
     const qs = next.toString();
-    if (qs === new URLSearchParams(window.location.search).toString()) return; // nothing changes
+    if (qs === new URLSearchParams(window.location.search).toString() && hash === window.location.hash) return; // nothing changes
     // Next.js's history state stays on the entry (its own replaceState passes it through unchanged).
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${hash}`);
     tellRouter.current = true;
     notify();
   }, []);
