@@ -14,3 +14,11 @@ test("R2 keys are served from /media", () => {
 test("an empty key stays empty", () => {
   expect(mediaUrl("")).toBe("");
 });
+
+test("a protocol-relative key never passes through as another host's address", () => {
+  for (const key of ["//evil.example/a.jpg", "///evil.example/a.jpg", "/\\evil.example/a.jpg", "\\\\evil.example/a.jpg", "\\/evil.example/a.jpg"])
+    expect(mediaUrl(key), key).toBe("");
+  // still a normal site path or R2 key
+  expect(mediaUrl("/seed/a.jpg")).toBe("/seed/a.jpg");
+  expect(mediaUrl("img//a.jpg")).toBe("/media/img//a.jpg");
+});

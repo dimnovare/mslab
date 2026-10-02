@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "@/middleware";
+import { canonicalPath, middleware } from "@/middleware";
 
-const run = (path: string) => middleware(new NextRequest(new URL(path, "http://localhost")));
+// The path is appended to the origin as it is: new URL("//evil.example/", base) would parse "evil.example" as the host.
+const run = (path: string) => middleware(new NextRequest(`http://localhost${path}`));
 const rewrittenTo = (path: string) => {
   const to = run(path).headers.get("x-middleware-rewrite");
   return to ? new URL(to).pathname + new URL(to).search : null;
@@ -11,6 +12,13 @@ const passesThrough = (path: string) => {
   const res = run(path);
   return res.headers.get("x-middleware-next") === "1" && !res.headers.get("x-middleware-rewrite") && res.status === 200;
 };
+
+describe("noindex (the whole host stays out of search engines)", () => {
+  test("every answer of the middleware says X-Robots-Tag: noindex, nofollow — rewrites, pass-throughs and redirects", () => {
+    for (const p of ["/", "/koolitused", "/ru", "/ru/koolitused", "/admin/login", "/api/feedback", "/api/feedback/", "/media/img/a.jpg", "/guide/", "/guide", "/p/d/", "/p/d/styles.css", "/koolitused/", "/et/koolitused", "//evil.example/", "/robots.txt", "/og.jpg"])
+      expect(run(p).headers.get("x-robots-tag"), p).toBe("noindex, nofollow");
+  });
+});
 
 describe("locale middleware", () => {
   test("Estonian pages are served from the et locale without changing the URL", () => {
@@ -76,7 +84,6 @@ describe("trailing slash (Next's own redirect is off for the hub: next.config sk
       ["/ru/", "/ru"],
       ["/ru/koolitused/", "/ru/koolitused"],
       ["/admin/", "/admin"],
-      ["/api/feedback/", "/api/feedback"],
       ["/guidexyz/", "/guidexyz"],
       ["/et/koolitused/", "/koolitused"],
     ]) {
@@ -85,6 +92,41 @@ describe("trailing slash (Next's own redirect is off for the hub: next.config sk
       const location = new URL(res.headers.get("location")!);
       expect(location.origin + location.pathname + location.search, from).toBe(`http://localhost${to}`);
     }
+  });
+
+  test("API routes are never redirected (a POST to /api/x/ must not turn into a GET elsewhere)", () => {
+    for (const p of ["/api/feedback/", "/api/feedback", "/api/auth/request/", "/api/feedback/abc123def456gh/"]) expect(passesThrough(p), p).toBe(true);
+  });
+
+  test("a redirect never leaves the site: leading slashes and backslashes collapse to one slash", () => {
+    // Next.js turns a same-origin Location into a relative one: "//evil.example" there would be another host.
+    for (const [from, to] of [
+      ["//evil.example/", "/evil.example"],
+      ["///evil.example/", "/evil.example"],
+      ["//evil.example/x/?q=1", "/evil.example/x?q=1"],
+      ["/et//evil.example", "/evil.example"],
+      ["/et//evil.example/", "/evil.example"],
+      ["//", "/"],
+    ]) {
+      const res = run(from);
+      expect(res.status, from).toBe(308);
+      const location = new URL(res.headers.get("location")!);
+      expect(location.origin, from).toBe("http://localhost");
+      expect(location.pathname + location.search, from).toBe(to);
+      expect(location.pathname.startsWith("//"), from).toBe(false);
+    }
+  });
+
+  test("canonicalPath: one slash in front, none at the end, no /et prefix", () => {
+    expect(canonicalPath("//evil.example/")).toBe("/evil.example");
+    expect(canonicalPath("/\\evil.example")).toBe("/evil.example");
+    expect(canonicalPath("/\\/evil.example/")).toBe("/evil.example");
+    expect(canonicalPath("/et//evil.example")).toBe("/evil.example");
+    expect(canonicalPath("/et/\\evil.example")).toBe("/evil.example");
+    expect(canonicalPath("/koolitused/")).toBe("/koolitused");
+    expect(canonicalPath("/et")).toBe("/");
+    expect(canonicalPath("/")).toBe("/");
+    expect(canonicalPath("/koolitused")).toBe("/koolitused");
   });
 
   test("the home page keeps its slash", () => {
