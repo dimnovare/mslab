@@ -24,8 +24,9 @@ export function cartMetadata(locale: Locale): Metadata {
  * until then the page sums up the course, says payment opens soon and takes an e-mail to tell the visitor.
  * Only e-learning courses can be bought; contact courses are registered on their own page.
  * The middleware serves "?kursus=<slug>" from ./[kursus] (one cached page per course); /ostukorv alone is the empty cart.
- * A course that does not exist or is not published is a 404 (./[kursus]/not-found.tsx says the cart is empty), so a
- * made-up address is never stored as a page of its own.
+ * A course that does not exist or is not published is a 404 (./[kursus]/not-found.tsx says the cart is empty). Next.js
+ * still stores that 404 in its cache, one entry per made-up ?kursus= (the cached-page front never serves those: it
+ * keeps 200 pages only, server/page-store.ts), so each such address is rendered once.
  */
 export async function Cart({ locale, slug }: { locale: Locale; slug: string }) {
   const d = getDict(locale);

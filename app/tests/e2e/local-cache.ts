@@ -41,6 +41,25 @@ export async function assertLocalUpstream(): Promise<void> {
   const res = await fetch(`${new URL(TARGET).origin}/api/newsletter/confirm?t=e2e-origin-check`, { redirect: "manual" });
   const location = res.headers.get("location") ?? "";
   const host = location ? new URL(location, TARGET).host : "";
-  if (host !== new URL(TARGET).host)
+  if (!sameLocalWorker(host, new URL(TARGET).host))
     throw new Error(`e2e: the local Worker sees itself as "${host || "?"}", not ${new URL(TARGET).host}: start it with \`npx wrangler dev --port 8787 --local-upstream localhost:8787\``);
+}
+
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The Worker's own address (`seen`, host:port) is this machine on the port the tests use (`target`): any loopback name
+ * (localhost, 127.0.0.1, [::1]) counts, so `--local-upstream 127.0.0.1:8787` and a target of localhost:8787 agree.
+ */
+export function sameLocalWorker(seen: string, target: string): boolean {
+  const parse = (host: string) => {
+    try {
+      const u = new URL(`http://${host}`);
+      return { name: u.hostname.toLowerCase(), port: u.port || "80" };
+    } catch {
+      return null;
+    }
+  };
+  const [a, b] = [parse(seen), parse(target)];
+  return !!a && !!b && LOOPBACK.has(a.name) && LOOPBACK.has(b.name) && a.port === b.port;
 }
