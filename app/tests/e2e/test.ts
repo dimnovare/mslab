@@ -1,5 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { LOCAL_FIXTURES } from "./fixtures";
+import { PROD_BUILD } from "./target";
 
 // `test` for every spec that opens site pages.
 // - Every test is its own visitor: the forms allow 5 submissions per 10 minutes per visitor IP (KV rate limit), and
@@ -44,7 +45,7 @@ export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopu
       // the run-unique part first: the server keeps 64 characters of the address, and a key that is the same in every run
       // would collect the rate limit of repeated runs (5 per 10 minutes)
       const ip = `e2e-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}-${info.retry}-${info.project.name}-${info.testId}`;
-      await context.setExtraHTTPHeaders({ "x-forwarded-for": ip });
+      await context.setExtraHTTPHeaders(PROD_BUILD ? { "x-forwarded-for": ip, "cf-connecting-ip": ip } : { "x-forwarded-for": ip });
       await use(ip);
     },
     { auto: true },

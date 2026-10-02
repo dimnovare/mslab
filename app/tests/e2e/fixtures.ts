@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
 import { courseSeeds } from "../../src/db/seed-data";
+import { revalidateLocalPages } from "./local-cache";
 import { assertLocalDatabases, isLocalDbUrl } from "./local-db";
-import { TARGET } from "./target";
+import { PROD_BUILD, TARGET } from "./target";
 
 // Test-owned seat fixtures for the calendar e2e tests. The seed never contains registrations (the real database will
 // hold real ones), so the "full" and "few" seat states are produced here: global-setup inserts confirmed registrations
@@ -28,10 +29,17 @@ export const FIXTURES = {
   few: { slug: "lash-lift-botox", city: "Viljandi", leave: 2 },
 } as const;
 
-/** Fixtures and test rows are written to and deleted from a local database only, never a shared one (local-db.ts). */
+/**
+ * Fixtures and test rows are written to and deleted from a local database only, never a shared one (local-db.ts).
+ * Against the local production build, closing a connection also marks the cached pages stale (local-cache.ts): what
+ * was written here must show on the next page view, as it does under `next dev`.
+ */
 const connect = () => {
   if (!isLocalDbUrl(DB_URL)) assertLocalDatabases([{ source: "E2E_DATABASE_URL", url: DB_URL }]);
-  return postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
+  const sql = postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
+  if (!PROD_BUILD) return sql;
+  const end = sql.end.bind(sql);
+  return Object.assign(sql, { end: async (...args: Parameters<typeof end>) => { await end(...args); await revalidateLocalPages(); } });
 };
 
 /** Removes this suite's rows; returns how many are left afterwards (0 when clean). */

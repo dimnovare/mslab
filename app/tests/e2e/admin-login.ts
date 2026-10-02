@@ -1,7 +1,10 @@
 import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { BrowserContext, Page } from "@playwright/test";
+import { onLocalDb, sha256Hex } from "./fixtures";
+import { PROD_BUILD } from "./target";
 import { expect } from "./test";
 
 // Signing in during the e2e tests (local dev server only).
@@ -57,6 +60,7 @@ export type CreatedRows = { tokens: Set<string>; sessions: Set<string> };
  * deletes them afterwards). The link is asked for and used under the login lock.
  */
 export async function signInAsAdmin(page: Page, context: BrowserContext, ip: string, created: CreatedRows): Promise<void> {
+  if (PROD_BUILD) return signInWithLocalSession(page, context, created);
   await lockLogin();
   try {
     const res = await page.request.post("/api/auth/request", { data: { email: ADMIN }, headers: { "x-forwarded-for": ip } });
@@ -70,6 +74,26 @@ export async function signInAsAdmin(page: Page, context: BrowserContext, ip: str
   } finally {
     unlockLogin();
   }
+  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
+  expect(cookie, "session cookie").toBeTruthy();
+  created.sessions.add(cookie!.value);
+}
+
+/** A login link's lifetime (server/auth.ts TOKEN_TTL_MS). */
+const TOKEN_TTL_MS = 15 * 60_000;
+
+/**
+ * Against the local production build (E2E_PROD_BUILD) there is no devLink: a production build never returns one, and
+ * the e-mail is not sent locally. So the test stores a login link for Dim's address as server/auth.ts createLoginToken
+ * would (the SHA-256 of a random token, 15 minutes, in the LOCAL database) and opens it: the app's own /api/auth/verify
+ * uses it and sets the session cookie. Dim only.
+ */
+async function signInWithLocalSession(page: Page, context: BrowserContext, created: CreatedRows): Promise<void> {
+  const raw = randomBytes(32).toString("base64url");
+  await onLocalDb((sql) => sql`insert into auth_tokens (hash, email, expires_at) values (${sha256Hex(raw)}, ${ADMIN}, ${new Date(Date.now() + TOKEN_TTL_MS)})`);
+  created.tokens.add(raw);
+  await page.goto(`/api/auth/verify?t=${raw}`);
+  await expect(page).toHaveURL(/\/admin$/);
   const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
   expect(cookie, "session cookie").toBeTruthy();
   created.sessions.add(cookie!.value);
