@@ -7,3 +7,7 @@
 /Assets/
 node_modules/
 .superpowers/
+
+# Client correspondence kept local only (removed from the public history 02.10.2026)
+/docs/feedback/2026-10-01-maria-comments-raw.md
+/docs/feedback/2026-10-01-maria-overview.md
