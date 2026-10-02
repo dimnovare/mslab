@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/site/Logo";
+import { lockPageScroll } from "@/lib/modal";
 import { AdminIcon, type AdminIconName } from "./AdminIcon";
 import type { Section } from "./sections";
 import styles from "./Sidebar.module.css";
@@ -93,12 +94,7 @@ export function Sidebar({ items, active, t, total }: { items: NavItem[]; active:
   // The page behind the drawer stays still.
   useEffect(() => {
     if (!open) return;
-    const root = document.documentElement;
-    const before = root.style.overflow;
-    root.style.overflow = "hidden";
-    return () => {
-      root.style.overflow = before;
-    };
+    return lockPageScroll();
   }, [open]);
 
   return (

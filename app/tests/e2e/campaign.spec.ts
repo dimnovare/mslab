@@ -42,10 +42,16 @@ test.describe("the site's own timing (brief)", () => {
 
   test("on / it opens after 6 s with 'Leia enda koolitus' and no 'Mitte praegu'; not again after a reload; never on /koolitused", async ({ page }) => {
     test.setTimeout(60_000);
-    await page.goto("/");
-    await expect(anyDialog(page)).toHaveCount(0); // not at once
+    // Timed from the page's first byte (waitUntil "commit"). The popup's 6 s start later still, once the page has run
+    // its scripts, so for the first 5 s there is no dialog at all: a shorter delay (1 s, say) fails here.
+    await page.goto("/", { waitUntil: "commit" });
+    const start = Date.now();
+    while (Date.now() - start < 5000) {
+      expect(await anyDialog(page).count(), `no dialog at ${Date.now() - start} ms`).toBe(0);
+      await page.waitForTimeout(200);
+    }
     expect(await seen(page)).toBeNull();
-    await page.waitForTimeout(6500);
+    await page.waitForTimeout(Math.max(0, 6500 - (Date.now() - start)));
     await expect(popup(page)).toBeVisible();
     await expect(popup(page).getByRole("link", { name: "Leia enda koolitus" })).toBeVisible(); // M4
     await expect(page.getByText("Mitte praegu")).toHaveCount(0); // M3
@@ -169,7 +175,7 @@ test.describe("short delay", () => {
     await expect(p).toBeVisible();
   });
 
-  test("when the browser refuses storage, it is shown once on that page load and not again after closing", async ({ page }) => {
+  test("when the browser refuses storage, it is shown once per page load: not again after closing, nor back on the home page", async ({ page }) => {
     await page.addInitScript(() =>
       Object.defineProperty(window, "sessionStorage", {
         get() {
@@ -182,6 +188,40 @@ test.describe("short delay", () => {
     await page.keyboard.press("Escape");
     await expect(anyDialog(page)).toHaveCount(0);
     await page.waitForTimeout(1500);
+    await expect(anyDialog(page)).toHaveCount(0);
+
+    // home → course → home without a page load (the marker survives only in the same document)
+    await page.evaluate(() => ((window as unknown as { sameLoad: boolean }).sameLoad = true));
+    await page.locator("[data-course-card]").first().click();
+    await expect(page).toHaveURL(/\/koolitused\/[a-z0-9-]+$/);
+    await page.getByRole("banner").getByRole("link", { name: "MS LAB Koolituskeskus — avaleht" }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("[data-hero]")).toBeVisible();
+    await page.waitForTimeout(1500);
+    await expect(anyDialog(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { sameLoad?: boolean }).sameLoad)).toBe(true);
+
+    // a new page load may show it once more
+    await page.reload();
+    await expect(popup(page)).toBeVisible();
+  });
+
+  test("ctrl/cmd-, shift- or middle-click on the button opens the course elsewhere: the popup stays, the focus too", async ({ page, context }) => {
+    await page.goto("/");
+    const p = popup(page);
+    const cta = p.getByRole("link", { name: "Leia enda koolitus" });
+    await expect(p).toBeVisible();
+    for (const how of [{ modifiers: ["ControlOrMeta" as const] }, { modifiers: ["Shift" as const] }, { button: "middle" as const }]) {
+      const opened = context.waitForEvent("page", { timeout: 5000 }).catch(() => null);
+      await cta.click(how);
+      (await opened)?.close();
+      await expect(p, JSON.stringify(how)).toBeVisible();
+      await expect(page).toHaveURL(/\/$/);
+      expect(await scrollLocked(page)).toBe(true);
+      await expect(p.locator(":focus"), JSON.stringify(how)).toHaveCount(1); // the focus is still inside
+    }
+    await cta.click(); // a plain click still goes
+    await expect(page).toHaveURL(/\/koolitused\/lash-lift-botox$/);
     await expect(anyDialog(page)).toHaveCount(0);
   });
 

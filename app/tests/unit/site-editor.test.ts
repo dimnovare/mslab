@@ -78,9 +78,15 @@ describe("links an admin may store", () => {
   test("a stored path that is another site once its locale is gone ('/ru//evil.example') falls back", () => {
     const ru = (p: string) => (p === "/" ? "/ru" : `/ru${p}`);
     const et = (p: string) => p;
-    for (const bad of ["/ru//evil.example", "/et//evil.example/x", "/RU//evil.example", "/ru//", "/ru/\\evil.example", "/et/\\/evil.example"]) {
+    for (const bad of ["/ru//evil.example", "/et//evil.example/x", "/RU//evil.example", "/ru//", "/ru//?x", "/et//#a"]) {
+      expect(isSiteHref(bad), bad).toBe(true); // a site path as written: only the strip makes it another site
       expect(linkFor(bad, et, "/koolitused"), bad).toBe("/koolitused");
       expect(linkFor(bad, ru, "/koolitused"), bad).toBe("/ru/koolitused");
+    }
+    // the backslash forms browsers also read as another site are refused before the strip (isSiteHref)
+    for (const bad of ["/ru/\\evil.example", "/et/\\/evil.example", "/\\evil.example"]) {
+      expect(isSiteHref(bad), bad).toBe(false);
+      expect(linkFor(bad, et, "/koolitused"), bad).toBe("/koolitused");
     }
     // a bare locale and a locale with a path still work
     expect(linkFor("/ru/", et, "/koolitused")).toBe("/");

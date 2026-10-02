@@ -2,13 +2,12 @@
 
 import Image from "next/image";
 import { useEffect, useRef } from "react";
+import { lockPageScroll, trapTab } from "@/lib/modal";
 import { Icon } from "./Icon";
 import styles from "./Lightbox.module.css";
 
 export type LightboxImage = { src: string; alt: string };
 export type LightboxTexts = { dialog: string; close: string; previous: string; next: string };
-
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Full-size image viewer (course gallery P2; the trainer works gallery in Task 9 reuses it).
@@ -38,14 +37,12 @@ export function Lightbox({
     const dialog = ref.current;
     if (!dialog) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const root = document.documentElement;
-    const overflow = root.style.overflow;
-    root.style.overflow = "hidden";
+    const unlock = lockPageScroll();
     if (!dialog.open) dialog.showModal();
     closeRef.current?.focus();
     return () => {
       if (dialog.open) dialog.close();
-      root.style.overflow = overflow;
+      unlock();
       opener?.focus();
     };
   }, []);
@@ -60,14 +57,8 @@ export function Lightbox({
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
       go(index - 1);
-    } else if (e.key === "Tab") {
-      // Keep focus inside the dialog (the browser would otherwise move on to its own UI).
-      const items = Array.from(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
-      if (items.length === 0) return;
-      const at = items.indexOf(document.activeElement as HTMLElement);
-      const nextAt = e.shiftKey ? (at <= 0 ? items.length - 1 : at - 1) : at === items.length - 1 ? 0 : at + 1;
-      e.preventDefault();
-      items[nextAt].focus();
+    } else {
+      trapTab(e, ref.current); // Tab stays inside the dialog
     }
   };
 

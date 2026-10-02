@@ -1,21 +1,11 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { CampaignView } from "@/domain/campaign";
 import { linkFor } from "@/domain/site-editor";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import ui from "./ui.module.css";
 import styles from "./CampaignCard.module.css";
-
-export type CampaignCardData = {
-  image: string;
-  kicker: string;
-  title: string;
-  text: string;
-  code: string;
-  ctaLabel: string;
-  /** As stored (a site path without the locale, or an https address); the card makes the link from it. */
-  ctaHref: string;
-};
 
 /**
  * The campaign popup's card (prototype D `campHtml`, Maria C37/C38): picture, kicker, Jost title, text, the code in a
@@ -26,7 +16,7 @@ export type CampaignCardData = {
  * here, through linkFor: a site path gets the page's locale, an https address stays, anything else (never stored by the
  * admin) goes to the catalogue, so a popup built on this card cannot render a script or outside link by mistake.
  */
-export function CampaignCard({ c, locale, titleId, codeAction, close }: { c: CampaignCardData; locale: Locale; titleId?: string; codeAction?: ReactNode; close?: ReactNode }) {
+export function CampaignCard({ c, locale, titleId, codeAction, close }: { c: CampaignView; locale: Locale; titleId?: string; codeAction?: ReactNode; close?: ReactNode }) {
   const cta = linkFor(c.ctaHref, (path) => href(locale, path), "/koolitused");
   return (
     <div className={styles.wrap}>

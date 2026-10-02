@@ -1,12 +1,24 @@
 // The public campaign popup (Task 14; Maria C37–C41: M1, M3, M4): which stored campaign the home page shows, with which
 // button text, and when. Pure: no database, no React.
 
-import type { CampaignCardData } from "@/components/site/CampaignCard";
 import type { Campaign } from "@/db/schema";
 import { pick, type I18n } from "@/i18n/field";
 import type { Locale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
 import { CAMPAIGN_CTA } from "./site-editor";
+
+/** What the popup's card shows (components/site/CampaignCard), in the page's language. */
+export type CampaignView = {
+  /** A public URL (mediaUrl of the stored key). */
+  image: string;
+  kicker: string;
+  title: string;
+  text: string;
+  code: string;
+  ctaLabel: string;
+  /** As stored (a site path without the locale, or an https address); the card makes the link from it. */
+  ctaHref: string;
+};
 
 /** sessionStorage key, set when the popup is shown: once per browser session (prototype D: "kord külastuse jooksul"). */
 export const CAMPAIGN_SEEN_KEY = "mslab-camp";
@@ -38,7 +50,7 @@ export function campaignCtaLabel(label: I18n | null | undefined, locale: Locale,
  * The popup's card for the home page, or null when there is no popup: no row, a switched-off campaign, or one without a
  * title (the dialog is named by its title; the admin requires one for an active campaign).
  */
-export function campaignView(c: Campaign | null | undefined, locale: Locale, ctaFallback: string): CampaignCardData | null {
+export function campaignView(c: Campaign | null | undefined, locale: Locale, ctaFallback: string): CampaignView | null {
   if (!c?.active) return null;
   const title = pick(c.title, locale).trim();
   if (!title) return null;

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { CAMPAIGN_SEEN_KEY, campaignDelay } from "@/domain/campaign";
+import { CAMPAIGN_SEEN_KEY, campaignDelay, type CampaignView } from "@/domain/campaign";
 import type { Locale } from "@/i18n/locales";
-import { CampaignCard, type CampaignCardData } from "./CampaignCard";
+import { lockPageScroll, trapTab } from "@/lib/modal";
+import { CampaignCard } from "./CampaignCard";
 import { Icon } from "./Icon";
 import ui from "./ui.module.css";
 import styles from "./CampaignPopup.module.css";
@@ -19,21 +20,28 @@ declare global {
 
 /** How far a finger pulls the sheet down before letting go closes it. */
 const SWIPE_CLOSE_PX = 80;
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Shown during this page load already. The module lives as long as the document, through client-side moves (home →
+ * course → home remounts the popup), so this keeps "once" when sessionStorage is refused; a new page load starts over.
+ */
+let shownThisLoad = false;
 
 /**
  * The campaign popup (prototype D `campHtml` / `maybeAutoCampaign`, Maria C37: "Sellise kampaania lahendus mulle
  * meeldib"). Rendered by the home page only (/ and /ru), so no other page ever shows it. 6 s after the page appears it
  * opens once per browser session: sessionStorage "mslab-camp" is set when it is shown. When the browser refuses
- * storage it is shown at most once per page load. It waits while another modal (the phone menu, a lightbox) is open.
+ * storage it is shown at most once per page load (shownThisLoad), also across client-side moves back to the home page.
+ * It waits while another modal (the phone menu, a lightbox) is open.
  */
-export function CampaignPopup({ c, locale, t }: { c: CampaignCardData; locale: Locale; t: CampaignPopupTexts }) {
+export function CampaignPopup({ c, locale, t }: { c: CampaignView; locale: Locale; t: CampaignPopupTexts }) {
   const [open, setOpen] = useState(false);
   const image = c.image;
 
   useEffect(() => {
+    if (shownThisLoad) return;
     try {
       if (sessionStorage.getItem(CAMPAIGN_SEEN_KEY) === "1") return;
     } catch {
@@ -46,10 +54,11 @@ export function CampaignPopup({ c, locale, t }: { c: CampaignCardData; locale: L
         timer = window.setTimeout(show, 1000);
         return;
       }
+      shownThisLoad = true;
       try {
         sessionStorage.setItem(CAMPAIGN_SEEN_KEY, "1");
       } catch {
-        // shown anyway, once (the effect does not run again on this page)
+        // shown anyway: shownThisLoad keeps it to once for this page load
       }
       setOpen(true);
     }, campaignDelay(window.__mslabCampaignDelay));
@@ -66,7 +75,7 @@ export function CampaignPopup({ c, locale, t }: { c: CampaignCardData; locale: L
  * does not scroll; Esc, ✕ and the backdrop close it and give the focus back; the button closes it on its way to the
  * course. Under 640px it is D's bottom sheet, which also closes when pulled down; with reduced motion nothing slides.
  */
-function CampaignDialog({ c, locale, t, onClose }: { c: CampaignCardData; locale: Locale; t: CampaignPopupTexts; onClose: () => void }) {
+function CampaignDialog({ c, locale, t, onClose }: { c: CampaignView; locale: Locale; t: CampaignPopupTexts; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(true);
@@ -79,9 +88,7 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignCardData; locale
     const dialog = ref.current;
     if (!dialog) return;
     const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
-    const root = document.documentElement;
-    const overflow = root.style.overflow;
-    root.style.overflow = "hidden";
+    const unlock = lockPageScroll();
     if (!dialog.open) dialog.showModal();
     dialog.querySelector<HTMLElement>("[data-campaign-close]")?.focus();
     // D: the backdrop fades in and the card rises (CSS transitions from the closed state; none with reduced motion)
@@ -89,7 +96,7 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignCardData; locale
     return () => {
       cancelAnimationFrame(frame);
       if (dialog.open) dialog.close();
-      root.style.overflow = overflow;
+      unlock();
       if (returnFocus.current && opener?.isConnected) opener.focus({ preventScroll: true });
     };
   }, []);
@@ -148,17 +155,6 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignCardData; locale
     };
   }, [onClose]);
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDialogElement>) => {
-    if (e.key !== "Tab") return;
-    // Keep the focus inside (a modal dialog would otherwise let it go on to the browser's own controls).
-    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
-    if (items.length === 0) return;
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const next = e.shiftKey ? (at <= 0 ? items.length - 1 : at - 1) : at === items.length - 1 ? 0 : at + 1;
-    e.preventDefault();
-    items[next].focus();
-  };
-
   const copy = async () => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error("no clipboard");
@@ -182,7 +178,7 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignCardData; locale
       aria-modal="true"
       aria-labelledby={titleId}
       data-campaign-popup=""
-      onKeyDown={onKeyDown}
+      onKeyDown={(e) => trapTab(e, ref.current)} // Tab stays inside
       // Esc fires "cancel": closing goes through onClose, so the popup's state stays the source of truth.
       onCancel={(e) => {
         e.preventDefault();
@@ -197,6 +193,9 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignCardData; locale
         const target = e.target as HTMLElement;
         if (target.hasAttribute("data-campaign-backdrop")) onClose();
         else if (target.closest("a[href]")) {
+          // A ctrl/cmd-, shift- or alt-click (or any but the main button) opens the course elsewhere: this page stays,
+          // and so do the popup and its focus.
+          if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
           // the button: on to the course; the focus belongs to the next page, not back to this one
           returnFocus.current = false;
           onClose();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { lockPageScroll } from "@/lib/modal";
 import { Icon } from "./Icon";
 import styles from "./Header.module.css";
 
@@ -32,12 +33,7 @@ export function MobileMenu({
   // Keep the page behind the dialog still (B: body overflow hidden while a modal is open).
   useEffect(() => {
     if (!open) return;
-    const root = document.documentElement;
-    const before = root.style.overflow;
-    root.style.overflow = "hidden";
-    return () => {
-      root.style.overflow = before;
-    };
+    return lockPageScroll();
   }, [open]);
 
   return (
