@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Script from "next/script";
 import { Footer } from "@/components/site/Footer";
 import { Header } from "@/components/site/Header";
+import { SiteReady } from "@/components/site/SiteReady";
 import { shellSettings, type ShellSettings } from "@/components/site/settings";
 import { getSiteSettings } from "@/server/site-data";
 import { isLocale, type Locale } from "@/i18n/locales";
@@ -43,6 +44,7 @@ export default async function SiteLayout({ children, params }: { children: React
       <main id="main">{children}</main>
       <Footer locale={locale} newsletter={settings.newsletter} contact={settings.contact} trainerName={settings.trainerName} />
       {REVIEW_TOOLS && <Script src="/feedback.js?v=5" strategy="afterInteractive" />}
+      <SiteReady />
     </>
   );
 }

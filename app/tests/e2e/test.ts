@@ -1,4 +1,4 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page, type Response } from "@playwright/test";
 import { LOCAL_FIXTURES } from "./fixtures";
 import { PROD_BUILD } from "./target";
 
@@ -16,7 +16,37 @@ import { PROD_BUILD } from "./target";
 //   number sets a shorter delay in ms through the page's test hook (window.__mslabCampaignDelay).
 export type CampaignPopup = "off" | "site" | number;
 
+/** A page of the public site (not the admin, the API, /media or the design-review hub), which carries the ready mark. */
+const SITE_PAGE = /^\/(?!admin(\/|$)|api\/|media\/|guide(\/|$)|p\/|_next\/)/;
+
+/**
+ * Waits after page.goto / page.reload until the public page has hydrated (<html data-site-ready>, SiteReady.tsx): a
+ * click or tap that lands before React has taken the page over is lost, which under parallel load on the dev server
+ * happened right after the load event. Not for a navigation that only waits for "commit", nor for non-HTML answers.
+ */
+async function untilReady(page: Page, response: Response | null, waitUntil: string | undefined): Promise<void> {
+  if (!response || waitUntil === "commit") return;
+  if (!(response.headers()["content-type"] ?? "").includes("text/html")) return;
+  if (!SITE_PAGE.test(new URL(page.url()).pathname)) return;
+  await page.locator("html[data-site-ready]").waitFor({ state: "attached" });
+}
+
 export const test = base.extend<{ visitorIp: string; campaignPopup: CampaignPopup; campaignInit: void }>({
+  page: async ({ page }, use) => {
+    const goto = page.goto.bind(page);
+    const reload = page.reload.bind(page);
+    page.goto = async (url, options) => {
+      const response = await goto(url, options);
+      await untilReady(page, response, options?.waitUntil);
+      return response;
+    };
+    page.reload = async (options) => {
+      const response = await reload(options);
+      await untilReady(page, response, options?.waitUntil);
+      return response;
+    };
+    await use(page);
+  },
   campaignPopup: ["off", { option: true }],
   campaignInit: [
     async ({ context, campaignPopup }, use) => {
