@@ -1,14 +1,37 @@
 // The site address used in links that leave the site (newsletter confirmation e-mail, admin link in Maria's
-// notifications). The request's own origin is used when it is one of ours, so a sign-up on the workers.dev preview
-// gets a workers.dev link; anything else (a forged Host / Origin) falls back to SITE_URL.
+// notifications). The request's own origin is used when it is one of ours, so a sign-up on the Vercel production URL
+// (before the domain switch) gets a link to that URL; anything else (a forged Host / Origin) falls back to SITE_URL.
 
+/** The fixed part of the allow-list: the public domain, the local development server and the training centre's old domains. */
 export const LINK_ORIGINS: readonly string[] = [
   "https://mslab.diipsolutions.eu",
-  "https://mslab-web.dim-novare.workers.dev",
   "http://localhost:3000",
   "https://mslab.ee",
   "https://www.mslab.ee",
 ];
+
+/** The Vercel system variables that name this deployment's own hosts (no scheme): the platform sets them, a visitor cannot. */
+const VERCEL_HOST_VARIABLES = ["VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_BRANCH_URL", "VERCEL_URL"] as const;
+
+/**
+ * The allow-list: LINK_ORIGINS plus this deployment's own Vercel hosts (the production URL, the branch URL and the
+ * deployment URL), each only when its variable is set and not empty. The variables are platform settings read at run
+ * time, never anything from a request. They are read from `process.env` (not serverEnv) because they are not
+ * configuration and must not fail a build that runs without them.
+ */
+export function linkOrigins(source: Record<string, string | undefined> = process.env): readonly string[] {
+  const own: string[] = [];
+  for (const name of VERCEL_HOST_VARIABLES) {
+    const host = source[name]?.trim();
+    if (!host) continue;
+    try {
+      own.push(new URL(`https://${host}`).origin);
+    } catch {
+      // not a host: left out
+    }
+  }
+  return [...LINK_ORIGINS, ...own];
+}
 
 const trimSlash = (url: string) => url.replace(/\/+$/, "");
 
@@ -36,12 +59,12 @@ export function hostOrigin(headers: Pick<Headers, "get">): string | null {
   return `${isLocalHost(host) ? "http" : "https"}://${host}`;
 }
 
-/** The base for outgoing links: `origin` when it is allow-listed, otherwise SITE_URL. No trailing slash. */
+/** The base for outgoing links: `origin` when it is in linkOrigins(), otherwise SITE_URL. No trailing slash. */
 export function linkBase(origin: string | null | undefined, siteUrl: string): string {
   if (origin) {
     try {
       const o = new URL(origin).origin;
-      if (LINK_ORIGINS.includes(o)) return o;
+      if (linkOrigins().includes(o)) return o;
     } catch {
       // not a URL: fall back
     }
