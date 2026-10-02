@@ -9,6 +9,7 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
-  "kv_namespaces": [{ "binding": "FEEDBACK", "id": "325a989613294fa19c86451afd8f6fa3" }],
-  "routes": [{ "pattern": "mslab.diipsolutions.eu", "custom_domain": true }]
+  "kv_namespaces": [{ "binding": "FEEDBACK", "id": "325a989613294fa19c86451afd8f6fa3" }]
+  // Retired 02.10.2026: mslab.diipsolutions.eu now belongs to the main app (Worker mslab-web, app/wrangler.jsonc),
+  // which also serves /guide, /p/* and the comment API. Kept only as a rollback until the old hub is removed.
 }
