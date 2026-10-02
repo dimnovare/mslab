@@ -4,6 +4,7 @@ import {
   campaignDraft,
   contactDraft,
   formatFocal,
+  hasLocalePrefix,
   isFocal,
   isHttpsUrl,
   isSiteHref,
@@ -59,6 +60,19 @@ describe("links an admin may store", () => {
     expect(linkFor("https://www.instagram.com/mslab", to, "/koolitused")).toBe("https://www.instagram.com/mslab");
     expect(linkFor("javascript:alert(1)", to, "/koolitused")).toBe("/ru/koolitused");
     expect(linkFor("//evil.example", to, "/koolitused")).toBe("/ru/koolitused");
+  });
+
+  test("a path stored with a locale never doubles it (/ru/ru/…); the admin refuses such a path", () => {
+    for (const p of ["/ru", "/ru/praktika", "/RU/praktika", "/et/koolitused", "/ru?x=1", "/ru#a"]) expect(hasLocalePrefix(p), p).toBe(true);
+    for (const p of ["/", "/ruumid", "/praktika", "/koolitused/ru", "/etendus"]) expect(hasLocalePrefix(p), p).toBe(false);
+    const ru = (p: string) => (p === "/" ? "/ru" : `/ru${p}`);
+    const et = (p: string) => p;
+    expect(linkFor("/ru/praktika", ru, "/koolitused")).toBe("/ru/praktika");
+    expect(linkFor("/ru/praktika", et, "/koolitused")).toBe("/praktika");
+    expect(linkFor("/et/koolitused?vorm=e", ru, "/koolitused")).toBe("/ru/koolitused?vorm=e");
+    expect(linkFor("/ru", ru, "/koolitused")).toBe("/ru");
+    expect(linkFor("/ru?x=1", et, "/koolitused")).toBe("/?x=1");
+    expect(linkFor("/ruumid", ru, "/koolitused")).toBe("/ru/ruumid");
   });
 });
 

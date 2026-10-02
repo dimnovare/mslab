@@ -7,7 +7,7 @@ import { makeTestDb } from "./helpers";
 const state = vi.hoisted(() => ({ db: null as unknown, cookie: undefined as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Host-mslab_admin" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
 vi.mock("@/db/client", () => ({ getDb: () => state.db }));
-vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext: () => ({ env: { ADMIN_EMAILS: "dim@example.test,maria@example.test" } }) }));
+vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext: () => ({ env: { ADMIN_EMAILS: "dim@example.test,second.admin@example.com" } }) }));
 
 import { adminAction, createSession, isCrossSite, requireAdmin, requireAdminEmail, withAdmin } from "@/server/auth";
 
@@ -44,14 +44,14 @@ describe("withAdmin", () => {
   });
 
   test("a live session: the handler gets the request, the context and the admin's e-mail; its response is returned as is", async () => {
-    await signIn("maria@example.test");
+    await signIn("second.admin@example.com");
     const handler = vi.fn(async (_r: Request, ctx: { params: Promise<{ id: string }> }, admin: { email: string }) => Response.json({ id: await ctx.params, email: admin.email }, { status: 201 }));
     const ctx = { params: Promise.resolve({ id: "7" }) };
     const request = req("POST");
     const res = await withAdmin(handler)(request, ctx);
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ id: { id: "7" }, email: "maria@example.test" });
-    expect(handler).toHaveBeenCalledWith(request, ctx, { email: "maria@example.test" });
+    expect(await res.json()).toEqual({ id: { id: "7" }, email: "second.admin@example.com" });
+    expect(handler).toHaveBeenCalledWith(request, ctx, { email: "second.admin@example.com" });
   });
 
   test("a mutating request from another site is 403, with or without a session; GET is not affected", async () => {
@@ -117,8 +117,8 @@ describe("requireAdmin / requireAdminEmail", () => {
     const thrown = await requireAdminEmail().catch((e) => e);
     expect(thrown).toBeInstanceOf(Response);
     expect((thrown as Response).status).toBe(401);
-    await signIn("maria@example.test");
-    expect(await requireAdmin()).toBe("maria@example.test");
-    expect(await requireAdminEmail()).toBe("maria@example.test");
+    await signIn("second.admin@example.com");
+    expect(await requireAdmin()).toBe("second.admin@example.com");
+    expect(await requireAdminEmail()).toBe("second.admin@example.com");
   });
 });

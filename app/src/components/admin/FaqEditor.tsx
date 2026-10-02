@@ -47,7 +47,7 @@ export function FaqEditor({ items, onChange, err }: { items: FaqDraft[]; onChang
     onChange(items.filter((_, j) => j !== i));
   };
   const add = () => {
-    const item = { uid: `new-${Date.now().toString(36)}-${++added}`, q: { et: "" }, a: { et: "" } };
+    const item: FaqDraft = { uid: `new-${Date.now().toString(36)}-${++added}`, id: null, q: { et: "" }, a: { et: "" } };
     focus.current = { uid: item.uid, what: "q" };
     onChange([...items, item]);
   };

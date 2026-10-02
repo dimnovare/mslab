@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import type { Db } from "../client";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import type { Q, Tx } from "../client";
 import { campaign, faq, galleryItems, heroSlides, pages, posts, practicePackages, settings } from "../schema";
 import type { Campaign, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "../schema";
 import type { I18n } from "@/i18n/field";
@@ -7,11 +7,6 @@ import type { I18n } from "@/i18n/field";
 // The site content editors' reads and writes (Task 13B): hero slides, FAQ, text pages, settings, practice packages, the
 // trainer works gallery, the campaign and posts. Callers must already have checked the admin session. The readers take
 // the database or an open transaction, so a save reads what it compares (the stale guard) inside its own transaction.
-
-/** An open transaction of the Db. */
-export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-/** The database or a transaction. */
-export type Q = Db | Tx;
 
 /** The tables a site editor writes; a save locks the ones it touches (see lockTables). */
 export const SITE_TABLES = ["campaign", "faq", "gallery_items", "hero_slides", "pages", "posts", "practice_packages", "settings"] as const;
@@ -65,9 +60,6 @@ export async function readPost(q: Q, id: number): Promise<Post | null> {
   return row ?? null;
 }
 
-/** Every post, drafts included, newest first. */
-export const readAllPosts = (q: Q): Promise<Post[]> => q.select().from(posts).orderBy(desc(posts.publishedAt), desc(posts.id));
-
 /** Is `slug` used by a post other than `exceptId`? */
 export async function isPostSlugTaken(q: Q, slug: string, exceptId?: number | null): Promise<boolean> {
   const [row] = await q
@@ -86,46 +78,43 @@ export type PackageFields = Omit<PracticePackage, "code" | "sort">;
 export type PostFields = Omit<Post, "id">;
 
 /**
- * The hero slides in this order (sort 1…n): a row with the id of a stored slide updates it (it keeps its id), one
- * without (or with an id that is not stored) is added, and stored slides that are not in `rows` are deleted.
+ * How an ordered list is stored so that its rows keep their ids: a row with the id of a stored row updates it, one
+ * without (or with an id that is not stored, or that came earlier in the list: a forged draft) is added, and stored rows
+ * that are not in the list are deleted. sort = place 1…n.
  */
+export function syncPlan<T extends { id: number | null }>(stored: number[], rows: T[]): { remove: number[]; steps: { id: number | null; row: Omit<T, "id">; sort: number }[] } {
+  const known = new Set(stored);
+  const used = new Set<number>();
+  const steps = rows.map(({ id, ...row }, i) => {
+    const keep = id != null && known.has(id) && !used.has(id);
+    if (keep) used.add(id);
+    return { id: keep ? id : null, row, sort: i + 1 };
+  });
+  return { remove: stored.filter((id) => !used.has(id)), steps };
+}
+
+/** The hero slides in this order, keeping their ids (syncPlan). */
 export async function saveSlides(tx: Tx, rows: (SlideRow & { id: number | null })[]): Promise<void> {
-  const stored = new Set((await tx.select({ id: heroSlides.id }).from(heroSlides)).map((r) => r.id));
-  const keep = rows.map((r) => r.id).filter((id): id is number => id != null && stored.has(id));
-  const gone = [...stored].filter((id) => !keep.includes(id));
-  if (gone.length) await tx.delete(heroSlides).where(inArray(heroSlides.id, gone));
-  for (const [i, { id, ...fields }] of rows.entries()) {
-    if (id != null && keep.includes(id)) await tx.update(heroSlides).set({ ...fields, sort: i + 1 }).where(eq(heroSlides.id, id));
-    else await tx.insert(heroSlides).values({ ...fields, sort: i + 1 });
+  const plan = syncPlan((await tx.select({ id: heroSlides.id }).from(heroSlides)).map((r) => r.id), rows);
+  if (plan.remove.length) await tx.delete(heroSlides).where(inArray(heroSlides.id, plan.remove));
+  for (const step of plan.steps) {
+    if (step.id != null) await tx.update(heroSlides).set({ ...step.row, sort: step.sort }).where(eq(heroSlides.id, step.id));
+    else await tx.insert(heroSlides).values({ ...step.row, sort: step.sort });
   }
 }
 
-/** The FAQ in this order (sort 1…n); the old rows are replaced. */
-export async function replaceFaq(tx: Tx, rows: FaqRow[]): Promise<void> {
-  await tx.delete(faq);
-  if (rows.length) await tx.insert(faq).values(rows.map((r, i) => ({ ...r, sort: i + 1 })));
-}
-
-/** One gallery group in this order; its old rows are replaced. */
-export async function replaceGalleryGroup(tx: Tx, group: string, items: { key: string; alt: I18n | null }[]): Promise<void> {
-  await tx.delete(galleryItems).where(eq(galleryItems.group, group));
-  if (items.length) await tx.insert(galleryItems).values(items.map((x, i) => ({ group, key: x.key, alt: x.alt, sort: i })));
-}
-
-export async function putPage(tx: Tx, key: string, page: { title: I18n; body: I18n }): Promise<void> {
-  await tx.insert(pages).values({ key, ...page }).onConflictDoUpdate({ target: pages.key, set: page });
-}
-
-export async function putSetting(tx: Tx, key: string, value: unknown): Promise<void> {
-  await tx.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
+/** The FAQ in this order, keeping the ids of its items (syncPlan), so the editor's rows keep their fields after a save. */
+export async function saveFaq(tx: Tx, rows: (FaqRow & { id: number | null })[]): Promise<void> {
+  const plan = syncPlan((await tx.select({ id: faq.id }).from(faq)).map((r) => r.id), rows);
+  if (plan.remove.length) await tx.delete(faq).where(inArray(faq.id, plan.remove));
+  for (const step of plan.steps) {
+    if (step.id != null) await tx.update(faq).set({ ...step.row, sort: step.sort }).where(eq(faq.id, step.id));
+    else await tx.insert(faq).values({ ...step.row, sort: step.sort });
+  }
 }
 
 export async function updatePackage(tx: Tx, code: string, fields: PackageFields): Promise<void> {
   await tx.update(practicePackages).set(fields).where(eq(practicePackages.code, code));
-}
-
-export async function putCampaign(tx: Tx, fields: Omit<Campaign, "id">): Promise<void> {
-  await tx.insert(campaign).values({ ...fields, id: 1 }).onConflictDoUpdate({ target: campaign.id, set: fields });
 }
 
 export async function insertPost(tx: Tx, fields: PostFields): Promise<Post> {

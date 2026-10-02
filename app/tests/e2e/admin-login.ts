@@ -1,0 +1,76 @@
+import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { BrowserContext, Page } from "@playwright/test";
+import { expect } from "./test";
+
+// Signing in during the e2e tests (local dev server only).
+//
+// - Only Dim's address is ever used to ask for a login link (tests/unit/test-addresses.test.ts checks that no test asks
+//   for Maria's). Locally the link comes back in the answer (devLink) and is never e-mailed (server/login.ts).
+// - One address may hold at most 3 unused links at a time (server/auth.ts LOGIN_TOKEN_CAP), and the workers sign in in
+//   parallel. So asking for a link and using it (or deleting it) happens under one lock shared by all worker processes:
+//   at most one test link is unused at any moment, and the cap is never reached by the tests themselves.
+
+export const ADMIN = "dim@example.test";
+
+const LOCK = join(tmpdir(), "mslab-e2e-login.lock");
+/** A lock older than this was left by a worker that crashed while holding it. */
+const STALE_MS = 20_000;
+const WAIT_MS = 25_000;
+let held = false;
+
+/** Takes the login lock (re-entrant within one worker: its tests run one after the other). */
+export async function lockLogin(): Promise<void> {
+  if (held) return;
+  const deadline = Date.now() + WAIT_MS;
+  for (;;) {
+    try {
+      mkdirSync(LOCK);
+      writeFileSync(join(LOCK, "owner"), `${process.pid} ${new Date().toISOString()}`);
+      held = true;
+      return;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    try {
+      if (Date.now() - statSync(LOCK).mtimeMs > STALE_MS) rmSync(LOCK, { recursive: true, force: true });
+    } catch {
+      // released meanwhile
+    }
+    if (Date.now() > deadline) throw new Error("e2e: the login lock was not free within 25 s");
+    await new Promise((r) => setTimeout(r, 40));
+  }
+}
+
+/** Gives the lock back: call it once the test's link is used up or deleted (also safe when not held). */
+export function unlockLogin(): void {
+  if (!held) return;
+  held = false;
+  rmSync(LOCK, { recursive: true, force: true });
+}
+
+export type CreatedRows = { tokens: Set<string>; sessions: Set<string> };
+
+/**
+ * Signs in as Dim through the devLink and lands on /admin; the token and the session cookie go into `created` (the test
+ * deletes them afterwards). The link is asked for and used under the login lock.
+ */
+export async function signInAsAdmin(page: Page, context: BrowserContext, ip: string, created: CreatedRows): Promise<void> {
+  await lockLogin();
+  try {
+    const res = await page.request.post("/api/auth/request", { data: { email: ADMIN }, headers: { "x-forwarded-for": ip } });
+    expect(res.status()).toBe(200);
+    const { devLink } = (await res.json()) as { devLink?: string };
+    expect(devLink, "devLink in the local answer").toBeTruthy();
+    const link = new URL(devLink!);
+    created.tokens.add(link.searchParams.get("t")!);
+    await page.goto(link.pathname + link.search);
+    await expect(page).toHaveURL(/\/admin$/);
+  } finally {
+    unlockLogin();
+  }
+  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
+  expect(cookie, "session cookie").toBeTruthy();
+  created.sessions.add(cookie!.value);
+}

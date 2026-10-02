@@ -26,6 +26,7 @@ const fieldErrors = {
   focal: "Vali pildil fookuspunkt.",
   codeFormat: "Kasuta ainult tähti (A–Z), numbreid ja sidekriipsu.",
   imageRequired: "Lisa pilt.",
+  localeHref: "Kirjuta lehe aadress ilma keeleta, nt /koolitused: vene lehel lisatakse /ru ise.",
 };
 
 export const adminEt = {

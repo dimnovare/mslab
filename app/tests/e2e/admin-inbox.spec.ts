@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
+import { signInAsAdmin } from "./admin-login";
 import {
   deleteStoredRequest,
   insertAdminFixtures,
@@ -18,7 +19,6 @@ import {
 // fixtures.ts, an unpublished fixture course with its own session) and deletes again. The guard tests are GET-only and
 // also run against a deployment.
 
-const ADMIN = "dim@example.test";
 const MENU = ["Ülevaade", "Koolitused", "Kalender", "Registreerimised", "Päringud", "Praktika", "Avaleht", "Koolitaja", "Uudised", "Kampaania", "Uudiskiri", "Seaded"];
 
 const created = { tokens: new Set<string>(), sessions: new Set<string>() };
@@ -38,20 +38,8 @@ async function fixtures(project: string, opts: { extraSubscribers?: number } = {
   return fx;
 }
 
-/** Signs in as Dim through the login API's devLink (local only); lands on /admin. */
-async function signIn(page: Page, context: BrowserContext, ip: string): Promise<void> {
-  const res = await page.request.post("/api/auth/request", { data: { email: ADMIN }, headers: { "x-forwarded-for": ip } });
-  expect(res.status()).toBe(200);
-  const { devLink } = (await res.json()) as { devLink?: string };
-  expect(devLink, "devLink in the local answer").toBeTruthy();
-  const link = new URL(devLink!);
-  created.tokens.add(link.searchParams.get("t")!);
-  await page.goto(link.pathname + link.search);
-  await expect(page).toHaveURL(/\/admin$/);
-  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
-  expect(cookie, "session cookie").toBeTruthy();
-  created.sessions.add(cookie!.value);
-}
+/** Signs in as Dim through the devLink, under the login lock shared by all workers (admin-login.ts); lands on /admin. */
+const signIn = (page: Page, context: BrowserContext, ip: string) => signInAsAdmin(page, context, ip, created);
 
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import type { BrowserContext, Page, TestInfo } from "@playwright/test";
+import type { BrowserContext, Page, Route, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
+import { signInAsAdmin } from "./admin-login";
 import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows } from "./fixtures";
 
 // Task 13B: the site content editors (home page, practice, trainer, news, campaign, settings), each followed through to
@@ -8,11 +9,8 @@ import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotR
 // "chromium-edit" / "mobile-edit" projects) and put it back (fixtures.ts: row snapshots; posts "e2e-uudis-<project>-…").
 // The two projects run side by side, so each changes rows the other does not: desktop MAXI, the hero slides and the
 // statement, the trainer card and works, the contact settings and the campaign; phone MINI, the FAQ, the centre's story
-// and the privacy page. Both make their own post. Local dev server only: they sign in through the devLink, as Maria (the
-// other allowed address; nothing is e-mailed locally): admin-edit.spec.ts signs in as Dim at the same time, and one
-// address may hold at most 3 unused login links at once (server/auth.ts LOGIN_TOKEN_CAP).
+// and the privacy page. Both make their own post. Local dev server only: they sign in as Dim through the devLink.
 
-const ADMIN = "maria@example.test";
 const created = { tokens: new Set<string>(), sessions: new Set<string>() };
 const undo: (() => Promise<unknown>)[] = [];
 const unique = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
@@ -38,19 +36,8 @@ async function changing(...snapshots: Parameters<typeof snapshotRows>[]): Promis
   for (const s of snapshots) undo.push(await snapshotRows(...s));
 }
 
-async function signIn(page: Page, context: BrowserContext, ip: string): Promise<void> {
-  const res = await page.request.post("/api/auth/request", { data: { email: ADMIN }, headers: { "x-forwarded-for": ip } });
-  expect(res.status()).toBe(200);
-  const { devLink } = (await res.json()) as { devLink?: string };
-  expect(devLink, "devLink in the local answer").toBeTruthy();
-  const link = new URL(devLink!);
-  created.tokens.add(link.searchParams.get("t")!);
-  await page.goto(link.pathname + link.search);
-  await expect(page).toHaveURL(/\/admin$/);
-  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
-  expect(cookie, "session cookie").toBeTruthy();
-  created.sessions.add(cookie!.value);
-}
+/** Signs in as Dim through the devLink, under the login lock shared by all workers (admin-login.ts); lands on /admin. */
+const signIn = (page: Page, context: BrowserContext, ip: string) => signInAsAdmin(page, context, ip, created);
 
 const status = (page: Page) => page.locator("[data-save-status]");
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
@@ -389,7 +376,7 @@ test.describe("settings", () => {
     await expect(page.locator("[data-contact-details]").getByRole("link", { name: /instagram\.com\/mslab\.e2e/ })).toBeVisible();
   });
 
-  test("the privacy page in two paragraphs; the admin addresses are shown, not editable", async ({ page, context, visitorIp }, info) => {
+  test("the privacy page in two paragraphs, text typed during a save is kept; the admin addresses are shown, not editable", async ({ page, context, visitorIp }, info) => {
     test.skip(!phone(info), "the phone project changes the privacy page; desktop the contact settings");
     await changing(["pages", { column: "key", value: "privacy" }]);
     await signIn(page, context, visitorIp);
@@ -398,11 +385,32 @@ test.describe("settings", () => {
     await expect(admins).toHaveText(["dim@example.test", "maria@example.test"]);
     await expect(page.locator("[data-admin-emails] input")).toHaveCount(0);
     const privacy = page.locator('[data-legal-editor="privacy"]');
-    await privacy.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true }).fill("E2E privaatsus, esimene lõik.\n\nTeine lõik.");
+    const body = privacy.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true });
+    await body.fill("E2E privaatsus, esimene lõik.\n\nTeine lõik.");
     expect(await noOverflow(page)).toBe(true);
+
+    // typing on while the save is on its way (slowed down here): the newer text stays on screen, unsaved, and the next
+    // "Salvesta" stores it (with the version the first save made: not stale)
+    const slow = async (route: Route) => {
+      if (route.request().method() === "POST") await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    };
+    await page.route("**/admin/seaded", slow);
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(status(page)).toHaveText("Salvestan…");
+    await body.focus();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(" Lisa.");
+    await expect(status(page)).toHaveText("Salvestamata muudatused", { timeout: 15_000 });
+    await expect(body).toHaveValue("E2E privaatsus, esimene lõik.\n\nTeine lõik. Lisa.");
+    const stored = () => one((sql) => sql<{ body: { et: string } }[]>`select body from pages where key = 'privacy'`);
+    expect((await stored()).body.et).toBe("E2E privaatsus, esimene lõik.\n\nTeine lõik."); // what was sent
+    await page.unroute("**/admin/seaded", slow);
     await save(page);
+    expect((await stored()).body.et).toBe("E2E privaatsus, esimene lõik.\n\nTeine lõik. Lisa.");
+
     await page.goto("/privaatsus");
-    await expect(page.locator("[data-legal-body] p")).toHaveText(["E2E privaatsus, esimene lõik.", "Teine lõik."]);
+    await expect(page.locator("[data-legal-body] p")).toHaveText(["E2E privaatsus, esimene lõik.", "Teine lõik. Lisa."]);
   });
 });
 

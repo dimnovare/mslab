@@ -8,9 +8,14 @@ import { fakeKv, stubFetch } from "../fakes";
 import { makeTestDb } from "./helpers";
 
 // POST /api/auth/request without Next.js: PGlite database, in-memory KV, stubbed fetch for Resend.
+// The second allowed address is a stand-in: no test asks for a link for a real address other than Dim's
+// (tests/unit/test-addresses.test.ts). A local Host (the default here) gets a devLink and no e-mail; the tests about
+// the e-mail use a non-local Host.
 
 const NOW = new Date("2026-10-01T10:00:00Z");
-const ALLOW = "dim@example.test,maria@example.test";
+const OTHER_ADMIN = "second.admin@example.com";
+const ALLOW = `dim@example.test,${OTHER_ADMIN}`;
+const SITE_HOST = "mslab.example";
 
 let db: Db;
 beforeAll(async () => {
@@ -63,7 +68,7 @@ const tokenOf = (link: string) => new URL(link).searchParams.get("t")!;
 describe("allowed address", () => {
   test("a token is stored and the link is e-mailed after the response", async () => {
     const { mails } = resend();
-    const { deps, flush } = setup();
+    const { deps, flush } = setup({ host: SITE_HOST });
     const res = await handleLoginRequest(deps, { email: " dim@example.test " });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
@@ -84,13 +89,13 @@ describe("allowed address", () => {
   test("the link starts with the site address given to the handler", async () => {
     resend();
     const { deps } = setup({ siteUrl: "https://mslab-web.dim-novare.workers.dev" });
-    const res = await handleLoginRequest(deps, { email: "maria@example.test" });
+    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
     expect(res.status === 200 && res.body.ok && res.body.devLink?.startsWith("https://mslab-web.dim-novare.workers.dev/api/auth/verify?t=")).toBe(true);
   });
 
   test("a failing e-mail provider does not change the answer", async () => {
     const { mails } = resend(() => Response.json({ name: "application_error", message: "dim@example.test is not allowed" }, { status: 422 }));
-    const { deps, flush } = setup();
+    const { deps, flush } = setup({ host: SITE_HOST });
     const res = await handleLoginRequest(deps, { email: "dim@example.test" });
     expect(res.status).toBe(200);
     await flush();
@@ -98,12 +103,12 @@ describe("allowed address", () => {
     // no address, token or provider message in the logs
     const logged = [...vi.mocked(console.error).mock.calls, ...vi.mocked(console.info).mock.calls].flat().join("\n");
     expect(logged).not.toMatch(/dim\.novare|gmail/);
-    expect(logged).not.toContain(tokenOf((res.body as { devLink: string }).devLink));
+    expect(logged).not.toContain(mails()[0].text.match(/\?t=([A-Za-z0-9_-]+)/)![1]);
   });
 
   test("without RESEND_API_KEY (local development) nothing is sent", async () => {
     const { mails } = resend();
-    const { deps, flush } = setup({ key: false });
+    const { deps, flush } = setup({ key: false, host: SITE_HOST });
     expect((await handleLoginRequest(deps, { email: "dim@example.test" })).status).toBe(200);
     await flush();
     expect(mails()).toHaveLength(0);
@@ -175,15 +180,15 @@ describe("per-address cap", () => {
     const kv = fakeKv();
     const flushes = [];
     for (let i = 0; i < 6; i++) {
-      const s = setup({ kv, ip: `198.51.100.${i}` });
+      const s = setup({ kv, ip: `198.51.100.${i}`, host: SITE_HOST });
       await handleLoginRequest(s.deps, { email: "dim@example.test" });
       flushes.push(s.flush());
     }
-    const maria = setup({ kv, ip: "198.51.100.99" });
-    await handleLoginRequest(maria.deps, { email: "maria@example.test" });
-    await Promise.all([...flushes, maria.flush()]);
+    const other = setup({ kv, ip: "198.51.100.99", host: SITE_HOST });
+    await handleLoginRequest(other.deps, { email: OTHER_ADMIN });
+    await Promise.all([...flushes, other.flush()]);
     expect(mails().filter((m) => m.to === "dim@example.test")).toHaveLength(LOGIN_TOKEN_CAP);
-    expect(mails().filter((m) => m.to === "maria@example.test")).toHaveLength(1);
+    expect(mails().filter((m) => m.to === OTHER_ADMIN)).toHaveLength(1);
   });
 
   test("a burst of simultaneous requests cannot slip past the cap", async () => {
@@ -210,6 +215,21 @@ describe("per-address cap", () => {
 });
 
 describe("devLink", () => {
+  test("a link handed back as devLink is never e-mailed, even when RESEND_API_KEY is set", async () => {
+    const { mails, calls } = resend();
+    const { deps, flush } = setup(); // a local Host, a non-production build, and a key
+    const res = await handleLoginRequest(deps, { email: "dim@example.test" });
+    expect(res.status === 200 && res.body.ok && typeof res.body.devLink === "string").toBe(true);
+    expect(await flush()).toHaveLength(0); // no e-mail work was even scheduled
+    expect(mails()).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+    // the same request to the site's own address: e-mailed, no devLink
+    const site = setup({ host: SITE_HOST });
+    expect(await handleLoginRequest(site.deps, { email: "dim@example.test" })).toEqual({ status: 200, body: { ok: true } });
+    await site.flush();
+    expect(mails().map((m) => m.to)).toEqual(["dim@example.test"]);
+  });
+
   test("is returned outside production (tests and local development) and works as a login link", async () => {
     resend();
     const { deps } = setup();

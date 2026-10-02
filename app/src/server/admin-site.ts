@@ -1,14 +1,12 @@
 import { z } from "zod";
-import type { Db } from "@/db/client";
+import type { Db, Q, Tx } from "@/db/client";
+import { replaceGallery, setSetting, upsertCampaign, upsertPage } from "@/db/queries/admin";
 import type { Campaign, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "@/db/schema";
 import {
   deletePostRow,
   insertPost,
   isPostSlugTaken,
   lockTables,
-  putCampaign,
-  putPage,
-  putSetting,
   readCampaign,
   readFaq,
   readGallery,
@@ -18,16 +16,13 @@ import {
   readPost,
   readSetting,
   readSlides,
-  replaceFaq,
-  replaceGalleryGroup,
+  saveFaq,
   saveSlides,
   updatePackage,
   updatePost,
   type FaqRow,
-  type Q,
   type SiteTable,
   type SlideRow,
-  type Tx,
 } from "@/db/queries/admin-site";
 import { tallinnFormParts, tallinnInstant } from "@/domain/calendar";
 import {
@@ -143,10 +138,11 @@ export async function saveParts(db: Db, parts: Parts, formData: FormData): Promi
     const stored = await Promise.all(writes.map((w) => w.def.read(tx)));
     for (const [i, w] of writes.entries()) if ((await contentVersion(stored[i])) !== w.version) return "stale" as const;
     for (const [i, w] of writes.entries()) await w.write(tx, stored[i]);
-    return "saved" as const;
+    // read back inside the same transaction (still locked): exactly what this save stored, with its versions
+    return loadParts(tx, parts, writes.map((w) => w.name));
   });
   if (outcome === "stale") return { ok: false, error: "stale" };
-  return { ok: true, id: 0, saved: await loadParts(db, parts, writes.map((w) => w.name)) };
+  return { ok: true, id: 0, saved: outcome };
 }
 
 // ---------- shared checks ----------
@@ -165,7 +161,7 @@ function pagePart(key: string, opts: { titleMax: number; bodyMax: number; requir
     check: (c, v, name) => {
       const title = c.text(`${name}.title`, v.title, opts.titleMax, { required: opts.required });
       const body = c.text(`${name}.body`, v.body, opts.bodyMax, { required: opts.required });
-      return (tx) => putPage(tx, key, { title: orEmpty(title), body: orEmpty(body) });
+      return async (tx) => void (await upsertPage(tx, { key, title: orEmpty(title), body: orEmpty(body) }));
     },
   });
 }
@@ -179,7 +175,7 @@ function bodyPart(key: string, max: number, defaultTitle: I18n): Part<{ body: I1
     draft: (stored) => ({ body: copyI18n((stored as Page | null)?.body) }),
     check: (c, v, name) => {
       const body = c.text(`${name}.body`, v.body, max);
-      return (tx, stored) => putPage(tx, key, { title: (stored as Page | null)?.title ?? defaultTitle, body: orEmpty(body) });
+      return async (tx, stored) => void (await upsertPage(tx, { key, title: (stored as Page | null)?.title ?? defaultTitle, body: orEmpty(body) }));
     },
   });
 }
@@ -188,9 +184,12 @@ function bodyPart(key: string, max: number, defaultTitle: I18n): Part<{ body: I1
 
 export type HomeValues = { slides: SlideDraft[]; statement: { body: I18n }; faq: FaqDraft[] };
 
+/** A stored row's id in a list draft; null (or absent) for a new row. */
+const storedId = z.number().int().positive().max(ID_MAX).nullable().default(null);
+
 const slideSchema = z.object({
   uid,
-  id: z.number().int().positive().max(ID_MAX).nullable(),
+  id: storedId,
   imageKey: text(400),
   imagePos: text(20),
   imagePosMobile: text(20),
@@ -227,32 +226,25 @@ const homeParts: Parts = {
           active: s.active,
         };
       });
-      // the same id twice (a forged draft) would update one slide twice: only its first place keeps the id
-      const seen = new Set<number>();
-      for (const r of rows) {
-        if (r.id == null) continue;
-        if (seen.has(r.id)) r.id = null;
-        else seen.add(r.id);
-      }
-      return (tx) => saveSlides(tx, rows);
+      return (tx) => saveSlides(tx, rows); // ids kept; a repeated or unknown id becomes a new row (syncPlan)
     },
   }),
   statement: bodyPart("statement", L.statement, { et: "MS LAB Koolituskeskus" }),
   faq: part<FaqDraft[]>({
     tables: ["faq"],
-    schema: z.array(z.object({ uid, q: i18n, a: i18n })).max(200),
+    schema: z.array(z.object({ uid, id: storedId, q: i18n, a: i18n })).max(200),
     read: readFaq,
     draft: (stored) => (stored as FaqItem[]).map(faqDraft),
     check: (c, items, name) => {
-      const rows: FaqRow[] = [];
+      const rows: (FaqRow & { id: number | null })[] = [];
       for (const [i, item] of items.entries()) {
         if (blank(item.q) && blank(item.a)) continue; // an empty row is dropped
         const q = c.text(`${name}.${i}.q`, item.q, L.question, { required: true });
         const a = c.text(`${name}.${i}.a`, item.a, L.answer, { required: true });
-        if (q && a) rows.push({ q, a });
+        if (q && a) rows.push({ id: item.id, q, a });
       }
       if (rows.length > L.faq) c.fail(name, "tooMany");
-      return (tx) => replaceFaq(tx, rows);
+      return (tx) => saveFaq(tx, rows); // the items keep their ids (the editor's rows keep their fields and focus)
     },
   }),
 };
@@ -333,7 +325,7 @@ const trainerParts: Parts = {
         // other keys (the contact block's photo) stay as they are
         const { role: _oldRole, ...rest } = obj(stored);
         void _oldRole;
-        return putSetting(tx, "trainer", { ...rest, portraitKey, portraitPos, name: trainerName, ...(role ? { role } : {}), stats });
+        return setSetting(tx, "trainer", { ...rest, portraitKey, portraitPos, name: trainerName, ...(role ? { role } : {}), stats });
       };
     },
   }),
@@ -345,8 +337,9 @@ const trainerParts: Parts = {
     draft: (stored) => (stored as GalleryItem[]).map((g) => ({ key: g.key, alt: copyI18n(g.alt) })),
     check: (c, items, name) => {
       if (items.length > L.works) c.fail(name, "tooMany");
-      const rows = items.map((x) => ({ key: c.image(name, x.key, { required: true }), alt: c.text(name, x.alt, L.alt) }));
-      return (tx) => replaceGalleryGroup(tx, WORKS_GROUP, rows);
+      // each picture's own field names, so the editor marks the one that is wrong
+      const rows = items.map((x, i) => ({ key: c.image(`${name}.${i}.key`, x.key, { required: true }), alt: c.text(`${name}.${i}.alt`, x.alt, L.alt) }));
+      return async (tx) => void (await replaceGallery(tx, WORKS_GROUP, rows));
     },
   }),
   center_story: pagePart("center_story", { titleMax: L.storyTitle, bodyMax: L.story }),
@@ -378,7 +371,7 @@ const campaignParts: Parts = {
       const ctaLabel = c.text(`${p}ctaLabel`, v.ctaLabel, L.ctaLabel) ?? { et: CAMPAIGN_CTA }; // M4
       const ctaHref = c.href(`${p}ctaHref`, v.ctaHref, { required: true });
       const imageKey = c.image(`${p}imageKey`, v.imageKey, { required: v.active });
-      return (tx) => putCampaign(tx, { active: v.active, kicker: orEmpty(kicker), title: orEmpty(title), text: orEmpty(body), code, ctaLabel, ctaHref, imageKey });
+      return async (tx) => void (await upsertCampaign(tx, { active: v.active, kicker: orEmpty(kicker), title: orEmpty(title), text: orEmpty(body), code, ctaLabel, ctaHref, imageKey }));
     },
   }),
 };
@@ -406,7 +399,7 @@ const settingsParts: Parts = {
         instagram: c.httpsUrl(`${p}instagram`, v.instagram),
         facebook: c.httpsUrl(`${p}facebook`, v.facebook),
       };
-      return (tx, stored) => putSetting(tx, "contact", { ...obj(stored), ...values });
+      return (tx, stored) => setSetting(tx, "contact", { ...obj(stored), ...values });
     },
   }),
   newsletter: part<NewsletterDraft>({
@@ -416,7 +409,7 @@ const settingsParts: Parts = {
     draft: newsletterDraft,
     check: (c, v, name) => {
       const discountLabel = c.plain(`${name}.discountLabel`, v.discountLabel, L.discount, { required: true });
-      return (tx, stored) => putSetting(tx, "newsletter", { ...obj(stored), discountLabel });
+      return (tx, stored) => setSetting(tx, "newsletter", { ...obj(stored), discountLabel });
     },
   }),
   privacy: pagePart("privacy", { titleMax: L.legalTitle, bodyMax: L.legal, required: true }),
@@ -452,8 +445,9 @@ export async function loadPost(q: Q, id: number): Promise<(SavedParts & { values
 
 /**
  * The post editor's save: part `post` (PostDraft; id null = a new post). The slug is typed or made from the Estonian
- * title, unique among the posts. The date is the Estonian calendar day (stored at 09:00 Estonian time). A published
- * post needs its cover. An existing post is refused as `stale` when it was saved elsewhere since its version.
+ * title, unique among the posts. The date is the Estonian calendar day: a new day is stored at 09:00 Estonian time, an
+ * unchanged day keeps the stored time. A published post needs its cover. An existing post is refused as `stale` when it
+ * was saved elsewhere since its version.
  */
 export async function savePostForm(db: Db, formData: FormData): Promise<EditResult> {
   const sent = payload(formData)?.parts.post;
@@ -471,29 +465,32 @@ export async function savePostForm(db: Db, formData: FormData): Promise<EditResu
   const category = c.text("post.category", d.category, L.category, { required: true });
   const coverKey = c.image("post.coverKey", d.coverKey, { required: d.published });
   const date = d.publishedAt.trim();
-  const publishedAt = date ? tallinnInstant(date, "09:00") : null;
-  if (!publishedAt) c.fail("post.publishedAt", date ? "date" : "required");
-  if (!c.ok || !title || !category || !publishedAt) return invalid(c.errors);
+  const newDay = date ? tallinnInstant(date, "09:00") : null;
+  if (!newDay) c.fail("post.publishedAt", date ? "date" : "required");
+  if (!c.ok || !title || !category || !newDay) return invalid(c.errors);
 
-  const fields = { slug, title, excerpt: orEmpty(excerpt), body: orEmpty(body), category, coverKey, publishedAt, published: d.published };
+  const fields = { slug, title, excerpt: orEmpty(excerpt), body: orEmpty(body), category, coverKey, published: d.published };
   const outcome = await db.transaction(async (tx) => {
     await lockTables(tx, ["posts"]);
+    const stored = d.id != null ? await readPost(tx, d.id) : null;
     if (d.id != null) {
-      const stored = await readPost(tx, d.id);
       if (!stored) return "notFound" as const;
       if ((await contentVersion(stored)) !== sent.version) return "stale" as const;
     }
     if (await isPostSlugTaken(tx, slug, d.id)) return "slugTaken" as const;
-    if (d.id != null) {
-      await updatePost(tx, d.id, fields);
-      return d.id;
-    }
-    return (await insertPost(tx, fields)).id;
+    // the same day keeps the stored time (the order of posts on one day stays); a new day starts at 09:00
+    const publishedAt = stored && tallinnFormParts(stored.publishedAt).date === date ? stored.publishedAt : newDay;
+    let id: number;
+    if (stored) {
+      await updatePost(tx, stored.id, { ...fields, publishedAt });
+      id = stored.id;
+    } else id = (await insertPost(tx, { ...fields, publishedAt })).id;
+    const saved = await loadPost(tx, id); // read back inside the transaction: what this save stored
+    return { id, saved: saved! };
   });
   if (outcome === "slugTaken") return invalid({ "post.slug": "slugTaken" });
   if (outcome === "notFound" || outcome === "stale") return { ok: false, error: outcome };
-  const saved = await loadPost(db, outcome);
-  return { ok: true, id: outcome, created: d.id == null, ...(saved ? { saved } : {}) };
+  return { ok: true, id: outcome.id, created: d.id == null, saved: outcome.saved };
 }
 
 /** "Kustuta postitus": field id. */

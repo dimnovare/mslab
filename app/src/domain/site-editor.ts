@@ -77,10 +77,23 @@ export function isHttpsUrl(value: string): boolean {
   }
 }
 
-/** A stored button link for the page: a site path gets the locale prefix (via `to`), an https address stays; anything else falls back. */
+const LOCALE_PREFIX = /^\/(ru|et)(?=$|[/?#])/i;
+
+/**
+ * Does a site path start with a locale ("/ru/praktika", "/et", "/ru?x")? The site adds the locale itself, so a stored
+ * link is written without it (the admin refuses one with it; "/ruumid" is not a locale).
+ */
+export const hasLocalePrefix = (path: string) => LOCALE_PREFIX.test(path);
+
+/**
+ * A stored button link for the page: a site path gets the locale prefix (via `to`), an https address stays; anything
+ * else falls back. A path stored with a locale already ("/ru/praktika") loses it first, so it never becomes "/ru/ru/…".
+ */
 export function linkFor(value: string, to: (path: string) => string, fallback: string): string {
   if (!isSiteHref(value)) return to(fallback);
-  return value.startsWith("/") ? to(value) : value;
+  if (!value.startsWith("/")) return value;
+  const bare = value.replace(LOCALE_PREFIX, "");
+  return to(bare === "" || /^[?#]/.test(bare) ? `/${bare}` : bare);
 }
 
 // ---------- focal points ("x% y%", CSS object-position) ----------
@@ -187,8 +200,9 @@ export function newSlideDraft(uid: string): SlideDraft {
   };
 }
 
-export type FaqDraft = Keyed & { q: I18n; a: I18n };
-export const faqDraft = (f: { id: number; q: I18n; a: I18n }): FaqDraft => ({ uid: `f${f.id}`, q: copyI18n(f.q), a: copyI18n(f.a) });
+/** A FAQ item; `id`: the stored item (kept on save), null for a new one. */
+export type FaqDraft = Keyed & { id: number | null; q: I18n; a: I18n };
+export const faqDraft = (f: { id: number; q: I18n; a: I18n }): FaqDraft => ({ uid: `f${f.id}`, id: f.id, q: copyI18n(f.q), a: copyI18n(f.a) });
 
 /** An editable text page (statement, trainer bio, stories, legal pages). */
 export type PageDraft = { title: I18n; body: I18n };

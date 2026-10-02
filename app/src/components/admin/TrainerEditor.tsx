@@ -184,7 +184,14 @@ export function TrainerEditor({ initial, storyTitles }: { initial: Loaded<Traine
           <h2 id={`${uid}-works`} className={`${ui.h2} ${styles.cardTitle}`}>
             {t.works}
           </h2>
-          <GalleryEditor images={d.draft.works} onChange={(fn) => d.update("works", fn)} error={d.err("works")} hint={t.worksHint} showMain={false} />
+          <GalleryEditor
+            images={d.draft.works}
+            onChange={(fn) => d.update("works", fn)}
+            error={d.err("works")}
+            errorOf={(i) => d.err(`works.${i}.key`) ?? d.err(`works.${i}.alt`)}
+            hint={t.worksHint}
+            showMain={false}
+          />
         </section>
 
         {story("center_story", t.story)}

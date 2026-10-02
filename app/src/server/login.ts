@@ -73,13 +73,16 @@ export async function handleLoginRequest(deps: LoginDeps, input: unknown): Promi
     return { status: 200, body: { ok: true } };
   }
   const link = verifyUrl(deps.siteUrl, token);
-  deps.later(async () => {
-    const sent = await sendMail(deps.env, { to: email, subject: adminEt.mail.subject, text: fill(adminEt.mail.text, { link }) });
-    console.info(`[auth] login link e-mailed: ${sent}`);
-  });
   // Tests and local development have no mailbox to read: the link comes back in the answer. Two gates: a non-production
   // build (production builds replace process.env.NODE_ENV with "production", so the branch is gone from them) AND a
   // request that came to localhost / 127.0.0.1, so a preview or staging deploy built in development mode cannot leak it.
   const dev = process.env.NODE_ENV !== "production" && isLocalHost(deps.host);
-  return { status: 200, body: dev ? { ok: true, devLink: link } : { ok: true } };
+  // A link handed back in the answer is never e-mailed as well: a local dev server or test run that happens to have a
+  // RESEND_API_KEY in its environment still sends nobody a mail (the e2e tests sign in many times per run).
+  if (dev) return { status: 200, body: { ok: true, devLink: link } };
+  deps.later(async () => {
+    const sent = await sendMail(deps.env, { to: email, subject: adminEt.mail.subject, text: fill(adminEt.mail.text, { link }) });
+    console.info(`[auth] login link e-mailed: ${sent}`);
+  });
+  return { status: 200, body: { ok: true } };
 }

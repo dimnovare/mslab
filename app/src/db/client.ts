@@ -9,6 +9,10 @@ import * as schema from "./schema";
 
 /** Query functions take a Db as their first parameter. Production passes the Hyperdrive client; tests pass PGlite. */
 export type Db = PostgresJsDatabase<typeof schema> | PgliteDatabase<typeof schema>;
+/** An open transaction of the Db. */
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+/** The database or an open transaction: queries that also run inside a caller's transaction take this. */
+export type Q = Db | Tx;
 
 /** Seconds to wait for a connection, so a slow or unreachable database cannot hang the page (the shell falls back). */
 const CONNECT_TIMEOUT = 5;

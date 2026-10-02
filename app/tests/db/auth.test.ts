@@ -141,12 +141,12 @@ describe("sessions", () => {
 
   test("raw id is 32 random bytes, stored only as a hash, valid for 30 days", async () => {
     const db = await makeTestDb();
-    const raw = await createSession(db, " maria@example.test", now);
+    const raw = await createSession(db, " Second.Admin@example.com", now);
     expect(raw).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const rows = await db.select().from(adminSessions);
     expect(rows).toHaveLength(1);
     expect(rows[0].idHash).toBe(await sha256(raw));
-    expect(rows[0].email).toBe("maria@example.test");
+    expect(rows[0].email).toBe("second.admin@example.com");
     expect(rows[0].expiresAt.getTime() - now.getTime()).toBe(SESSION_TTL_MS);
     expect(SESSION_TTL_MS).toBe(30 * 24 * 60 * MIN);
   });
@@ -208,7 +208,7 @@ describe("issueLoginToken (per-address cap)", () => {
   test("other addresses have their own cap", async () => {
     const db = await makeTestDb();
     for (let i = 0; i < LOGIN_TOKEN_CAP; i++) await issueLoginToken(db, DIM, now);
-    expect(await issueLoginToken(db, "maria@example.test", now)).not.toBeNull();
+    expect(await issueLoginToken(db, "second.admin@example.com", now)).not.toBeNull();
   });
 
   test("the window is 10 minutes: older tokens (still alive until 15) stop counting", async () => {
@@ -259,7 +259,7 @@ describe("redeemLoginToken (one transaction)", () => {
   test("an address that has left the allow-list gets no session (its token is used up)", async () => {
     const db = await makeTestDb();
     const t = await createLoginToken(db, DIM, now);
-    expect(await redeemLoginToken(db, t, "maria@example.test", now)).toBeNull();
+    expect(await redeemLoginToken(db, t, "second.admin@example.com", now)).toBeNull();
     expect(await db.select().from(adminSessions)).toHaveLength(0);
     expect(await redeemLoginToken(db, t, ALLOW, now)).toBeNull();
   });

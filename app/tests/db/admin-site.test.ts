@@ -98,6 +98,16 @@ describe("home page: hero slides, statement, FAQ", () => {
     expect(await db.select().from(heroSlides)).toEqual(before);
   });
 
+  test("a site path written with its locale is refused (the site adds /ru itself)", async () => {
+    const home = await loadHome(db);
+    const slides = clone(home.values.slides);
+    slides[0].ctaHref = "/ru/praktika";
+    slides[1].ctaHref = "/et/koolitused";
+    expect(fieldsOf(await saveHomeForm(db, form({ slides: { version: home.versions.slides, value: slides } })))).toEqual({ "slides.0.ctaHref": "localeHref", "slides.1.ctaHref": "localeHref" });
+    const c = await loadCampaign(db);
+    expect(fieldsOf(await saveCampaignForm(db, form({ campaign: { version: c.versions.campaign, value: { ...c.values.campaign, ctaHref: "/ru/koolitused" } } })))).toEqual({ "campaign.ctaHref": "localeHref" });
+  });
+
   test("site paths (with a query or a hash) and https addresses are accepted links; a new slide goes where it is put", async () => {
     const home = await loadHome(db);
     const slides = clone(home.values.slides);
@@ -163,6 +173,22 @@ describe("home page: hero slides, statement, FAQ", () => {
     const many = Array.from({ length: 31 }, (_, i) => ({ uid: `m${i}`, q: { et: `K${i}?` }, a: { et: "V" } }));
     expect(fieldsOf(await saveHomeForm(db, form({ faq: { version: now.versions.faq, value: many } })))).toEqual({ faq: "tooMany" });
     expect(await db.select().from(faq)).toHaveLength(7);
+  });
+
+  test("FAQ items keep their ids across saves (the editor's rows keep their fields); removed ones are deleted", async () => {
+    const home = await loadHome(db);
+    const ids = home.values.faq.map((f) => f.id);
+    expect(ids.every((id) => typeof id === "number")).toBe(true);
+    const items = clone(home.values.faq);
+    items[0].q = { et: "Muudetud küsimus?" };
+    const moved = [items[2], items[0], ...items.slice(3), { uid: "n", id: null, q: { et: "Uus?" }, a: { et: "Jah." } }]; // item 2 (index 1) removed
+    expect(await saveHomeForm(db, form({ faq: { version: home.versions.faq, value: moved } }))).toMatchObject({ ok: true });
+    const stored = await db.select().from(faq).orderBy(faq.sort);
+    expect(stored.map((f) => f.id).slice(0, 5)).toEqual([ids[2], ids[0], ids[3], ids[4], ids[5]]);
+    expect(stored[1].q).toEqual({ et: "Muudetud küsimus?" });
+    expect(stored.map((f) => f.id)).not.toContain(ids[1]);
+    expect(ids).not.toContain(stored[5].id); // the new one
+    expect((await loadHome(db)).values.faq.map((f) => f.uid)).toEqual(stored.map((f) => `f${f.id}`));
   });
 
   test("an unknown part, a malformed draft or no JSON is refused", async () => {
@@ -263,7 +289,12 @@ describe("trainer page", () => {
     const now = await loadTrainer(db);
     const tooMany = Array.from({ length: 25 }, () => ({ key: UPLOAD, alt: { et: "" } }));
     expect(fieldsOf(await saveTrainerForm(db, form({ works: { version: now.versions.works, value: tooMany } })))).toEqual({ works: "tooMany" });
-    expect(fieldsOf(await saveTrainerForm(db, form({ works: { version: now.versions.works, value: [{ key: "../../etc/passwd", alt: { et: "" } }] } })))).toEqual({ works: "image" });
+    // each picture's refusal under its own index (the editor marks that picture)
+    expect(
+      fieldsOf(
+        await saveTrainerForm(db, form({ works: { version: now.versions.works, value: [{ key: UPLOAD, alt: { et: "x".repeat(201) } }, { key: "../../etc/passwd", alt: { et: "" } }, { key: UPLOAD2, alt: { et: "ok" } }] } })),
+      ),
+    ).toEqual({ "works.0.alt": "tooLong", "works.1.key": "image" });
   });
 });
 
@@ -349,6 +380,22 @@ describe("posts", () => {
     const [first] = await listPosts(db);
     expect(first).toMatchObject({ id, coverKey: UPLOAD });
     expect(first.publishedAt.toISOString()).toBe("2026-12-24T07:00:00.000Z"); // winter: UTC+2
+  });
+
+  test("an edit on the same day keeps the stored time (the order of that day's posts); a new day starts at 09:00", async () => {
+    const [seed] = await listPosts(db);
+    const at = new Date("2026-09-22T11:37:00Z"); // 14:37 in Tallinn
+    await db.update(posts).set({ publishedAt: at }).where(eq(posts.id, seed.id));
+    const a = (await loadPost(db, seed.id))!;
+    expect(a.values.post.publishedAt).toBe("2026-09-22");
+    const same = await savePost({ ...a.values.post, title: { et: "Sama päev" } }, a.versions.post);
+    expect(same).toMatchObject({ ok: true });
+    expect((await db.select().from(posts).where(eq(posts.id, seed.id)))[0].publishedAt.toISOString()).toBe(at.toISOString());
+    // the saved draft and version are the ones a fresh load gives (read back inside the save's transaction)
+    expect((same as unknown as { saved: unknown }).saved).toEqual(await loadPost(db, seed.id));
+    const b = (await loadPost(db, seed.id))!;
+    expect(await savePost({ ...b.values.post, publishedAt: "2026-09-23" }, b.versions.post)).toMatchObject({ ok: true });
+    expect((await db.select().from(posts).where(eq(posts.id, seed.id)))[0].publishedAt.toISOString()).toBe("2026-09-23T06:00:00.000Z");
   });
 
   test("refuses a missing title or category, a bad date, a taken or malformed slug", async () => {

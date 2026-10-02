@@ -1,6 +1,6 @@
 import { LIMITS } from "@/domain/course-editor";
 import { parseEuroCents } from "@/domain/money";
-import { isFocal, isHttpsUrl, isSiteHref } from "@/domain/site-editor";
+import { hasLocalePrefix, isFocal, isHttpsUrl, isSiteHref } from "@/domain/site-editor";
 import type { I18n } from "@/i18n/field";
 import { isMediaKey } from "./media";
 
@@ -32,7 +32,8 @@ export type FieldError =
   | "phone"
   | "focal"
   | "codeFormat"
-  | "imageRequired";
+  | "imageRequired"
+  | "localeHref";
 
 /** The parts of a site editor as stored after a save: their drafts and versions (the editor continues from these). */
 export type SavedParts = { values: Record<string, unknown>; versions: Record<string, string> };
@@ -117,11 +118,15 @@ export class Check {
     return Number(v);
   }
 
-  /** A button link: a path on this site or an https:// address ("" when blank and not required). */
+  /**
+   * A button link: a path on this site or an https:// address ("" when blank and not required). A path is written
+   * without the locale ("/praktika", not "/ru/praktika"): the site adds /ru on the Russian pages itself.
+   */
   href(name: string, value: string, opts: { required?: boolean } = {}): string {
     const v = value.trim();
     if (!v) return opts.required ? (this.fail(name, "required") ?? "") : "";
-    return isSiteHref(v) ? v : (this.fail(name, "href") ?? "");
+    if (!isSiteHref(v)) return this.fail(name, "href") ?? "";
+    return hasLocalePrefix(v) ? (this.fail(name, "localeHref") ?? "") : v;
   }
 
   /** An https:// address, or "" when blank. */

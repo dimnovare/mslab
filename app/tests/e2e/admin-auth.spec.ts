@@ -1,11 +1,14 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
+import { ADMIN, lockLogin, unlockLogin } from "./admin-login";
 import { authTestEmail, expireAuthToken, removeAdminRows, sessionExists, storedAuthTokens } from "./fixtures";
 
-// Task 11: admin sign-in by magic link. The tests that sign in or ask for a link run against the local dev server only
-// (they use the real admin addresses, which is safe because `next dev` has no RESEND_API_KEY — global-setup refuses to
-// run otherwise — and the answer carries a devLink); they delete the token and session rows they created. The GET-only
-// tests also run against a deployment.
+// Task 11: admin sign-in by magic link. The tests that sign in or ask for a link run against the local dev server only.
+// The only allowed address they ask a link for is Dim's (never Maria's: tests/unit/test-addresses.test.ts); locally the
+// answer carries the link as devLink and nothing is e-mailed (server/login.ts). A link for Dim is asked for and used up
+// (or deleted) under the login lock that every worker shares (admin-login.ts), so the parallel workers never reach the
+// per-address cap. The tests delete the token and session rows they created. The GET-only tests also run against a
+// deployment.
 
 const SENT = "Kui see aadress on lubatud, saatsime sisselogimislingi.";
 const BUTTON = "Saada sisselogimislink";
@@ -19,7 +22,10 @@ test.afterEach(async () => {
   await removeAdminRows({ tokens: created.tokens, sessions: created.sessions }).catch(() => {});
   created.tokens.clear();
   created.sessions.clear();
+  unlockLogin(); // a failed test may still hold it
 });
+
+const isAdmin = (address: string) => address.trim().toLowerCase() === ADMIN;
 
 const tokenOf = (link: string) => new URL(link).searchParams.get("t")!;
 /** The link's path and query, to open on whatever origin the test runs against (the link carries the site's own origin). */
@@ -53,6 +59,7 @@ async function submitLogin(page: Page, address: string): Promise<Answer> {
       )
       .catch(reject),
   );
+  if (isAdmin(address)) await lockLogin(); // given back once the link is used (sessionCookie) or deleted
   await page.getByLabel("E-post").fill(address);
   await page.getByRole("button", { name: BUTTON }).click();
   const a = await answer;
@@ -66,7 +73,9 @@ async function requestLink(page: Page, address: string): Promise<Answer> {
   return submitLogin(page, address);
 }
 
+/** The session cookie, if any. Called once the link has been opened: the link is used up, so the login lock is freed. */
 async function sessionCookie(context: BrowserContext) {
+  unlockLogin();
   const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
   if (cookie) created.sessions.add(cookie.value);
   return cookie;
@@ -165,10 +174,8 @@ test.describe("login page", () => {
   });
 });
 
-for (const [address, name] of [
-  ["maria@example.test", "Maria"],
-  [" dim@example.test ", "Dim"],
-] as const) {
+// Dim only (written loosely, as people type it): no test asks for a link for Maria's address. Her greeting is a unit test.
+for (const [address, name] of [[" dim@example.test ", "Dim"]] as const) {
   test(`${name}: the link from the e-mail signs in; the session lasts 30 days; logout ends it`, async ({ page, context, request, baseURL, isMobile }) => {
     submitsForms();
     const { headers, body } = await requestLink(page, address);
@@ -262,8 +269,9 @@ test.describe("the link", () => {
 
   test("expires after 15 minutes", async ({ page }) => {
     submitsForms();
-    const { body } = await requestLink(page, "maria@example.test");
+    const { body } = await requestLink(page, ADMIN);
     await expireAuthToken(tokenOf(body.devLink!));
+    unlockLogin(); // an expired link does not count towards the cap
     await page.goto(pathOf(body.devLink!));
     await expect(page).toHaveURL(/\/admin\/login\?viga=link$/);
     await expect(page.locator("main").getByRole("alert")).toHaveText(LINK_ERROR);
@@ -296,10 +304,15 @@ test.describe("who can sign in", () => {
   test("the allowed and the not allowed address see the same page text", async ({ page }, info) => {
     submitsForms();
     const text = async (address: string) => {
-      await requestLink(page, address);
-      return page.locator("[data-login-status]").innerText();
+      const { body } = await requestLink(page, address);
+      const shown = await page.locator("[data-login-status]").innerText();
+      if (body.devLink) {
+        await removeAdminRows({ tokens: [tokenOf(body.devLink)] }); // never opened: deleted at once, then the lock is free
+        unlockLogin();
+      }
+      return shown;
     };
-    const allowed = await text("maria@example.test");
+    const allowed = await text(ADMIN);
     const refused = await text(authTestEmail(info.project.name));
     expect(refused).toBe(allowed);
   });

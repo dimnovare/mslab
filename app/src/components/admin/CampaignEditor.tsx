@@ -20,7 +20,8 @@ import styles from "./site-editor.module.css";
 /**
  * Kampaania: prototype D's adminCamp (Maria C38/C42: "Meeldib, jätame.") — on / off, kicker, title, text, code, the
  * button's text and link — with the image upload she asked for (C43, M5) and the popup card as a live preview (ET or
- * RU). The button says "Leia enda koolitus" (M4); there is no "Mitte praegu" (M3). The popup itself is on the home page.
+ * RU). The button says "Leia enda koolitus" (M4); there is no "Mitte praegu" (M3). The public popup that shows this card
+ * on the home page comes with Task 14; until then the campaign is stored and previewed here only.
  */
 export function CampaignEditor({ initial, links }: { initial: Loaded<{ campaign: CampaignDraft }>; links: string[] }) {
   const t = adminEt.campaign;
@@ -84,6 +85,7 @@ export function CampaignEditor({ initial, links }: { initial: Loaded<{ campaign:
             <div className={styles.previewBox} inert data-campaign-preview="" data-off={c.active ? undefined : ""} lang={lang}>
               <CampaignCard
                 c={preview}
+                locale={lang}
                 codeAction={
                   <button type="button" tabIndex={-1}>
                     {t.copy}

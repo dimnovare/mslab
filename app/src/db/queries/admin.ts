@@ -1,5 +1,5 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
-import type { Db } from "../client";
+import type { Db, Q } from "../client";
 import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
 import { pageInfo, PAGE_SIZE, type PageInfo } from "@/domain/paging";
@@ -467,14 +467,18 @@ export async function upsertPost(db: Db, input: PostInput): Promise<Post> {
   return row;
 }
 
-export async function upsertPage(db: Db, input: PageInput): Promise<Page> {
+/** Creates or updates a text page by its key (inside a transaction too). */
+export async function upsertPage(db: Q, input: PageInput): Promise<Page> {
   const [row] = await db.insert(pages).values(input).onConflictDoUpdate({ target: pages.key, set: input }).returning();
   return row;
 }
 
-/** Replaces the images of one gallery group; order of `items` becomes the display order. */
-export async function replaceGallery(db: Db, group: string, items: ImageInput[]): Promise<GalleryItem[]> {
-  return db.transaction(async (tx) => {
+/**
+ * Replaces the images of one gallery group; order of `items` becomes the display order. One transaction (a savepoint
+ * inside the caller's when `db` already is one).
+ */
+export async function replaceGallery(db: Q, group: string, items: ImageInput[]): Promise<GalleryItem[]> {
+  return (db as Db).transaction(async (tx) => {
     await tx.delete(galleryItems).where(eq(galleryItems.group, group));
     if (items.length === 0) return [];
     return tx
@@ -485,12 +489,12 @@ export async function replaceGallery(db: Db, group: string, items: ImageInput[])
 }
 
 /** The campaign popup is a single row (id 1). */
-export async function upsertCampaign(db: Db, input: CampaignInput): Promise<Campaign> {
+export async function upsertCampaign(db: Q, input: CampaignInput): Promise<Campaign> {
   const [row] = await db.insert(campaign).values({ ...input, id: 1 }).onConflictDoUpdate({ target: campaign.id, set: input }).returning();
   return row;
 }
 
-export async function setSetting(db: Db, key: string, value: unknown): Promise<void> {
+export async function setSetting(db: Q, key: string, value: unknown): Promise<void> {
   await db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 

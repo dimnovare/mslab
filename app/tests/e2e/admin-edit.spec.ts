@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { BrowserContext, Locator, Page, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
+import { signInAsAdmin } from "./admin-login";
 import {
   courseOrder,
   EDIT_CITY_PREFIX,
@@ -22,7 +23,6 @@ import {
 // put everything back (fixtures.ts: course snapshots, "E2E …" sessions). The two projects run side by side, so each has
 // its own course and its own session cities. Local dev server only: they sign in as Dim through the devLink.
 
-const ADMIN = "dim@example.test";
 const created = { tokens: new Set<string>(), sessions: new Set<string>() };
 const undo: (() => Promise<unknown>)[] = [];
 
@@ -54,19 +54,8 @@ async function changing(slug: string): Promise<number> {
   return id;
 }
 
-async function signIn(page: Page, context: BrowserContext, ip: string): Promise<void> {
-  const res = await page.request.post("/api/auth/request", { data: { email: ADMIN }, headers: { "x-forwarded-for": ip } });
-  expect(res.status()).toBe(200);
-  const { devLink } = (await res.json()) as { devLink?: string };
-  expect(devLink, "devLink in the local answer").toBeTruthy();
-  const link = new URL(devLink!);
-  created.tokens.add(link.searchParams.get("t")!);
-  await page.goto(link.pathname + link.search);
-  await expect(page).toHaveURL(/\/admin$/);
-  const cookie = (await context.cookies()).find((c) => c.name === "__Host-mslab_admin");
-  expect(cookie, "session cookie").toBeTruthy();
-  created.sessions.add(cookie!.value);
-}
+/** Signs in as Dim through the devLink, under the login lock shared by all workers (admin-login.ts); lands on /admin. */
+const signIn = (page: Page, context: BrowserContext, ip: string) => signInAsAdmin(page, context, ip, created);
 
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 const status = (page: Page) => page.locator("[data-save-status]");

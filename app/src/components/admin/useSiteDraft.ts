@@ -2,11 +2,10 @@
 
 import { startTransition, useActionState, useEffect, useState, type FormEvent, type RefObject } from "react";
 import { adminEt } from "@/i18n/dict/admin";
-import { stableJson } from "@/lib/version";
 import type { EditResult, FieldError } from "@/server/edit-check";
+import { afterReload, afterSave, dirtyParts as changedParts, type Loaded } from "./site-draft";
 
-/** An editor page's parts as the server loaded them: the drafts and their versions (server/admin-site.ts). */
-export type Loaded<V> = { values: V; versions: Record<string, string> };
+export type { Loaded } from "./site-draft";
 
 type Action = (prev: EditResult | null, formData: FormData) => Promise<EditResult>;
 export type SaveStatus = { text: string; tone: "error" | "success" | "hint"; stale: boolean };
@@ -15,9 +14,9 @@ export type SaveStatus = { text: string; tone: "error" | "success" | "hint"; sta
  * The draft of a site editor page (home page, practice, trainer, campaign, settings, a post), saved with one
  * "Salvesta". Only the parts that differ from what was loaded are sent, each with the version it was loaded at; the
  * server refuses a part that was saved elsewhere meanwhile (stale) and returns the saved parts as now stored, which
- * become the new starting point. `always`: send every part even when unchanged (a new post: the save creates it).
- * While there are unsaved changes, leaving the page asks first (beforeunload); a refused save puts the focus on the
- * first marked field of `form`.
+ * become the new starting point (site-draft.ts afterSave: a part edited while the save was on its way keeps the newer
+ * edits). `always`: send every part even when unchanged (a new post: the save creates it). While there are unsaved
+ * changes, leaving the page asks first (beforeunload); a refused save puts the focus on the first marked field of `form`.
  */
 export function useSiteDraft<V extends Record<string, unknown>>(initial: Loaded<V>, action: Action, form: RefObject<HTMLFormElement | null>, opts: { always?: boolean } = {}) {
   const [draft, setDraft] = useState<V>(initial.values);
@@ -25,30 +24,27 @@ export function useSiteDraft<V extends Record<string, unknown>>(initial: Loaded<
   const [state, dispatch, pending] = useActionState<EditResult | null, FormData>(action, null);
   const [seen, setSeen] = useState<EditResult | null>(null);
   const [lastInitial, setLastInitial] = useState(initial);
+  // what the last save sent, part by part (to tell edits made while it was on its way)
+  const [sent, setSent] = useState<Partial<V>>({});
   const [nothing, setNothing] = useState(false);
 
-  // A save went through: the parts as stored now (normalised: trimmed, blank rows dropped) are the draft and the base.
+  // Follow the stored content (adjusting state while rendering): first a save's result, then a new render of the page.
+  let next: { draft: V; base: Loaded<V> } | null = null;
   if (state !== seen) {
     setSeen(state);
-    const saved = state?.ok ? state.saved : undefined;
-    if (saved) {
-      setBase((b) => ({ values: { ...b.values, ...(saved.values as Partial<V>) }, versions: { ...b.versions, ...saved.versions } }));
-      setDraft((d) => ({ ...d, ...(saved.values as Partial<V>) }));
-    }
+    if (state?.ok && state.saved) next = afterSave(draft, base, sent, state.saved);
   }
-  // The page was rendered again with other stored versions (after a save elsewhere and a reload): those parts follow.
   if (initial !== lastInitial) {
     setLastInitial(initial);
-    const changed = Object.keys(initial.versions).filter((k) => initial.versions[k] !== base.versions[k]);
-    if (changed.length) {
-      const pick = (v: V) => Object.fromEntries(changed.map((k) => [k, v[k]])) as Partial<V>;
-      setBase((b) => ({ values: { ...b.values, ...pick(initial.values) }, versions: { ...b.versions, ...Object.fromEntries(changed.map((k) => [k, initial.versions[k]])) } }));
-      setDraft((d) => ({ ...d, ...pick(initial.values) }));
-    }
+    next = afterReload(next?.draft ?? draft, next?.base ?? base, initial);
+  }
+  if (next) {
+    setDraft(next.draft);
+    setBase(next.base);
   }
 
   const keys = Object.keys(draft) as (keyof V & string)[];
-  const dirtyParts = keys.filter((k) => stableJson(draft[k]) !== stableJson(base.values[k]));
+  const dirtyParts = changedParts(draft, base);
   const dirty = dirtyParts.length > 0;
 
   useEffect(() => {
@@ -80,6 +76,7 @@ export function useSiteDraft<V extends Record<string, unknown>>(initial: Loaded<
     if (send.length === 0) return setNothing(true);
     setNothing(false);
     const parts = Object.fromEntries(send.map((k) => [k, { version: base.versions[k] ?? "", value: draft[k] }]));
+    setSent(Object.fromEntries(send.map((k) => [k, draft[k]])) as Partial<V>);
     const fd = new FormData();
     fd.set("data", JSON.stringify({ parts }));
     startTransition(() => dispatch(fd));
