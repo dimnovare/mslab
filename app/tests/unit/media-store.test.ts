@@ -33,8 +33,8 @@ describe("mediaStore", () => {
       const store = mediaStore(R2, production)!;
       expect(store, `production ${production}`).not.toBeNull();
       expect(await store.get(KEY)).toBeNull();
-      const request = fetch.mock.calls[0] as unknown as [Request];
-      expect(request[0].url).toBe(`https://${R2.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2.R2_BUCKET}/${KEY}`);
+      const [address] = fetch.mock.calls[0] as unknown as [string, RequestInit]; // an address and an init (server/r2.ts)
+      expect(address).toBe(`https://${R2.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2.R2_BUCKET}/${KEY}`);
     }
   });
 

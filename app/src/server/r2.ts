@@ -1,4 +1,4 @@
-import { AwsClient } from "aws4fetch";
+import { AwsV4Signer } from "aws4fetch";
 import type { MediaStore } from "./media";
 
 // Cloudflare R2 through its S3-compatible API: signed requests (AWS Signature V4, region "auto", service "s3") to
@@ -33,17 +33,23 @@ const ANSWER_TIMEOUT_MS = 10_000;
  * records the signed request.
  */
 export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init) => fetch(input, init)): MediaStore {
-  const client = new AwsClient({ accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, service: "s3", region: "auto" });
+  const signingKeys = new Map<string, ArrayBuffer>(); // aws4fetch keeps the day's signing key here, as its AwsClient does
   const urlOf = (key: string) => `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
-  // aws4fetch's own fetch() would retry up to 10 times with growing pauses, far longer than a request may take here: it
-  // only signs, and one attempt is made.
-  async function send(key: string, init: RequestInit): Promise<Response> {
-    const signed = await client.sign(urlOf(key), init);
+  // Only aws4fetch's signer is used: its AwsClient.fetch() would retry up to 10 times with growing pauses, far longer than
+  // a request may take here, and one attempt is made.
+  // The signed request goes to fetch as an address and an init that holds the signal, never as a Request object. In a
+  // route handler fetch is Next.js's: it folds the init of a Request into the Request, and then deduplicates a GET whose
+  // init has no signal, handing back one branch of a tee of the body while the other branch waits, unread, for a repeat
+  // of the request. Cancelling that body (the 404 and error answers below) waits for the other branch, so it never
+  // finished and /media never answered. A signal in the init is Next.js's opt-out of that deduplication.
+  async function send(key: string, init: { method: "GET" | "PUT"; headers?: Record<string, string>; body?: ArrayBuffer }): Promise<Response> {
+    const signer = new AwsV4Signer({ ...init, url: urlOf(key), accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, service: "s3", region: "auto", cache: signingKeys });
+    const signed = await signer.sign();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ANSWER_TIMEOUT_MS);
     try {
-      return await fetchImpl(signed, { signal: controller.signal });
+      return await fetchImpl(signed.url.toString(), { method: signed.method, headers: signed.headers, body: signed.body, signal: controller.signal });
     } finally {
       clearTimeout(timer);
     }
