@@ -178,6 +178,21 @@
     transform 0.2s;
 }
 
+/* "Logi sisse" and "Minu konto" in one grid cell, the other one hidden (AccountLink): the button is as wide as the
+   longer label either way, so switching after hydration moves nothing. */
+.accountLabels {
+  display: grid;
+  justify-items: center;
+}
+
+.accountLabels > span {
+  grid-area: 1 / 1;
+}
+
+.accountLabels > [aria-hidden="true"] {
+  visibility: hidden;
+}
+
 .login:hover,
 .menuLogin:hover {
   background: #40383c;

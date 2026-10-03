@@ -12,7 +12,7 @@ test.describe("newsletter", () => {
   test("a failed attempt keeps the e-mail and the consent; each error is on its own field", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("nl-failed", info.project.name);
-    await page.goto("/konto");
+    await page.goto("/konto/sisene");
     const footer = page.locator("footer");
     const form = footer.locator("[data-newsletter-form]");
     await expect(form).toHaveAttribute("method", "post");
@@ -109,7 +109,7 @@ test.describe("newsletter", () => {
   });
 
   test("ink focus ring on the lilac surface; consent hit area and login pill at least 44px", async ({ page, isMobile }) => {
-    await page.goto("/konto");
+    await page.goto("/konto/sisene");
     const footer = page.locator("footer");
     const email = footer.getByLabel("Sinu e-post");
     await email.focus();

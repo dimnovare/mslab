@@ -25,7 +25,7 @@ const PAGES: [key: string, path: string][] = [
   ["privaatsus", "/privaatsus"],
   ["tingimused", "/tingimused"],
   ["ostukorv", "/ostukorv"],
-  ["konto", "/konto"],
+  ["konto-sisene", "/konto/sisene"],
   ["404", "/olematu-leht"],
 ];
 

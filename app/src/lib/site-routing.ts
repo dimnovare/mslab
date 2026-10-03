@@ -40,10 +40,16 @@ export function cartPage(pathname: string, search: URLSearchParams): string | nu
   return `/${m[1] ? "ru" : "et"}/ostukorv/${encodeURIComponent(course)}`;
 }
 
-/** The pages of app/[locale]/(site) without their locale (tests/unit/site-routing.test.ts checks them against the app). */
-const STATIC_PAGES = new Set(["", "/kontakt", "/konto", "/koolitaja", "/koolitused", "/koolituskalender", "/ostukorv", "/praktika", "/privaatsus", "/tingimused", "/uudised"]);
-/** Pages with a slug of ours (lowercase letters, digits, dashes); the cart takes whatever ?kursus= says (its own 404). */
-const SLUG_PAGE = /^\/(koolitused|uudised)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/**
+ * The pages of app/[locale]/(site) without their locale (tests/unit/site-routing.test.ts checks them against the app),
+ * with the client account's shells (/konto…, phase 2a: the login page, favourites and my details).
+ */
+const STATIC_PAGES = new Set([
+  "", "/kontakt", "/konto", "/konto/andmed", "/konto/lemmikud", "/konto/sisene", "/koolitaja", "/koolitused", "/koolituskalender", "/ostukorv",
+  "/praktika", "/privaatsus", "/tingimused", "/uudised",
+]);
+/** Pages with a slug of ours (lowercase letters, digits, dashes), an e-course in the account too; the cart takes whatever ?kursus= says (its own 404). */
+const SLUG_PAGE = /^\/(koolitused|uudised|konto\/kursus)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CART_PAGE = /^\/ostukorv\/[^/]+$/;
 
 /**

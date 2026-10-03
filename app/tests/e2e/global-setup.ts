@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { applySeatFixtures, LOCAL_FIXTURES, scheduleSampleSessions, removeAdminFixtures, removeAdminRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
+import { applySeatFixtures, LOCAL_FIXTURES, scheduleSampleSessions, removeAdminFixtures, removeAdminRows, removeClientRows, removeEditRows, removeFormRows, removePostRows, restoreLeftoverCourses, restoreLeftoverRows } from "./fixtures";
 import { forbiddenSettingError, SERVER_ENV_FILES } from "../local-secrets";
 import { assertLocalDatabases } from "./local-db";
 import { removeLeftoverComments } from "./local-kv";
@@ -18,6 +18,7 @@ export default async function globalSetup(): Promise<void> {
   assertLocalDatabases(); // before any write: the fixtures' database and the server's are both on this machine
   await removeFormRows();
   await removeAdminRows(); // e2e-auth-… leftovers of an interrupted run
+  await removeClientRows(); // e2e-client-… accounts and login tokens of an interrupted run
   await removeAdminFixtures(); // e2e-admin-… inbox fixtures of an interrupted run
   await restoreLeftoverCourses(); // seed courses an interrupted content test left changed
   await restoreLeftoverRows(); // site content (slides, packages, pages, settings …) it left changed

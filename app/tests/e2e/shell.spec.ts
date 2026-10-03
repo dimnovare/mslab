@@ -47,16 +47,16 @@ test.describe("desktop", () => {
     await expect.poll(() => header.evaluate((el) => getComputedStyle(el).color)).toBe(ink);
   });
 
-  test("inner pages have a white sticky header and the account placeholder", async ({ page }) => {
-    await page.goto("/konto");
+  test("inner pages have a white sticky header; the login page switches language", async ({ page }) => {
+    await page.goto("/konto/sisene");
     const header = page.locator("header");
     const s = await header.evaluate((el) => { const c = getComputedStyle(el); return { bg: c.backgroundColor, pos: c.position }; });
     expect(s).toEqual({ bg: "rgb(255, 255, 255)", pos: "sticky" });
-    await expect(page.getByRole("heading", { name: "Õppija konto avaneb peagi" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Logi sisse" })).toBeVisible();
     await header.getByRole("link", { name: /Vaheta keelt/ }).click();
-    await expect(page).toHaveURL(/\/ru\/konto$/);
+    await expect(page).toHaveURL(/\/ru\/konto\/sisene$/);
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
-    await expect(page.getByRole("heading", { name: "Личный кабинет ученика скоро откроется" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Войти" })).toBeVisible();
   });
 
   test("the language switch keeps the query and hash, and leaves Ctrl/Shift/middle clicks to the browser (item 8)", async ({ page, context }) => {
@@ -82,7 +82,7 @@ test.describe("desktop", () => {
 
   test("the newsletter card is capped at 1400 px and centred on wide screens (item 8)", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1300 });
-    await page.goto("/konto");
+    await page.goto("/konto/sisene");
     const card = page.locator("footer section").filter({ has: page.locator("[data-newsletter-form]") });
     const box = (await card.boundingBox())!;
     expect(box.width).toBe(1400);
@@ -111,7 +111,7 @@ test.describe("desktop", () => {
   test("newsletter form shows the sent state", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("shell-nl", info.project.name);
-    await page.goto("/konto");
+    await page.goto("/konto/sisene");
     const footer = page.locator("footer");
     await footer.getByLabel("Sinu e-post").fill(addr);
     await footer.getByRole("checkbox").check();
@@ -139,7 +139,7 @@ test.describe("mobile", () => {
   });
 
   test("no horizontal overflow", async ({ page }) => {
-    for (const p of ["/", "/konto", "/ru"]) {
+    for (const p of ["/", "/konto/sisene", "/ru"]) {
       await page.goto(p);
       expect(await page.evaluate(() => document.documentElement.scrollWidth), p).toBeLessThanOrEqual(390);
     }

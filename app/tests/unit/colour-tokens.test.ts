@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 
 // Global constraint: only the colour tokens of src/styles/tokens.css. The course components (catalogue, cards, course
 // page, buying, galleries) had prototype B's greys as literals (Task 8 / 14 review, Task 16 item 9); they now use the
-// tokens, and a literal colour in them fails here.
+// tokens, and a literal colour in them fails here. The client account's styles are held to the same rule.
 
 const COURSE_CSS = [
   "src/components/site/CourseActions.module.css",
@@ -19,6 +19,9 @@ const COURSE_CSS = [
   "src/components/site/PurchaseInterest.module.css",
   "src/app/[locale]/(site)/koolitused/catalogue.module.css",
   "src/app/[locale]/(site)/koolitused/[slug]/course.module.css",
+  // the client account (phase 2a)
+  "src/components/account/LoginForm.module.css",
+  "src/components/account/AccountGate.module.css",
 ];
 
 const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""); // comments aside

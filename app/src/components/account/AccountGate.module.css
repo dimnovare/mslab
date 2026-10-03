@@ -1,0 +1,4 @@
+/* While the account loads (or the login page opens): the height of a Notice, so the footer does not jump. */
+.wait {
+  min-height: 52vh;
+}

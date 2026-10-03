@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { href } from "@/i18n/href";
 import { getDict, type Locale } from "@/i18n/locales";
+import { AccountLink } from "./AccountLink";
 import { HeaderFrame } from "./HeaderFrame";
 import { Icon } from "./Icon";
 import { LangSwitch } from "./LangSwitch";
@@ -10,7 +11,8 @@ import { NavLink } from "./NavLink";
 import styles from "./Header.module.css";
 
 /**
- * B header (G3): logo left, five menu links, then ET / RU, cart and "Logi sisse"; burger below 1100px.
+ * B header (G3): logo left, five menu links, then ET / RU, cart and "Logi sisse" ("Minu konto" once signed in:
+ * AccountLink); burger below 1100px.
  * Menu, login and language switch use Manrope 500 15px (G4). `overHero` defaults to "on the home page":
  * there the header is transparent, follows the hero tone (G5) and turns white after scrolling.
  */
@@ -24,7 +26,6 @@ export function Header({ locale, overHero }: { locale: Locale; overHero?: boolea
     [href(locale, "/koolitaja"), d.nav.trainer],
     [href(locale, "/uudised"), d.nav.news],
   ];
-  const account = href(locale, "/konto");
 
   return (
     <>
@@ -49,9 +50,7 @@ export function Header({ locale, overHero }: { locale: Locale; overHero?: boolea
               0
             </span>
           </Link>
-          <Link className={styles.login} href={account}>
-            {d.nav.login}
-          </Link>
+          <AccountLink className={styles.login} locale={locale} login={d.nav.login} account={d.nav.account} />
           <MobileMenu openLabel={d.nav.openMenu} closeLabel={d.nav.closeMenu} dialogLabel={d.nav.menu}>
             <Logo href={home} label={d.nav.home} className={styles.menuLogo} />
             <nav className={styles.menuNav} aria-label={d.nav.mainLabel}>
@@ -61,9 +60,7 @@ export function Header({ locale, overHero }: { locale: Locale; overHero?: boolea
                 </NavLink>
               ))}
               <LangSwitch locale={locale} label={d.nav.langSwitch} className={styles.menuLang} />
-              <Link className={styles.menuLogin} href={account}>
-                {d.nav.login}
-              </Link>
+              <AccountLink className={styles.menuLogin} locale={locale} login={d.nav.login} account={d.nav.account} />
             </nav>
           </MobileMenu>
         </div>

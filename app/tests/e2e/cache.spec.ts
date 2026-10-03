@@ -92,6 +92,39 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
   expect(await (await fromCache(request, "/ostukorv")).text()).not.toBe(cart);
 });
 
+// The client account's pages are static shells (phase 2a): one cached copy for every visitor, whoever is signed in. Tasks
+// 7 and 8 add their shells to this list.
+const ACCOUNT_SHELLS = ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene"];
+
+test("the account's pages come from the cache with no Set-Cookie, for a signed-in browser too; /api/konto/me never does (phase 2a)", async ({ request }) => {
+  const signedIn = { cookie: `__Host-mslab_client=${"e2e".repeat(15)}; mslab_in=1` };
+  for (const path of ACCOUNT_SHELLS) {
+    const plain = await fromCache(request, path);
+    for (const [who, res] of [["no cookie", plain], ["signed-in cookies", await fromCache(request, path, { headers: signedIn })]] as const) {
+      expect(res.status(), `${path} (${who})`).toBe(200);
+      expect(res.headers()["x-nextjs-cache"], `${path} (${who})`).toBe("HIT");
+      expect(res.headers()["cache-control"], `${path} (${who}): for a CDN only`).toMatch(CDN_ONLY);
+      expect(res.headers()["set-cookie"], `${path} (${who})`).toBeUndefined();
+    }
+    const rsc = await fromCache(request, `${path}?_rsc=k`, { headers: { RSC: "1", ...signedIn } });
+    expect(rsc.headers()["x-nextjs-cache"], `${path} RSC`).toBe("HIT");
+    expect(rsc.headers()["set-cookie"], `${path} RSC`).toBeUndefined();
+  }
+  // the query is read by the browser, never by the server: the same page
+  const login = await (await fromCache(request, "/konto/sisene")).text();
+  for (const query of ["?viga=link", "?viga=server", "?korda=1"]) {
+    const res = await fromCache(request, `/konto/sisene${query}`);
+    expect(res.headers()["x-nextjs-cache"], query).toBe("HIT");
+    expect(await res.text(), query).toBe(login);
+  }
+
+  const me = await request.get("/api/konto/me", { failOnStatusCode: false });
+  expect(me.status()).toBe(401);
+  expect(await me.json()).toEqual({ ok: false, reason: "none" });
+  expect(me.headers()["cache-control"]).toBe("private, no-store");
+  expect(me.headers()["x-nextjs-cache"]).toBeUndefined();
+});
+
 test("admin pages and the API never come from the page cache, and no CDN may keep them", async ({ request }) => {
   for (const path of ["/admin/login", "/api/feedback", "/api/cron/sweep"]) {
     for (let i = 0; i < 2; i++) {

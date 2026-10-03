@@ -16,6 +16,8 @@ export const et = {
     trainer: "Koolitaja",
     news: "Uudised",
     login: "Logi sisse",
+    // the same header button once this browser is signed in (the `mslab_in` hint cookie, components/site/AccountLink.tsx)
+    account: "Minu konto",
     cart: "Ostukorv",
     menu: "Menüü",
     langSwitch: "Vaheta keelt",
@@ -430,6 +432,36 @@ export const et = {
       waitlist: "Oled ootenimekirjas. Anname teada, kui koht vabaneb.",
       accessEnded: "Ligipääs on lõppenud.",
       openCourse: "Ligipääs kuni {date}.",
+    },
+    // The login page /konto/sisene (components/account/LoginForm.tsx): the e-mail, then the 6-digit code from the e-mail.
+    // {fixed} is the address with its domain corrected, {email} the address the code went to, {s} the seconds left.
+    login: {
+      email: "E-post",
+      send: "Saada kood",
+      typo: "Kas mõtlesid {fixed}?",
+      typoYes: "Jah, paranda",
+      typoNo: "Ei, saada nii",
+      sent: "Saatsime 6-kohalise koodi aadressile {email}.",
+      code: "Kood",
+      spam: "Ei leia kirja? Vaata ka rämpsposti kausta.",
+      resend: "Saada uuesti",
+      resendIn: "Saada uuesti ({s} s)",
+      resent: "Saatsime uue koodi.",
+      changeEmail: "Muuda e-posti",
+      wrongCode: "Kood ei sobi. Proovi uuesti.",
+      expired: "Kood on aegunud. Saada uus kood.",
+      // ?viga=link: the e-mail's button was used already, or is older than 30 minutes
+      linkExpired: "Link on aegunud või juba kasutatud. Saada uus kood.",
+      rate: "Liiga palju katseid. Proovi mõne minuti pärast uuesti.",
+      server: "Midagi läks valesti. Proovi uuesti.",
+    },
+    // The account pages when the visitor is not signed in there (components/account/AccountGate.tsx): another device
+    // signed in (one device only), or the account could not be loaded.
+    signedOut: {
+      replaced: "Sinu konto avati teises seadmes",
+      sendCode: "Saada uus kood",
+      error: "Midagi läks valesti.",
+      retry: "Proovi uuesti",
     },
   },
 

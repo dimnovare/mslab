@@ -563,7 +563,7 @@ test.describe("contact and legal", () => {
     }
     await page.goto("/ru/tingimused");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Условия обучения");
-    await page.goto("/konto");
+    await page.goto("/konto/sisene");
     await page.locator("footer").getByRole("link", { name: "Privaatsus" }).click();
     await expect(page).toHaveURL(/\/privaatsus$/);
     await page.locator("footer").getByRole("link", { name: "Õppetingimused" }).click();

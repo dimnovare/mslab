@@ -35,11 +35,22 @@ describe("routeSitePath", () => {
     };
     walk(root, "");
     expect(pages.sort()).toEqual(
-      ["", "/[...rest]", "/kontakt", "/konto", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
+      ["", "/[...rest]", "/kontakt", "/konto", "/konto/sisene", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
     );
     for (const p of pages.filter((x) => !x.includes("["))) expect(isKnownPage(`/et${p}`), p).toBe(true);
     for (const p of ["/koolitused/x", "/uudised/y-2", "/ostukorv/whatever"]) expect(isKnownPage(`/ru${p}`), p).toBe(true);
     for (const p of ["/et/leidmata", "/et/koolitused/x/y", "/ru/kontakt/x", "/et/KONTAKT", "/etude", "/et/uudised/Y"]) expect(isKnownPage(p), p).toBe(false);
+  });
+
+  test("the client account's pages are known, in both locales; nothing deeper is (phase 2a Task 5)", () => {
+    for (const locale of ["et", "ru"])
+      for (const p of ["/konto", "/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/kulmude-lami", "/konto/kursus/e-koolitus-2"])
+        expect(isKnownPage(`/${locale}${p}`), `/${locale}${p}`).toBe(true);
+    for (const p of ["/et/konto/x/y", "/et/konto/x", "/et/konto/kursus", "/et/konto/kursus/A", "/et/konto/kursus/x/y", "/ru/konto/sisene/x", "/et/konto/lemmikud/x"])
+      expect(isKnownPage(p), p).toBe(false);
+    expect(route("/konto/sisene?viga=link")).toEqual({ kind: "page", page: "/et/konto/sisene", rewritten: true });
+    expect(route("/ru/konto/sisene?korda=1")).toEqual({ kind: "page", page: "/ru/konto/sisene", rewritten: false });
+    expect(route("/konto/kursus/kulmude-lami")).toEqual({ kind: "page", page: "/et/konto/kursus/kulmude-lami", rewritten: true });
   });
 
   test("redirects, the hub, the API and everything served as it is", () => {

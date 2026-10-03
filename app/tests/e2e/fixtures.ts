@@ -249,6 +249,30 @@ export async function expireAuthToken(rawToken: string): Promise<void> {
   }
 }
 
+// ---------- client account rows (account-login.spec.ts) ----------
+// The account tests sign in as `e2e-client-<label>-<project>@example.test` (tests/e2e/account.ts clientEmail): a sample
+// address, never mailed. Each test starts by removing its own address's rows (a retry starts clean), and global-setup /
+// global-teardown remove every one of them: the clients (their sessions, favourites and access go with them) and the
+// login tokens, which are kept by address.
+
+export const CLIENT_EMAIL_PATTERN = "e2e-client-%@example.test";
+
+/** Deletes the account rows of one test address, or of all of them; returns how many are left (0 when clean). */
+export async function removeClientRows(email?: string): Promise<number> {
+  const match = email ?? CLIENT_EMAIL_PATTERN;
+  const sql = connect();
+  try {
+    await sql`delete from client_login_tokens where email like ${match}`;
+    await sql`delete from clients where email like ${match}`; // on delete cascade: sessions, favourites, access, terms
+    const [{ n }] = await sql<{ n: number }[]>`
+      select (select count(*) from client_login_tokens where email like ${match})
+           + (select count(*) from clients where email like ${match})::int as n`;
+    return Number(n);
+  } finally {
+    await sql.end();
+  }
+}
+
 // ---------- admin inbox fixtures ----------
 // The admin inbox tests need registrations, requests and subscribers to look at. Each test inserts its own set, tagged
 // with a unique `tag` (in every e-mail address and in the course slug), and deletes it afterwards; global-setup and
