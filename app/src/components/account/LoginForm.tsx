@@ -14,8 +14,11 @@ export type LoginTexts = Dict["account"]["login"] & { title: string; badEmail: s
 
 /** "Saada uus kood" waits this long after a code was sent (spec 5). */
 export const RESEND_AFTER_MS = 60_000;
-/** A code is valid this long (server/client-auth.ts LOGIN_TTL_MS): the code step is kept for a reload within it. */
-const CODE_TTL_MS = 30 * 60_000;
+/**
+ * The code step is kept for a reload within this time: the code's 30 minutes (server/client-auth.ts LOGIN_TTL_MS) less a
+ * minute, because `sentAt` is stamped when the answer arrives, a little after the server issued the code.
+ */
+const KEEP_CODE_STEP_MS = 29 * 60_000;
 /** sessionStorage key of the code step in this tab: `{ sentTo, sentAt }`. */
 export const PENDING_KEY = "mslab-login-code";
 
@@ -51,7 +54,7 @@ function pendingCode(now: number): Pending | null {
     if (typeof value !== "object" || value === null) return null;
     const { sentTo, sentAt } = value as Record<string, unknown>;
     if (typeof sentTo !== "string" || !isEmail(sentTo) || typeof sentAt !== "number") return null;
-    return now >= sentAt && now - sentAt < CODE_TTL_MS ? { sentTo, sentAt } : null;
+    return now >= sentAt && now - sentAt < KEEP_CODE_STEP_MS ? { sentTo, sentAt } : null;
   } catch {
     return null;
   }
@@ -201,6 +204,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     setCodeError(error);
     if (error === "code" || error === "expired") setCode(""); // a wrong or dead code is typed again; after a failure of ours "Logi sisse" tries the same one
     if (error === "expired") {
+      keepPendingCode(null); // the server says the code is dead: a reload must not bring its step back
       setResendAt(0); // a new code is the only way on: "Saada uus kood" works at once and has the focus
       focusAfterRender.current = "resend";
     } else focusAfterRender.current = "code";
@@ -234,6 +238,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     }
     if (saved) setEmail((typed) => typed || saved);
     if (problem === "link" || problem === "server") {
+      keepPendingCode(null); // a code step kept in this tab belongs to a send the notice says to replace
       setBanner(problem); // the notice belongs to the e-mail step: a new code is what it asks for
       return;
     }

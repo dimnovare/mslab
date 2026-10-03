@@ -242,6 +242,7 @@ test("the code step survives a reload (a phone that dropped the tab) with the re
   await page.reload();
   await codeField(page).pressSequentially(await knownLoginCode(email));
   await expect(page).toHaveURL(/\/konto$/);
+  expect(await page.evaluate(() => sessionStorage.getItem("mslab-login-code"))).toBeNull();
   await openLogin(page);
   await expect(page.locator("[data-login-step='email']")).toBeVisible();
 });
