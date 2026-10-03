@@ -774,11 +774,11 @@ The shell page: `generateStaticParams()` returns `[]` (rendered on the first vis
 - Test: `app/tests/db/actions.test.ts` (extend), `app/tests/unit/account-mail.test.ts`
 
 **Behaviour (spec section 8):**
-- Group registration: subject "Registreering on vastu võetud — {course}"; body: course, date/time/city, the next step (prepayment amount + instructions from the `prepayment` setting, or "Maria saadab sulle arve"), "Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.", button "Ava minu konto" → `${siteUrl}/konto/sisene?email=<urlencoded>` (pre-fills the field; `siteUrl` = `deps.siteUrl`).
+- Group registration: subject "Registreering on vastu võetud — {course}"; body: course, date/time/city, the next step (prepayment amount + instructions from the `prepayment` setting, or "Maria saadab sulle arve"), "Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.", button "Ava minu konto" → `${siteUrl}/konto/sisene#email=<urlencoded>` (pre-fills the field; `siteUrl` = `deps.siteUrl`).
 - When `wantsAccount` was ticked: the same e-mail also contains a live login code + button (issue via `issueClientLogin`; counts against `reserveLoginMail`; if the cap is reached, the e-mail goes out without the code).
 - Individual, practice, waitlist: short confirmation with "Maria võtab sinuga ühendust." and the same "Ava minu konto" button.
 - Language = the registration's locale. Sample/test addresses are never mailed: skip when `isSampleAddress(to)` (Task 2), before reserving any quota.
-- The login page reads `?email=` once in the browser to pre-fill (then removes it from the address bar).
+- The login page reads `#email=` once in the browser to pre-fill (then removes it from the address bar). A fragment, not a query: it never reaches the server, so no cached shell can ever carry an address (a regeneration bakes the request's query into the page).
 
 - [ ] Steps: unit tests for the mail texts (ET/RU, with and without prepayment info, with and without code); DB tests: registration with `wantsAccount` creates a login token, without it creates none, `@example.test` is never sent; implement; full suites; commit `feat(accounts): confirmation e-mails with the account button`.
 
