@@ -1,5 +1,7 @@
 # MS LAB Phase 2a — Client Accounts Implementation Plan
 
+> **Note (03.10.2026):** this describes the Cloudflare Workers setup, which is retired. The site runs on Vercel now (the design hub is static files in `app/public`); see [`docs/deploy.md`](../../deploy.md) for the current hosting.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Students log in with an e-mail code or link and see "Minu koolitused", their favourites and their details; admins grant e-course access and can view any client's screen read-only — all inside Cloudflare Workers Free.

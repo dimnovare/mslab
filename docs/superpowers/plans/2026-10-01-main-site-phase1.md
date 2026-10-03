@@ -1,5 +1,7 @@
 # MS LAB main site — Phase 1 Implementation Plan
 
+> **Note (03.10.2026):** this describes the Cloudflare Workers setup, which is retired. The site runs on Vercel now (the design hub is static files in `app/public`); see [`docs/deploy.md`](../../deploy.md) for the current hosting.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the real MS LAB website (all public pages, ET + RU, content from Postgres) and a content admin at `mslab.diipsolutions.eu`, with the review hub still reachable at `/guide`.

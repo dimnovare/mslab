@@ -1,5 +1,7 @@
 # MS LAB — design review hub (mslab.diipsolutions.eu/guide)
 
+> **Note (03.10.2026):** this describes the Cloudflare Workers setup, which is retired. The site runs on Vercel now (the design hub is static files in `app/public`); see [`docs/deploy.md`](../../deploy.md) for the current hosting.
+
 Date: 2026-09-29 · Approved by Dim in chat.
 
 ## Goal

@@ -1,5 +1,7 @@
 # MS LAB phase 2a — client accounts and dashboard
 
+> **Note (03.10.2026):** this describes the Cloudflare Workers setup, which is retired. The site runs on Vercel now (the design hub is static files in `app/public`); see [`docs/deploy.md`](../../deploy.md) for the current hosting.
+
 Date: 2026-10-02 · Status: approved by Dim (with the simplicity rules in section 2.1)
 Builds on: `2026-10-01-main-site-phase1-design.md` (phase plan, section 1). Requirements: checklist rows S1–S5, S7 (account part), P6, P16, A4 (students) in `docs/feedback/2026-10-01-checklist.md`.
 

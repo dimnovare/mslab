@@ -1,5 +1,7 @@
 # MS LAB main site — phase 1 design
 
+> **Note (03.10.2026):** this describes the Cloudflare Workers setup, which is retired. The site runs on Vercel now (the design hub is static files in `app/public`); see [`docs/deploy.md`](../../deploy.md) for the current hosting.
+
 Date: 2026-10-01 · Approved in chat by Dim (scope, stack, domain, RU, admin login, account ownership).
 Inputs: Maria's comment-tool feedback 30.09–01.10 (bot export `ChatExport_2026-10-01`), her course-logic
 overview of 01.10, earlier chat (`ChatExport_2026-09-29`), prototypes in `site/p/{a,b,c,d}`.
