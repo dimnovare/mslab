@@ -1,4 +1,4 @@
-import { and, count, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Db, Q } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -59,7 +59,7 @@ export async function issueClientLogin(db: Db, email: string, now = new Date()):
 
 /** Creates the client if new, ends its other sessions, links its records and starts a session. */
 async function startSession(t: Db, address: string, now: Date): Promise<ClientLogin> {
-  await lockAddress(t, address); // the code path already holds it (re-entrant); the link path takes it here at the latest
+  await lockAddress(t, address); // both callers already hold it (re-entrant, no wait); kept so no future caller can skip it
   const [existing] = await t.select().from(clients).where(eq(clients.email, address)).limit(1);
   const client = existing ?? (await t.insert(clients).values({ email: address }).returning())[0];
   await t.update(clientSessions).set({ endedAt: now, endReason: "replaced" })
@@ -105,8 +105,9 @@ export async function redeemClientCode(db: Db, email: string, code: string, now 
         return startSession(t, address, now);
       }
     }
+    // Counts against the live tokens just read (under the lock), never the expired rows a parallel purge may be deleting.
     await t.update(clientLoginTokens).set({ attempts: sql`${clientLoginTokens.attempts} + 1` })
-      .where(and(eq(clientLoginTokens.email, address), isNull(clientLoginTokens.usedAt)));
+      .where(inArray(clientLoginTokens.hash, live.map((row) => row.hash)));
     return "wrong";
   });
 }

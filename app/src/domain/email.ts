@@ -1,6 +1,7 @@
 export const normalizeEmail = (raw: string): string => raw.trim().toLowerCase();
 
-export const isEmail = (s: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);
+/** Address shape; at most 254 characters (the SMTP limit), which also bounds the regex work on hostile input. */
+export const isEmail = (s: string): boolean => s.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);
 
 /** Sample and test data (`@example.test`) is never mailed: the domain does not exist, and bounces hurt the sender. */
 export const isSampleAddress = (email: string): boolean => normalizeEmail(email).endsWith("@example.test");
