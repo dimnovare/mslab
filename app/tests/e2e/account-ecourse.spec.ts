@@ -1,0 +1,335 @@
+import type { Page, Response } from "@playwright/test";
+import { formatDate } from "../../src/i18n/format";
+import {
+  clientEmail, currentTermsVersion, E2E_TERMS, insertEcourseAccess, SEED_ECOURSE_SLUG, setTerms, signInAsClient, storedAcceptances, takeTerms,
+} from "./account";
+import { adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
+import { onLocalDb, removeAdminRows, removeClientRows } from "./fixtures";
+import { PROD_BUILD } from "./target";
+import { submitsForms, test, expect } from "./test";
+
+// Phase 2a Task 7: an e-course in the account (/konto/kursus/<slug>) — "Sul ei ole sellele koolitusele ligipääsu.", the terms
+// notice the student accepts once per terms version, the course view, and the admin's "E-koolituse tingimused" (Seaded), whose
+// save asks everyone to accept again. Clients are sample addresses (`e2e-client-…@example.test`, never mailed) with rows written
+// straight to the local database (account.ts). The terms text and version are shared by every client, so each test takes them
+// (takeTerms: an advisory lock, a snapshot, restored afterwards) and the desktop and phone runs take turns.
+
+let restoreTerms: (() => Promise<void>) | null = null;
+/** The addresses this worker's tests made rows for: removed after each test (the admin course list would show their courses). */
+const made = new Set<string>();
+
+test.beforeEach(async () => {
+  restoreTerms = await takeTerms();
+});
+
+test.afterEach(async () => {
+  try {
+    for (const email of made) await removeClientRows(email);
+    made.clear();
+  } finally {
+    await restoreTerms?.();
+    restoreTerms = null;
+  }
+});
+
+/** A fresh client (with access to the seed e-course, or its own unpublished one, or none) signed in on `page`; /konto is open. */
+async function signedIn(page: Page, label: string, project: string, opts: { own?: boolean; access?: boolean; locale?: "et" | "ru" } = {}) {
+  const email = clientEmail(label, project);
+  made.add(email);
+  await removeClientRows(email);
+  const course = await insertEcourseAccess(email, opts);
+  await signInAsClient(page, email);
+  return { email, ...course };
+}
+
+const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+const gate = (page: Page) => page.locator("[data-terms-gate]");
+const box = (page: Page) => gate(page).getByRole("checkbox", { name: "Olen tutvunud ja nõustun tingimustega" });
+const start = (page: Page) => gate(page).getByRole("button", { name: "Alusta koolitust" });
+const courseView = (page: Page) => page.locator("[data-ecourse]");
+const path = (slug: string, ru = false) => `${ru ? "/ru" : ""}/konto/kursus/${slug}`;
+const paragraphs = (text: string) => text.split("\n\n");
+
+/** Opens the course from the dashboard's "Ava koolitus" (the real way in) and waits for the page's own load to finish. */
+async function openFromDashboard(page: Page, slug: string) {
+  await page.goto("/konto");
+  await page.locator(`[data-card="course-${slug}"]`).getByRole("link", { name: "Ava koolitus" }).click();
+  await expect(page).toHaveURL(new RegExp(`/konto/kursus/${slug}$`));
+}
+
+/** Ticks the box and presses "Alusta koolitust"; the POST's answer. */
+async function accept(page: Page) {
+  await box(page).check();
+  const answer = page.waitForResponse((r) => r.url().endsWith("/api/konto/tingimused") && r.request().method() === "POST");
+  await start(page).click();
+  return answer;
+}
+
+test("without access: one sentence and one button to the public course page, not the error; an unknown course is the same", async ({ page }, info) => {
+  const c = await signedIn(page, "noaccess", info.project.name, { access: false });
+  expect(c.expiresAt).toBeNull();
+  await page.goto(path(c.slug));
+  const state = page.locator("[data-account-state='noAccess']");
+  await expect(state.getByRole("heading", { level: 1 })).toHaveText("Sul ei ole sellele koolitusele ligipääsu.");
+  await expect(state.getByRole("link")).toHaveText(["Vaata koolitust"]);
+  await expect(state.getByRole("button")).toHaveCount(0);
+  await expect(page.getByText(/Proovi uuesti|Ei õnnestunud/)).toHaveCount(0);
+  await expect(gate(page)).toHaveCount(0);
+  await expect(courseView(page)).toHaveCount(0);
+  // the tab bar stays (at the top on a computer, at the bottom on a phone): the page is under "Minu koolitused"
+  await expect(page.locator("[data-account-tabs]:visible")).toHaveCount(1);
+  await expect(page.locator("[data-account-tabs]:visible").getByRole("link", { name: "Minu koolitused" })).toHaveAttribute("aria-current", "page");
+  const link = page.getByRole("link", { name: "Vaata koolitust" });
+  await expect(link).toHaveAttribute("href", `/koolitused/${c.slug}`);
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/koolitused/${c.slug}$`));
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(c.title.et);
+
+  // a course that does not exist says the same thing (nothing about what exists is told)
+  await page.goto(path("e2e-olematu-kursus"));
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sul ei ole sellele koolitusele ligipääsu.");
+  // Russian
+  await page.goto(path(c.slug, true));
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("У вас нет доступа к этому курсу.");
+  await expect(page.getByRole("link", { name: "Посмотреть курс" })).toHaveAttribute("href", `/ru/koolitused/${c.slug}`);
+  // an address that cannot be a course is a 404 page
+  const bad = await page.goto("/konto/kursus/Vale_Nimi");
+  expect(bad?.status()).toBe(404);
+});
+
+test("a signed-out visitor is sent to the login page", async ({ page }) => {
+  await page.goto(path(SEED_ECOURSE_SLUG));
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+});
+
+test("the notice shows first: title, the text, one checkbox, one button that stays off until the box is ticked; nothing is stored yet", async ({ page }, info) => {
+  const c = await signedIn(page, "gate", info.project.name);
+  await openFromDashboard(page, c.slug);
+
+  await expect(gate(page).getByRole("heading", { level: 1 })).toHaveText("Enne alustamist");
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(paragraphs(E2E_TERMS.et));
+  await expect(gate(page).getByRole("checkbox")).toHaveCount(1);
+  await expect(gate(page).getByRole("button")).toHaveCount(1);
+  await expect(gate(page).getByRole("link")).toHaveCount(0);
+  // a notice on the page, not a dialog that can be dismissed
+  await expect(page.locator("dialog[open], [role='dialog']:visible")).toHaveCount(0);
+  await expect(courseView(page)).toHaveCount(0);
+
+  await expect(start(page)).toBeDisabled();
+  await box(page).check();
+  await expect(start(page)).toBeEnabled();
+  await box(page).uncheck();
+  await expect(start(page)).toBeDisabled();
+  expect(await storedAcceptances(c.clientId)).toEqual([]);
+
+  // it spans the page like the rest of the page's content, and its targets are big enough
+  const viewport = page.viewportSize()!.width;
+  expect((await page.locator("[data-terms-text]").boundingBox())!.width).toBeGreaterThan(viewport * 0.85);
+  expect((await start(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await page.locator("[data-terms-gate] label").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(await noOverflow(page)).toBe(true);
+});
+
+test("the notice in Russian shows the Russian text", async ({ page }, info) => {
+  const c = await signedIn(page, "gate-ru", info.project.name, { locale: "ru" });
+  await page.goto(path(c.slug, true));
+  await expect(gate(page).getByRole("heading", { level: 1 })).toHaveText("Перед началом");
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(paragraphs(E2E_TERMS.ru));
+  await expect(gate(page).getByRole("checkbox", { name: "Ознакомлен(а) с условиями и принимаю их" })).toBeVisible();
+  await expect(gate(page).getByRole("button", { name: "Начать обучение" })).toBeDisabled();
+});
+
+test("accepting shows the course: title, access end, the modules with locks, one sentence; the focus is on the title; the next visit skips the notice", async ({ page }, info) => {
+  const c = await signedIn(page, "accept", info.project.name);
+  await openFromDashboard(page, c.slug);
+  const answer = await accept(page);
+  expect(answer.status()).toBe(200);
+  expect(answer.request().postDataJSON()).toEqual({ slug: c.slug, version: "1" });
+
+  await expect(gate(page)).toHaveCount(0);
+  const heading = courseView(page).getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText(c.title.et);
+  await expect(heading).toBeFocused();
+  await expect(page.locator("[data-ecourse-access]")).toHaveText(`Ligipääs kuni ${formatDate(c.expiresAt!, "et")}`);
+  const modules = page.locator("[data-modules] li");
+  await expect(modules).toHaveCount(c.modules.length);
+  for (const [i, m] of c.modules.entries()) await expect(modules.nth(i)).toContainText(m.et);
+  await expect(page.locator("[data-modules] [data-locked]")).toHaveCount(c.modules.length);
+  await expect(page.locator("[data-ecourse-soon]")).toHaveText("Sisu lisandub peagi.");
+  // nothing else on the page: the title, the line, the modules, the sentence
+  await expect(courseView(page).locator(":scope > *")).toHaveCount(4);
+  await expect(courseView(page).getByRole("button")).toHaveCount(0);
+  await expect(courseView(page).getByRole("link")).toHaveCount(0);
+  expect(await storedAcceptances(c.clientId)).toEqual([{ slug: c.slug, version: "1" }]);
+
+  // opening it again goes straight to the course, nothing is asked
+  await page.reload();
+  await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText(c.title.et);
+  await expect(gate(page)).toHaveCount(0);
+  expect(await storedAcceptances(c.clientId)).toHaveLength(1);
+
+  // Russian: the Russian title, date line and sentence
+  await page.goto(path(c.slug, true));
+  await expect(page.locator("[data-ecourse-access]")).toHaveText(`Доступ до ${formatDate(c.expiresAt!, "ru")}`);
+  await expect(page.locator("[data-ecourse-soon]")).toHaveText("Материалы скоро появятся.");
+  await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText(c.title.ru);
+});
+
+test("an unpublished course with active access still opens: the notice, then the course", async ({ page }, info) => {
+  const c = await signedIn(page, "hidden", info.project.name, { own: true });
+  // it is not on the public site any more, but the student's access stays
+  const publicPage = await page.request.get(`/koolitused/${c.slug}`, { failOnStatusCode: false });
+  expect(publicPage.status()).toBe(404);
+  await openFromDashboard(page, c.slug);
+  await expect(gate(page).getByRole("heading", { level: 1 })).toHaveText("Enne alustamist");
+  await accept(page);
+  await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText("E2E e-koolitus");
+  await expect(page.locator("[data-modules] li")).toHaveText([/Sissejuhatus/, /Praktika/]);
+  await expect(page.locator("[data-ecourse-access]")).toHaveText(`Ligipääs kuni ${formatDate(c.expiresAt!, "et")}`);
+});
+
+test("accept, then the admin saves new terms in Seaded: the next open shows the notice again with the new text", async ({ page, context, visitorIp }, info) => {
+  submitsForms();
+  const c = await signedIn(page, "readmin", info.project.name);
+  await openFromDashboard(page, c.slug);
+  await accept(page);
+  await expect(courseView(page)).toBeVisible();
+  expect(await storedAcceptances(c.clientId)).toEqual([{ slug: c.slug, version: "1" }]);
+
+  const created: CreatedRows = { tokens: new Set(), sessions: new Set() };
+  try {
+    await signInAsAdmin(page, context, visitorIp, created);
+    await page.goto("/admin/seaded");
+    await adminReady(page);
+    const editor = page.locator('[data-legal-editor="course_terms"]');
+    await expect(editor.getByRole("heading", { level: 2 })).toHaveText("E-koolituse tingimused");
+    // next to privacy and terms; account-only, so no link to a public page
+    await expect(page.locator("[data-legal-editor]")).toHaveCount(3);
+    await expect(editor.getByRole("link")).toHaveCount(0);
+    const body = editor.getByRole("textbox", { name: "Tekst (eesti keeles)", exact: true });
+    await expect(body).toHaveValue(E2E_TERMS.et);
+    await body.fill("E2E uued tingimused.\n\nTeine lõik muutus.");
+    await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+    await expect(page.locator("[data-save-status]")).toHaveText("Salvestatud.");
+  } finally {
+    await removeAdminRows(created);
+  }
+  const version = await currentTermsVersion();
+  expect(version, "the save time").toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  expect(Math.abs(Date.now() - new Date(version).getTime())).toBeLessThan(120_000);
+  const page_ = await onLocalDb((sql) => sql<{ body: { et: string } }[]>`select body from pages where key = 'course_terms'`);
+  expect(page_[0].body.et).toBe("E2E uued tingimused.\n\nTeine lõik muutus.");
+
+  // the student opens the course again (a new visit): the notice, the new text, an empty box
+  await page.goto(path(c.slug));
+  await expect(gate(page).getByRole("heading", { level: 1 })).toHaveText("Enne alustamist");
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(["E2E uued tingimused.", "Teine lõik muutus."]);
+  await expect(box(page)).not.toBeChecked();
+  await expect(start(page)).toBeDisabled();
+  await expect(courseView(page)).toHaveCount(0);
+
+  // accepting stores the new version next to the old one
+  const answer = await accept(page);
+  expect(answer.request().postDataJSON()).toEqual({ slug: c.slug, version });
+  await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText(c.title.et);
+  expect(await storedAcceptances(c.clientId)).toEqual([{ slug: c.slug, version: "1" }, { slug: c.slug, version }]);
+});
+
+test("a 409: new terms saved after the page loaded, before the click — the fresh text shows, the box is cleared, no message, nothing was stored", async ({ page }, info) => {
+  const c = await signedIn(page, "stale", info.project.name);
+  await openFromDashboard(page, c.slug);
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(paragraphs(E2E_TERMS.et));
+  await box(page).check();
+
+  // the admin saves new terms now (a DB write: the page does not know)
+  const version = (await setTerms({ et: "E2E vahepeal muudetud tingimused.", ru: "E2E изменённые условия." }))!;
+  const answer = page.waitForResponse((r) => r.url().endsWith("/api/konto/tingimused") && r.request().method() === "POST");
+  await start(page).click();
+  expect((await answer).status()).toBe(409);
+  expect((await answer).request().postDataJSON()).toEqual({ slug: c.slug, version: "1" });
+
+  // quietly loaded again: the new text, an empty box, the button off, and no message of any kind
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(["E2E vahepeal muudetud tingimused."]);
+  await expect(gate(page)).toHaveAttribute("data-terms-version", version);
+  await expect(box(page)).not.toBeChecked();
+  await expect(start(page)).toBeDisabled();
+  await expect(page.locator("[data-terms-failed]")).toHaveText("");
+  await expect(page.getByText(/Ei õnnestunud|Proovi uuesti|aegunud|muutus/i)).toHaveCount(0);
+  await expect(gate(page).getByRole("heading", { level: 1 })).toBeFocused();
+  await expect(page.locator("[data-account-state]")).toHaveCount(0); // never went back to a loading state
+  expect(await storedAcceptances(c.clientId)).toEqual([]);
+
+  // reading the new text and accepting it works, and stores that version
+  const second = await accept(page);
+  expect(second.status()).toBe(200);
+  expect(second.request().postDataJSON()).toEqual({ slug: c.slug, version });
+  await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText(c.title.et);
+  expect(await storedAcceptances(c.clientId)).toEqual([{ slug: c.slug, version }]);
+});
+
+test("if the answer does not come, one plain sentence stays with the box ticked, and pressing again works", async ({ page }, info) => {
+  const c = await signedIn(page, "fail", info.project.name);
+  await openFromDashboard(page, c.slug);
+  await page.route("**/api/konto/tingimused", (route) => route.abort("failed"), { times: 1 });
+  await box(page).check();
+  await start(page).click();
+  await expect(page.locator("[data-terms-failed]")).toHaveText("Ei õnnestunud salvestada. Proovi uuesti.");
+  await expect(box(page)).toBeChecked();
+  await expect(start(page)).toBeEnabled();
+  expect(await storedAcceptances(c.clientId)).toEqual([]);
+  await start(page).click();
+  await expect(courseView(page)).toBeVisible();
+  expect(await storedAcceptances(c.clientId)).toEqual([{ slug: c.slug, version: "1" }]);
+});
+
+test("no sideways scrolling at 390, 834, 1440 and 2560 px: no access, the notice, the course", async ({ page }, info) => {
+  const c = await signedIn(page, "overflow", info.project.name);
+  const widths = [390, 834, 1440, 2560];
+  const sweep = async (what: string) => {
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await noOverflow(page), `${what} at ${width}`).toBe(true);
+    }
+  };
+  await page.goto(path("e2e-olematu-kursus"));
+  await expect(page.locator("[data-account-state='noAccess']")).toBeVisible();
+  await sweep("no access");
+  await page.goto(path(c.slug));
+  await expect(gate(page)).toBeVisible();
+  await sweep("the notice");
+  await accept(page);
+  await expect(courseView(page)).toBeVisible();
+  await sweep("the course");
+});
+
+test("the shell is static: a visit and the dashboard's link ask the API only for this client's own course, after the page has loaded", async ({ page, request }, info) => {
+  const c = await signedIn(page, "static", info.project.name);
+  // the page itself carries nothing personal and sets no cookie, with or without a session
+  const shell = await request.get(path(c.slug));
+  expect(shell.status()).toBe(200);
+  expect(shell.headers()["set-cookie"]).toBeUndefined();
+
+  const asked: string[] = [];
+  const prefetched: Response[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/konto/kursus/")) asked.push(r.url());
+  });
+  page.on("response", (r) => {
+    if (r.url().includes(`/konto/kursus/${c.slug}`) && r.url().includes("_rsc=")) prefetched.push(r);
+  });
+  await page.goto("/konto");
+  await expect(page.locator(`[data-card="course-${c.slug}"]`)).toBeVisible();
+  if (PROD_BUILD) {
+    // the production build prefetches the link (a visible <Link>): the cached shell answers it, and the prefetch loads nothing personal
+    await expect.poll(() => prefetched.length, { message: "the link's prefetch", timeout: 15_000 }).toBeGreaterThan(0);
+    expect(prefetched[0].status()).toBe(200);
+    expect(prefetched[0].headers()["set-cookie"]).toBeUndefined();
+  }
+  await page.waitForTimeout(800);
+  expect(asked, "no personal request before the link is opened").toEqual([]);
+  await page.locator(`[data-card="course-${c.slug}"]`).getByRole("link", { name: "Ava koolitus" }).click();
+  await expect(gate(page)).toBeVisible();
+  // (the dev server runs every effect twice: the first request is dropped at once)
+  if (PROD_BUILD) expect(asked).toHaveLength(1);
+  expect([...new Set(asked.map((u) => new URL(u).pathname))]).toEqual([`/api/konto/kursus/${c.slug}`]);
+});

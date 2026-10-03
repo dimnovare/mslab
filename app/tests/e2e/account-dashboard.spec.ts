@@ -385,7 +385,7 @@ test("Logi välja ends the session and opens the home page, which says Logi siss
 
 test("in Russian: the page, the tabs and Выйти speak Russian, and logging out opens /ru", async ({ page, isMobile }, info) => {
   submitsForms();
-  const f = await signedInWith(page, "ru", info.project.name, { name: "Анна", locale: "ru", cards: ["awaiting", "confirmed"] });
+  const f = await signedInWith(page, "dash-ru", info.project.name, { name: "Анна", locale: "ru", cards: ["awaiting", "confirmed"] });
   await expect(page).toHaveURL(/\/ru\/konto$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Здравствуйте, Анна!");
   await expect(page.getByText("Здесь ваши курсы.", { exact: true })).toBeVisible();

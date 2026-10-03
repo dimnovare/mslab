@@ -1,4 +1,5 @@
 import type { APIRequestContext } from "@playwright/test";
+import { SEED_ECOURSE_SLUG } from "./account";
 import { testEmail } from "./fixtures";
 import { PROD_BUILD } from "./target";
 import { submitsForms, test, expect } from "./test";
@@ -92,9 +93,10 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
   expect(await (await fromCache(request, "/ostukorv")).text()).not.toBe(cart);
 });
 
-// The client account's pages are static shells (phase 2a): one cached copy for every visitor, whoever is signed in. Tasks
-// 7 and 8 add their shells to this list.
-const ACCOUNT_SHELLS = ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene"];
+// The client account's pages are static shells (phase 2a): one cached copy for every visitor, whoever is signed in. Task 8
+// adds its shells to this list. An e-course's shell (/konto/kursus/<slug>) is rendered on its first visit, then cached per slug.
+const ECOURSE_SHELL = `/konto/kursus/${SEED_ECOURSE_SLUG}`;
+const ACCOUNT_SHELLS = ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", ECOURSE_SHELL, `/ru${ECOURSE_SHELL}`];
 
 test("the account's pages come from the cache with no Set-Cookie, for a signed-in browser too; /api/konto/me never does (phase 2a)", async ({ request }) => {
   const signedIn = { cookie: `__Host-mslab_client=${"e2e".repeat(15)}; mslab_in=1` };
@@ -109,6 +111,14 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
     const rsc = await fromCache(request, `${path}?_rsc=k`, { headers: { RSC: "1", ...signedIn } });
     expect(rsc.headers()["x-nextjs-cache"], `${path} RSC`).toBe("HIT");
     expect(rsc.headers()["set-cookie"], `${path} RSC`).toBeUndefined();
+  }
+  // the dashboard's "Ava koolitus" link is a <Link>: its prefetch (the page's tree and its payload) is answered from the same cache,
+  // with no cookie set, and renders nothing personal (the course comes from /api/konto/kursus/<slug> after the page has loaded)
+  for (const [label, headers] of [["tree", { "Next-Router-Prefetch": "1", "Next-Router-Segment-Prefetch": "/_tree" }], ["payload", { "Next-Router-Prefetch": "1" }]] as const) {
+    const prefetch = await fromCache(request, `${ECOURSE_SHELL}?_rsc=p${label}`, { headers: { RSC: "1", ...headers, ...signedIn } });
+    expect(prefetch.status(), `prefetch ${label}`).toBe(200);
+    expect(prefetch.headers()["x-nextjs-cache"], `prefetch ${label}`).toBe("HIT");
+    expect(prefetch.headers()["set-cookie"], `prefetch ${label}`).toBeUndefined();
   }
   // the query is read by the browser, never by the server: the same page
   const login = await (await fromCache(request, "/konto/sisene")).text();

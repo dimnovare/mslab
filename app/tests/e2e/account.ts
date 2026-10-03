@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from "node:crypto";
 import type { Page } from "@playwright/test";
-import { accountCourseSlug, onLocalDb, sha256Hex } from "./fixtures";
+import { accountCourseSlug, holdLocalLock, onLocalDb, sha256Hex, snapshotRows } from "./fixtures";
 import { LOCAL_URL, PROD_BUILD, TARGET } from "./target";
 import { expect } from "./test";
 
@@ -170,4 +170,114 @@ export async function setPrepayment(value: typeof TEST_PREPAYMENT | null): Promi
 /** The change requests stored for a client. */
 export async function storedChangeRequests(clientId: number): Promise<{ payload: Record<string, unknown> }[]> {
   return onLocalDb((sql) => sql<{ payload: Record<string, unknown> }[]>`select payload from requests where kind = 'change_request' and client_id = ${clientId} order by id`);
+}
+
+// ---------- the e-course page and its terms (account-ecourse.spec.ts) ----------
+
+/** The seed e-course (published) the e-course tests open and the cache spec asks for. */
+export const SEED_ECOURSE_SLUG = ECOURSE_SLUG;
+
+export type EcourseFixture = {
+  clientId: number;
+  slug: string;
+  title: { et: string; ru: string };
+  modules: { et: string; ru: string }[];
+  /** When the access ends (six months ahead), null without access. */
+  expiresAt: Date | null;
+};
+
+/**
+ * A client (written straight to the LOCAL database) with six months of access to an e-course, or, with `access: false`, none:
+ * - the seed e-course `kulmumeistri-e-koolitus` (published; access rows change no public page), or
+ * - `own: true`: the test's own e-course `e2e-konto-<label>-<project>`, not published (removeClientRows deletes it), with two modules.
+ */
+export async function insertEcourseAccess(email: string, opts: { own?: boolean; access?: boolean; locale?: "et" | "ru"; name?: string } = {}): Promise<EcourseFixture> {
+  return onLocalDb(async (sql) => {
+    const [client] = await sql<{ id: number }[]>`insert into clients (email, name, locale) values (${email}, ${opts.name ?? ""}, ${opts.locale ?? "et"}) returning id`;
+    let slug = ECOURSE_SLUG;
+    if (opts.own) {
+      slug = accountCourseSlug(email);
+      await sql`
+        insert into courses (slug, type, level, title, summary, body, price, access_months, modules, published)
+        values (${slug}, 'e_learning', 'basic', ${sql.json({ et: "E2E e-koolitus", ru: "E2E онлайн-курс" })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 9500, 6,
+                ${sql.json([{ et: "Sissejuhatus", ru: "Введение" }, { et: "Praktika", ru: "Практика" }])}, false)`;
+    }
+    const [course] = await sql<{ id: number; title: { et: string; ru?: string }; modules: { et: string; ru?: string }[] }[]>`select id, title, modules from courses where slug = ${slug}`;
+    let expiresAt: Date | null = null;
+    if (opts.access !== false) {
+      const [access] = await sql<{ expiresAt: Date }[]>`
+        insert into course_access (client_id, course_id, granted_by, expires_at) values (${client.id}, ${course.id}, 'e2e', now() + interval '6 months')
+        returning expires_at as "expiresAt"`;
+      expiresAt = access.expiresAt;
+    }
+    return {
+      clientId: client.id,
+      slug,
+      title: { et: course.title.et, ru: course.title.ru ?? course.title.et },
+      modules: course.modules.map((m) => ({ et: m.et, ru: m.ru ?? m.et })),
+      expiresAt,
+    };
+  });
+}
+
+/** The terms the e-course tests start from (ET and RU, two paragraphs in Estonian). */
+export const E2E_TERMS = { et: "E2E tingimused: ligipääs on isiklik.\n\nÄra jaga seda teistega.", ru: "E2E условия: доступ личный.\n\nНе передавайте его другим." };
+
+const TERMS_LOCK = "e2e-course-terms";
+let termsStamp = 0;
+
+/**
+ * Writes the terms like an admin's save would, but straight to the LOCAL database: the `course_terms` page text, and the version
+ * (settings `courseTermsVersion`) as the time of the save; `version: null` leaves the key out (the version reads as "1").
+ * Returns the version stored (a new, never repeated ISO time unless asked for another).
+ */
+export async function setTerms(body: { et: string; ru?: string }, version: string | null | undefined = undefined): Promise<string | null> {
+  const stored = version === undefined ? new Date(Date.now() + ++termsStamp).toISOString() : version;
+  await onLocalDb(async (sql) => {
+    await sql`
+      insert into pages (key, title, body) values ('course_terms', ${sql.json({ et: "E-koolituse tingimused", ru: "Условия онлайн-обучения" })}, ${sql.json(body)})
+      on conflict (key) do update set body = excluded.body`;
+    await sql`delete from settings where key = 'courseTermsVersion'`;
+    if (stored !== null) await sql`insert into settings (key, value) values ('courseTermsVersion', ${sql.json(stored)})`;
+  });
+  return stored;
+}
+
+/** The version the students are asked about now: the stored settings value, "1" when there is none. */
+export async function currentTermsVersion(): Promise<string> {
+  const [row] = await onLocalDb((sql) => sql<{ value: unknown }[]>`select value from settings where key = 'courseTermsVersion'`);
+  return typeof row?.value === "string" && row.value ? row.value : "1";
+}
+
+/** The terms a client has accepted: course slug and version, oldest first. */
+export async function storedAcceptances(clientId: number): Promise<{ slug: string; version: string }[]> {
+  return onLocalDb(
+    (sql) => sql<{ slug: string; version: string }[]>`
+      select c.slug, t.terms_version as version from terms_acceptances t join courses c on c.id = t.course_id where t.client_id = ${clientId} order by t.accepted_at, t.terms_version`,
+  );
+}
+
+/**
+ * Takes the terms for one test. The terms text and version are shared by every client of the site, and the desktop and phone runs
+ * go side by side, so they take turns (a Postgres advisory lock). The page and the version are snapshotted, set to E2E_TERMS with no
+ * version ("1"), and put back by the function this returns (which also gives the lock back).
+ */
+export async function takeTerms(): Promise<() => Promise<void>> {
+  const unlock = await holdLocalLock(TERMS_LOCK);
+  try {
+    const restorePage = await snapshotRows("pages", { column: "key", value: "course_terms" });
+    const restoreVersion = await snapshotRows("settings", { column: "key", value: "courseTermsVersion" });
+    await setTerms(E2E_TERMS, null);
+    return async () => {
+      try {
+        await restorePage();
+        await restoreVersion();
+      } finally {
+        await unlock();
+      }
+    };
+  } catch (e) {
+    await unlock();
+    throw e;
+  }
 }

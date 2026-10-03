@@ -32,7 +32,7 @@ describe("prototype seed", () => {
       hero_slides: 5,
       faq: 6,
       posts: 6,
-      pages: 7,
+      pages: 8,
       gallery_items: 7,
       campaign: 1,
       settings: 3,
@@ -154,6 +154,19 @@ describe("prototype seed", () => {
     expect((await getPage(db, "trainer_journey"))?.body.et).toContain("Maria täiendab");
     expect((await getPage(db, "privacy"))?.body.et).toContain("Maria täiendab");
     expect((await getPage(db, "terms"))?.body.et).toContain("Maria täiendab");
+  });
+
+  test("the e-course terms: a short sample text in both languages for Maria to replace, no version in the body, no public page and no home data", async () => {
+    const page = (await getPage(db, "course_terms"))!;
+    expect(page.title).toEqual({ et: "E-koolituse tingimused", ru: "Условия онлайн-обучения" });
+    expect(page.body.et).toContain("Näidistekst — Maria täiendab");
+    expect(page.body.ru).toContain("Образец текста — Мария дополнит");
+    for (const text of [page.body.et, page.body.ru!]) expect(text.split("\n\n").length).toBeGreaterThanOrEqual(3);
+    expect(page.body.et).toMatch(/isiklik/);
+    expect(page.body.et).toMatch(/jaga/);
+    expect(Object.keys(page.body).sort()).toEqual(["et", "ru"]); // the version is the settings key courseTermsVersion, never in the body
+    expect(await getSettings(db)).not.toHaveProperty("courseTermsVersion");
+    expect(Object.keys((await getHomeData(db)).pages)).not.toContain("course_terms");
   });
 
   test("trainer works gallery and settings", async () => {

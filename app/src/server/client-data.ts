@@ -7,6 +7,7 @@ import {
 } from "@/db/schema";
 import { sortCards, type AccountCard, type PrepaymentInfo } from "@/domain/account-cards";
 import { upcomingFrom } from "@/domain/calendar";
+import { DEFAULT_TERMS_VERSION, TERMS_PAGE_KEY, TERMS_VERSION_KEY } from "@/domain/course-terms";
 import { registrationPrice } from "@/domain/registration";
 import { normalizeEmail } from "@/domain/email";
 import type { I18n } from "@/i18n/field";
@@ -18,13 +19,8 @@ import { newToken } from "./token";
 // request, and scopes every read and write to it: a registration, request, favourite or access row of another client is
 // never read, changed or reported to exist.
 
-/** The settings keys read here: where to pay the prepayment (admin "Ettemaksu juhised") and the version of the e-course terms. */
+/** The settings key read here: where to pay the prepayment (admin "Ettemaksu juhised"). The e-course terms' keys are in domain/course-terms.ts. */
 export const PREPAYMENT_KEY = "prepayment";
-export const TERMS_VERSION_KEY = "courseTermsVersion";
-/** The terms version while the admin has not saved the terms text yet. */
-export const DEFAULT_TERMS_VERSION = "1";
-/** The page that holds the e-course terms text (ET/RU, edited in the admin). */
-export const TERMS_PAGE_KEY = "course_terms";
 
 /** At most this much of a request's text goes onto its card ("what was asked"). */
 const DETAIL_MAX = 200;

@@ -529,6 +529,19 @@ export const et = {
       loadError: "Ei õnnestunud laadida.",
       retry: "Proovi uuesti",
     },
+    // The e-course page /konto/kursus/<slug> (components/account/EcoursePage.tsx, TermsGate.tsx, EcourseView.tsx). {date} is the last
+    // day of access. The terms text itself is the admin's (Seaded, "E-koolituse tingimused"). A module's lock label is `course.locked`.
+    ecourse: {
+      noAccess: "Sul ei ole sellele koolitusele ligipääsu.",
+      viewCourse: "Vaata koolitust",
+      termsTitle: "Enne alustamist",
+      termsAccept: "Olen tutvunud ja nõustun tingimustega",
+      start: "Alusta koolitust",
+      // the acceptance could not be stored (the checkbox stays ticked)
+      termsFailed: "Ei õnnestunud salvestada. Proovi uuesti.",
+      access: "Ligipääs kuni {date}",
+      soon: "Sisu lisandub peagi.",
+    },
   },
 
   // Localized 404 inside the site shell.

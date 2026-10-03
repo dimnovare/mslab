@@ -59,7 +59,7 @@ export function rememberEmail(email: string): void {
 export const loginPath = (locale?: Locale): string =>
   href(locale ?? (/^\/ru(\/|$)/.test(window.location.pathname) ? "ru" : "et"), "/konto/sisene");
 
-export type AccountState = "loading" | "ready" | "signedOut" | "replaced" | "error";
+export type AccountState = "loading" | "ready" | "signedOut" | "replaced" | "notFound" | "error";
 
 type Loaded<T> = { state: AccountState; data: T | null };
 
@@ -69,6 +69,8 @@ type Loaded<T> = { state: AccountState; data: T | null };
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
  * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
  *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
+ * - 404 (the endpoint says there is nothing for this client: an e-course without access): "notFound", for the page to say so;
+ *   a quiet reload that learns it moves the page there too (it is an answer, not a failure).
  * - anything else, no answer, or a 200 without a JSON object: "error"; `reload()` asks again.
  * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again.
  * `reload({ quiet: true })` asks again in the background: the page keeps showing what it has ("ready" and the old data)
@@ -116,6 +118,10 @@ export function useAccount<T>(
         // signed out: the page keeps its waiting look while the login page loads
         if (!replaced && redirect) window.location.replace(loginPath(locale));
         setLoaded({ state: replaced ? "replaced" : "signedOut", data: null });
+        return;
+      }
+      if (res.status === 404) {
+        setLoaded({ state: "notFound", data: null });
         return;
       }
       if (!quiet) setLoaded({ state: "error", data: null });

@@ -36,6 +36,8 @@ export function ReplacedNotice({ locale, t }: { locale: Locale; t: { replaced: s
  * - Loading: `skeleton` (the page's own stand-ins), or an empty space of a message's height; aria-busy.
  * - Not signed in: useAccount sends the visitor to the login page meanwhile (the waiting look stays).
  * - Another device signed in since (one device only): ReplacedNotice.
+ * - A 404 (nothing for this client, e.g. an e-course without access): `notFound` when the page gives one — its own plain
+ *   sentence, never hidden behind the error — else the same as an error.
  * - No answer, a server error or a 200 without a JSON object: "Ei õnnestunud laadida." and "Proovi uuesti".
  * - Loaded: `render(data, reload)`; `reload({ quiet: true })` refreshes it in the background.
  */
@@ -45,17 +47,21 @@ export function AccountLoader<T>({
   t,
   render,
   skeleton,
+  notFound,
 }: {
   path: string;
   locale: Locale;
   t: LoaderTexts;
   render(data: T, reload: Reload): React.ReactNode;
   skeleton?: React.ReactNode;
+  /** What a 404 shows (nothing: the load error). */
+  notFound?: React.ReactNode;
 }) {
   const { state, data, reload } = useAccount<T>(path, { locale });
   if (state === "ready" && data !== null) return render(data, reload);
   if (state === "replaced") return <ReplacedNotice locale={locale} t={t} />;
-  if (state === "error")
+  if (state === "notFound" && notFound) return notFound;
+  if (state === "error" || state === "notFound")
     return (
       <div data-account-state="error">
         <Notice title={t.loadError}>

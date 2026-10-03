@@ -15,7 +15,8 @@ import styles from "./site-editor.module.css";
 
 /**
  * Seaded: the contact details and social links (footer, contact page; social links https only), the newsletter's
- * welcome discount (footer text), the legal pages (privacy, terms) in ET / RU, and the admin addresses, read-only.
+ * welcome discount (footer text), the legal pages (privacy, terms) in ET / RU, the e-course terms (the text a student accepts
+ * before opening an e-course; account-only, so no link to a public page) and the admin addresses, read-only.
  */
 export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsValues>; admins: string[] }) {
   const t = adminEt.settings;
@@ -45,6 +46,8 @@ export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsVa
       </section>
     );
   };
+
+  const courseTerms = d.draft.course_terms;
 
   return (
     <form ref={form} className={ui.page} onSubmit={d.submit} noValidate data-settings-editor="">
@@ -90,6 +93,26 @@ export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsVa
 
         {legal("privacy", t.privacy, "/privaatsus")}
         {legal("terms", t.terms, "/tingimused")}
+
+        <section className={ui.card} aria-labelledby={`${uid}-course_terms`} data-legal-editor="course_terms">
+          <h2 id={`${uid}-course_terms`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {t.courseTerms}
+          </h2>
+          <p className={`${ui.muted} ${styles.cardLead}`}>{t.courseTermsLead}</p>
+          <div className={styles.fields}>
+            <I18nInput
+              label={t.pageBody}
+              value={courseTerms.body}
+              onChange={(body) => d.set("course_terms", { body })}
+              multiline
+              rows={10}
+              maxLength={SITE_LIMITS.legal}
+              hint={t.pageHint}
+              error={d.err("course_terms.body")}
+              name="course_terms.body"
+            />
+          </div>
+        </section>
 
         <section className={ui.card} aria-labelledby={`${uid}-admins`} data-admin-emails="">
           <h2 id={`${uid}-admins`} className={`${ui.h2} ${styles.cardTitle}`}>

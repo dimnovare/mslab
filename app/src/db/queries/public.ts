@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { TERMS_PAGE_KEY } from "@/domain/course-terms";
 import type { Db, Q } from "../client";
 import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "../schema";
@@ -122,7 +123,7 @@ export async function getSettings(db: Db): Promise<Record<string, unknown>> {
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-/** Everything the home page needs in one call. The campaign is null when it is switched off. */
+/** Everything the home page needs in one call. The campaign is null when it is switched off. The e-course terms (account-only) are not part of it. */
 export async function getHomeData(db: Db): Promise<HomeData> {
   const [slides, courseList, faqItems, postList, practice, pageRows, settingsMap, campaignRow] = await Promise.all([
     db.select().from(heroSlides).where(eq(heroSlides.active, true)).orderBy(asc(heroSlides.sort), asc(heroSlides.id)),
@@ -130,7 +131,7 @@ export async function getHomeData(db: Db): Promise<HomeData> {
     db.select().from(faq).orderBy(asc(faq.sort), asc(faq.id)),
     listPosts(db, HOME_POSTS_LIMIT),
     getPracticePackages(db),
-    db.select().from(pages),
+    db.select().from(pages).where(ne(pages.key, TERMS_PAGE_KEY)),
     getSettings(db),
     db.select().from(campaign).where(eq(campaign.id, 1)).limit(1),
   ]);

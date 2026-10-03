@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
-import { courseSeeds } from "../../src/db/seed-data";
+import { courseSeeds, pageSeeds } from "../../src/db/seed-data";
+import { TERMS_PAGE_KEY } from "../../src/domain/course-terms";
 import { revalidateLocalPages } from "./prod-build";
 import { assertLocalDatabases, isLocalDbUrl } from "./local-db";
 import { PROD_BUILD, TARGET } from "./target";
@@ -77,6 +78,26 @@ export async function removeSeatFixtures(): Promise<void> {
   try {
     const left = await clear(sql);
     if (left !== 0) throw new Error(`e2e fixtures: ${left} fixture registrations are still in the database`);
+  } finally {
+    await sql.end();
+  }
+}
+
+// ---------- the e-course terms page ----------
+// The seed gained the `course_terms` page in phase 2a. A local database seeded before that has no such row (the admin's Seaded
+// editor and the e-course notice read it), so every run first adds it, with the seed's text, when it is missing (the seed's own
+// rule: rows that exist are never touched). Only the LOCAL database, like every fixture here.
+
+/** Adds the seed's `course_terms` page to the local database when it has none; true when it was added. */
+export async function ensureCourseTermsPage(): Promise<boolean> {
+  const seed = pageSeeds.find((p) => p.key === TERMS_PAGE_KEY);
+  if (!seed) throw new Error("e2e fixtures: the seed has no course_terms page");
+  const sql = connect();
+  try {
+    const added = await sql`
+      insert into pages (key, title, body) values (${seed.key}, ${sql.json(seed.title as never)}, ${sql.json(seed.body as never)})
+      on conflict (key) do nothing returning key`;
+    return added.length > 0;
   } finally {
     await sql.end();
   }

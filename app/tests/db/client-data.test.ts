@@ -11,6 +11,7 @@ import {
   setFavourite, setNewsletter, updateProfile,
 } from "@/server/client-data";
 import { issueClientLogin, redeemClientCode, redeemClientLink } from "@/server/client-auth";
+import { loadSettings, saveSettingsForm } from "@/server/admin-site";
 import { makeTestDb } from "./helpers";
 
 // What a client sees and may change (server/client-data.ts) against a real (PGlite) database. Every address is `@example.test`.
@@ -513,6 +514,33 @@ describe("e-course and terms", () => {
     expect(await acceptTerms(db, kati.id, "veebikursus", V2, at(40))).toBe("accepted");
     expect((await db.select().from(termsAcceptances)).map((t) => t.termsVersion).sort()).toEqual(["1", V2]);
     expect((await loadEcourse(db, kati.id, "veebikursus", at(40)))!.terms.accepted).toBe(true);
+  });
+
+  test("the admin's own save of new terms (Seaded) asks a student who accepted before again, and the 409 case follows from it", async () => {
+    const kati = await client();
+    await grant(kati.id, f.online.id);
+    await db.insert(pages).values({ key: "course_terms", ...TERMS });
+    const save = async (et: string) => {
+      const s = await loadSettings(db);
+      const fd = new FormData();
+      fd.set("data", JSON.stringify({ parts: { course_terms: { version: s.versions.course_terms, value: { body: { et } } } } }));
+      return saveSettingsForm(db, fd);
+    };
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("accepted");
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toMatchObject({ version: "1", accepted: true, text: null });
+
+    const seen = (await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.version; // a page was loaded with this version
+    expect(await save("Uued tingimused.")).toMatchObject({ ok: true });
+    const view = (await loadEcourse(db, kati.id, "veebikursus", NOW))!;
+    expect(view.terms).toEqual({ version: await courseTermsVersion(db), accepted: false, text: { et: "Uued tingimused." } });
+    expect(view.terms.version).not.toBe(seen);
+    expect(await acceptTerms(db, kati.id, "veebikursus", seen, NOW)).toBe("stale"); // the old page's click
+    expect(await acceptTerms(db, kati.id, "veebikursus", view.terms.version, NOW)).toBe("accepted");
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toMatchObject({ accepted: true, text: null });
+    // the same text saved again changes nothing: nobody is asked again
+    const kept = await courseTermsVersion(db);
+    expect(await save("Uued tingimused.")).toMatchObject({ ok: true });
+    expect(await courseTermsVersion(db)).toBe(kept);
   });
 
   test("a stale version is refused and nothing is stored: the student saw the old text, the admin has saved a new one", async () => {

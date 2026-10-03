@@ -14,8 +14,13 @@ export type CoursesTexts = Dict["account"]["dashboard"] & {
   loader: LoaderTexts;
 };
 
+/** The e-course page's: the account.ecourse strings, the modules' lock label (course.locked), AccountLoader's. */
+export type EcourseTexts = Dict["account"]["ecourse"] & { locked: string; loader: LoaderTexts };
+
 export const shellTexts = (d: Dict): ShellTexts => d.account.shell;
 
 export const loaderTexts = (d: Dict): LoaderTexts => d.account.loader;
+
+export const ecourseTexts = (d: Dict): EcourseTexts => ({ ...d.account.ecourse, locked: d.course.locked, loader: loaderTexts(d) });
 
 export const coursesTexts = (d: Dict): CoursesTexts => ({ ...d.account.dashboard, next: d.account.next, loader: loaderTexts(d) });

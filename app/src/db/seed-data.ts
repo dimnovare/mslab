@@ -4,6 +4,7 @@ import type { Badge } from "./schema";
 import type { CampaignInput, CourseInput, HeroSlideInput, PostInput, PracticePackageInput, SessionInput } from "./queries/admin";
 import { seedSessionStart } from "./seed-dates";
 import { DARK_MOBILE_FOCAL } from "@/domain/site-editor";
+import { TERMS_PAGE_KEY, TERMS_PAGE_TITLE } from "@/domain/course-terms";
 
 /**
  * Prototype content that fills the site on day one (spec section 7). Texts come from prototype B (ET + RU)
@@ -476,6 +477,16 @@ export const pageSeeds: { key: string; title: I18n; body: I18n }[] = [
   },
   { key: "privacy", title: t("Privaatsus", "Конфиденциальность"), body: legalPlaceholder },
   { key: "terms", title: t("Õppetingimused", "Условия обучения"), body: legalPlaceholder },
+  {
+    // What a student accepts before opening an e-course for the first time (account-only: no public page shows it); the admin
+    // edits it under Seaded. The version is not in the body: it is the settings key courseTermsVersion, set when the admin saves.
+    key: TERMS_PAGE_KEY,
+    title: TERMS_PAGE_TITLE,
+    body: t(
+      "Ligipääs sellele e-koolitusele on isiklik: see kehtib ainult sulle ja sinu e-posti aadressiga seotud kontole.\n\nPalun ära jaga oma kontot ega koolituse materjale teistega. Ära edasta, kopeeri ega avalda videoid, tekste ega muud sisu.\n\nLigipääs kehtib kuni kuupäevani, mis on sinu koolituse juures näha. Pärast seda sisu enam avada ei saa.\n\n(Näidistekst — Maria täiendab.)",
+      "Доступ к этому онлайн-курсу личный: он действует только для вас и для кабинета, связанного с вашим адресом электронной почты.\n\nПожалуйста, не передавайте свой кабинет и материалы курса другим людям. Не пересылайте, не копируйте и не публикуйте видео, тексты и другие материалы.\n\nДоступ действует до даты, указанной у вашего курса. После этого материалы больше не откроются.\n\n(Образец текста — Мария дополнит.)",
+    ),
+  },
 ];
 
 // ---------- gallery "koolitaja tööd" (Maria's own photos; portraits last) ----------

@@ -35,7 +35,7 @@ describe("routeSitePath", () => {
     };
     walk(root, "");
     expect(pages.sort()).toEqual(
-      ["", "/[...rest]", "/kontakt", "/konto", "/konto/sisene", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
+      ["", "/[...rest]", "/kontakt", "/konto", "/konto/kursus/[slug]", "/konto/sisene", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
     );
     for (const p of pages.filter((x) => !x.includes("["))) expect(isKnownPage(`/et${p}`), p).toBe(true);
     for (const p of ["/koolitused/x", "/uudised/y-2", "/ostukorv/whatever"]) expect(isKnownPage(`/ru${p}`), p).toBe(true);

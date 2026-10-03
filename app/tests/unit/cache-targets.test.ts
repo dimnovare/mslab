@@ -46,6 +46,13 @@ describe("the revalidation map", () => {
     expect(paths({ kind: "settings", parts: [] })).toEqual([]);
   });
 
+  test("settings: the e-course terms (course_terms) are account-only, so saving them revalidates no public page", () => {
+    expect(revalidationTargets({ kind: "settings", parts: ["course_terms"] })).toEqual([]);
+    // saved together with another part, only that part's pages are made stale
+    expect(paths({ kind: "settings", parts: ["course_terms", "privacy"] })).toEqual([`${SITE}/privaatsus (page)`]);
+    expect(paths({ kind: "settings", parts: ["course_terms", "contact"] })).toEqual([`${SITE} (layout)`]);
+  });
+
   test("every route named is a real route of app/[locale]/(site)", () => {
     const all: PublicChange[] = [
       { kind: "courses" },

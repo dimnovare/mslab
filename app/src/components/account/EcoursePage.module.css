@@ -1,0 +1,6 @@
+/* While the e-course loads: the page's own padding around the title's stand-in, so the content does not jump. Tokens only. */
+
+.wait {
+  min-height: 52vh;
+  padding-top: clamp(28px, 4vw, 52px);
+}

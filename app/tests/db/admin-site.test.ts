@@ -384,6 +384,89 @@ describe("settings", () => {
     expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%" });
     expect(await getPage(db, "privacy")).toMatchObject({ title: { et: "Privaatsuspoliitika" }, body: { et: "Esimene.\n\nTeine.", ru: "Первый." } });
   });
+
+  describe("E-koolituse tingimused (course_terms)", () => {
+    const stored = async () => ({
+      page: await getPage(db, "course_terms"),
+      version: (await getSettings(db)).courseTermsVersion,
+    });
+    const save = async (body: { et: string; ru?: string }) => {
+      const s = await loadSettings(db);
+      return saveSettingsForm(db, form({ course_terms: { version: s.versions.course_terms, value: { body } } }));
+    };
+
+    test("the seed has a sample text in both languages and no version yet; the editor loads the body only", async () => {
+      const s = await loadSettings(db);
+      expect(s.values.course_terms.body.et).toMatch(/Näidistekst/);
+      expect(s.values.course_terms.body.ru).toMatch(/Образец текста/);
+      expect(Object.keys(s.values.course_terms)).toEqual(["body"]);
+      expect(s.versions.course_terms).toMatch(/^[0-9a-f]{32}$/);
+      expect((await stored()).version).toBeUndefined(); // no version in the seed: it reads as "1" until the first save
+      expect(JSON.stringify((await getPage(db, "course_terms"))!.body)).not.toMatch(/version/i);
+    });
+
+    test("saving the text writes it and the save time as the version, together; the title stays", async () => {
+      const before = Date.now();
+      const r = await save({ et: "  Uus tekst.\n\nTeine lõik.  ", ru: "Новый текст." });
+      expect(r).toMatchObject({ ok: true });
+      const { page, version } = await stored();
+      expect(page).toMatchObject({ title: { et: "E-koolituse tingimused", ru: "Условия онлайн-обучения" }, body: { et: "Uus tekst.\n\nTeine lõik.", ru: "Новый текст." } });
+      expect(typeof version).toBe("string");
+      expect(new Date(version as string).toISOString()).toBe(version); // an ISO time
+      expect(new Date(version as string).getTime()).toBeGreaterThanOrEqual(before);
+      expect(new Date(version as string).getTime()).toBeLessThanOrEqual(Date.now());
+      // the result carries the part as now stored, with its new version
+      const saved = (r as unknown as { saved: { values: { course_terms: { body: unknown } }; versions: Record<string, string> } }).saved;
+      expect(Object.keys(saved.versions)).toEqual(["course_terms"]);
+      expect(saved.values.course_terms.body).toEqual({ et: "Uus tekst.\n\nTeine lõik.", ru: "Новый текст." });
+    });
+
+    test("every changed save gives a new version; a save of the very same text keeps it (nobody has to accept again)", async () => {
+      await save({ et: "Esimene." });
+      const first = (await stored()).version;
+      await save({ et: "Teine." });
+      const second = (await stored()).version;
+      expect(second).not.toBe(first);
+      expect(new Date(second as string).getTime()).toBeGreaterThan(new Date(first as string).getTime());
+      await save({ et: "Teine." });
+      expect((await stored()).version).toBe(second);
+    });
+
+    test("an empty Estonian text is refused and writes nothing; a stale save writes nothing; other parts save alongside", async () => {
+      const s = await loadSettings(db);
+      expect(fieldsOf(await save({ et: "  " }))).toEqual({ "course_terms.body": "required" });
+      expect(fieldsOf(await save({ et: "", ru: "Только русский" }))).toEqual({ "course_terms.body": "required" });
+      expect(fieldsOf(await save({ et: "x".repeat(30_001) }))).toEqual({ "course_terms.body": "tooLong" });
+      expect(await stored()).toMatchObject({ version: undefined, page: { body: s.values.course_terms.body } });
+
+      expect(await save({ et: "Esimene." })).toMatchObject({ ok: true });
+      const afterFirst = await stored();
+      // another admin saved first: this one was loaded before it
+      const stale = await saveSettingsForm(db, form({ course_terms: { version: s.versions.course_terms, value: { body: { et: "Hilinenud." } } } }));
+      expect(stale).toEqual({ ok: false, error: "stale" });
+      expect(await stored()).toEqual(afterFirst);
+
+      // a failed check of another part in the same save writes no version either
+      const fresh = await loadSettings(db);
+      const mixed = await saveSettingsForm(
+        db,
+        form({
+          course_terms: { version: fresh.versions.course_terms, value: { body: { et: "Kolmas." } } },
+          newsletter: { version: fresh.versions.newsletter, value: { discountLabel: " " } },
+        }),
+      );
+      expect(mixed.ok).toBe(false);
+      expect(await stored()).toEqual(afterFirst);
+    });
+
+    test("a first save when the page row is missing creates it with the default title", async () => {
+      await db.delete(pages).where(eq(pages.key, "course_terms"));
+      const s = await loadSettings(db);
+      expect(s.values.course_terms.body).toEqual({ et: "" });
+      expect(await save({ et: "Esimene." })).toMatchObject({ ok: true });
+      expect((await stored()).page).toMatchObject({ title: { et: "E-koolituse tingimused" }, body: { et: "Esimene." } });
+    });
+  });
 });
 
 describe("posts", () => {

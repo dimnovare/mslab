@@ -124,6 +124,43 @@ describe("useAccount", () => {
     expect(hook().data).toEqual({ n: 1 });
   });
 
+  test("404 is its own state, \"notFound\" (nothing for this client, e.g. no access to an e-course): no redirect, no sign-in event; a quiet reload gets there too", async () => {
+    const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {});
+    const told = vi.fn();
+    window.addEventListener(ACCOUNT_EVENT, told);
+    fetchMock.mockResolvedValueOnce(json(404, { ok: false }));
+    await mount();
+    expect(hook().state).toBe("notFound");
+    expect(hook().data).toBeNull();
+    expect(replace).not.toHaveBeenCalled();
+    expect(told).not.toHaveBeenCalled();
+    window.removeEventListener(ACCOUNT_EVENT, told);
+
+    // an answer without a body is the same
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    fetchMock.mockResolvedValueOnce(text(404, ""));
+    await mount();
+    expect(hook().state).toBe("notFound");
+
+    // a page that was ready finds out on a quiet reload (access ended meanwhile); reload() asks again from the top
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    fetchMock.mockResolvedValueOnce(json(200, { n: 1 }));
+    await mount();
+    expect(hook().state).toBe("ready");
+    fetchMock.mockResolvedValueOnce(json(404, { ok: false }));
+    await act(async () => hook().reload({ quiet: true }));
+    await settle();
+    expect(hook().state).toBe("notFound");
+    expect(hook().data).toBeNull();
+    fetchMock.mockResolvedValueOnce(json(200, { n: 2 }));
+    await act(async () => hook().reload());
+    await settle();
+    expect(hook().state).toBe("ready");
+    expect(hook().data).toEqual({ n: 2 });
+  });
+
   test("a quiet reload keeps the page (ready, the old data) while it asks, takes the new data, and ignores a failure", async () => {
     fetchMock.mockResolvedValueOnce(json(200, { n: 1 }));
     await mount();

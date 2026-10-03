@@ -25,6 +25,7 @@ import {
   type SlideRow,
 } from "@/db/queries/admin-site";
 import { tallinnFormParts, tallinnInstant } from "@/domain/calendar";
+import { nextTermsVersion, TERMS_PAGE_KEY, TERMS_PAGE_TITLE, TERMS_VERSION_KEY } from "@/domain/course-terms";
 import {
   CAMPAIGN_CTA,
   campaignDraft,
@@ -381,9 +382,9 @@ const campaignParts: Parts = {
 export const loadCampaign = async (q: Q) => (await loadParts(q, campaignParts)) as SavedParts & { values: { campaign: CampaignDraft } };
 export const saveCampaignForm = (db: Db, formData: FormData) => saveParts(db, campaignParts, formData);
 
-// ---------- Seaded: contact details, newsletter discount, legal pages ----------
+// ---------- Seaded: contact details, newsletter discount, legal pages, the e-course terms ----------
 
-export type SettingsValues = { contact: ContactDraft; newsletter: NewsletterDraft; privacy: PageDraft; terms: PageDraft };
+export type SettingsValues = { contact: ContactDraft; newsletter: NewsletterDraft; privacy: PageDraft; terms: PageDraft; course_terms: { body: I18n } };
 
 const settingsParts: Parts = {
   contact: part<ContactDraft>({
@@ -416,6 +417,26 @@ const settingsParts: Parts = {
   }),
   privacy: pagePart("privacy", { titleMax: L.legalTitle, bodyMax: L.legal, required: true }),
   terms: pagePart("terms", { titleMax: L.legalTitle, bodyMax: L.legal, required: true }),
+  // "E-koolituse tingimused": what a student accepts before opening an e-course (account-only, no public page). Only the text is
+  // edited (the title stays). A changed text and the new version (settings courseTermsVersion = the save time) are written in
+  // this one transaction, so a student is never asked about a text that has no version, nor holds a version of another text.
+  // The same text again keeps the version: nobody is asked to accept what did not change.
+  course_terms: part<{ body: I18n }>({
+    tables: ["pages", "settings"],
+    schema: z.object({ body: i18n }),
+    read: (q) => readPage(q, TERMS_PAGE_KEY),
+    draft: (stored) => ({ body: copyI18n((stored as Page | null)?.body) }),
+    check: (c, v, name) => {
+      const body = c.text(`${name}.body`, v.body, L.legal, { required: true });
+      if (!body) return null;
+      return async (tx, stored) => {
+        const old = (stored as Page | null)?.body;
+        await upsertPage(tx, { key: TERMS_PAGE_KEY, title: (stored as Page | null)?.title ?? TERMS_PAGE_TITLE, body });
+        if (old && old.et === body.et && (old.ru ?? "") === (body.ru ?? "")) return;
+        await setSetting(tx, TERMS_VERSION_KEY, nextTermsVersion(new Date(), await readSetting(tx, TERMS_VERSION_KEY)));
+      };
+    },
+  }),
 };
 
 export const loadSettings = async (q: Q) => (await loadParts(q, settingsParts)) as SavedParts & { values: SettingsValues };

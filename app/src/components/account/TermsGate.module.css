@@ -1,0 +1,92 @@
+/* The terms notice before an e-course opens: the title in Jost as on the dashboard, the text in a B .notice strip (the admin's
+   "view as client" banner has the same: first-light ground, a rose rule at the left) at the full width of the page, and under
+   it the checkbox and the one button. Targets are at least 44 px; a phone gets the button across the screen. Tokens only. */
+
+.page {
+  padding-top: clamp(28px, 4vw, 52px);
+  padding-bottom: clamp(48px, 6vw, 96px);
+}
+
+.title {
+  margin: 0 0 clamp(20px, 3vw, 32px);
+  font: 400 clamp(34px, 4vw, 49px) / 1.08 var(--font-display);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.title:focus {
+  outline: none;
+}
+
+.title:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 6px;
+}
+
+/* B .notice */
+.notice {
+  padding: clamp(20px, 3vw, 36px);
+  border-left: 2px solid var(--rose);
+  border-radius: 0 10px 10px 0;
+  background: var(--first);
+}
+
+/* the paragraphs are LegalText's (B's prose): the last one needs no room under it */
+.notice > div > p:last-child {
+  margin-bottom: 0;
+}
+
+.accept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 32px;
+  margin-top: 28px;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-height: 44px;
+  padding: 10px 0;
+  font: 500 16px/1.45 var(--font-body);
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+/* off until the box is ticked: a plain "not allowed", not the busy cursor of a sending button (ui.btn) */
+.accept .start:disabled {
+  cursor: not-allowed;
+}
+
+.failed {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--bad);
+  font: 500 15px/1.45 var(--font-body);
+}
+
+.failed:empty {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .accept {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .start {
+    width: 100%;
+  }
+}

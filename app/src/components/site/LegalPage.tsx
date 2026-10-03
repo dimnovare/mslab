@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { getDb } from "@/db/client";
 import { getPage } from "@/db/queries/public";
-import { paragraphs } from "@/domain/catalogue";
 import { pick } from "@/i18n/field";
 import type { Locale } from "@/i18n/locales";
+import { LegalText } from "./LegalText";
 import ui from "./ui.module.css";
 import styles from "./LegalPage.module.css";
 
@@ -23,11 +23,7 @@ export async function LegalPage({ pageKey, locale }: { pageKey: LegalKey; locale
     <article className={`${ui.wrap} ${styles.page}`}>
       <div className={styles.inner}>
         <h1 className={styles.title}>{pick(page.title, locale)}</h1>
-        <div className={styles.body} data-legal-body="">
-          {paragraphs(pick(page.body, locale)).map((p, i) => (
-            <p key={i}>{p}</p>
-          ))}
-        </div>
+        <LegalText text={pick(page.body, locale)} />
       </div>
     </article>
   );

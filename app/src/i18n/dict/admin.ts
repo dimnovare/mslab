@@ -723,7 +723,7 @@ export const adminEt = {
   settings: {
     eyebrow: "Seaded",
     title: "Seaded",
-    lead: "Kontaktandmed, sotsiaalmeedia lingid, uudiskirja soodustus ja õigustekstid.",
+    lead: "Kontaktandmed, sotsiaalmeedia lingid, uudiskirja soodustus, õigustekstid ja e-koolituse tingimused.",
     contact: "Kontaktandmed",
     contactLead: "Jaluses ja kontaktilehel. Tühja välja ei näidata.",
     email: "E-post",
@@ -738,6 +738,8 @@ export const adminEt = {
     discountHint: "Jaluse uudiskirja plokis: „… {discount} tervitussoodustus sinu esimesele koolitusele.“ Näiteks 10%.",
     privacy: "Privaatsus",
     terms: "Õppetingimused",
+    courseTerms: "E-koolituse tingimused",
+    courseTermsLead: "Õpilane loeb seda enne e-koolituse esimest avamist ja nõustub sellega. Kui salvestad muudetud teksti, peab iga õpilane uuesti nõustuma. Seda teksti ei näe keegi avalikul lehel.",
     pageTitle: "Pealkiri",
     pageBody: "Tekst",
     pageHint: "Tühi rida alustab uut lõiku.",

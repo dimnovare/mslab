@@ -69,7 +69,7 @@ describe("plan and apply on a database seeded before round 2", () => {
     for (const q of await db.select().from(faq)) await db.update(faq).set({ q: etOnly(q.q) as never, a: etOnly(q.a) as never }).where(eq(faq.id, q.id));
     for (const p of await db.select().from(posts)) await db.update(posts).set({ title: etOnly(p.title) as never, excerpt: etOnly(p.excerpt) as never, body: etOnly(p.body) as never }).where(eq(posts.id, p.id));
     await db.delete(pages).where(eq(pages.key, "trainer_teaser"));
-    for (const p of await db.select().from(pages)) if (p.key !== "privacy" && p.key !== "terms" && p.key !== "center_story") await db.update(pages).set({ title: etOnly(p.title) as never, body: etOnly(p.body) as never }).where(eq(pages.key, p.key));
+    for (const p of await db.select().from(pages)) if (p.key !== "privacy" && p.key !== "terms" && p.key !== "center_story" && p.key !== "course_terms") await db.update(pages).set({ title: etOnly(p.title) as never, body: etOnly(p.body) as never }).where(eq(pages.key, p.key));
     const [camp] = await db.select().from(campaign);
     await db.update(campaign).set({ kicker: etOnly(camp.kicker) as never, title: etOnly(camp.title) as never, text: etOnly(camp.text) as never, ctaLabel: etOnly(camp.ctaLabel) as never });
     const [t] = await db.select().from(settings).where(eq(settings.key, "trainer"));
