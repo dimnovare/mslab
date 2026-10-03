@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { HEAD } from "@/app/api/konto/[[...path]]/route";
 import type { Db } from "@/db/client";
-import { loginMail, verifyLink } from "@/server/account-mail";
+import { deletionMail, esc, loginMail, verifyLink } from "@/server/account-mail";
 import { accountResponse, clearedCookies, handleAccountApi, sessionCookies, type AccountDeps } from "@/server/account-api";
 import { isPrefetch } from "@/server/prefetch";
 import { fakeKv } from "../fakes";
@@ -46,12 +46,22 @@ describe("routing and the cross-site check", () => {
       expect(await handleAccountApi(new Request(path), deps()), path).toBeNull();
   });
 
-  test("an unknown path or method under /api/konto answers 404 { ok: false }", async () => {
-    for (const r of [req(""), req("/"), req("/nothing"), req("/login"), req("/me", { method: "POST" }), req("/me", { method: "HEAD" }), req("/andmed", { method: "PATCH" })]) {
-      const res = (await handleAccountApi(r, deps()))!;
-      expect(res.status, `${r.method} ${new URL(r.url).pathname}`).toBe(404);
-      expect(await res.json()).toEqual({ ok: false });
-    }
+  test("an unknown path or method under /api/konto answers 404 { ok: false }, with or without a session, and never reaches the database", async () => {
+    const cookie = { cookie: `__Host-mslab_client=${"A".repeat(43)}` };
+    const unknown = [
+      req("/nothing"), req("/login"), req("/me", { method: "POST" }), req("/me", { method: "HEAD" }), req("/", { method: "HEAD" }),
+      // known paths with the wrong method
+      post("/", {}), req("/lemmikud"), req("/lemmikud/merge"), req("/andmed"), post("/andmed", {}), req("/uudiskiri"), req("/muutmine"), req("/tingimused"), req("/kustuta"),
+      req("/kustuta", { method: "DELETE" }), req("/lemmikud", { method: "PATCH" }),
+      // the e-course path: one slug only, GET only
+      post("/kursus/x", {}), req("/kursus"), req("/kursus/"), req("/kursus/a/b"), req("/kursus/x", { method: "PATCH" }), req("/Kursus/x"), req("/lemmikud/"),
+    ];
+    for (const r of unknown)
+      for (const headers of [{}, cookie]) {
+        const res = (await handleAccountApi(new Request(r.url, { method: r.method, headers, body: r.method === "POST" || r.method === "PATCH" ? "{}" : undefined }), deps()))!;
+        expect(res.status, `${r.method} ${new URL(r.url).pathname}`).toBe(404);
+        expect(await res.json()).toEqual({ ok: false });
+      }
   });
 
   test("a cross-site POST, PATCH or DELETE is refused with 403 before anything else", async () => {
@@ -167,6 +177,44 @@ describe("bad input is a 400, never a 500, and never reaches the database", () =
     const res = (await handleAccountApi(post("/code", body), deps()))!;
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ ok: false, error: "code" });
+  });
+});
+
+describe("the data endpoints without a session", () => {
+  // Every one starts with requireClient: no cookie (or one that is not a token) is 401 before anything else, the body is not read and the database is not used.
+  const endpoints: [string, string, unknown?][] = [
+    ["GET", ""], ["GET", "/"], ["GET", "/kursus/kulmude-lami"], ["GET", "/kursus/%E0%A4%A"],
+    ["POST", "/lemmikud", { slug: "kulmude-lami", on: true }], ["POST", "/lemmikud/merge", { slugs: ["kulmude-lami"] }],
+    ["PATCH", "/andmed", { name: "Kati", phone: "", locale: "et" }], ["POST", "/uudiskiri", { on: true }],
+    ["POST", "/muutmine", { registrationId: 1, kind: "cancel", message: "" }], ["POST", "/tingimused", { slug: "veebikursus" }],
+    ["POST", "/kustuta", { confirm: true }], ["POST", "/kustuta", "not json"],
+  ];
+
+  test.each(endpoints)("%s %s: 401 none, the hint cookie cleared, nothing sent or used", async (method, path, body) => {
+    const queued: unknown[] = [];
+    for (const cookie of [undefined, "other=1", "__Host-mslab_client=", "__Host-mslab_client=short"]) {
+      const res = (await handleAccountApi(
+        req(path, { method, headers: cookie === undefined ? {} : { cookie }, body: typeof body === "string" ? body : body === undefined ? undefined : JSON.stringify(body) }),
+        deps({ later: (task) => void queued.push(task) }),
+      ))!;
+      expect(res.status, String(cookie)).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, reason: "none" });
+      expect(res.headers.getSetCookie()).toEqual([clearedCookies()[1]]);
+    }
+    expect(queued).toEqual([]);
+  });
+
+  test("with a session cookie and a database that fails: a JSON 500 that names nothing (no cookie value, no value of the request)", async () => {
+    const cookie = `__Host-mslab_client=${"A".repeat(43)}`;
+    const res = (await handleAccountApi(
+      req("/andmed", { method: "PATCH", headers: { cookie }, body: JSON.stringify({ name: "Kati Tamm", phone: "", locale: "et" }) }),
+      deps({ db: failingDb(`select failed for ${cookie} Kati Tamm`) }),
+    ))!;
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ ok: false, error: "server" });
+    const logged = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(logged).toContain("[account] request failed");
+    expect(logged).not.toMatch(/AAAA|Kati|select failed/);
   });
 });
 
@@ -327,4 +375,40 @@ describe("login e-mail", () => {
     expect(hrefs).toHaveLength(2);
     for (const href of hrefs) expect(href).not.toMatch(/["<>]/);
   });
+});
+
+describe("deletion e-mail", () => {
+  test("Estonian: the account is deleted, the registrations stay with Maria; plain text and a plain HTML body", () => {
+    const mail = deletionMail("kati@example.test", "et");
+    expect(mail.to).toBe("kati@example.test");
+    expect(mail.subject).toBe("MS LAB konto on kustutatud");
+    expect(mail.text).toBe(["Tere!", "", "Sinu MS LAB konto on kustutatud.", "Sinu registreeringud jäävad Mariale alles.", "", "MS LAB Koolituskeskus"].join("\n"));
+    const html = mail.html!;
+    expect(html.startsWith('<!doctype html><html lang="et">')).toBe(true);
+    expect(html).toContain("<title>MS LAB konto on kustutatud</title>");
+    for (const line of ["Tere!", "Sinu MS LAB konto on kustutatud.", "Sinu registreeringud jäävad Mariale alles.", "MS LAB Koolituskeskus"]) expect(html).toContain(line);
+  });
+
+  test("Russian: the same lines in Russian", () => {
+    const mail = deletionMail("kati@example.test", "ru");
+    expect(mail.subject).toBe("Личный кабинет MS LAB удалён");
+    expect(mail.text).toBe(["Здравствуйте!", "", "Ваш личный кабинет MS LAB удалён.", "Ваши регистрации остаются у Марии.", "", "MS LAB Учебный центр"].join("\n"));
+    expect(mail.html).toContain('lang="ru"');
+    expect(mail.html).toContain("Ваши регистрации остаются у Марии.");
+  });
+
+  test("the HTML has no button and no link, no resources, and only the site's colours", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles/tokens.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const tokens = new Set(css.match(/#[0-9a-f]{6}\b/gi)!.map((c) => c.toLowerCase()));
+    for (const locale of ["et", "ru"] as const) {
+      const html = deletionMail("kati@example.test", locale).html!;
+      expect(html).not.toMatch(/<(a|img|script|link|style|iframe|svg|button)\b/i);
+      expect(html).not.toMatch(/https?:|@import|url\(|src=|href=/i);
+      for (const colour of html.match(/#[0-9a-f]{3,8}\b/gi)!) expect(tokens.has(colour.toLowerCase()), colour).toBe(true);
+    }
+  });
+});
+
+test("esc is exported for the other mails: nothing it returns can open a tag or end an attribute", () => {
+  expect(esc(`<a href="x">&'`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
 });

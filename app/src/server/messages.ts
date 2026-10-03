@@ -141,3 +141,32 @@ export function waitlistSummary(s: SessionInfo & Visitor, adminUrl: string): Sum
     short: `${title}\n${sessionShort(s)}\n${contactLine(s)}`,
   };
 }
+
+/**
+ * A student's wish to cancel a registration or move it to another date (the account's "Soovin tühistada / muuta aega").
+ * Nothing has been changed: the registration stays as it was until Maria has talked to the student. `session` is null for
+ * a registration without a date (an individual course).
+ */
+export function changeRequestSummary(
+  r: Visitor & { registrationId: number; course: string; session: Omit<SessionInfo, "course"> | null; kind: "cancel" | "change"; message: string },
+  adminUrl: string,
+): Summary {
+  const title = r.kind === "cancel" ? "Soov registreering tühistada" : "Soov registreeringu aega muuta";
+  const info = r.session ? { course: r.course, ...r.session } : null;
+  const place = info ? `${r.course}, ${sessionWhen(info.startsAt)}, ${info.city}` : r.course;
+  return {
+    subject: `${title}: ${place} — ${r.name}`,
+    text: body(
+      title,
+      [
+        ...(info ? sessionRows(info) : ([["Koolitus", r.course]] as Row[])),
+        ["Registreeringu number", String(r.registrationId)],
+        ...person(r),
+        ["Sõnum", r.message, true],
+      ],
+      adminUrl,
+      "Registreeringut ei ole muudetud. Võta õpilasega ühendust ja muuda registreering vajadusel adminis.",
+    ),
+    short: `${title}\n${info ? sessionShort(info) : r.course}\n${contactLine(r)}${r.message ? `\n${r.message.slice(0, 280)}` : ""}`,
+  };
+}

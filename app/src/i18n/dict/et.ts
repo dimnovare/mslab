@@ -408,6 +408,29 @@ export const et = {
       ignore: "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.",
       signature: "MS LAB Koolituskeskus",
     },
+    // The e-mail that confirms an account deletion (account-mail.ts deletionMail): the greeting and signature are `mail`'s.
+    deleted: {
+      subject: "MS LAB konto on kustutatud",
+      line: "Sinu MS LAB konto on kustutatud.",
+      kept: "Sinu registreeringud jäävad Mariale alles.",
+    },
+    // The one sentence on each course card (domain/account-cards.ts nextStep): `{amount}` and `{rest}` are euros ("175 €"),
+    // `{date}` a day ("14.11", for the access "22.03.2027"), `{time}` "10:00", `{city}` the session's city.
+    next: {
+      cancelled: "Registreering on tühistatud.",
+      done: "Koolitus on toimunud. Aitäh!",
+      pay: "Koha kinnitamiseks tasu ettemaks {amount}.",
+      invoice: "Maria saadab sulle arve ettemaksu tasumiseks.",
+      confirming: "Makse on laekunud. Maria kinnitab su koha.",
+      confirmedRest: "Koht on kinnitatud. Ülejäänud {rest} tasud koolituspäeval.",
+      confirmed: "Koht on kinnitatud. Kohtume {date} kell {time}, {city}.",
+      individualPending: "Maria võtab sinuga ühendust, et aeg kokku leppida.",
+      requestNew: "Päring on saadetud. Maria vastab peagi.",
+      requestDone: "Maria on päringule vastanud.",
+      waitlist: "Oled ootenimekirjas. Anname teada, kui koht vabaneb.",
+      accessEnded: "Ligipääs on lõppenud.",
+      openCourse: "Ligipääs kuni {date}.",
+    },
   },
 
   // Localized 404 inside the site shell.

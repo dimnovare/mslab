@@ -1,14 +1,17 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
-import { clientLoginTokens, clients, clientSessions, mailQuota } from "@/db/schema";
+import {
+  clientFavourites, clientLoginTokens, clients, clientSessions, courseAccess, courses, courseSessions, mailQuota, pages, registrations, requests, settings,
+  subscribers, termsAcceptances,
+} from "@/db/schema";
 import { clearedCookies, handleAccountApi, sessionCookies, type AccountDeps } from "@/server/account-api";
 import { CLIENT_SESSION_TTL_MS, LOGIN_MAIL_DAILY_CAP } from "@/server/client-auth";
 import { sha256 } from "@/server/token";
 import { fakeKv, stubFetch } from "../fakes";
 import { makeTestDb } from "./helpers";
 
-// The client account's sign-in API without Next.js: PGlite database, in-memory KV (the rate-limit store), stubbed fetch
+// The client account's API without Next.js (sign-in, then the data endpoints at the end): PGlite database, in-memory KV (the rate-limit store), stubbed fetch
 // for Resend. `later` collects what production runs after the response (the e-mail); `flush()` awaits it.
 // EMAIL is a sample address (`@example.test`: never mailed outside development); MAILED is a stand-in for a real one.
 
@@ -24,7 +27,10 @@ beforeAll(async () => {
 beforeEach(async () => {
   await db.delete(clientLoginTokens);
   await db.delete(clientSessions);
+  // what the data endpoints leave: records first (they point at courses and clients), then the clients (cascade: hearts, access, terms)
+  for (const table of [termsAcceptances, clientFavourites, courseAccess, registrations, requests, subscribers]) await db.delete(table);
   await db.delete(clients);
+  for (const table of [courseSessions, courses, settings, pages]) await db.delete(table);
   await db.delete(mailQuota);
   for (const method of ["info", "error", "log", "warn"] as const) vi.spyOn(console, method).mockImplementation(() => {});
 });
@@ -593,5 +599,540 @@ describe("logs hold no personal data", () => {
     const logged = (["info", "error", "log", "warn"] as const).flatMap((m) => vi.mocked(console[m]).mock.calls).flat().join("\n");
     expect(logged.length).toBeGreaterThan(0);
     for (const secret of [MAILED, "kati", "other@example", code, token, rawOf(cookie)]) expect(logged).not.toContain(secret);
+  });
+});
+
+// ---------- the data endpoints (dashboard, e-course, favourites, profile, newsletter, change requests, terms, deletion) ----------
+
+const DAY = 86_400_000;
+const at = (days: number) => new Date(NOW.getTime() + days * DAY);
+
+type Seeded = Awaited<ReturnType<typeof seedCourses>>;
+let seeded: Seeded;
+
+/** A published contact course with a session in 30 days, a published e-course (with two modules) and an unpublished e-course. */
+async function seedCourses() {
+  const base = { level: "basic" as const, summary: { et: "" }, body: { et: "" } };
+  const [lami] = await db.insert(courses).values({ ...base, slug: "kulmude-lami", type: "contact", title: { et: "Kulmude lamineerimine" }, published: true, priceGroup: 35000 }).returning();
+  const [online] = await db.insert(courses).values({
+    ...base, slug: "veebikursus", type: "e_learning", title: { et: "Veebikursus" }, published: true, price: 9500, modules: [{ et: "Sissejuhatus" }, { et: "Praktika" }],
+  }).returning();
+  const [hidden] = await db.insert(courses).values({ ...base, slug: "peidus-kursus", type: "e_learning", title: { et: "Peidus" }, published: false, price: 100 }).returning();
+  const [session] = await db.insert(courseSessions).values({ courseId: lami.id, startsAt: at(30), city: "Pärnu", venue: "Salong" }).returning();
+  return { lami, online, hidden, session };
+}
+
+/** Signs in (development: the code comes back in the answer) and gives the client row, the cookie and the deps. */
+async function account(opts: Setup & { email?: string } = {}) {
+  const s = setup(opts);
+  const email = opts.email ?? EMAIL;
+  const cookie = await signIn(s.deps, email);
+  const [client] = await db.select().from(clients).where(eq(clients.email, email));
+  return { ...s, cookie, client };
+}
+
+const register = async (clientId: number | null, over: Partial<typeof registrations.$inferInsert> = {}) =>
+  (await db.insert(registrations).values({
+    courseId: seeded.lami.id, courseSessionId: seeded.session.id, kind: "group", name: "Kati Tamm", email: EMAIL, phone: "+3725551234", paymentChoice: "full", clientId, ...over,
+  }).returning())[0];
+
+const grantAccess = async (clientId: number, courseId: number, over: Partial<typeof courseAccess.$inferInsert> = {}) =>
+  (await db.insert(courseAccess).values({ clientId, courseId, grantedBy: "admin@example.test", grantedAt: at(-1), expiresAt: at(180), ...over }).returning())[0];
+
+const send = (deps: AccountDeps, method: string, path: string, cookie: string | undefined, body?: unknown) => call(deps, path, { method, cookie, body });
+
+/** A request whose body is sent as it is (a string that may not be JSON). */
+async function rawCall(deps: AccountDeps, method: string, path: string, cookie: string | undefined, rawBody: string): Promise<Response> {
+  const headers = new Headers({ "x-forwarded-for": "203.0.113.1" });
+  if (cookie) headers.set("cookie", cookie);
+  return (await handleAccountApi(new Request(`${SITE}/api/konto${path}`, { method, headers, body: rawBody }), deps))!;
+}
+
+describe("GET /api/konto: the dashboard", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  test("the session's client: profile, cards, favourites and the prepayment instructions; private and uncached", async () => {
+    const { deps, cookie, client } = await account();
+    const reg = await register(client.id);
+    await db.insert(clientFavourites).values({ clientId: client.id, courseId: seeded.online.id });
+    await db.insert(settings).values({ key: "prepayment", value: { receiver: "MS LAB OÜ", iban: "EE00 0000", bank: "Pank", referencePrefix: "MS" } });
+    const res = await call(deps, "", { cookie });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(await res.json()).toEqual({
+      client: { email: EMAIL, name: "", phone: "", locale: "et", newsletter: false },
+      cards: [
+        {
+          kind: "contact", registrationId: reg.id, course: { slug: "kulmude-lami", title: { et: "Kulmude lamineerimine" } },
+          session: { startsAt: seeded.session.startsAt.toISOString(), city: "Pärnu", venue: "Salong", cancelled: false },
+          status: "awaiting_prepayment", paymentChoice: "full", priceCents: 35000, paidCents: 0, createdAt: reg.createdAt.toISOString(),
+        },
+      ],
+      favourites: ["veebikursus"],
+      prepayment: { receiver: "MS LAB OÜ", iban: "EE00 0000", bank: "Pank", referencePrefix: "MS" },
+    });
+    expect((await call(deps, "/", { cookie })).status).toBe(200); // the trailing slash is the same endpoint
+  });
+
+  test("what was booked with this address before the first login is already there, and nobody else's is", async () => {
+    await register(null); // the same address, before there was an account
+    await register(null, { email: "mari@example.test", name: "Mari" });
+    const { deps, cookie } = await account();
+    const { cards } = await (await call(deps, "", { cookie })).json();
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: "contact", status: "awaiting_prepayment" });
+  });
+
+  test("without a session, after logout, and once another device has signed in: 401 with the reason, the hint cookie cleared", async () => {
+    const { deps, cookie } = await account();
+    const none = await call(deps, "", {});
+    expect(none.status).toBe(401);
+    expect(await none.json()).toEqual({ ok: false, reason: "none" });
+    expect(none.headers.getSetCookie()).toEqual([clearedCookies()[1]]);
+    const other = await signIn(deps); // a second device
+    const replaced = await call(deps, "", { cookie });
+    expect(replaced.status).toBe(401);
+    expect(await replaced.json()).toEqual({ ok: false, reason: "replaced" });
+    expect(replaced.headers.getSetCookie()).toEqual([clearedCookies()[1]]);
+    await call(deps, "/logout", { method: "POST", cookie: other });
+    expect(await (await call(deps, "", { cookie: other })).json()).toEqual({ ok: false, reason: "logout" });
+  });
+});
+
+describe("GET /api/konto/kursus/:slug: an e-course", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  test("with access: the view, with the terms still to accept; without it, for another client's access, an unpublished or unknown course: 404", async () => {
+    const { deps, cookie, client } = await account();
+    const mari = (await db.insert(clients).values({ email: "mari@example.test" }).returning())[0];
+    await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
+    for (const slug of ["veebikursus", "peidus-kursus", "olematu", "kulmude-lami"]) {
+      const res = await call(deps, `/kursus/${slug}`, { cookie });
+      expect(res.status, slug).toBe(404);
+      expect(await res.json()).toEqual({ ok: false });
+    }
+    await grantAccess(mari.id, seeded.online.id);
+    expect((await call(deps, "/kursus/veebikursus", { cookie })).status).toBe(404); // Mari's access is Mari's
+    await grantAccess(client.id, seeded.online.id);
+    await grantAccess(client.id, seeded.hidden.id);
+    const res = await call(deps, "/kursus/veebikursus", { cookie });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(await res.json()).toEqual({
+      course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika" }] },
+      access: { expiresAt: at(180).toISOString() },
+      terms: { accepted: false, text: { et: "Ligipääs on isiklik." } },
+    });
+    expect((await call(deps, "/kursus/peidus-kursus", { cookie })).status).toBe(404);
+  });
+
+  test("access that has ended is a 404; a slug that is not decodable or cannot be one is a 404, not a 500", async () => {
+    const { deps, cookie, client } = await account();
+    await grantAccess(client.id, seeded.online.id, { expiresAt: at(-1) });
+    expect((await call(deps, "/kursus/veebikursus", { cookie })).status).toBe(404);
+    for (const raw of ["%E0%A4%A", "%00", "a%00b", "%01", "x".repeat(300), "a%2Fb"]) {
+      const res = await call(deps, `/kursus/${raw}`, { cookie });
+      expect(res.status, raw).toBe(404);
+      expect(await res.json(), raw).toEqual({ ok: false });
+    }
+  });
+
+  test("the terms: accepting stores the version, the view then has none to accept; a changed version asks again", async () => {
+    const { deps, cookie, client } = await account();
+    await grantAccess(client.id, seeded.online.id);
+    const accept = await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus" } });
+    expect(accept.status).toBe(200);
+    expect(await accept.json()).toEqual({ ok: true });
+    expect(await db.select().from(termsAcceptances)).toEqual([{ clientId: client.id, courseId: seeded.online.id, termsVersion: "1", acceptedAt: NOW }]);
+    expect((await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms).toEqual({ accepted: true, text: null });
+    await db.insert(settings).values({ key: "courseTermsVersion", value: "2026-10-02T09:00:00.000Z" });
+    expect((await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms.accepted).toBe(false);
+  });
+
+  test("accepting terms needs active access to a published course: another client's access, none, ended, unpublished, unknown: 404 { error: \"slug\" }", async () => {
+    const { deps, cookie, client } = await account();
+    const mari = (await db.insert(clients).values({ email: "mari@example.test" }).returning())[0];
+    await grantAccess(mari.id, seeded.online.id);
+    await grantAccess(client.id, seeded.hidden.id);
+    for (const slug of ["veebikursus", "peidus-kursus", "olematu", "kulmude-lami"]) {
+      const res = await call(deps, "/tingimused", { cookie, body: { slug } });
+      expect(res.status, slug).toBe(404);
+      expect(await res.json()).toEqual({ ok: false, error: "slug" });
+    }
+    expect(await db.select().from(termsAcceptances)).toEqual([]);
+  });
+});
+
+describe("favourites", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  test("POST /lemmikud hearts and un-hearts; POST /lemmikud/merge adds the browser's list, ignoring what is unknown or unpublished", async () => {
+    const { deps, cookie } = await account();
+    const heart = await call(deps, "/lemmikud", { cookie, body: { slug: "kulmude-lami", on: true } });
+    expect(heart.status).toBe(200);
+    expect(await heart.json()).toEqual({ ok: true, favourites: ["kulmude-lami"] });
+    const merged = await call(deps, "/lemmikud/merge", { cookie, body: { slugs: ["veebikursus", "olematu", "peidus-kursus", "kulmude-lami", "veebikursus"] } });
+    expect(merged.status).toBe(200);
+    expect(await merged.json()).toEqual({ ok: true, favourites: ["veebikursus", "kulmude-lami"] });
+    expect(await (await call(deps, "/lemmikud", { cookie, body: { slug: "kulmude-lami", on: false } })).json()).toEqual({ ok: true, favourites: ["veebikursus"] });
+    expect((await (await call(deps, "", { cookie })).json()).favourites).toEqual(["veebikursus"]);
+  });
+
+  test("hearting a course that is not published or does not exist: 404 { error: \"slug\" }, nothing stored", async () => {
+    const { deps, cookie } = await account();
+    for (const slug of ["peidus-kursus", "olematu"]) {
+      const res = await call(deps, "/lemmikud", { cookie, body: { slug, on: true } });
+      expect(res.status, slug).toBe(404);
+      expect(await res.json()).toEqual({ ok: false, error: "slug" });
+    }
+    expect(await db.select().from(clientFavourites)).toEqual([]);
+  });
+
+  test("a merge of 100 slugs of 200 characters is accepted; 101, or one slug over 200, is 400 { error: \"slugs\" }", async () => {
+    const { deps, cookie } = await account();
+    const long = (i: number) => `${String(i).padStart(3, "0")}${"x".repeat(197)}`; // 200 characters
+    const res = await call(deps, "/lemmikud/merge", { cookie, body: { slugs: Array.from({ length: 100 }, (_, i) => long(i)) } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, favourites: [] });
+    for (const slugs of [Array.from({ length: 101 }, (_, i) => `s${i}`), ["x".repeat(201)]]) {
+      const bad = await call(deps, "/lemmikud/merge", { cookie, body: { slugs } });
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toEqual({ ok: false, error: "slugs" });
+    }
+  });
+
+  test("a client's hearts are its own", async () => {
+    const a = await account();
+    const b = await account({ email: "mari@example.test" });
+    await call(a.deps, "/lemmikud", { cookie: a.cookie, body: { slug: "kulmude-lami", on: true } });
+    expect((await (await call(b.deps, "", { cookie: b.cookie })).json()).favourites).toEqual([]);
+    expect(await (await call(b.deps, "/lemmikud", { cookie: b.cookie, body: { slug: "kulmude-lami", on: false } })).json()).toEqual({ ok: true, favourites: [] });
+    expect((await (await call(a.deps, "", { cookie: a.cookie })).json()).favourites).toEqual(["kulmude-lami"]);
+  });
+});
+
+describe("profile and newsletter", () => {
+  test("PATCH /andmed saves name, phone and language (trimmed); /me and the dashboard show them", async () => {
+    const { deps, cookie } = await account();
+    const res = await call(deps, "/andmed", { method: "PATCH", cookie, body: { name: "  Kati   Tamm ", phone: " +372 555 1234 ", locale: "ru" } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(await (await call(deps, "/me", { cookie })).json()).toEqual({ ok: true, email: EMAIL, name: "Kati Tamm" });
+    expect((await (await call(deps, "", { cookie })).json()).client).toEqual({ email: EMAIL, name: "Kati Tamm", phone: "+372 555 1234", locale: "ru", newsletter: false });
+  });
+
+  test("POST /uudiskiri on: a confirmed subscriber for the account's address, no mail; off deletes it", async () => {
+    const f = resend();
+    const { deps, cookie, client, queued, flush } = await account({ email: MAILED });
+    const on = await call(deps, "/uudiskiri", { cookie, body: { on: true } });
+    expect(on.status).toBe(200);
+    expect(await on.json()).toEqual({ ok: true });
+    const [sub] = await db.select().from(subscribers);
+    expect(sub).toMatchObject({ email: MAILED, clientId: client.id, confirmedAt: NOW, consentAt: NOW });
+    expect((await (await call(deps, "", { cookie })).json()).client.newsletter).toBe(true);
+    expect(queued()).toBe(0); // the login proved the address: nothing to confirm by mail
+    await flush();
+    expect(f.calls).toEqual([]);
+    expect(await (await call(deps, "/uudiskiri", { cookie, body: { on: false } })).json()).toEqual({ ok: true });
+    expect(await db.select().from(subscribers)).toEqual([]);
+    expect((await (await call(deps, "", { cookie })).json()).client.newsletter).toBe(false);
+  });
+});
+
+describe("POST /muutmine: a request to cancel or change a registration", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  test("stores a change_request for the admin's inbox, tells Maria after the response (reply to the client), and changes nothing else", async () => {
+    const f = resend();
+    const { deps, cookie, client, queued, flush } = await account();
+    const reg = await register(client.id, { status: "confirmed", paidCents: 35000 });
+    const res = await call(deps, "/muutmine", { cookie, body: { registrationId: reg.id, kind: "cancel", message: "  Haigestusin.  " } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const rows = await db.select().from(requests);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "change_request", clientId: client.id, handled: false, payload: { registrationId: reg.id, kind: "cancel", message: "Haigestusin.", email: EMAIL } });
+    expect((await db.select().from(registrations).where(eq(registrations.id, reg.id)))[0]).toEqual(reg);
+
+    expect(queued()).toBe(1);
+    expect(f.mails()).toHaveLength(0); // nothing goes out before the response is sent
+    await flush();
+    const [mail] = f.mails();
+    expect(mail).toMatchObject({ to: "maria@example.test" });
+    expect(mail.subject).toMatch(/^Soov registreering tühistada: Kulmude lamineerimine, /);
+    expect(mail.text).toContain("Haigestusin.");
+    expect(mail.text).toContain(`Admin: ${SITE}/admin`);
+    expect(f.calls.filter((c) => c.url.includes("resend"))[0].body).toMatchObject({ reply_to: EMAIL });
+  });
+
+  test("another client's registration, one linked to nobody and one that does not exist: 404 { error: \"registration\" }; nothing stored, nobody told", async () => {
+    const f = resend();
+    const { deps, cookie, queued, flush } = await account();
+    const mari = (await db.insert(clients).values({ email: "mari@example.test" }).returning())[0];
+    const maris = await register(mari.id, { email: "mari@example.test", name: "Mari" });
+    const loose = await register(null);
+    for (const registrationId of [maris.id, loose.id, 987654]) {
+      const res = await call(deps, "/muutmine", { cookie, body: { registrationId, kind: "cancel", message: "" } });
+      expect(res.status, String(registrationId)).toBe(404);
+      expect(await res.json()).toEqual({ ok: false, error: "registration" });
+    }
+    expect(await db.select().from(requests)).toEqual([]);
+    expect(queued()).toBe(0);
+    await flush();
+    expect(f.calls).toEqual([]);
+  });
+
+  test("5 an hour per client, then 429 { error: \"rate\" }: no row, no mail; a failing rate store lets it through", async () => {
+    const f = resend();
+    const kv = fakeKv();
+    const { deps, cookie, client, queued, flush } = await account({ kv });
+    const reg = await register(client.id);
+    const ask = () => call(deps, "/muutmine", { cookie, body: { registrationId: reg.id, kind: "change", message: "" } });
+    for (let i = 0; i < 5; i++) expect((await ask()).status).toBe(200);
+    const limited = await ask();
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ ok: false, error: "rate" });
+    expect(await db.select().from(requests)).toHaveLength(5);
+    expect(queued()).toBe(5);
+    await flush();
+    expect(f.mails()).toHaveLength(5);
+    // the count is per client: another client is not held back
+    const other = await account({ kv, email: "mari@example.test" });
+    const maris = await register(other.client.id, { email: "mari@example.test" });
+    expect((await call(other.deps, "/muutmine", { cookie: other.cookie, body: { registrationId: maris.id, kind: "change", message: "" } })).status).toBe(200);
+    // a failing store: allowed, and the log names no address
+    kv.get = async () => { throw new Error(`down ${EMAIL}`); };
+    expect((await ask()).status).toBe(200);
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toContain("kati");
+  });
+
+  test("bad bodies: 400 with the field, before the rate limit and the database", async () => {
+    const { deps, cookie, client } = await account();
+    const reg = await register(client.id);
+    const cases: [unknown, string][] = [
+      ["not json", "body"], ["[]", "body"], ["null", "body"], [{}, "registrationId"],
+      [{ registrationId: String(reg.id), kind: "cancel", message: "" }, "registrationId"],
+      [{ registrationId: 0, kind: "cancel", message: "" }, "registrationId"],
+      [{ registrationId: 2_147_483_648, kind: "cancel", message: "" }, "registrationId"],
+      [{ registrationId: reg.id, kind: "delete", message: "" }, "kind"],
+      [{ registrationId: reg.id, kind: "Cancel", message: "" }, "kind"],
+      [{ registrationId: reg.id, kind: "cancel", message: 7 }, "message"],
+      [{ registrationId: reg.id, kind: "cancel", message: "m".repeat(1001) }, "message"],
+      [{ registrationId: reg.id, kind: "cancel", message: "a\u0000b" }, "message"],
+      [{ registrationId: reg.id, kind: "cancel", message: "a\ud800" }, "message"],
+    ];
+    for (const [body, error] of cases) {
+      const res = await rawCall(deps, "POST", "/muutmine", cookie, typeof body === "string" ? body : JSON.stringify(body));
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(await res.json(), JSON.stringify(body)).toEqual({ ok: false, error });
+    }
+    expect(await db.select().from(requests)).toEqual([]);
+    // a message of exactly 1000 characters is fine
+    expect((await call(deps, "/muutmine", { cookie, body: { registrationId: reg.id, kind: "cancel", message: "m".repeat(1000) } })).status).toBe(200);
+  });
+});
+
+describe("POST /kustuta: deleting the account", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  test("deletes the client and what hangs on it, keeps the registration (unlinked, name and address as given), clears both cookies, ends the session", async () => {
+    const { deps, cookie, client } = await account();
+    const reg = await register(client.id);
+    await grantAccess(client.id, seeded.online.id);
+    await db.insert(clientFavourites).values({ clientId: client.id, courseId: seeded.lami.id });
+    await db.insert(subscribers).values({ email: EMAIL, token: "t1", confirmedAt: NOW, clientId: client.id });
+    const res = await call(deps, "/kustuta", { cookie, body: { confirm: true } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(res.headers.getSetCookie()).toEqual(clearedCookies());
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(await db.select().from(clients)).toEqual([]);
+    expect(await sessions()).toEqual([]);
+    expect(await db.select().from(courseAccess)).toEqual([]);
+    expect(await db.select().from(clientFavourites)).toEqual([]);
+    expect(await db.select().from(subscribers)).toEqual([]);
+    expect((await db.select().from(registrations))[0]).toEqual({ ...reg, clientId: null });
+    // the old cookie is nothing now
+    const after = await call(deps, "/me", { cookie });
+    expect(after.status).toBe(401);
+    expect(await after.json()).toEqual({ ok: false, reason: "none" });
+  });
+
+  test("a renewed session's cookies are not sent: the answer clears them", async () => {
+    const first = await account();
+    const later = setup({ now: at(100) }).deps;
+    const res = await call(later, "/kustuta", { cookie: first.cookie, body: { confirm: true } });
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual(clearedCookies());
+  });
+
+  test("the confirmation e-mail goes out after the response, in the client's language, to a real address only", async () => {
+    const f = resend();
+    const dev = await account({ email: MAILED });
+    await db.update(clients).set({ locale: "ru" }).where(eq(clients.id, dev.client.id));
+    const live = setup({ dev: false });
+    const res = await call(live.deps, "/kustuta", { cookie: dev.cookie, body: { confirm: true } });
+    expect(res.status).toBe(200);
+    expect(live.queued()).toBe(1);
+    expect(f.mails()).toHaveLength(0);
+    await live.flush();
+    const [mail] = f.mails();
+    expect(mail).toMatchObject({ to: MAILED, subject: "Личный кабинет MS LAB удалён" });
+    expect(mail.text).toContain("Ваши регистрации остаются у Марии.");
+    expect(mail.html).toContain("Ваши регистрации остаются у Марии.");
+  });
+
+  test("no e-mail to a sample address, and none in development", async () => {
+    const f = resend();
+    const sample = await account({ email: EMAIL });
+    const live = setup({ dev: false });
+    expect((await call(live.deps, "/kustuta", { cookie: sample.cookie, body: { confirm: true } })).status).toBe(200);
+    expect(live.queued()).toBe(0);
+    const real = await account({ email: MAILED });
+    const dev = setup({ dev: true });
+    expect((await call(dev.deps, "/kustuta", { cookie: real.cookie, body: { confirm: true } })).status).toBe(200);
+    expect(dev.queued()).toBe(0);
+    await live.flush();
+    await dev.flush();
+    expect(f.calls).toEqual([]);
+    expect(await db.select().from(clients)).toEqual([]); // both accounts are gone all the same
+  });
+
+  test("without { confirm: true }: 400 { error: \"confirm\" }, the account and the session stay", async () => {
+    const { deps: devDeps, cookie, queued } = await account();
+    const deps: AccountDeps = { ...devDeps, dev: false };
+    for (const body of [{}, { confirm: false }, { confirm: "true" }, { confirm: 1 }, "x", []]) {
+      const res = await call(deps, "/kustuta", { cookie, body });
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: typeof body === "object" && !Array.isArray(body) ? "confirm" : "body" });
+      expect(res.headers.getSetCookie()).toEqual([]);
+    }
+    expect(await db.select().from(clients)).toHaveLength(1);
+    expect(queued()).toBe(0);
+    expect((await call(deps, "/me", { cookie })).status).toBe(200);
+  });
+
+  test("a cross-site request is refused before anything is deleted", async () => {
+    const { deps, cookie } = await account();
+    const res = await call(deps, "/kustuta", { cookie, body: { confirm: true }, headers: { origin: "https://evil.example" } });
+    expect(res.status).toBe(403);
+    expect(await db.select().from(clients)).toHaveLength(1);
+  });
+});
+
+describe("every endpoint behind a session answers through the session", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  // [method, path, the body of a request that succeeds for a client with that registration (id) and access to the e-course, the same endpoint with a body it refuses]
+  type Endpoint = [string, string, (registrationId: number) => unknown, unknown];
+  const ENDPOINTS: Endpoint[] = [
+    ["GET", "", () => undefined, undefined],
+    ["GET", "/kursus/veebikursus", () => undefined, undefined],
+    ["POST", "/lemmikud", () => ({ slug: "kulmude-lami", on: true }), {}],
+    ["POST", "/lemmikud/merge", () => ({ slugs: ["kulmude-lami"] }), {}],
+    ["PATCH", "/andmed", () => ({ name: "Kati", phone: "", locale: "et" }), {}],
+    ["POST", "/uudiskiri", () => ({ on: true }), {}],
+    ["POST", "/muutmine", (id) => ({ registrationId: id, kind: "cancel", message: "" }), {}],
+    ["POST", "/tingimused", () => ({ slug: "veebikursus" }), {}],
+  ];
+  test.each(ENDPOINTS)("%s %s at day 100 sends the renewed session's cookies, on success and on a refusal alike", async (method, path, okBody, bad) => {
+    for (const [label, status] of [["success", 200], ["refusal", null]] as const) {
+      for (const table of [termsAcceptances, clientFavourites, courseAccess, registrations, requests, subscribers]) await db.delete(table); // the second round starts as the first
+      const first = await account();
+      const reg = await register(first.client.id);
+      await grantAccess(first.client.id, seeded.online.id);
+      const body = label === "success" ? okBody(reg.id) : bad;
+      const later = setup({ now: at(100) });
+      const res = await send(later.deps, method, path, first.cookie, body);
+      if (status) expect(res.status, `${method} ${path}`).toBe(status); // the success case really is one
+      else expect(res.status).toBeLessThan(500);
+      expect(res.headers.getSetCookie(), `${label} ${method} ${path}`).toEqual(sessionCookies(rawOf(first.cookie)));
+      // the same day again: nothing to renew
+      const again = await send(later.deps, method, path, first.cookie, body);
+      expect(again.headers.getSetCookie()).toEqual([]);
+    }
+  });
+
+  test("the dashboard renews the session in the database too (180 days from the day it was used)", async () => {
+    const first = await account();
+    const later = setup({ now: at(100) });
+    expect((await call(later.deps, "", { cookie: first.cookie })).status).toBe(200);
+    expect((await sessions())[0].expiresAt).toEqual(new Date(at(100).getTime() + CLIENT_SESSION_TTL_MS));
+  });
+
+  test.each(ENDPOINTS)("%s %s with no session: 401, the body is not even looked at, nothing is stored", async (method, path, okBody) => {
+    const { deps, queued } = setup();
+    const res = await send(deps, method, path, undefined, okBody(1));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, reason: "none" });
+    expect(queued()).toBe(0);
+  });
+
+  test("a bad body is 400 { error: <field> } on every endpoint, never a 500, and nothing changes", async () => {
+    const { deps, cookie } = await account();
+    const cases: [string, string, unknown, string][] = [
+      ["POST", "/lemmikud", { slug: 5, on: true }, "slug"],
+      ["POST", "/lemmikud", { slug: "x", on: "yes" }, "on"],
+      ["POST", "/lemmikud", "{", "body"],
+      ["POST", "/lemmikud/merge", { slugs: "kulmude-lami" }, "slugs"],
+      ["POST", "/lemmikud/merge", { slugs: [1] }, "slugs"],
+      ["POST", "/lemmikud/merge", "null", "body"],
+      ["PATCH", "/andmed", { name: "x".repeat(121), phone: "", locale: "et" }, "name"],
+      ["PATCH", "/andmed", { name: "x", phone: "1".repeat(41), locale: "et" }, "phone"],
+      ["PATCH", "/andmed", { name: "x", phone: "", locale: "en" }, "locale"],
+      ["PATCH", "/andmed", { name: "a\u0000b", phone: "", locale: "et" }, "name"],
+      ["PATCH", "/andmed", { name: 1, phone: "", locale: "et" }, "name"],
+      ["PATCH", "/andmed", "[]", "body"],
+      ["POST", "/uudiskiri", { on: "true" }, "on"],
+      ["POST", "/uudiskiri", {}, "on"],
+      ["POST", "/tingimused", { slug: "" }, "slug"],
+      ["POST", "/tingimused", { slug: "a".repeat(201) }, "slug"],
+      ["POST", "/lemmikud", { slug: "x", on: true, padding: "p".repeat(5000) }, "body"], // longer than the endpoint reads
+    ];
+    for (const [method, path, body, error] of cases) {
+      const res = await rawCall(deps, method, path, cookie, typeof body === "string" ? body : JSON.stringify(body));
+      expect(res.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error });
+    }
+    expect((await db.select().from(clients))[0]).toMatchObject({ name: "", phone: "", locale: "et" });
+    expect(await db.select().from(clientFavourites)).toEqual([]);
+  });
+});
+
+describe("the data endpoints log no personal data", () => {
+  beforeEach(async () => {
+    seeded = await seedCourses();
+  });
+
+  test("a whole round with a failing provider and a failing store: no address, name, phone, message or session id", async () => {
+    resend(() => Response.json({ name: "validation_error", message: `${MAILED} is not allowed` }, { status: 422 }));
+    const kv = fakeKv();
+    const { deps, cookie, client, flush } = await account({ kv, email: MAILED });
+    const live: AccountDeps = { ...deps, dev: false };
+    const reg = await register(client.id, { name: "Kati Tamm", phone: "+3725551234", email: MAILED });
+    await call(live, "/andmed", { method: "PATCH", cookie, body: { name: "Kati Salajane", phone: "+3725559999", locale: "ru" } });
+    kv.get = async () => { throw Object.assign(new Error(`down ${EMAIL} Kati Salajane`), { code: "ECONNRESET" }); };
+    await call(live, "/muutmine", { cookie, body: { registrationId: reg.id, kind: "cancel", message: "Salajane sõnum" } });
+    await call(live, "/uudiskiri", { cookie, body: { on: true } });
+    await call(live, "/lemmikud", { cookie, body: { slug: "kulmude-lami", on: true } });
+    await call(live, "/muutmine", { cookie, body: { registrationId: reg.id, kind: "cancel", message: "x".repeat(5000) } });
+    await call(live, "/kustuta", { cookie, body: { confirm: true } });
+    await flush();
+    const logged = (["info", "error", "log", "warn"] as const).flatMap((m) => vi.mocked(console[m]).mock.calls).flat().join("\n");
+    expect(logged.length).toBeGreaterThan(0);
+    for (const secret of ["kati@", "Kati", "Salajane", "+372", rawOf(cookie), "maria@example", MAILED]) expect(logged).not.toContain(secret);
   });
 });

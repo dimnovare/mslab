@@ -3,14 +3,19 @@ import type { Db } from "@/db/client";
 import { clients } from "@/db/schema";
 import { isEmail, isSampleAddress, normalizeEmail } from "@/domain/email";
 import type { Locale } from "@/i18n/locales";
-import { loginMail, verifyLink } from "./account-mail";
+import { deletionMail, loginMail, verifyLink } from "./account-mail";
+import { LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseSlug, parseTerms } from "./account-input";
 import { isCrossSite } from "./auth";
 import {
   CLIENT_COOKIE, CLIENT_SESSION_TTL_MS, HINT_COOKIE, endClientSession, getClientSession, issueClientLogin, redeemClientCode,
   redeemClientLink, reserveLoginMail,
 } from "./client-auth";
+import {
+  acceptTerms, createChangeRequest, deleteClient, loadDashboard, loadEcourse, mergeFavourites, setFavourite, setNewsletter, updateProfile,
+} from "./client-data";
 import { logFailure, logNote } from "./log";
-import { sendMail, type Env } from "./notify";
+import { changeRequestSummary } from "./messages";
+import { adminUrl, notifyMaria, sendMail, type Env } from "./notify";
 import { isPrefetch } from "./prefetch";
 import { clientIp, rateKey, rateLimit } from "./ratelimit";
 
@@ -22,6 +27,13 @@ import { clientIp, rateKey, rateLimit } from "./ratelimit";
 // client-auth.ts). The session is the `__Host-mslab_client` cookie (HttpOnly) plus `mslab_in=1`, a hint the static pages
 // read to show "Minu konto" instead of "Logi sisse" (it grants nothing). The login answer is the same for every address.
 // Every answer is `private, no-store`: it is one visitor's data, never kept by a CDN or a shared cache.
+//
+// Behind a session (the data endpoints, at the bottom): GET / the dashboard, GET /kursus/:slug an e-course, POST /lemmikud and
+// /lemmikud/merge favourites, PATCH /andmed the profile, POST /uudiskiri the newsletter, POST /muutmine a request to cancel or
+// move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion.
+// Each one starts with requireClient and answers through clientResponse (a renewed session's cookies reach the browser); the
+// client is always the session's, never a value from the request. A body that is not what the endpoint expects is 400
+// { ok: false, error: "<field>" } (account-input.ts), a record that is not the client's is 404.
 
 export type AccountDeps = {
   db: Db;
@@ -42,6 +54,10 @@ const LOGIN_RATE_LIMIT = 10;
 const CODE_RATE_LIMIT = 20;
 /** Request bodies here are a few dozen bytes; anything bigger is refused unread by the parser. */
 const MAX_BODY_CHARS = 4096;
+/** A favourites merge carries up to 100 slugs of up to 200 characters each. */
+const MERGE_BODY_CHARS = LIMITS.mergeSlugs * (LIMITS.slug + 4) + 64;
+/** Change requests a client may send per hour: each one e-mails Maria (and pings her on Telegram). */
+const CHANGE_REQUESTS_PER_HOUR = 5;
 
 const BASE_HEADERS = { "cache-control": "private, no-store", "x-robots-tag": "noindex, nofollow" } as const;
 
@@ -72,11 +88,11 @@ function cookieValue(header: string | null, name: string): string | undefined {
   return undefined;
 }
 
-/** The JSON object in the request body; null for anything else (not JSON, an array, a number, too long). Never throws. */
-async function readObject(request: Request): Promise<Record<string, unknown> | null> {
+/** The JSON object in the request body; null for anything else (not JSON, an array, a number, longer than `max`). Never throws. */
+async function readObject(request: Request, max = MAX_BODY_CHARS): Promise<Record<string, unknown> | null> {
   try {
     const text = await request.text();
-    if (text.length > MAX_BODY_CHARS) return null;
+    if (text.length > max) return null;
     const value: unknown = JSON.parse(text);
     return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
   } catch {
@@ -94,6 +110,16 @@ async function withinRateLimit(request: Request, deps: AccountDeps, form: string
   if (ip === null) return true;
   try {
     return await rateLimit(deps.env.KV, rateKey(form, ip), limit, RATE_WINDOW_SEC);
+  } catch (e) {
+    logFailure("[account] rate limit unavailable, allowing", e);
+    return true;
+  }
+}
+
+/** The same fail-open limit for a signed-in client, counted per client (not per address): `limit` in `windowSec`. */
+async function withinClientLimit(deps: AccountDeps, clientId: number, form: string, limit: number, windowSec: number): Promise<boolean> {
+  try {
+    return await rateLimit(deps.env.KV, rateKey(form, String(clientId)), limit, windowSec);
   } catch (e) {
     logFailure("[account] rate limit unavailable, allowing", e);
     return true;
@@ -225,9 +251,131 @@ async function me(request: Request, deps: AccountDeps): Promise<Response> {
   return client ? clientResponse(session, { ok: true, email: client.email, name: client.name }) : unauthorized("none");
 }
 
-/** The data endpoints (dashboard, favourites, profile, …) come with Task 4; until then every other path is unknown. */
-function dataRoute(): Response {
-  return accountResponse({ ok: false }, 404);
+/** 400 for a body the endpoint cannot use, answered like every other signed-in answer. */
+const badInput = (session: ClientSession, field: string): Response => clientResponse(session, { ok: false, error: field }, 400);
+
+/** GET /: the client's dashboard (`Dashboard` in client-data.ts): profile, the cards, favourites, the prepayment instructions. */
+async function dashboard(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const data = await loadDashboard(deps.db, session.clientId, deps.now);
+  return data ? clientResponse(session, data) : unauthorized("none"); // the client was deleted since the session was checked
+}
+
+/** GET /kursus/:slug: the e-course page's data (`EcourseView`), or 404 without active access (or for a slug that cannot be one). */
+async function ecourse(request: Request, deps: AccountDeps, rawSlug: string): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const slug = parseSlug(rawSlug);
+  const view = slug === null ? null : await loadEcourse(deps.db, session.clientId, slug, deps.now);
+  return view ? clientResponse(session, view) : clientResponse(session, { ok: false }, 404);
+}
+
+/** POST /lemmikud `{ slug, on }`: hearts or un-hearts a published course. 200 `{ ok, favourites }`; 404 `{ error: "slug" }` for a course that is not published. */
+async function favourite(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseFavourite(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  const favourites = await setFavourite(deps.db, session.clientId, input.data.slug, input.data.on);
+  return favourites ? clientResponse(session, { ok: true, favourites }) : clientResponse(session, { ok: false, error: "slug" }, 404);
+}
+
+/** POST /lemmikud/merge `{ slugs }` (at most 100): the browser's favourites join the account's; unknown slugs are ignored. 200 `{ ok, favourites }`. */
+async function mergeFavouriteList(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseMerge(await readObject(request, MERGE_BODY_CHARS));
+  if (!input.ok) return badInput(session, input.error);
+  return clientResponse(session, { ok: true, favourites: await mergeFavourites(deps.db, session.clientId, input.data.slugs) });
+}
+
+/** PATCH /andmed `{ name, phone, locale }`. 200 `{ ok: true }`. */
+async function profile(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseProfile(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  return (await updateProfile(deps.db, session.clientId, input.data)) ? clientResponse(session, { ok: true }) : unauthorized("none");
+}
+
+/** POST /uudiskiri `{ on }`: the account's address subscribes (confirmed: the login proved it) or unsubscribes. 200 `{ ok: true }`. */
+async function newsletter(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseNewsletter(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  return (await setNewsletter(deps.db, session.clientId, input.data.on, deps.now)) ? clientResponse(session, { ok: true }) : unauthorized("none");
+}
+
+/**
+ * POST /muutmine `{ registrationId, kind, message }`: a request to cancel (`cancel`) or move (`change`) one of the client's own
+ * registrations. It changes nothing itself: it is stored for the admin's inbox and Maria is told after the response. 404
+ * `{ error: "registration" }` for a registration that is not the client's, 429 `{ error: "rate" }` after 5 in an hour.
+ */
+async function changeRequest(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseChangeRequest(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  if (!(await withinClientLimit(deps, session.clientId, "client-change", CHANGE_REQUESTS_PER_HOUR, 60 * 60))) {
+    console.info("[account] change request rate limited");
+    return clientResponse(session, { ok: false, error: "rate" }, 429);
+  }
+  const { registrationId, kind, message } = input.data;
+  const info = await createChangeRequest(deps.db, session.clientId, registrationId, kind, message);
+  if (!info) return clientResponse(session, { ok: false, error: "registration" }, 404);
+  const summary = changeRequestSummary({ ...info, kind, message }, adminUrl(deps.siteUrl));
+  deps.later(() => notifyMaria(deps.env, summary.subject, summary.text, { short: summary.short, replyTo: info.email, siteUrl: deps.siteUrl }));
+  return clientResponse(session, { ok: true });
+}
+
+/** POST /tingimused `{ slug }`: the client accepts the e-course terms (the current version). 404 `{ error: "slug" }` without active access to that course. */
+async function terms(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseTerms(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  return (await acceptTerms(deps.db, session.clientId, input.data.slug, deps.now))
+    ? clientResponse(session, { ok: true })
+    : clientResponse(session, { ok: false, error: "slug" }, 404);
+}
+
+/**
+ * POST /kustuta `{ confirm: true }`: deletes the account (client-data.ts deleteClient: registrations stay with Maria) and answers with
+ * both cookies cleared, the one answer that does not go through clientResponse. The confirmation e-mail goes out after the
+ * response, never to a sample address (`@example.test`) and never in development.
+ */
+async function deleteAccount(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parseDeletion(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  const gone = await deleteClient(deps.db, session.clientId);
+  if (gone && !deps.dev && !isSampleAddress(gone.email)) {
+    const mail = deletionMail(gone.email, gone.locale);
+    deps.later(() => sendMail(deps.env, mail));
+  }
+  return accountResponse({ ok: true }, 200, clearedCookies());
+}
+
+/** The path of one e-course: /kursus/<slug>. */
+const COURSE_PATH = /^\/kursus\/([^/]+)$/;
+
+/** The endpoints behind a session; any other method and path is unknown (404, with or without a session). */
+async function dataRoute(request: Request, path: string, deps: AccountDeps): Promise<Response> {
+  switch (`${request.method} ${path}`) {
+    case "GET /": return dashboard(request, deps);
+    case "POST /lemmikud": return favourite(request, deps);
+    case "POST /lemmikud/merge": return mergeFavouriteList(request, deps);
+    case "PATCH /andmed": return profile(request, deps);
+    case "POST /uudiskiri": return newsletter(request, deps);
+    case "POST /muutmine": return changeRequest(request, deps);
+    case "POST /tingimused": return terms(request, deps);
+    case "POST /kustuta": return deleteAccount(request, deps);
+  }
+  const course = request.method === "GET" ? COURSE_PATH.exec(path) : null;
+  return course ? ecourse(request, deps, course[1]) : accountResponse({ ok: false }, 404);
 }
 
 /** The router: `null` when the path is not `/api/konto/…`. Every failure is a JSON answer; nothing it throws reaches the framework. */
@@ -245,7 +393,7 @@ export async function handleAccountApi(request: Request, deps: AccountDeps): Pro
       case "GET /verify": return await verify(request, url, deps);
       case "POST /logout": return await logout(request, deps);
       case "GET /me": return await me(request, deps);
-      default: return dataRoute();
+      default: return await dataRoute(request, path, deps);
     }
   } catch (e) {
     logFailure("[account] request failed", e);

@@ -1,0 +1,61 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+
+// Guard for the client account's data endpoints (server/account-api.ts): nothing but a convention makes an endpoint start
+// with the session check and answer through clientResponse (which carries a renewed session's cookies to the browser), so the
+// source is read here. A new endpoint that skips either fails this test. The one answer that does not go through
+// clientResponse is account deletion, which clears both cookies instead.
+
+const SOURCE = readFileSync(join(process.cwd(), "src/server/account-api.ts"), "utf8").replace(/\r\n/g, "\n");
+
+/** The data endpoints' section: from the 400 helper to the router of their paths. */
+const START = "/** 400 for a body the endpoint cannot use";
+const END = "/** The path of one e-course";
+const section = SOURCE.slice(SOURCE.indexOf(START), SOURCE.indexOf(END));
+const handlers = section.split(/\n(?=\/\*\*[^\n]*\n(?:[^\n]*\n)*?(?:export )?async function )/).filter((chunk) => /async function (\w+)/.test(chunk));
+const nameOf = (chunk: string) => /async function (\w+)/.exec(chunk)![1];
+
+describe("the data endpoints of the account API", () => {
+  test("the section and its handlers are found", () => {
+    expect(SOURCE.indexOf(START)).toBeGreaterThan(0);
+    expect(SOURCE.indexOf(END)).toBeGreaterThan(SOURCE.indexOf(START));
+    expect(handlers.map(nameOf)).toEqual(["dashboard", "ecourse", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"]);
+  });
+
+  test.each(["dashboard", "ecourse", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"])(
+    "%s starts with requireClient and hands a refusal back unchanged",
+    (name) => {
+      const body = handlers.find((h) => nameOf(h) === name)!.split("{\n").slice(1).join("{\n");
+      expect(body.trimStart().startsWith("const session = await requireClient(request, deps);\n  if (session instanceof Response) return session;\n")).toBe(true);
+    },
+  );
+
+  test("every answer goes through clientResponse (or badInput, which does), except the deletion's, which clears both cookies", () => {
+    for (const handler of handlers) {
+      const name = nameOf(handler);
+      const answers = handler.match(/accountResponse\(/g) ?? [];
+      if (name === "deleteAccount") {
+        expect(handler).toContain("return accountResponse({ ok: true }, 200, clearedCookies());");
+        expect(answers).toHaveLength(1);
+      } else {
+        expect(answers, name).toHaveLength(0);
+        expect(handler, name).toMatch(/clientResponse\(session, |badInput\(session, |unauthorized\("none"\)/);
+      }
+    }
+  });
+
+  test("the 400 helper answers through clientResponse", () => {
+    expect(section.slice(0, section.indexOf("\n\n"))).toContain("clientResponse(session, { ok: false, error: field }, 400)");
+  });
+
+  test("the router sends every known path to a handler, and only GET /kursus/:slug is matched by pattern", () => {
+    const router = SOURCE.slice(SOURCE.indexOf(END), SOURCE.indexOf("/** The router: `null`"));
+    const cases = [...router.matchAll(/case "(\w+) ([^"]+)": return (\w+)\(request, deps\);/g)].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
+    expect(cases).toEqual([
+      "GET / dashboard", "POST /lemmikud favourite", "POST /lemmikud/merge mergeFavouriteList", "PATCH /andmed profile", "POST /uudiskiri newsletter",
+      "POST /muutmine changeRequest", "POST /tingimused terms", "POST /kustuta deleteAccount",
+    ]);
+    expect(router).toContain('request.method === "GET" ? COURSE_PATH.exec(path) : null');
+  });
+});
