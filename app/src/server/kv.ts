@@ -1,6 +1,8 @@
-import { and, asc, eq, gt, isNull, like, lte, or } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, like, lte, or, sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Db } from "@/db/client";
 import { getDb } from "@/db/client";
+import type * as schema from "@/db/schema";
 import { kvEntries } from "@/db/schema";
 import type { FeedbackKv } from "./feedback";
 import { logFailure } from "./log";
@@ -68,7 +70,9 @@ export class PgKv implements TextKv, FeedbackKv {
  * not wait for the next submission.
  */
 export async function sweepExpired(db: Db, now: Date = new Date()): Promise<number> {
-  const gone = await db.delete(kvEntries).where(lte(kvEntries.expiresAt, now)).returning();
+  // Returns a constant per row: the keys hold visitors' addresses and need not leave the database to be counted.
+  const gone = await (db as PostgresJsDatabase<typeof schema>).delete(kvEntries).where(lte(kvEntries.expiresAt, now))
+    .returning({ one: sql<number>`1` });
   return gone.length;
 }
 
