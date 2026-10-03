@@ -98,7 +98,7 @@ export function useAccount<T>(
       }
       if (abort.signal.aborted) return;
       // A 200 without a JSON object (an empty or broken answer) is no data: an error, or for a quiet reload nothing.
-      if (res.ok && (body === null || typeof body !== "object")) {
+      if (res.ok && (body === null || typeof body !== "object" || Array.isArray(body))) {
         if (!quiet) setLoaded({ state: "error", data: null });
         return;
       }

@@ -36,7 +36,7 @@ export function ReplacedNotice({ locale, t }: { locale: Locale; t: { replaced: s
  * - Loading: `skeleton` (the page's own stand-ins), or an empty space of a message's height; aria-busy.
  * - Not signed in: useAccount sends the visitor to the login page meanwhile (the waiting look stays).
  * - Another device signed in since (one device only): ReplacedNotice.
- * - No answer or a server error: "Ei õnnestunud laadida." and "Proovi uuesti".
+ * - No answer, a server error or a 200 without a JSON object: "Ei õnnestunud laadida." and "Proovi uuesti".
  * - Loaded: `render(data, reload)`; `reload({ quiet: true })` refreshes it in the background.
  */
 export function AccountLoader<T>({
