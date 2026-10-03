@@ -19,7 +19,7 @@ The whole host is noindex (`X-Robots-Tag`, `frame-ancestors 'self'` and `Referre
 
 ## 2. Environment variables
 
-Set in the Vercel project: Settings → Environment Variables (or `vercel env add <NAME> production`). A change reaches a deployment only when a **new** deployment is made. The pages are prerendered from the database at build time, so the required ones must be available at build time too (a Production variable is). Without a required variable every request answers 500 with an error that names the variable, never its value (`src/instrumentation.ts`, `src/server/env.ts`).
+Set in the Vercel project: Settings → Environment Variables (or `vercel env add <NAME> production`). A change reaches a deployment only when a **new** deployment is made. The build needs none of them: no page is prerendered from the database (`[locale]/layout.tsx` returns no static params on purpose; pages are rendered on the first request and then cached), and the start-up check runs when the server starts, not during the build, so `next build` succeeds with an empty environment. They are read at run time. Without a required variable every request answers 500 with an error that names the variable, never its value (`src/instrumentation.ts`, `src/server/env.ts`).
 
 Required:
 
@@ -47,13 +47,23 @@ Set by Vercel itself (do not set by hand): `VERCEL`, and `VERCEL_PROJECT_PRODUCT
 
 Local only, never on Vercel: `MEDIA_LOCAL` (a production build on this machine keeps images in a folder; ignored when `VERCEL` is set) and the `E2E_*` variables of the test runs. `app/.env.example` lists everything with placeholders for local development.
 
-Preview deployments get only the variables that are enabled for the Preview environment. A preview that is given the production `DATABASE_URL` writes to the production data.
+Preview deployments get only the variables that are enabled for the Preview environment. A preview that is given the production `DATABASE_URL` writes to the production data. None are enabled for Preview today (section 3 says what that means for previews).
 
 ## 3. Deploying
 
 **Normal way (once the branch is merged into `main`).** The project's Git integration deploys `main` to production on every push, and any other branch or pull request to a preview URL (`*.vercel.app`, noindex like everything else). Nothing else is needed: the build is `next build` in `app/`. Database migrations are not part of it (section 6): apply a new one **before** the code that needs it goes live.
 
-**Manual fallback (the Vercel CLI).** Never deploy from the repository folder: it holds about 1 GB of untracked files (local media, test output, build caches) and the upload fails. Deploy a clean copy of what is committed:
+**Previews.** A preview deployment builds, but no Preview environment variables are set (section 2), so the start-up check fails and it answers **500 on every request**. That is harmless: it touches no database and is behind Deployment Protection. Do not "fix" it by enabling the production variables for Preview. If a working preview is ever wanted, give Preview its own database and variables.
+
+**After the first Git deploy of `main`.** That build puts live the R2 request handling and logging written after the CLI deploy of 03.10.2026, so check these once (replace the host if it has changed):
+
+1. A key that does not exist answers 404 within a second: `curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' https://mslab.diipsolutions.eu/media/img/00000000-0000-4000-8000-000000000000.jpg`. A request that hangs means the R2 call is stuck (see the canary in `app/tests/unit/r2.test.ts`).
+2. An image that exists (take an `/media/img/…` address from a course page) answers 200 with `cache-control: public, max-age=31536000, immutable`. Ask twice with `curl -sI`: `x-vercel-cache` is `MISS`, then `HIT`. The app also sends `Vercel-CDN-Cache-Control` so that the CDN keeps the image, but Vercel strips that header from the answer, so the `HIT` is the evidence.
+3. One admin upload: sign in at `/admin`, upload a small image in a picture field (the upload route answers 201) and open its `/media/img/…` address. Uploads are never deleted today, so use a small image.
+4. One manual cron run: Settings → Cron Jobs → Run on `/api/cron/sweep` answers 200, and the runtime log shows `[cron] sweep: N expired kv entries deleted` (only the 401 case has been seen so far).
+5. Then the read-only checks at the end of this section.
+
+**Manual fallback (the Vercel CLI).** The CLI reads the `.vercelignore` of the folder it runs in, so it works from the **repository root**, where the root `.vercelignore` is applied (an `app/.vercelignore` is not read there, and a deploy from `app/` is refused: the project's Root Directory `app` would become `app/app`). The root file is an allow-list of what `next build` in `app/` reads: `app/src`, `app/public`, `app/drizzle` and six files (`package.json`, `package-lock.json`, `next.config.ts`, `tsconfig.json`, `vercel.json`, `drizzle.config.ts`), 449 files and about 42 MB. Everything else stays out, whatever lies around locally: `.wrangler`, `.open-next`, `.next`, `node_modules`, `.env*`, `.dev.vars*`, `.media-local`, test output and everything outside `app/` (`app/tests/unit/vercelignore.test.ts` guards this). It uploads the working tree, though, so uncommitted edits go up too. For a production deploy that is exactly the commit, deploy a clean copy of what is committed:
 
 ```
 mkdir <scratch>
@@ -105,7 +115,7 @@ The test suites and the e2e run never write to Railway: they use PGlite and a lo
 ## 8. Rollback
 
 1. **The code only.** Promote an earlier deployment (section 3). The database stays as it is; migrations are additive, so older code still runs.
-2. **Back to Cloudflare.** The Worker `mslab-web` is still deployed with its bindings, detached from the domain. In Vercel remove `mslab.diipsolutions.eu` from the project (Settings → Domains); in the Cloudflare zone delete the `mslab` CNAME; then Workers & Pages → `mslab-web` → Settings → Domains & Routes → add the custom domain `mslab.diipsolutions.eu` (Cloudflare adds the DNS record itself). The Worker still reads the same Railway database through its Hyperdrive config, so content and registrations are current; the review comments written after the cutover are in `kv_entries` and not in the old KV namespace, so run `db:copy-kv` the other way by hand if they matter. This only works while the Cloudflare resources exist: once they are deleted (the clean-up item of `docs/launch-checklist.md`), the only rollback is a Vercel deployment.
+2. **Back to Cloudflare.** The Worker `mslab-web` is still deployed with its bindings, detached from the domain. In Vercel remove `mslab.diipsolutions.eu` from the project (Settings → Domains); in the Cloudflare zone delete the `mslab` CNAME; then Workers & Pages → `mslab-web` → Settings → Domains & Routes → add the custom domain `mslab.diipsolutions.eu` (Cloudflare adds the DNS record itself). The Worker still reads the same Railway database through its Hyperdrive config, so content and registrations are current. Two things are not: the review comments written after the cutover are in `kv_entries` only (`db:copy-kv` cannot copy back, it only writes into `kv_entries`; a reverse copy would be a hand-written `wrangler kv bulk put` from an export of `kv_entries`), and the Worker's page cache (the R2 bucket `mslab-next-cache` and the D1 tags) still holds the pages it cached before the cutover, while saves made on Vercel since then wrote no tags there, so pages and seat counts can be up to a day old unless that cache is purged first (or the staleness is accepted). This only works while the Cloudflare resources exist: once they are deleted (the clean-up item of `docs/launch-checklist.md`), the only rollback is a Vercel deployment.
 
 ## 9. Hobby-plan limits to keep in mind
 
