@@ -96,6 +96,11 @@ const tokens = () => db.select().from(clientLoginTokens);
 const sessions = () => db.select().from(clientSessions);
 const quota = () => db.select().from(mailQuota);
 const tokenOf = (link: string) => new URL(link).searchParams.get("t")!;
+/** The router path of a link (with its whole query: t and l). */
+const pathOf = (link: string) => {
+  const u = new URL(link);
+  return u.pathname.slice("/api/konto".length) + u.search;
+};
 
 /** Resend as the stub fetch sees it: the e-mails sent. */
 function resend(respond: () => Response = () => Response.json({ id: "email_1" })) {
@@ -482,6 +487,78 @@ describe("verify", () => {
     await signIn(deps);
     await signIn(deps);
     expect(await db.select().from(clients)).toHaveLength(1);
+  });
+});
+
+describe("the login page's language (fix round 1)", () => {
+  const localeOf = async (email: string) => (await db.select({ locale: clients.locale }).from(clients).where(eq(clients.email, email)))[0]?.locale;
+
+  test("a first login through the link asked from the Russian page makes a Russian account and opens /ru/konto", async () => {
+    const { deps } = setup();
+    const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
+    expect(devLink).toBe(`${SITE}/api/konto/verify?t=${tokenOf(devLink)}&l=ru`);
+    const res = await call(deps, pathOf(devLink));
+    expect(res.headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect(await localeOf(EMAIL)).toBe("ru");
+  });
+
+  test("a first login with the code on the Russian page makes a Russian account", async () => {
+    const { deps } = setup();
+    const { devCode } = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
+    expect(await (await call(deps, "/code", { body: { email: EMAIL, code: devCode, locale: "ru" } })).json()).toEqual({ ok: true, locale: "ru" });
+    expect(await localeOf(EMAIL)).toBe("ru");
+  });
+
+  test("an existing Estonian account keeps its language from the Russian page, by link and by code", async () => {
+    const { deps } = setup();
+    await db.insert(clients).values({ email: EMAIL, locale: "et" });
+    const a = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
+    expect((await call(deps, pathOf(a.devLink))).headers.get("location")).toBe(`${SITE}/konto`);
+    const b = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
+    expect(await (await call(deps, "/code", { body: { email: EMAIL, code: b.devCode, locale: "ru" } })).json()).toEqual({ ok: true, locale: "et" });
+    expect(await localeOf(EMAIL)).toBe("et");
+  });
+
+  test("a used, unknown or expired link from the Russian page opens the Russian login page", async () => {
+    const { deps } = setup();
+    expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=ru`)).headers.get("location")).toBe(`${SITE}/ru/konto/sisene?viga=link`);
+    const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
+    expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene?viga=link`); // used
+    const old = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
+    const later = setup({ now: new Date(NOW.getTime() + 30 * 60_000 + 1) }).deps;
+    expect((await call(later, pathOf(old.devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene?viga=link`); // expired
+  });
+
+  test("anything but et or ru is no language: Estonian pages and an Estonian account, as before", async () => {
+    const { deps } = setup();
+    expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=fr`)).headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    const a = await (await call(deps, "/login", { body: { email: EMAIL, locale: "fr" } })).json();
+    expect(a.devLink).toBe(`${SITE}/api/konto/verify?t=${tokenOf(a.devLink)}`); // no l
+    expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}&l=xx`)).headers.get("location")).toBe(`${SITE}/konto`);
+    expect(await localeOf(EMAIL)).toBe("et");
+    const other = "mari@example.test";
+    const b = await (await call(deps, "/login", { body: { email: other } })).json();
+    expect(await (await call(deps, "/code", { body: { email: other, code: b.devCode, locale: 7 } })).json()).toEqual({ ok: true, locale: "et" });
+  });
+
+  test("the e-mailed link carries the page's language; the e-mail's own language stays the account's", async () => {
+    const { mails } = resend();
+    const { deps, flush } = setup({ dev: false });
+    await call(deps, "/login", { body: { email: MAILED, locale: "ru" } });
+    await db.insert(clients).values({ email: "olga@example.com", locale: "ru" });
+    await call(deps, "/login", { body: { email: "olga@example.com", locale: "et" } }); // a Russian account, asked from the Estonian page
+    await flush();
+    const [newcomer, olga] = mails();
+    const linkOf = (mail: { text: string }) => mail.text.match(/https:\/\/\S+/)![0];
+    expect(newcomer.subject).toMatch(/код входа/);
+    expect(linkOf(newcomer)).toMatch(/\/api\/konto\/verify\?t=[\w-]+&l=ru$/);
+    expect(newcomer.html).toContain(`href="${linkOf(newcomer).replace("&", "&amp;")}"`);
+    expect(olga.subject).toMatch(/код входа/);
+    expect(linkOf(olga)).toMatch(/\/api\/konto\/verify\?t=[\w-]+$/);
+    // the newcomer's link makes a Russian account
+    expect((await call(deps, pathOf(linkOf(newcomer)))).headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect(await localeOf(MAILED)).toBe("ru");
   });
 });
 

@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { href } from "@/i18n/href";
+import type { Locale } from "@/i18n/locales";
+import { HINT_COOKIE } from "@/lib/account-cookies";
 
 // The client account in the browser. The /konto… pages are static shells, the same for every visitor (served by the CDN
 // without a render); everything personal comes from /api/konto/* after the page has loaded, read here.
@@ -10,8 +13,6 @@ import { useCallback, useEffect, useState } from "react";
 // - The last e-mail this browser signed in with is kept in localStorage, so the login page can fill it in and "Saada uus
 //   kood" (another device signed in) can send a code to it at once.
 
-/** The readable hint cookie (server/client-auth.ts HINT_COOKIE). */
-export const HINT_COOKIE = "mslab_in";
 /** localStorage key of the last e-mail used to sign in here. */
 export const EMAIL_KEY = "mslab-email";
 /** Fired on window when this tab learns that the sign-in state changed (the hint cookie was set or cleared). */
@@ -54,11 +55,9 @@ export function rememberEmail(email: string): void {
   }
 }
 
-/** Is the page being shown in Russian (/ru/…)? The account pages know their locale from the address. */
-const inRussian = (): boolean => /^\/ru(\/|$)/.test(window.location.pathname);
-
-/** The login page of the locale the visitor is in: "/konto/sisene" or "/ru/konto/sisene". */
-export const loginPath = (): string => (inRussian() ? "/ru/konto/sisene" : "/konto/sisene");
+/** The login page of a locale: "/konto/sisene" or "/ru/konto/sisene" (without one, the locale of the address shown). */
+export const loginPath = (locale?: Locale): string =>
+  href(locale ?? (/^\/ru(\/|$)/.test(window.location.pathname) ? "ru" : "et"), "/konto/sisene");
 
 export type AccountState = "loading" | "ready" | "signedOut" | "replaced" | "error";
 
@@ -68,13 +67,14 @@ type Loaded<T> = { state: AccountState; data: T | null };
  * Loads one account endpoint (`path`, e.g. "/api/konto/me") with the session cookie.
  * - 200: "ready" with the JSON as `data`; an `email` in it is remembered for the next login in this browser.
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
- * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page
- *   (`redirect: false` keeps them here).
+ * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
+ *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
  * - anything else, or no answer: "error"; `reload()` asks again.
  * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again.
  */
-export function useAccount<T>(path: string, options: { redirect?: boolean } = {}): { state: AccountState; data: T | null; reload(): void } {
+export function useAccount<T>(path: string, options: { redirect?: boolean; locale?: Locale } = {}): { state: AccountState; data: T | null; reload(): void } {
   const redirect = options.redirect ?? true;
+  const locale = options.locale;
   const [loaded, setLoaded] = useState<Loaded<T>>({ state: "loading", data: null });
   const [round, setRound] = useState(0);
 
@@ -101,14 +101,14 @@ export function useAccount<T>(path: string, options: { redirect?: boolean } = {}
         window.dispatchEvent(new Event(ACCOUNT_EVENT));
         const replaced = (body as { reason?: unknown } | null)?.reason === "replaced";
         // signed out: the page keeps its waiting look while the login page loads
-        if (!replaced && redirect) window.location.replace(loginPath());
+        if (!replaced && redirect) window.location.replace(loginPath(locale));
         setLoaded({ state: replaced ? "replaced" : "signedOut", data: null });
         return;
       }
       setLoaded({ state: "error", data: null });
     })();
     return () => abort.abort();
-  }, [path, redirect, round]);
+  }, [path, redirect, locale, round]);
 
   const reload = useCallback(() => {
     setLoaded({ state: "loading", data: null });

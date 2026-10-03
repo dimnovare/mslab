@@ -89,7 +89,8 @@
 }
 
 .error,
-.status {
+.status,
+.note {
   margin: 8px 0 0;
   font: 500 14px/1.45 var(--font-body);
 }
@@ -102,16 +103,33 @@
   color: var(--ok);
 }
 
+/* "Sisesta kõik 6 numbrit.": a nudge, not an error */
+.note {
+  color: var(--ink-soft);
+}
+
 .error:empty,
-.status:empty {
+.status:empty,
+.note:empty {
   margin: 0;
 }
 
-/* "Ei leia kirja? …": one small, calm line */
+/* "Ei leia kirja? …": one small, calm line under "Logi sisse" */
 .hint {
-  margin: 10px 0 0;
+  margin: 14px 0 6px;
   color: var(--muted);
   font: 400 13px/1.5 var(--font-body);
+}
+
+/* "Uue koodi saad saata 45 s pärast.": in the place of "Saada uus kood" until it can be used, as quiet as it */
+.wait {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin: 0;
+  color: var(--muted);
+  font: 400 14px/1.3 var(--font-body);
+  font-variant-numeric: tabular-nums;
 }
 
 /* "Kas mõtlesid …?" with its two answers, in the B .notice look */
@@ -152,7 +170,7 @@
   gap: 12px 26px;
 }
 
-/* B .link as a button: "Muuda e-posti" */
+/* B .link as a button: "Saada uus kood", "Muuda e-posti" */
 .textButton {
   display: inline-flex;
   align-items: center;
@@ -169,4 +187,9 @@
 
 .textButton:hover {
   border-bottom-color: var(--ink);
+}
+
+.textButton[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
 }

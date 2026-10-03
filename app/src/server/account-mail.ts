@@ -8,8 +8,13 @@ import type { Mail } from "./notify";
 // The subject carries the code, so a phone shows it in the notification.
 // The deletion e-mail (deletionMail) is the same card with two lines of text and no button.
 
-/** The link in the login e-mail: it signs in the device that opens it (api/konto verify). */
-export const verifyLink = (siteUrl: string, token: string): string => `${siteUrl.replace(/\/+$/, "")}/api/konto/verify?t=${encodeURIComponent(token)}`;
+/**
+ * The link in the login e-mail: it signs in the device that opens it (api/konto verify). `pageLocale` is the language of
+ * the login page: "ru" adds `&l=ru` (a new account is Russian, a failed link opens the Russian login page); Estonian adds
+ * nothing, as before.
+ */
+export const verifyLink = (siteUrl: string, token: string, pageLocale: Locale = "et"): string =>
+  `${siteUrl.replace(/\/+$/, "")}/api/konto/verify?t=${encodeURIComponent(token)}${pageLocale === "ru" ? "&l=ru" : ""}`;
 
 const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -87,10 +92,14 @@ function loginHtml(mail: MailTexts, subject: string, locale: Locale, code: strin
   ]);
 }
 
-/** The login e-mail for `email`, in `locale`: HTML with a plain-text fallback. `siteUrl` is the base of the link (site.ts linkBase). */
-export function loginMail(siteUrl: string, email: string, token: string, code: string, locale: Locale): Mail {
+/**
+ * The login e-mail for `email`, in `locale`: HTML with a plain-text fallback. `siteUrl` is the base of the link (site.ts
+ * linkBase), `pageLocale` the language of the login page, carried by the link (verifyLink); it can differ from `locale`,
+ * which is the account's own language when the address has one.
+ */
+export function loginMail(siteUrl: string, email: string, token: string, code: string, locale: Locale, pageLocale: Locale = "et"): Mail {
   const mail = getDict(locale).account.mail;
-  const link = verifyLink(siteUrl, token);
+  const link = verifyLink(siteUrl, token, pageLocale);
   const subject = fill(mail.subject, { code });
   return { to: email, subject, text: loginText(mail, code, link), html: loginHtml(mail, subject, locale, code, link) };
 }

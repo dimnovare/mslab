@@ -33,6 +33,20 @@ test("code login: right code works once, wrong codes count, 5 wrong kill the tok
   expect(await redeemClientCode(db, "kati@example.test", again.code, T0)).toBeNull();
 });
 
+test("the login page's language goes to a client the login creates, never to an existing one (fix round 1)", async () => {
+  const db = await makeTestDb();
+  const byLink = await redeemClientLink(db, (await issueClientLogin(db, "olga@example.test", T0))!.token, T0, "ru");
+  expect(byLink).toMatchObject({ isNew: true, locale: "ru" });
+  const byCode = await redeemClientCode(db, "irina@example.test", (await issueClientLogin(db, "irina@example.test", T0))!.code, T0, "ru");
+  expect(byCode).toMatchObject({ isNew: true, locale: "ru" });
+  expect(await redeemClientLink(db, (await issueClientLogin(db, "mari@example.test", T0))!.token, T0)).toMatchObject({ isNew: true, locale: "et" });
+  // existing clients keep theirs, whatever the page
+  expect(await redeemClientLink(db, (await issueClientLogin(db, "mari@example.test", T0))!.token, later(1000), "ru")).toMatchObject({ isNew: false, locale: "et" });
+  expect(await redeemClientCode(db, "olga@example.test", (await issueClientLogin(db, "olga@example.test", T0))!.code, later(2000), "et")).toMatchObject({ isNew: false, locale: "ru" });
+  const stored = Object.fromEntries((await db.select().from(clients)).map((c) => [c.email, c.locale]));
+  expect(stored).toEqual({ "olga@example.test": "ru", "irina@example.test": "ru", "mari@example.test": "et" });
+});
+
 test("expired after 30 minutes", async () => {
   const db = await makeTestDb();
   const { token } = (await issueClientLogin(db, "kati@example.test", T0))!;

@@ -12,12 +12,18 @@ import styles from "./LoginForm.module.css";
 
 export type LoginTexts = Dict["account"]["login"] & { title: string; badEmail: string };
 
-/** "Saada uuesti" waits this long after a code was sent (spec 5). */
+/** "Saada uus kood" waits this long after a code was sent (spec 5). */
 export const RESEND_AFTER_MS = 60_000;
+/** A code is valid this long (server/client-auth.ts LOGIN_TTL_MS): the code step is kept for a reload within it. */
+const CODE_TTL_MS = 30 * 60_000;
+/** sessionStorage key of the code step in this tab: `{ sentTo, sentAt }`. */
+export const PENDING_KEY = "mslab-login-code";
 
 type SendError = "email" | "rate" | "server";
-type CodeError = "code" | "expired" | "rate" | "server";
+/** `short`: Enter (a phone's "Go") with fewer than six digits. */
+type CodeError = "short" | "code" | "expired" | "rate" | "server";
 type FocusTarget = "email" | "code" | "resend" | "typo";
+type Pending = { sentTo: string; sentAt: number };
 
 /** A same-origin JSON POST: its status (0 when there was no answer) and its body ({} when it is not JSON). */
 async function post(path: string, body: object): Promise<{ status: number; data: Record<string, unknown> }> {
@@ -32,6 +38,32 @@ async function post(path: string, body: object): Promise<{ status: number; data:
     return { status: res.status, data: typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {} };
   } catch {
     return { status: 0, data: {} };
+  }
+}
+
+/**
+ * The code step this tab is in, when a code went out less than 30 minutes ago: a phone that dropped the tab (or a reload)
+ * opens the login page at the code field again. Null when there is none, it is older, or storage is blocked.
+ */
+function pendingCode(now: number): Pending | null {
+  try {
+    const value: unknown = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? "null");
+    if (typeof value !== "object" || value === null) return null;
+    const { sentTo, sentAt } = value as Record<string, unknown>;
+    if (typeof sentTo !== "string" || !isEmail(sentTo) || typeof sentAt !== "number") return null;
+    return now >= sentAt && now - sentAt < CODE_TTL_MS ? { sentTo, sentAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps (or, with null, forgets) the code step of this tab; silently nothing when storage is blocked. */
+function keepPendingCode(pending: Pending | null): void {
+  try {
+    if (pending) sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    else sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    // private mode or blocked storage: a reload simply starts at the e-mail again
   }
 }
 
@@ -50,18 +82,23 @@ function withBold(template: string, name: string, value: string): React.ReactNod
 }
 
 /**
- * The login page (/konto/sisene, spec 2.1 rules 1, 3, 8): the e-mail → "Saada kood" → the 6-digit code from the e-mail,
- * which signs in as soon as the sixth digit is typed. No password and no other step.
+ * The login page (/konto/sisene, spec 2.1 rules 1, 3, 8): the e-mail → "Saada kood" → the 6-digit code from the e-mail →
+ * "Logi sisse". No password and no other step.
  *
  * - The field starts with the last e-mail used in this browser; the address is trimmed and lower-cased, and a common
  *   domain typo ("gmial.com") asks "Kas mõtlesid …?" first: "Jah, paranda" corrects it and sends, "Ei, saada nii" sends as typed.
- * - The code step says where the code went, hints at the spam folder (the answer is the same whether or not a mail went
- *   out), offers "Saada uuesti" after 60 s and "Muuda e-posti".
+ * - The code step says where the code went and has one primary button, "Logi sisse", enabled at six digits; the sixth digit
+ *   also signs in by itself. Enter with fewer digits says "Sisesta kõik 6 numbrit.". Below: the spam-folder hint (the answer
+ *   is the same whether or not a mail went out), then two quiet text buttons, "Saada uus kood" (after 60 s; until then
+ *   the seconds left, as text) and "Muuda e-posti".
+ * - The code step is kept in this tab (sessionStorage) for the code's 30 minutes: a phone that drops the tab while the
+ *   student reads the e-mail comes back to the code field, with the rest of the 60 s.
  * - The page is static and the same for every visitor; the browser reads its query: `?viga=link` (the e-mail's button was
  *   used or too old) and `?viga=server` show a notice above the form, `?korda=1` (from "Saada uus kood" on an account page)
  *   sends a code to the remembered e-mail at once. The parameters are then removed from the address, so a reload does
  *   not repeat them.
- * - Signed in, the browser opens "Minu konto" in the language of this page (in place of the login page in the history).
+ * - The page's language goes with the login (the account a first login creates speaks it); signed in, the browser opens
+ *   "Minu konto" in that language, in place of the login page in the history.
  */
 export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   const id = useId();
@@ -82,20 +119,37 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   const [resendAt, setResendAt] = useState(0);
   const [now, setNow] = useState(0);
 
-  // One request at a time (a double tap, the sixth digit typed twice): a ref, so a second call in the same tick sees it.
+  // One request at a time (a double tap, the sixth digit and Enter): a ref, so a second call in the same tick sees it.
   const busy = useRef(false);
   const emailRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
   const resendRef = useRef<HTMLButtonElement>(null);
   const typoRef = useRef<HTMLButtonElement>(null);
-  // Where the focus goes once the next render is on screen (the element may not exist before it).
+  // Where the focus goes once the render that shows it is on screen: kept until that element exists (an effect may run
+  // before the state that shows it has rendered, as Strict Mode's second run in development does).
   const focusAfterRender = useRef<FocusTarget | null>(null);
   useEffect(() => {
     const target = focusAfterRender.current;
-    if (!target) return;
+    const element = target && { email: emailRef, code: codeRef, resend: resendRef, typo: typoRef }[target].current;
+    if (!element) return;
     focusAfterRender.current = null;
-    ({ email: emailRef, code: codeRef, resend: resendRef, typo: typoRef })[target].current?.focus();
+    element.focus();
   });
+
+  /** Opens the code step for `address`, the code sent at `sentAt`. */
+  function showCodeStep(address: string, sentAt: number): void {
+    setNow(Date.now());
+    setResendAt(sentAt + RESEND_AFTER_MS);
+    setSentTo(address);
+    setEmail(address);
+    setStep("code");
+    setCode("");
+    setCodeError(null);
+    setSendError(null);
+    setTypo(null);
+    setBanner(null);
+    focusAfterRender.current = "code";
+  }
 
   /** Asks for a code for `address`: on success the code step (again, for a resend), else the error where it belongs. */
   async function send(address: string, again = false): Promise<void> {
@@ -106,19 +160,11 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     busy.current = false;
     setSending(false);
     if (status === 200 && data.ok === true) {
-      rememberEmail(address);
       const sentAt = Date.now();
-      setNow(sentAt);
-      setResendAt(sentAt + RESEND_AFTER_MS);
-      setSentTo(address);
-      setStep("code");
-      setCode("");
-      setCodeError(null);
-      setSendError(null);
-      setTypo(null);
-      setBanner(null);
+      rememberEmail(address);
+      keepPendingCode({ sentTo: address, sentAt });
+      showCodeStep(address, sentAt);
       setResent(again);
-      focusAfterRender.current = "code";
       return;
     }
     const error: SendError = status === 400 && data.error === "email" ? "email" : status === 429 ? "rate" : "server";
@@ -139,8 +185,10 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     setChecking(true);
     setCodeError(null);
     setResent(false);
-    const { status, data } = await post("/api/konto/code", { email: sentTo, code: digits });
+    // the page's language: an account this login creates speaks it (an existing one keeps its own)
+    const { status, data } = await post("/api/konto/code", { email: sentTo, code: digits, locale });
     if (status === 200 && data.ok === true) {
+      keepPendingCode(null);
       // The field stays as it is while the page opens. replace, not assign: Back from "Minu konto" goes to the page before
       // the login, never to a code that is used up (nor to this form as it was left, from the browser's page cache).
       window.location.replace(locale === "ru" ? "/ru/konto" : "/konto");
@@ -148,18 +196,33 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     }
     busy.current = false;
     setChecking(false);
-    setCode("");
     const error: CodeError =
       status === 400 && data.error === "code" ? "code" : status === 400 && data.error === "expired" ? "expired" : status === 429 ? "rate" : "server";
     setCodeError(error);
+    if (error === "code" || error === "expired") setCode(""); // a wrong or dead code is typed again; after a failure of ours "Logi sisse" tries the same one
     if (error === "expired") {
-      setResendAt(0); // a new code is the only way on: "Saada uuesti" works at once and has the focus
+      setResendAt(0); // a new code is the only way on: "Saada uus kood" works at once and has the focus
       focusAfterRender.current = "resend";
     } else focusAfterRender.current = "code";
   }
 
-  // The page's query and the remembered e-mail exist in the browser only: read once after hydration.
+  /** "Logi sisse", Enter or a phone's "Go": the code when it has six digits, else the hint, the focus kept in the field. */
+  const submitCode = () => {
+    if (busy.current) return;
+    if (code.length === 6) {
+      void verify(code);
+      return;
+    }
+    setCodeError("short");
+    focusAfterRender.current = "code";
+  };
+
+  // The page's query, the remembered e-mail and a code step of this tab exist in the browser only: read once after
+  // hydration (once per mount: Strict Mode runs the effect twice in development).
+  const arrived = useRef(false);
   const arrive = useEffectEvent(() => {
+    if (arrived.current) return;
+    arrived.current = true;
     const saved = rememberedEmail();
     const url = new URL(window.location.href);
     const problem = url.searchParams.get("viga");
@@ -170,15 +233,23 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
       window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     }
     if (saved) setEmail((typed) => typed || saved);
-    if (problem === "link" || problem === "server") setBanner(problem);
-    if (again && saved) void send(saved);
+    if (problem === "link" || problem === "server") {
+      setBanner(problem); // the notice belongs to the e-mail step: a new code is what it asks for
+      return;
+    }
+    if (again && saved) {
+      void send(saved);
+      return;
+    }
+    const pending = pendingCode(Date.now());
+    if (pending) showCodeStep(pending.sentTo, pending.sentAt);
   });
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the address and the storage are only known in the browser, after hydration
     arrive();
   }, []);
 
-  // "Saada uuesti (45 s)": the seconds count down while the code step waits.
+  // "Uue koodi saad saata 45 s pärast.": the seconds count down while the code step waits.
   useEffect(() => {
     if (step !== "code" || resendAt === 0) return;
     const timer = window.setInterval(() => {
@@ -220,6 +291,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   };
 
   const changeEmail = () => {
+    keepPendingCode(null);
     setStep("email");
     setEmail(sentTo);
     setCode("");
@@ -230,8 +302,12 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
 
   const secondsLeft = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const sendErrorText = sendError === "email" ? t.badEmail : sendError === "rate" ? t.rate : sendError === "server" ? t.server : "";
-  const codeMessage =
-    codeError === "code" ? t.wrongCode : codeError === "expired" ? t.expired : codeError === "rate" ? t.rate : codeError === "server" ? t.server : resent ? t.resent : "";
+  const codeMessage = codeError
+    ? { short: t.allDigits, code: t.wrongCode, expired: t.expired, rate: t.rate, server: t.server }[codeError]
+    : resent
+      ? t.resent
+      : "";
+  const messageClass = codeError === "short" ? styles.note : codeError ? styles.error : styles.status;
 
   return (
     <section className={styles.page} data-login-step={step} data-login-ready={hydrated ? "" : undefined}>
@@ -304,7 +380,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
             noValidate
             onSubmit={(e) => {
               e.preventDefault();
-              if (code.length === 6) void verify(code);
+              submitCode();
             }}
             data-login-code=""
           >
@@ -322,10 +398,17 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 autoComplete="one-time-code"
+                enterKeyHint="go"
                 maxLength={6}
                 value={code}
                 readOnly={checking}
                 onChange={(e) => typeCode(e.target.value)}
+                // Enter / "Go": handled here, since the form's own Enter does nothing while "Logi sisse" is disabled
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  submitCode();
+                }}
                 // a pasted "123 456" is the code too (maxLength would cut it to "123 45")
                 onPaste={(e) => {
                   e.preventDefault();
@@ -335,15 +418,25 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
                 aria-describedby={`${id}-sent ${id}-code-message`}
                 aria-busy={checking || undefined}
               />
-              <p id={`${id}-code-message`} className={codeError ? styles.error : styles.status} aria-live="polite">
+              <p id={`${id}-code-message`} className={messageClass} aria-live="polite">
                 {codeMessage}
               </p>
-              <p className={styles.hint}>{t.spam}</p>
             </div>
+            <button type="submit" className={`${ui.btn} ${ui.btnFull}`} disabled={code.length < 6 || checking}>
+              {t.submit}
+              <Icon name="arrow" />
+            </button>
+            <p className={styles.hint}>{t.spam}</p>
             <div className={styles.actions}>
-              <button ref={resendRef} type="button" className={ui.btnOutline} disabled={secondsLeft > 0 || sending} onClick={() => void send(sentTo, true)}>
-                {secondsLeft > 0 ? fill(t.resendIn, { s: secondsLeft }) : t.resend}
-              </button>
+              {secondsLeft > 0 ? (
+                <p className={styles.wait} data-login-wait="">
+                  {fill(t.resendIn, { s: secondsLeft })}
+                </p>
+              ) : (
+                <button ref={resendRef} type="button" className={styles.textButton} aria-disabled={sending || undefined} onClick={() => void send(sentTo, true)}>
+                  {t.resend}
+                </button>
+              )}
               <button type="button" className={styles.textButton} onClick={changeEmail}>
                 {t.changeEmail}
               </button>

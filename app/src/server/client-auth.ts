@@ -7,7 +7,7 @@ import { normalizeEmail } from "@/domain/email";
 import { isTokenShape, newToken, sha256 } from "./token";
 
 export const CLIENT_COOKIE = "__Host-mslab_client";
-export const HINT_COOKIE = "mslab_in";
+export { HINT_COOKIE } from "@/lib/account-cookies";
 export const LOGIN_TTL_MS = 30 * 60_000;
 export const CLIENT_SESSION_TTL_MS = 180 * 86_400_000;
 export const CODE_ATTEMPTS = 5;
@@ -57,11 +57,14 @@ export async function issueClientLogin(db: Db, email: string, now = new Date()):
   });
 }
 
-/** Creates the client if new, ends its other sessions, links its records and starts a session. */
-async function startSession(t: Db, address: string, now: Date): Promise<ClientLogin> {
+/**
+ * Creates the client if new, ends its other sessions, links its records and starts a session. `newClientLocale` (the
+ * language of the page the login was asked for) is the language of a client created here; an existing client keeps its own.
+ */
+async function startSession(t: Db, address: string, now: Date, newClientLocale?: "et" | "ru"): Promise<ClientLogin> {
   await lockAddress(t, address); // both callers already hold it (re-entrant, no wait); kept so no future caller can skip it
   const [existing] = await t.select().from(clients).where(eq(clients.email, address)).limit(1);
-  const client = existing ?? (await t.insert(clients).values({ email: address }).returning())[0];
+  const client = existing ?? (await t.insert(clients).values({ email: address, ...(newClientLocale ? { locale: newClientLocale } : {}) }).returning())[0];
   await t.update(clientSessions).set({ endedAt: now, endReason: "replaced" })
     .where(and(eq(clientSessions.clientId, client.id), isNull(clientSessions.endedAt)));
   const sessionRaw = newToken();
@@ -72,7 +75,8 @@ async function startSession(t: Db, address: string, now: Date): Promise<ClientLo
   return { sessionRaw, clientId: client.id, locale: client.locale, isNew: !existing };
 }
 
-export async function redeemClientLink(db: Db, token: string, now = new Date()): Promise<ClientLogin | null> {
+/** The session for a login link (once); `newClientLocale` as in startSession. Null: unknown, used, expired or dead. */
+export async function redeemClientLink(db: Db, token: string, now = new Date(), newClientLocale?: "et" | "ru"): Promise<ClientLogin | null> {
   if (!isTokenShape(token)) return null;
   return tx(db, async (t) => {
     const hash = await sha256(token);
@@ -85,12 +89,15 @@ export async function redeemClientLink(db: Db, token: string, now = new Date()):
       .where(and(eq(clientLoginTokens.hash, hash), isNull(clientLoginTokens.usedAt), gt(clientLoginTokens.expiresAt, now),
         lt(clientLoginTokens.attempts, CODE_ATTEMPTS)))
       .returning();
-    return row ? startSession(t, row.email, now) : null;
+    return row ? startSession(t, row.email, now, newClientLocale) : null;
   });
 }
 
-/** The session for a right code; "wrong" (attempts counted on every live token of the address); null when none is live. */
-export async function redeemClientCode(db: Db, email: string, code: string, now = new Date()): Promise<ClientLogin | "wrong" | null> {
+/**
+ * The session for a right code; "wrong" (attempts counted on every live token of the address); null when none is live.
+ * `newClientLocale` as in startSession.
+ */
+export async function redeemClientCode(db: Db, email: string, code: string, now = new Date(), newClientLocale?: "et" | "ru"): Promise<ClientLogin | "wrong" | null> {
   const address = normalizeEmail(email);
   if (!/^\d{6}$/.test(code)) return "wrong";
   return tx(db, async (t) => {
@@ -102,7 +109,7 @@ export async function redeemClientCode(db: Db, email: string, code: string, now 
     for (const row of live) {
       if ((await sha256(`${row.hash}:${code}`)) === row.codeHash) {
         await t.update(clientLoginTokens).set({ usedAt: now }).where(eq(clientLoginTokens.hash, row.hash));
-        return startSession(t, address, now);
+        return startSession(t, address, now, newClientLocale);
       }
     }
     // Counts against the live tokens just read (under the lock), never the expired rows a parallel purge may be deleting.

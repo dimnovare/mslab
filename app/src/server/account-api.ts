@@ -23,8 +23,9 @@ import { clientIp, rateKey, rateLimit } from "./ratelimit";
 // (database, settings, Postgres KV store, after()) and calls handleAccountApi; the tests call it with PGlite and fakes.
 //
 // Sign-in: POST login ({ email, locale }) e-mails a 6-digit code and a link (e-mail goes out after the response); POST code
-// ({ email, code }) or GET verify (?t=<link token>) uses the login once and starts the session (the one-device rule is in
-// client-auth.ts). The session is the `__Host-mslab_client` cookie (HttpOnly) plus `mslab_in=1`, a hint the static pages
+// ({ email, code, locale }) or GET verify (?t=<link token>&l=<locale>) uses the login once and starts the session (the
+// one-device rule is in client-auth.ts). The login page's language travels with the login (`locale`, the link's `l`): an
+// account the login creates speaks it, and a failed link opens the login page in it. The session is the `__Host-mslab_client` cookie (HttpOnly) plus `mslab_in=1`, a hint the static pages
 // read to show "Minu konto" instead of "Logi sisse" (it grants nothing). The login answer is the same for every address.
 // Every answer is `private, no-store`: it is one visitor's data, never kept by a CDN or a shared cache.
 //
@@ -126,6 +127,9 @@ async function withinClientLimit(deps: AccountDeps, clientId: number, form: stri
   }
 }
 
+/** A page language sent by the browser (`locale` in a body, `l` in the login link): "et" or "ru", anything else is no language. */
+const pageLocaleOf = (value: unknown): Locale | undefined => (value === "et" || value === "ru" ? value : undefined);
+
 /** The language of the login e-mail: the client's own when the address has an account, else the page the visitor asked from. */
 async function mailLocale(db: Db, address: string, pageLocale: unknown): Promise<Locale> {
   const [client] = await db.select({ locale: clients.locale }).from(clients).where(eq(clients.email, address)).limit(1);
@@ -133,7 +137,9 @@ async function mailLocale(db: Db, address: string, pageLocale: unknown): Promise
 }
 
 /**
- * POST /login `{ email, locale }`: a login (code + link) for the address, e-mailed after the response. The answer is
+ * POST /login `{ email, locale }`: a login (code + link) for the address, e-mailed after the response. `locale` is the login
+ * page's language: the e-mail's language when the address has no account yet, and the link's `l` (the page the link opens
+ * on a failure, and the language of an account the link creates). The answer is
  * `{ ok: true }` for every well-formed address: unknown, over the per-address cap (3 live logins) or over the daily e-mail
  * cap look the same. 400 `{ error: "email" }`, 429 `{ error: "rate" }` (10 per 10 minutes per IP). In development the
  * answer carries `devCode` and `devLink` (and nothing is mailed); a sample address (`@example.test`) outside development
@@ -148,10 +154,11 @@ async function login(request: Request, deps: AccountDeps): Promise<Response> {
     return accountResponse({ ok: false, error: "rate" }, 429);
   }
 
+  const page = pageLocaleOf(body?.locale) ?? "et";
   const issued = await issueClientLogin(deps.db, address, deps.now);
   if (issued && !deps.dev && !isSampleAddress(address)) {
     // The language is read before the daily counter is raised, so a database failure in between cannot count a mail that is never queued.
-    const mail = loginMail(deps.siteUrl, address, issued.token, issued.code, await mailLocale(deps.db, address, body?.locale));
+    const mail = loginMail(deps.siteUrl, address, issued.token, issued.code, await mailLocale(deps.db, address, page), page);
     if (await reserveLoginMail(deps.db, deps.now)) {
       deps.later(() => sendMail(deps.env, mail));
     } else {
@@ -159,11 +166,13 @@ async function login(request: Request, deps: AccountDeps): Promise<Response> {
     }
   }
   // Tests and local development have no mailbox: the code and link come back in the answer (and are never e-mailed as well).
-  return accountResponse(issued && deps.dev ? { ok: true, devCode: issued.code, devLink: verifyLink(deps.siteUrl, issued.token) } : { ok: true });
+  return accountResponse(issued && deps.dev ? { ok: true, devCode: issued.code, devLink: verifyLink(deps.siteUrl, issued.token, page) } : { ok: true });
 }
 
 /**
- * POST /code `{ email, code }`: the 6 digits from the e-mail. Starts the session (200 `{ ok: true, locale }` + cookies).
+ * POST /code `{ email, code, locale? }`: the 6 digits from the e-mail. Starts the session (200 `{ ok: true, locale }` + cookies,
+ * `locale` the client's own). `locale` ("et" / "ru", anything else ignored) is the login page's language, kept by an account
+ * this login creates; an existing account keeps its own.
  * 400 `{ error: "code" }` for a wrong or malformed code (5 wrong tries end the login), 400 `{ error: "expired" }` when the
  * address has no live login, 429 `{ error: "rate" }` (20 per 10 minutes per IP).
  */
@@ -178,7 +187,7 @@ async function code(request: Request, deps: AccountDeps): Promise<Response> {
     return accountResponse({ ok: false, error: "rate" }, 429);
   }
 
-  const result = await redeemClientCode(deps.db, address, digits, deps.now);
+  const result = await redeemClientCode(deps.db, address, digits, deps.now, pageLocaleOf(body?.locale));
   if (result === "wrong") return accountResponse({ ok: false, error: "code" }, 400);
   if (result === null) return accountResponse({ ok: false, error: "expired" }, 400);
   return accountResponse({ ok: true, locale: result.locale }, 200, sessionCookies(result.sessionRaw));
@@ -195,20 +204,24 @@ function redirect(url: URL, target: string, cookies: string[] = []): Response {
 }
 
 /**
- * GET /verify?t=<token>: the link in the login e-mail. Uses the login once, starts the session and goes to the client's
- * own page (/konto, /ru/konto). A token that is unknown, used, expired or dead goes to /konto/sisene?viga=link; a database
- * failure to ?viga=server (the link is still usable then, as for the admin). A prefetch or prerender goes to
- * /konto/sisene without touching the token.
+ * GET /verify?t=<token>&l=<et|ru>: the link in the login e-mail. Uses the login once, starts the session and goes to the
+ * client's own page (/konto, /ru/konto, by the client's language). `l` is the language of the page the login was asked from
+ * (absent: Estonian; anything but "et" / "ru" is ignored): an account this link creates gets it, and the login page of that
+ * language is where the link goes when it fails. A token that is unknown, used, expired or dead goes to
+ * /konto/sisene?viga=link (/ru/konto/sisene?viga=link); a database failure to ?viga=server (the link is still usable then,
+ * as for the admin). A prefetch or prerender goes to the login page without touching the token.
  */
 async function verify(request: Request, url: URL, deps: AccountDeps): Promise<Response> {
-  if (isPrefetch(request.headers)) return redirect(url, "/konto/sisene");
+  const page = pageLocaleOf(url.searchParams.get("l"));
+  const login = page === "ru" ? "/ru/konto/sisene" : "/konto/sisene";
+  if (isPrefetch(request.headers)) return redirect(url, login);
   try {
-    const session = await redeemClientLink(deps.db, url.searchParams.get("t") ?? "", deps.now);
-    if (!session) return redirect(url, "/konto/sisene?viga=link");
+    const session = await redeemClientLink(deps.db, url.searchParams.get("t") ?? "", deps.now, page);
+    if (!session) return redirect(url, `${login}?viga=link`);
     return redirect(url, session.locale === "ru" ? "/ru/konto" : "/konto", sessionCookies(session.sessionRaw));
   } catch (e) {
     logFailure("[account] verify failed", e); // never the message: it holds the token hash and the e-mail
-    return redirect(url, "/konto/sisene?viga=server");
+    return redirect(url, `${login}?viga=server`);
   }
 }
 

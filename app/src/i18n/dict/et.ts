@@ -443,9 +443,13 @@ export const et = {
       typoNo: "Ei, saada nii",
       sent: "Saatsime 6-kohalise koodi aadressile {email}.",
       code: "Kood",
+      submit: "Logi sisse",
+      // Enter (a phone's "Go") before the sixth digit
+      allDigits: "Sisesta kõik 6 numbrit.",
       spam: "Ei leia kirja? Vaata ka rämpsposti kausta.",
-      resend: "Saada uuesti",
-      resendIn: "Saada uuesti ({s} s)",
+      resend: "Saada uus kood",
+      // instead of "Saada uus kood" during the first 60 s after a code was sent
+      resendIn: "Uue koodi saad saata {s} s pärast.",
       resent: "Saatsime uue koodi.",
       changeEmail: "Muuda e-posti",
       wrongCode: "Kood ei sobi. Proovi uuesti.",

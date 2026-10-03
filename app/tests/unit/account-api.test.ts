@@ -234,6 +234,9 @@ describe("failures", () => {
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene?viga=server`);
     expect(res.headers.getSetCookie()).toEqual([]);
+    // a link from the Russian page fails to the Russian login page (fix round 1)
+    const ru = (await handleAccountApi(req(`/verify?t=${token}&l=ru`), deps({ db: failingDb("update failed") })))!;
+    expect(ru.headers.get("location")).toBe(`${BASE}/ru/konto/sisene?viga=server`);
     const logged = vi.mocked(console.error).mock.calls.flat().join("\n"); // the error's message holds the token; only the class is logged
     expect(logged).toContain("[account] verify failed");
     expect(logged).not.toContain(token);
@@ -267,6 +270,8 @@ describe("verify", () => {
       expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene`);
       expect(res.headers.get("referrer-policy")).toBe("no-referrer");
       expect(res.headers.getSetCookie()).toEqual([]);
+      const ru = (await handleAccountApi(req(`/verify?t=${"A".repeat(43)}&l=ru`, { headers }), deps()))!;
+      expect(ru.headers.get("location")).toBe(`${BASE}/ru/konto/sisene`);
     }
   });
 
@@ -288,6 +293,19 @@ describe("login e-mail", () => {
     expect(verifyLink(BASE, TOKEN)).toBe(LINK);
     expect(verifyLink(`${BASE}/`, TOKEN)).toBe(LINK);
     expect(verifyLink(BASE, "a b&c")).toBe(`${BASE}/api/konto/verify?t=a%20b%26c`);
+  });
+
+  test("verifyLink: the Russian login page adds &l=ru, the Estonian one nothing (fix round 1)", () => {
+    expect(verifyLink(BASE, TOKEN, "ru")).toBe(`${LINK}&l=ru`);
+    expect(verifyLink(BASE, TOKEN, "et")).toBe(LINK);
+  });
+
+  test("the link carries the login page's language, which can differ from the e-mail's (an account's own language)", () => {
+    const fromRussianPage = loginMail(BASE, "kati@example.test", TOKEN, "042917", "et", "ru");
+    expect(fromRussianPage.subject).toBe("042917 — MS LAB sisselogimiskood"); // the account is Estonian
+    expect(fromRussianPage.text.split("\n")).toContain(`${LINK}&l=ru`);
+    expect(fromRussianPage.html).toContain(`href="${LINK}&amp;l=ru"`);
+    expect(loginMail(BASE, "kati@example.test", TOKEN, "042917", "ru").text.split("\n")).toContain(LINK); // the page was Estonian
   });
 
   test("Estonian text: the code in the subject and alone on a line, the link, 30 minutes, the ignore line", () => {

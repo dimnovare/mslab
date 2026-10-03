@@ -18,7 +18,7 @@ export type SignedOutTexts = { replaced: string; sendCode: string; error: string
  * "Saada uus kood", which opens the login page with the code already sent to the remembered e-mail (?korda=1).
  */
 export function AccountGate({ locale, t, children }: { locale: Locale; t: SignedOutTexts; children: React.ReactNode }) {
-  const { state, reload } = useAccount<{ email: string; name: string }>("/api/konto/me");
+  const { state, reload } = useAccount<{ email: string; name: string }>("/api/konto/me", { locale });
 
   if (state === "ready") return children;
   if (state === "replaced")
