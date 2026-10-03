@@ -302,7 +302,7 @@ test.describe("practice", () => {
 
   test("on the practice page a card's Registreeru picks its package in place (no navigation, one #taotlus)", async ({ page }) => {
     // Landing on ?pakett=MINI#taotlus, picking MAXI and then the panel's "Registreeru MINI" used to be a Next.js
-    // navigation back to the landing address, which on the Worker doubled the hash (#taotlus#taotlus).
+    // navigation back to the landing address, which once doubled the hash (#taotlus#taotlus).
     await page.goto("/praktika?pakett=MINI#taotlus");
     const form = page.locator("[data-practice-form]");
     await form.getByRole("radio", { name: /MAXI/ }).check();

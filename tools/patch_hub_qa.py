@@ -1,6 +1,6 @@
 # One-off patch: hub answers Maria's questions from the 26.09 feedback and marks direction A as the one she saw.
 import io, os
-p = os.path.join(os.path.dirname(__file__), "..", "site", "guide", "index.html")
+p = os.path.join(os.path.dirname(__file__), "..", "app", "public", "guide", "index.html")
 s = io.open(p, encoding="utf-8").read()
 
 def rep(a, b):

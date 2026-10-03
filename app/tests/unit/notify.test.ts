@@ -78,8 +78,8 @@ describe("Telegram", () => {
     expect(f.calls).toHaveLength(1);
     expect(f.calls[0].url).toBe("https://api.telegram.org/bot123:abc/sendMessage");
     expect(f.calls[0].body).toEqual({ chat_id: "42", text: "Lühike\n\nhttps://mslab.example/admin", disable_web_page_preview: true });
-    await notifyMaria(env({ TELEGRAM_BOT_TOKEN: "123:abc" }, fakeKv({ "tg:chat": "42" })), "Teema", "Tekst", { siteUrl: "https://mslab-web.dim-novare.workers.dev" });
-    expect((f.calls[1].body as { text: string }).text).toBe("Teema\n\nhttps://mslab-web.dim-novare.workers.dev/admin");
+    await notifyMaria(env({ TELEGRAM_BOT_TOKEN: "123:abc" }, fakeKv({ "tg:chat": "42" })), "Teema", "Tekst", { siteUrl: "https://mslab.diipsolutions.eu" });
+    expect((f.calls[1].body as { text: string }).text).toBe("Teema\n\nhttps://mslab.diipsolutions.eu/admin");
   });
 
   test("TELEGRAM_CHAT_ID overrides KV", async () => {

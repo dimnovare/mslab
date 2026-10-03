@@ -1,6 +1,6 @@
 # One-off patch: align Studio with Maria's reference images (photo_4 practice, photo_5 blog, HOFIN).
 import io, os
-p = os.path.join(os.path.dirname(__file__), "..", "site", "p", "studio", "app.js")
+p = os.path.join(os.path.dirname(__file__), "..", "app", "public", "p", "studio", "app.js")
 s = io.open(p, encoding="utf-8").read()
 
 def rep(a, b):

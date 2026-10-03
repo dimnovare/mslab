@@ -1,7 +1,7 @@
 // The version of a stored piece of content, for the editors' stale guard: the content editor gets the version of what
 // it loaded and sends it back with its save; the save is refused when the stored content has another version by then
 // (someone saved it elsewhere meanwhile). The site tables other than courses have no updatedAt column, so the version is
-// a hash of the stored value itself. Works in Node, the Worker and the browser (Web Crypto).
+// a hash of the stored value itself. Works in Node and in the browser (Web Crypto).
 
 /** JSON with object keys in sorted order and dates as ISO strings, so the same value always gives the same text. */
 export function stableJson(value: unknown): string {

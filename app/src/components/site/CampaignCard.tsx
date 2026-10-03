@@ -25,7 +25,7 @@ export function CampaignCard({ c, locale, titleId, codeAction, close }: { c: Cam
       <div className={styles.camp} data-campaign-card="">
         {close}
         <div className={styles.photo}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- an upload shown at its own size; no optimisation route on the Worker */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- an upload already resized in the browser (ImageUpload) and served by /media: next/image would add nothing */}
           {c.image && <img className={styles.image} src={c.image} alt="" />}
         </div>
         <div className={styles.body}>

@@ -17,7 +17,7 @@ import {
 import { DEV_REVIEW_KEY, keyMatches, reviewKey } from "@/server/review-key";
 import { fakeKv, stubFetch } from "../fakes";
 
-// The review comment API (src/server/feedback.ts): the review Worker's contract (worker/index.js) inside the app.
+// The review comment API (src/server/feedback.ts): the old review Worker's contract (retired 03.10.2026) inside the app.
 
 const ORIGIN = "https://mslab.example";
 const KEY = "test-admin-key-0123456789";
@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 describe("POST /api/feedback", () => {
-  test("stores the review Worker's record under fb:<at>:<id> and id:<id>", async () => {
+  test("stores the old review Worker's record under fb:<at>:<id> and id:<id>", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const k = kv();
     const r = await post(env(k), {
@@ -214,7 +214,7 @@ describe("links ('Näita kohta')", () => {
     for (const p of ["", "koolitused", "//x", "/\\x", "/x y", "/x?y", "/x#y", "http://x", undefined, 1]) expect(isSitePath(p), String(p)).toBe(false);
   });
 
-  test("ids look like the review Worker's", () => {
+  test("ids look like the old review Worker's", () => {
     for (let i = 0; i < 50; i++) expect(newId()).toMatch(/^[a-z0-9]{14}$/);
   });
 });
@@ -313,7 +313,7 @@ describe("list key", () => {
     expect(reviewKey(undefined, { dev: true, host: "localhost:3000" })).toBe(DEV_REVIEW_KEY);
     expect(reviewKey("", { dev: true, host: "127.0.0.1:3000" })).toBe(DEV_REVIEW_KEY);
     expect(reviewKey(undefined, { dev: false, host: "localhost:3000" })).toBe("");
-    expect(reviewKey(undefined, { dev: true, host: "mslab-web.example.workers.dev" })).toBe("");
+    expect(reviewKey(undefined, { dev: true, host: "mslab-x.vercel.app" })).toBe("");
     expect(reviewKey(undefined, { dev: true, host: null })).toBe("");
   });
 

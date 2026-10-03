@@ -12,10 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Build output of the old Cloudflare Worker (wrangler / OpenNext), if a checkout still has it:
+    // Build output of the retired Cloudflare Worker (wrangler / OpenNext), if a checkout still has it:
     ".open-next/**",
     ".wrangler/**",
-    // The static design-review hub and its comment widget (copied from site/, plain browser scripts):
+    // The static design-review hub and its comment widget (public/guide, public/p, public/feedback.js: plain browser scripts):
     "public/**",
   ]),
 ]);

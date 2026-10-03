@@ -9,7 +9,7 @@ import { test, expect } from "./test";
 // The production build under load: a burst of signed-in admin pages, one after another and side by side, with public
 // pages and public answers that read the database at the same time, all answer (one database pool for the process,
 // db/client.ts; the signed-in admin looked up once per request, server/auth.ts). On 02.10.2026 the live Cloudflare
-// Worker answered about a quarter of the admin pages with a 500; the deployment check after the move repeats this by hand.
+// Worker answered about a quarter of the admin pages with a 500; the check on Vercel (03.10.2026) repeated this by hand.
 //
 // Local production build only (E2E_PROD_BUILD): it signs in by writing to the local database.
 

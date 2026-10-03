@@ -369,7 +369,7 @@ describe("requests", () => {
     const slowChange = (deps: Deps): Deps => ({
       ...deps,
       changed: async (c) => {
-        await new Promise((r) => setTimeout(r, 20)); // the D1 write
+        await new Promise((r) => setTimeout(r, 20)); // the revalidation
         order.push(`stale:${c.kind}`);
       },
     });
@@ -403,7 +403,7 @@ describe("failures are logged without personal data", () => {
   test("a failure while building the dependencies is answered the same way", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await runSubmission("contact", () => {
-      throw new Error("no Cloudflare context: mari@example.com");
+      throw new Error("no database connection: mari@example.com");
     }, handleContact, form({}));
     expect(result).toEqual({ ok: false, errors: { form: "server" } });
   });
@@ -426,9 +426,9 @@ describe("newsletter double opt-in", () => {
     expect(mail.subject).toBe("Подтвердите подписку на рассылку MS LAB");
     expect(mail.text).toContain(`https://mslab.example/api/newsletter/confirm?t=${sub.token}`);
     // The link base is the allow-listed request origin the action resolved (deps.siteUrl), not always SITE_URL.
-    await signUp({ ...deps, siteUrl: "https://mslab-web.dim-novare.workers.dev" }, "teine@example.com");
+    await signUp({ ...deps, siteUrl: "https://mslab.diipsolutions.eu" }, "teine@example.com");
     await flush();
-    expect(mails()[1].text).toContain("https://mslab-web.dim-novare.workers.dev/api/newsletter/confirm?t=");
+    expect(mails()[1].text).toContain("https://mslab.diipsolutions.eu/api/newsletter/confirm?t=");
   });
 
   test("signing up again does not tell whether the address exists: same answer, one row; unconfirmed → link again", async () => {

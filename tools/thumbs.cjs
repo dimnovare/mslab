@@ -1,8 +1,8 @@
 // Hub thumbnails: node tools/thumbs.cjs <baseUrl> key=path [key=path...]
-// Writes site/guide/thumbs/<key>-d.jpg (1440x900 → 1200w) and <key>-m.jpg (390x760).
+// Writes app/public/guide/thumbs/<key>-d.jpg (1440x900 → 1200w) and <key>-m.jpg (390x760).
 const path = require("path");
 const { chromium } = require("C:/Users/Dmitri.MARKIT/source/repos/rempire-web/node_modules/playwright");
-const out = path.join(__dirname, "..", "site", "guide", "thumbs");
+const out = path.join(__dirname, "..", "app", "public", "guide", "thumbs");
 (async () => {
   const [base, ...pairs] = process.argv.slice(2);
   require("fs").mkdirSync(out, { recursive: true });

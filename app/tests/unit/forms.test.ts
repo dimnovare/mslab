@@ -12,7 +12,7 @@ import {
 } from "@/server/forms";
 
 // Task 10 brief test (verbatim), then the forms' error-code contract (moved here from the Task 8/9 placeholder tests:
-// the actions now need the Worker env, the parsing they start with does not).
+// the actions now need the server env, the parsing they start with does not).
 
 test("registration requires terms and a session for group", () => {
   const base = { courseId: 1, kind: "group", name: "A B", email: "a@example.ee", phone: "+372 5555", paymentChoice: "half", terms: "on" };

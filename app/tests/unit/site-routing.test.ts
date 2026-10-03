@@ -3,8 +3,8 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { isKnownPage, routeSitePath } from "@/lib/site-routing";
 
-// lib/site-routing.ts: the middleware's decisions as plain functions. The Worker's cached-page front reads the page the
-// middleware would render (tests/unit/middleware.test.ts checks the middleware's answers themselves).
+// lib/site-routing.ts: the middleware's decisions as plain functions. The middleware applies them to each request
+// (tests/unit/middleware.test.ts checks the middleware's answers themselves).
 
 const route = (url: string) => {
   const u = new URL(url, "https://mslab.example");

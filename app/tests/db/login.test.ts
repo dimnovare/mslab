@@ -88,9 +88,9 @@ describe("allowed address", () => {
 
   test("the link starts with the site address given to the handler", async () => {
     resend();
-    const { deps } = setup({ siteUrl: "https://mslab-web.dim-novare.workers.dev" });
+    const { deps } = setup({ siteUrl: "https://mslab.diipsolutions.eu" });
     const res = await handleLoginRequest(deps, { email: "admin@example.test" });
-    expect(res.status === 200 && res.body.ok && res.body.devLink?.startsWith("https://mslab-web.dim-novare.workers.dev/api/auth/verify?t=")).toBe(true);
+    expect(res.status === 200 && res.body.ok && res.body.devLink?.startsWith("https://mslab.diipsolutions.eu/api/auth/verify?t=")).toBe(true);
   });
 
   test("a failing e-mail provider does not change the answer", async () => {
@@ -256,7 +256,7 @@ describe("devLink", () => {
       expect(res.status === 200 && "devLink" in res.body, host).toBe(true);
       await db.delete(authTokens);
     }
-    for (const host of ["mslab-web.dim-novare.workers.dev", "mslab.example", "localhost.evil.example", "evil.example:3000", "", null]) {
+    for (const host of ["mslab-x.vercel.app", "mslab.example", "localhost.evil.example", "evil.example:3000", "", null]) {
       const res = await handleLoginRequest(setup({ host }).deps, { email: "admin@example.test" });
       expect(res, String(host)).toEqual({ status: 200, body: { ok: true } });
       await db.delete(authTokens);

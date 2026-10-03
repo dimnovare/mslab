@@ -1,5 +1,6 @@
 // CLI: DATABASE_URL=postgres://... npm run db:copy-kv -- --target local|railway --file <export.json> [--apply]
-// Copies the review comments (and the Telegram chat id) from the Cloudflare KV of the old review site into kv_entries.
+// One-time move: copies the review comments (and the Telegram chat id) from the Cloudflare KV of the retired review site
+// (Worker mslab-guide) into kv_entries.
 // The input is a JSON file made from the old namespace with wrangler: an array of { name, value, expiration? } where
 // `expiration` is unix seconds (it becomes expires_at). Copied: `fb:*` (a comment), `id:*` (its lookup) and `tg:chat`.
 // Skipped and counted: `rl:*` (rate limits hold visitors' addresses and must not move), every other key, and a copied key

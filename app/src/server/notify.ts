@@ -15,7 +15,7 @@ export type Env = {
   SITE_URL: string;
   RESEND_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
-  /** Optional override of the chat; otherwise the chat id stored in KV under `tg:chat` (set by the review-site worker). */
+  /** Optional override of the chat; otherwise the chat id stored in KV under `tg:chat` (copied from the old review site's KV by db:copy-kv). */
   TELEGRAM_CHAT_ID?: string;
 };
 

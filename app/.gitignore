@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# opennext / cloudflare
+# build output and local settings of the retired Cloudflare Worker, if a checkout still has them
 /.open-next/
 # at any depth: a wrangler cache inside a copied folder (public/…/.wrangler) is never committed
 .wrangler/

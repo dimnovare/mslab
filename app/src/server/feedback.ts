@@ -4,7 +4,7 @@ import { rateKey, rateLimit, type TextKv } from "./ratelimit";
 import { keyMatches } from "./review-key";
 
 // Design-review comments (public/feedback.js on the hub, the prototypes and, until launch, the main site's pages).
-// A port of the review site's Worker (worker/index.js) with the same contract, KV keys and record fields, so the
+// A port of the old review site's Worker (mslab-guide, retired 03.10.2026) with the same contract, KV keys and record fields, so the
 // comments stored before the move and the list page /guide/tagasiside/ keep working:
 //
 //   POST  /api/feedback        store a comment, ping Telegram          (anyone; honeypot, 30 per 10 min per visitor)
@@ -20,12 +20,12 @@ export type FeedbackKv = TextKv & {
   list(options: { prefix: string; cursor?: string }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
 };
 
-/** The Worker env the comments use: the notification env, the comment KV and the ADMIN_KEY secret of the list. */
+/** The env the comments use: the notification env, the comment KV and the ADMIN_KEY secret of the list. */
 export type FeedbackEnv = Omit<Env, "KV"> & { KV: FeedbackKv; ADMIN_KEY?: string };
 
 export type Reply = { status: number; body: Record<string, unknown> };
 
-/** Largest accepted request body (bytes), as in the review Worker. */
+/** Largest accepted request body (bytes), as in the old review Worker. */
 export const MAX_BYTES = 20_000;
 /** PATCH carries only { done }. */
 export const MAX_PATCH_BYTES = 200;
@@ -77,7 +77,7 @@ const has = <T extends object>(map: T, key: unknown): key is keyof T => typeof k
 /** A main-site page path: "/" or "/x…", never "//host" (a link under our origin must stay on it), no query or hash. */
 export const isSitePath = (v: unknown): v is string => typeof v === "string" && /^\/(?:[^/\\\s?#][^\\\s?#]*)?$/.test(v);
 
-/** 14 characters of [0-9a-z] (the review Worker's format). */
+/** 14 characters of [0-9a-z] (the old review Worker's format). */
 export function newId(): string {
   const b = crypto.getRandomValues(new Uint8Array(9));
   return Array.from(b, (x) => x.toString(36).padStart(2, "0")).join("").slice(0, 14);

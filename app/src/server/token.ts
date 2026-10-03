@@ -1,4 +1,4 @@
-// Random tokens and their SHA-256 hashes (Web Crypto, so the same code runs in the Worker, in `next dev` and in tests).
+// Random tokens and their SHA-256 hashes (Web Crypto, so the same code runs on the server, in `next dev` and in tests).
 // Newsletter confirmation tokens and the admin login links / session ids are all 32 random bytes in base64url; the
 // admin tables store only the hash, so a copy of the database cannot be used to log in.
 
