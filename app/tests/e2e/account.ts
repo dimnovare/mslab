@@ -73,7 +73,7 @@ export async function expireLogins(email: string): Promise<void> {
 
 // ---------- the dashboard's rows (account-dashboard.spec.ts) ----------
 
-export type AccountCardKind = "awaiting" | "confirmed" | "cancelled" | "practice" | "waitlist" | "ecourse";
+export type AccountCardKind = "awaiting" | "confirmed" | "confirmed2" | "cancelled" | "practice" | "waitlist" | "ecourse";
 
 export type AccountFixtures = {
   clientId: number;
@@ -81,7 +81,7 @@ export type AccountFixtures = {
   course: { id: number; slug: string; title: string };
   /** Its one session, about 40 days ahead. */
   session: { id: number; startsAt: Date; city: string };
-  registrations: Partial<Record<"awaiting" | "confirmed" | "cancelled", number>>;
+  registrations: Partial<Record<"awaiting" | "confirmed" | "confirmed2" | "cancelled", number>>;
   requests: Partial<Record<"practice" | "waitlist", number>>;
   /** The published seed e-course the access is to; `expiresAt` when access was granted. */
   ecourse: { slug: string; title: string; expiresAt?: Date };
@@ -94,7 +94,7 @@ const ECOURSE_SLUG = "kulmumeistri-e-koolitus";
  * A client with the given cards, written straight to the LOCAL database and linked to the client (as a login would link
  * them by e-mail):
  * - awaiting: a group registration, 50 % chosen, nothing paid (→ "tasu ettemaks 175 €" or "Maria saadab sulle arve");
- * - confirmed: paid in full, ahead (→ "Kohtume … " and "Tühista või muuda aega");
+ * - confirmed (and confirmed2, a second one): paid in full, ahead (→ "Koht on kinnitatud." and "Tühista või muuda aega");
  * - cancelled: a cancelled registration (over);
  * - practice: a MINI practice request; waitlist: a waitlist entry for the session;
  * - ecourse: six months of access to the seed e-course (→ "Ava koolitus").
@@ -139,6 +139,7 @@ export async function insertAccountFixtures(
     };
     if (cards.has("awaiting")) out.registrations.awaiting = await registration("awaiting_prepayment", "half", 0);
     if (cards.has("confirmed")) out.registrations.confirmed = await registration("confirmed", "full", 35000);
+    if (cards.has("confirmed2")) out.registrations.confirmed2 = await registration("confirmed", "full", 35000);
     if (cards.has("cancelled")) out.registrations.cancelled = await registration("cancelled", "full", 0);
     const name = opts.name || "E2E Õpilane";
     if (cards.has("practice"))

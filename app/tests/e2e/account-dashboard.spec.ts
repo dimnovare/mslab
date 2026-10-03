@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { formatDate, formatDayMonth, formatTime } from "../../src/i18n/format";
+import { formatDate, formatTime } from "../../src/i18n/format";
 import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, storedChangeRequests, TEST_PREPAYMENT, type AccountCardKind } from "./account";
 import { signInAsAdmin, type CreatedRows } from "./admin-login";
 import { holdLocalLock, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
@@ -55,7 +55,7 @@ test("every card says what to do next, with at most one button; the prepayment i
     const expected: [string, string, string, string | null][] = [
       // card, tag, sentence, the one button
       [`registration-${reg.awaiting}`, "Kontaktõpe", "Koha kinnitamiseks tasu ettemaks 175 €.", "Vaata juhiseid"],
-      [`registration-${reg.confirmed}`, "Kontaktõpe", `Koht on kinnitatud. Kohtume ${formatDayMonth(start, "et")} kell ${formatTime(start, "et")}, Pärnu.`, "Tühista või muuda aega"],
+      [`registration-${reg.confirmed}`, "Kontaktõpe", "Koht on kinnitatud.", "Tühista või muuda aega"],
       [`registration-${reg.cancelled}`, "Kontaktõpe", "Registreering on tühistatud.", null],
       [`request-${f.requests.practice}`, "Päring", "Päring on saadetud. Maria vastab peagi.", null],
       [`request-${f.requests.waitlist}`, "Ootenimekiri", "Oled ootenimekirjas. Anname teada, kui koht vabaneb.", null],
@@ -69,8 +69,9 @@ test("every card says what to do next, with at most one button; the prepayment i
       if (button) await expect(actions(c), key).toHaveText([button]);
       else await expect(actions(c), key).toHaveCount(0);
     }
-    // the dated session line, the practice request's times, the e-course link
+    // the dated session line (the sentences do not repeat it), the practice request's times, the e-course link
     await expect(card(page, `registration-${reg.awaiting}`)).toContainText(`${formatDate(start, "et")} · ${formatTime(start, "et")}`);
+    await expect(card(page, `registration-${reg.confirmed}`)).toContainText(`${formatDate(start, "et")} · ${formatTime(start, "et")}`);
     await expect(card(page, `registration-${reg.awaiting}`)).toContainText("Pärnu, MS LAB stuudio");
     await expect(card(page, `request-${f.requests.practice}`)).toContainText("Tööpäeviti pärast kella 17");
     await expect(card(page, `course-${f.ecourse.slug}`).getByRole("link", { name: "Ava koolitus" })).toHaveAttribute("href", `/konto/kursus/${f.ecourse.slug}`);
@@ -91,20 +92,33 @@ test("every card says what to do next, with at most one button; the prepayment i
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const awaiting = card(page, `registration-${reg.awaiting}`);
     const pay = awaiting.getByRole("button", { name: "Vaata juhiseid" });
+    // only the opened card grows: its neighbours keep their height
+    const neighbour = card(page, `registration-${reg.confirmed}`);
+    const before = (await neighbour.boundingBox())!.height;
     await pay.click();
     await expect(awaiting.getByRole("button", { name: "Peida juhised" })).toHaveAttribute("aria-expanded", "true");
     const panel = awaiting.locator("[data-prepayment]");
     await expect(panel.locator("[data-pay-row]")).toHaveText([
       /^Saaja\s*MS LAB OÜ$/,
-      new RegExp(`^IBAN\\s*${TEST_PREPAYMENT.iban}\\s*Kopeeri$`),
+      // both labels of Kopeeri are in the button, one shown
+      new RegExp(`^IBAN\\s*${TEST_PREPAYMENT.iban}\\s*Kopeeri\\s*Kopeeritud ✓$`),
       /^Pank\s*Swedbank$/,
       /^Summa\s*175 €$/,
-      new RegExp(`^Selgitus\\s*MSLAB-${reg.awaiting}\\s*Kopeeri$`),
+      new RegExp(`^Selgitus\\s*MSLAB-${reg.awaiting}\\s*Kopeeri\\s*Kopeeritud ✓$`),
     ]);
     await expect(panel).toContainText("Pärast makset kinnitab Maria su koha.");
-    await panel.getByRole("button", { name: "Kopeeri: Selgitus" }).click();
-    await expect(panel.locator("[data-pay-status]")).toHaveText("Kopeeritud");
+    expect((await awaiting.boundingBox())!.height).toBeGreaterThan(before + 200);
+    expect((await neighbour.boundingBox())!.height).toBe(before);
+    // Kopeeri: the pressed button says so for a moment; a hidden live region tells a screen reader
+    const copyRef = panel.getByRole("button", { name: "Kopeeri: Selgitus" });
+    await copyRef.click();
+    await expect(copyRef.locator("span", { hasText: "Kopeeritud ✓" })).toBeVisible();
+    await expect(copyRef.locator("span", { hasText: /^Kopeeri$/ })).toBeHidden();
+    await expect(panel.locator("[data-pay-status]")).toHaveText("Kopeeritud: Selgitus");
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`MSLAB-${reg.awaiting}`);
+    await expect(copyRef.locator("span", { hasText: /^Kopeeri$/ })).toBeVisible({ timeout: 4000 }); // back after about 2 s
+    // the drawn pill is the button itself: at least 44 px tall
+    expect((await copyRef.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await panel.getByRole("button", { name: "Kopeeri: IBAN" }).click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(TEST_PREPAYMENT.iban);
     await awaiting.getByRole("button", { name: "Peida juhised" }).click();
@@ -132,6 +146,7 @@ test("without the clipboard, Kopeeri selects the text and says so", async ({ pag
     const c = card(page, `registration-${f.registrations.awaiting}`);
     await c.getByRole("button", { name: "Vaata juhiseid" }).click();
     await c.getByRole("button", { name: "Kopeeri: IBAN" }).click();
+    await expect(c.locator("[data-pay-selected]")).toHaveText("Tekst on märgitud. Kopeeri see.");
     await expect(c.locator("[data-pay-status]")).toHaveText("Tekst on märgitud. Kopeeri see.");
     expect(await page.evaluate(() => String(window.getSelection()))).toBe(TEST_PREPAYMENT.iban);
   } finally {
@@ -192,30 +207,50 @@ test("Tühista või muuda aega: two choices, a message, Saada — Maria finds it
   }
 });
 
-test("a request that cannot go says so in one plain sentence (too many, no longer possible), and the card catches up", async ({ page }, info) => {
+test("a request that cannot go says so in one plain sentence (too many, no longer possible); the cards catch up in place, chips and focus kept", async ({ page }, info) => {
   submitsForms();
-  const f = await signedInWith(page, "refused", info.project.name, { cards: ["confirmed"] });
-  const c = card(page, `registration-${f.registrations.confirmed}`);
-  await c.getByRole("button", { name: "Tühista või muuda aega" }).click();
+  const f = await signedInWith(page, "refused", info.project.name, { cards: ["confirmed", "confirmed2", "cancelled"] });
+  const first = card(page, `registration-${f.registrations.confirmed}`);
+  const second = card(page, `registration-${f.registrations.confirmed2}`);
   const dialog = page.getByRole("dialog");
-  await dialog.getByText("Soovin tühistada").click();
   const notice = dialog.locator("[data-change-notice]");
+  const chips = page.locator("[data-account-filters]");
+  // the dashboard is drawn once: a reload behind it keeps this very element (no skeleton in between)
+  await page.locator("[data-account-dashboard]").evaluate((el) => el.setAttribute("data-e2e-same", ""));
 
-  // 429 (5 an hour)
+  // under Tulevased: 429 (5 an hour), then Maria cancels the registration meanwhile: 404
+  await chips.getByRole("button", { name: "Tulevased" }).click();
+  await first.getByRole("button", { name: "Tühista või muuda aega" }).click();
+  await dialog.getByText("Soovin tühistada").click();
   await page.route("**/api/konto/muutmine", (route) => route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ ok: false, error: "rate" }) }), { times: 1 });
   await dialog.getByRole("button", { name: "Saada" }).click();
   await expect(notice).toHaveText("Oled saatnud juba mitu soovi. Proovi tunni aja pärast uuesti.");
   await expect(dialog).toBeVisible();
-
-  // Maria cancelled the registration meanwhile: 404
   await onLocalDb((sql) => sql`update registrations set status = 'cancelled' where id = ${f.registrations.confirmed!}`);
   await dialog.getByRole("button", { name: "Saada" }).click();
   await expect(notice).toHaveText("Seda registreeringut ei saa enam muuta. Võta Mariaga ühendust.");
   await dialog.getByRole("button", { name: "Sulge" }).click();
   await expect(dialog).toBeHidden();
-  // closing loads the cards again: this one is over now
-  await expect(c.locator("[data-next-step]")).toHaveText("Registreering on tühistatud.");
-  await expect(actions(c)).toHaveCount(0);
+  // the cards are loaded again behind the page: that one is over now, so Tulevased no longer shows it; the chip stays
+  await expect(first).toHaveCount(0);
+  await expect(chips.getByRole("button", { name: "Tulevased" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused(); // its card is gone from view: the page heading
+  await expect(page.locator("[data-account-dashboard][data-e2e-same]")).toHaveCount(1);
+  await expect(page.locator("[data-card-skeleton]")).toHaveCount(0);
+
+  // under Kõik the same for the other one: it stays in view, over, and the focus is on its heading
+  await chips.getByRole("button", { name: "Kõik" }).click();
+  await second.getByRole("button", { name: "Tühista või muuda aega" }).click();
+  await dialog.getByText("Soovin muuta aega").click();
+  await onLocalDb((sql) => sql`update registrations set status = 'cancelled' where id = ${f.registrations.confirmed2!}`);
+  await dialog.getByRole("button", { name: "Saada" }).click();
+  await expect(notice).toHaveText("Seda registreeringut ei saa enam muuta. Võta Mariaga ühendust.");
+  await page.keyboard.press("Escape");
+  await expect(second.locator("[data-next-step]")).toHaveText("Registreering on tühistatud.");
+  await expect(actions(second)).toHaveCount(0);
+  await expect(second.getByRole("heading", { level: 2 })).toBeFocused();
+  await expect(chips).toHaveCount(0); // every card is over now: nothing left to filter
+  await expect(page.locator("[data-account-dashboard][data-e2e-same]")).toHaveCount(1);
   expect(await storedChangeRequests(f.clientId)).toEqual([]);
 });
 
@@ -223,6 +258,7 @@ test("no courses yet: one sentence and Vaata koolitusi; no chips", async ({ page
   submitsForms();
   await signedInWith(page, "empty", info.project.name);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tere!");
+  await expect(page.getByText("Siin on sinu koolitused.")).toHaveCount(0); // the line is for a page with courses
   const empty = page.locator("[data-account-empty]");
   await expect(empty).toContainText("Sul ei ole veel koolitusi.");
   await expect(page.locator("[data-account-filters]")).toHaveCount(0);
@@ -252,7 +288,7 @@ test("while loading: two skeleton cards; a failed load says so, and Proovi uuest
     failing ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false }) }) : route.fallback(),
   );
   await page.reload();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ei õnnestunud laadida. Proovi uuesti.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ei õnnestunud laadida.");
   failing = false;
   await page.getByRole("button", { name: "Proovi uuesti" }).click();
   await expect(page.locator("[data-card]")).toHaveCount(1);
@@ -314,6 +350,7 @@ test("phones: the cards are a row to swipe through", async ({ page, isMobile }, 
   await signedInWith(page, "swipe", info.project.name, { cards: ALL });
   const row = page.locator("[data-account-cards='swipe']");
   await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute("tabindex", "0"); // the arrow keys scroll it too
   expect(await scrollLeft(row)).toBe(0);
   const second = page.locator("[data-card]").nth(1);
   const x = async (el: Locator) => (await el.boundingBox())!.x;
@@ -331,7 +368,7 @@ test("Logi välja ends the session and opens the home page, which says Logi siss
   submitsForms();
   await signedInWith(page, "logout", info.project.name, { cards: ["confirmed"] });
   const menu = page.locator("[data-account-menu]");
-  await expect(menu).toHaveAccessibleName("Minu konto");
+  await expect(menu).toHaveAccessibleName("Konto menüü");
   await menu.click();
   const logout = page.getByRole("button", { name: "Logi välja" });
   await expect(logout).toBeVisible();
@@ -356,9 +393,8 @@ test("in Russian: the page, the tabs and Выйти speak Russian, and logging o
   await expect(tabs.getByRole("link")).toHaveText(["Мои курсы", "Избранное", "Мои данные"]);
   await expect(tabs.getByRole("link").nth(1)).toHaveAttribute("href", "/ru/konto/lemmikud");
   const start = f.session.startsAt;
-  await expect(card(page, `registration-${f.registrations.confirmed}`).locator("[data-next-step]")).toHaveText(
-    `Место подтверждено. Встречаемся ${formatDayMonth(start, "ru")} в ${formatTime(start, "ru")}, Pärnu.`,
-  );
+  await expect(card(page, `registration-${f.registrations.confirmed}`).locator("[data-next-step]")).toHaveText("Место подтверждено.");
+  await expect(card(page, `registration-${f.registrations.confirmed}`)).toContainText(`${formatDate(start, "ru")} · ${formatTime(start, "ru")}`);
   await expect(card(page, `registration-${f.registrations.confirmed}`).getByRole("button")).toHaveText("Отменить или перенести");
   await expect(card(page, `registration-${f.registrations.awaiting}`)).toContainText("Очное обучение");
   await page.locator("[data-account-menu]").click();

@@ -4,41 +4,15 @@ import Link from "next/link";
 import { useId, useState } from "react";
 import { Icon } from "@/components/site/Icon";
 import ui from "@/components/site/ui.module.css";
-import { cardKey, cardTag, isPastCard, nextStep, type AccountCard, type ContactCard, type PrepaymentInfo as PaySettings } from "@/domain/account-cards";
-import { pick } from "@/i18n/field";
-import { formatDate, formatTime } from "@/i18n/format";
+import {
+  cardKey, cardTag, cardTitle, cardWhen, isPastCard, nextStep, type AccountCard, type ContactCard, type PrepaymentInfo as PaySettings,
+} from "@/domain/account-cards";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import { NextStepLine } from "./NextStepLine";
 import { PrepaymentInfo } from "./PrepaymentInfo";
 import type { CoursesTexts } from "./texts";
 import styles from "./AccountCourseCard.module.css";
-
-/** The card's title: the course, the practice package; a plain name when it is gone. */
-export function cardTitle(card: AccountCard, locale: Locale, t: CoursesTexts): string {
-  switch (card.kind) {
-    case "contact":
-    case "individual":
-    case "ecourse":
-      return pick(card.course.title, locale);
-    case "request":
-      return card.title ? pick(card.title, locale) : t.untitled[card.requestKind];
-    case "waitlist":
-      return card.course ? pick(card.course.title, locale) : t.untitled.course;
-  }
-}
-
-/** When and where (a session: "14.11.2026 · 10:00" and "Pärnu, MS LAB stuudio"), or what was asked; empty for an e-course. */
-export function cardWhen(card: AccountCard, locale: Locale): { time: string; place: string } | null {
-  const session = card.kind === "contact" ? card.session : card.kind === "waitlist" ? card.session : null;
-  if (session) {
-    const start = new Date(session.startsAt);
-    return { time: `${formatDate(start, locale)} · ${formatTime(start, locale)}`, place: [session.city, session.venue].filter(Boolean).join(", ") };
-  }
-  if (card.kind === "individual" && card.preferredPeriod.trim()) return { time: card.preferredPeriod.trim(), place: "" };
-  if (card.kind === "request" && card.detail.trim()) return { time: card.detail.trim(), place: "" };
-  return null;
-}
 
 export type CardProps = {
   card: AccountCard;
@@ -130,8 +104,9 @@ export function AccountCourseCard({ card, now, locale, t, pay, readOnly, sent, f
       data-past={isPastCard(card, now) || undefined}
     >
       <span className={styles.tag}>{t.tag[cardTag(card)]}</span>
-      <h2 id={titleId} className={styles.title}>
-        {cardTitle(card, locale, t)}
+      {/* tabIndex -1: the dashboard puts the focus here after the card has changed under the student (a refused request) */}
+      <h2 id={titleId} className={styles.title} tabIndex={-1}>
+        {cardTitle(card, locale, t.untitled)}
       </h2>
       {when && (
         <p className={styles.when}>

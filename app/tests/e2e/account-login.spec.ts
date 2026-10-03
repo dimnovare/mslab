@@ -388,7 +388,7 @@ test("an account page that cannot load says so, and Proovi uuesti asks again (he
     failing ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false, error: "server" }) }) : route.fallback(),
   );
   await page.goto("/konto");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ei õnnestunud laadida. Proovi uuesti.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ei õnnestunud laadida.");
   await expect(page).toHaveURL(/\/konto$/); // no redirect: the visitor may well be signed in
   failing = false;
   await page.getByRole("button", { name: "Proovi uuesti" }).click();

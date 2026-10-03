@@ -1,8 +1,8 @@
 import { upcomingFrom } from "@/domain/calendar";
 import { formatEUR } from "@/domain/money";
 import { prepaymentDue, type RegStatus } from "@/domain/registration";
-import type { I18n } from "@/i18n/field";
-import { formatDate, formatDayMonth, formatTime } from "@/i18n/format";
+import { pick, type I18n } from "@/i18n/field";
+import { formatDate, formatTime } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
 
 // The client dashboard's cards and the one sentence each says about what to do next (spec 2.1 rule 5: one plain sentence
@@ -98,9 +98,12 @@ export type NextStepAction =
 /** `key` is the sentence in the dictionary (`account.next.<key>`), `vars` fill its {placeholders}, `action` is the card's one button. */
 export type NextStep = { key: NextStepKey; vars: Record<string, string>; action: NextStepAction };
 
-/** Prepayment instructions exist when the admin filled in at least one field. */
+/**
+ * Prepayment instructions can be followed when they name at least the receiver and the IBAN (the bank and the reference
+ * prefix are optional); anything less, and Maria sends an invoice instead.
+ */
 export function hasPrepayment(pay: PrepaymentInfo | null): pay is PrepaymentInfo {
-  return !!pay && [pay.receiver, pay.iban, pay.bank, pay.referencePrefix].some((v) => v.trim() !== "");
+  return !!pay && pay.receiver.trim() !== "" && pay.iban.trim() !== "";
 }
 
 const NONE: NextStepAction = { kind: "none" };
@@ -123,14 +126,14 @@ function contactStep(card: ContactCard, now: Date, pay: PrepaymentInfo | null, l
   }
   const change: NextStepAction = { kind: "changeRequest", registrationId: card.registrationId };
   if (rest > 0) return step("confirmedRest", { rest: formatEUR(rest, locale) }, change);
-  const startsAt = new Date(card.session.startsAt);
-  return step("confirmed", { date: formatDayMonth(startsAt, locale), time: formatTime(startsAt, locale), city: card.session.city }, change);
+  // the date, time and place are on the card's own line (cardWhen): the sentence does not repeat them
+  return step("confirmed", {}, change);
 }
 
 /**
  * The sentence and the button of a card. Dates and times are Estonian time and amounts are euros, formatted for `locale`
  * (the formatters of src/i18n/format.ts and domain/money.ts), so the caller only puts the vars into the dictionary text.
- * `pay` is the admin's prepayment setting (null or all empty: Maria sends an invoice).
+ * `pay` is the admin's prepayment setting (null, or without a receiver or an IBAN: Maria sends an invoice).
  */
 export function nextStep(card: AccountCard, now: Date, pay: PrepaymentInfo | null, locale: Locale = "et"): NextStep {
   switch (card.kind) {
@@ -233,6 +236,38 @@ export function firstName(name: string): string {
 /** The payment's explanation on the prepayment instructions: the admin's prefix and the registration number ("MSLAB-" + 42). */
 export function paymentReference(pay: PrepaymentInfo, registrationId: number): string {
   return `${pay.referencePrefix.trim()}${registrationId}`;
+}
+
+/** The names a card uses when its course or practice package is gone (account.dashboard.untitled). */
+export type UntitledTexts = { individual: string; practice: string; course: string };
+
+/** The card's title: the course, the practice package; a plain name when it is gone. */
+export function cardTitle(card: AccountCard, locale: Locale, untitled: UntitledTexts): string {
+  switch (card.kind) {
+    case "contact":
+    case "individual":
+    case "ecourse":
+      return pick(card.course.title, locale);
+    case "request":
+      return card.title ? pick(card.title, locale) : untitled[card.requestKind];
+    case "waitlist":
+      return card.course ? pick(card.course.title, locale) : untitled.course;
+  }
+}
+
+/**
+ * The card's line about when and where: a session's "14.11.2026 · 10:00" (Estonian time) and "Pärnu, MS LAB stuudio"; an
+ * individual registration's preferred period or a request's times as `time`; null for an e-course (its sentence says it).
+ */
+export function cardWhen(card: AccountCard, locale: Locale): { time: string; place: string } | null {
+  const session = card.kind === "contact" || card.kind === "waitlist" ? card.session : null;
+  if (session) {
+    const start = new Date(session.startsAt);
+    return { time: `${formatDate(start, locale)} · ${formatTime(start, locale)}`, place: [session.city, session.venue].filter(Boolean).join(", ") };
+  }
+  if (card.kind === "individual" && card.preferredPeriod.trim()) return { time: card.preferredPeriod.trim(), place: "" };
+  if (card.kind === "request" && card.detail.trim()) return { time: card.detail.trim(), place: "" };
+  return null;
 }
 
 /** The small tag on a card: what kind of thing it is (an individual registration is a contact course too). */

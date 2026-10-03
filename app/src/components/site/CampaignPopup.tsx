@@ -6,6 +6,7 @@ import type { Locale } from "@/i18n/locales";
 import { lockPageScroll, trapTab } from "@/lib/modal";
 import { CampaignCard } from "./CampaignCard";
 import { Icon } from "./Icon";
+import modal from "@/components/ui/modal.module.css";
 import ui from "./ui.module.css";
 import styles from "./CampaignPopup.module.css";
 
@@ -173,7 +174,7 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignView; locale: Lo
   return (
     <dialog
       ref={ref}
-      className={styles.dialog}
+      className={modal.dialog}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -202,14 +203,14 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignView; locale: Lo
         }
       }}
     >
-      <div className={styles.backdrop} data-campaign-backdrop="" aria-hidden="true" />
-      <div ref={panelRef} className={styles.panel} data-campaign-panel="" data-fab-avoid="">
+      <div className={modal.backdrop} data-campaign-backdrop="" aria-hidden="true" />
+      <div ref={panelRef} className={`${modal.panel} ${styles.panel}`} data-campaign-panel="" data-fab-avoid="">
         <CampaignCard
           c={c}
           locale={locale}
           titleId={titleId}
           close={
-            <button type="button" className={styles.close} aria-label={t.close} onClick={onClose} data-campaign-close="">
+            <button type="button" className={`${modal.close} ${styles.close}`} aria-label={t.close} onClick={onClose} data-campaign-close="">
               <Icon name="close" size={20} />
             </button>
           }

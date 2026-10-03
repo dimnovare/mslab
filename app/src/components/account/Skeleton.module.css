@@ -1,0 +1,58 @@
+/* Grey stand-ins while an account page loads: the greeting (two bars) and a course card (the card's own box from
+   AccountCourseCard.module.css). One gentle pulse; none with reduced motion (globals.css). Tokens only. */
+
+.bone {
+  display: block;
+  border-radius: 99px;
+  background: var(--first);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.title {
+  width: min(320px, 70%);
+  height: clamp(36px, 4vw, 50px);
+  border-radius: 10px;
+}
+
+.lead {
+  width: min(220px, 50%);
+  height: 16px;
+  margin-top: 14px;
+  border-radius: 10px;
+}
+
+.tag {
+  width: 84px;
+  height: 24px;
+}
+
+.cardTitle {
+  width: 70%;
+  height: 26px;
+  margin-top: 18px;
+  border-radius: 8px;
+}
+
+.line {
+  width: 90%;
+  height: 14px;
+  margin-top: 26px;
+}
+
+.lineShort {
+  width: 55%;
+  height: 14px;
+  margin-top: 10px;
+}
+
+.button {
+  width: 160px;
+  height: 49px;
+  margin-top: 24px;
+}

@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import filters from "@/components/site/CatalogueFilters.module.css";
 import { Icon } from "@/components/site/Icon";
-import { Notice } from "@/components/site/Notice";
 import ui from "@/components/site/ui.module.css";
 import { cardKey, filterCards, firstName, isPastCard, showFilters, type CardFilter, type ContactCard } from "@/domain/account-cards";
 import { fill } from "@/i18n/format";
@@ -12,12 +11,11 @@ import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import type { Dashboard } from "@/server/client-data";
 import { AccountCourseCard } from "./AccountCourseCard";
-import { ReplacedNotice } from "./AccountGate";
-import { CardSkeleton } from "./CardSkeleton";
+import { AccountLoader, type Reload } from "./AccountLoader";
+import { CardSkeleton, GreetingSkeleton } from "./CardSkeleton";
 import { ChangeRequestDialog, type ChangeRequestEnd } from "./ChangeRequestDialog";
-import { rememberChangeRequest, sentChangeRequests } from "./sent-requests";
+import { isSent, pruneChangeRequests, rememberChangeRequest, sentChangeRequests, type SentRequest } from "./sent-requests";
 import type { CoursesTexts } from "./texts";
-import { useAccount } from "./useAccount";
 import styles from "./CoursesTab.module.css";
 
 const FILTERS: CardFilter[] = ["all", "upcoming", "past"];
@@ -25,47 +23,46 @@ const FILTERS: CardFilter[] = ["all", "upcoming", "past"];
 type Props = {
   locale: Locale;
   t: CoursesTexts;
-  /** The dashboard as the server loaded it (the admin's read-only "view as client"); without it the page loads GET /api/konto. */
-  data?: Dashboard;
-  /** Every button and link that would act is aria-disabled and does nothing; nothing is fetched or sent. */
-  readOnly?: boolean;
   /** The time the cards are judged at (ISO), for a server render that must match its hydration; default: now. */
   now?: string;
-};
+} & (
+  | {
+      /** The dashboard as the server loaded it (the admin's read-only "view as client"). */
+      data: Dashboard;
+      /** Every button and link that would act is aria-disabled and does nothing; nothing is fetched or sent. */
+      readOnly?: boolean;
+    }
+  | {
+      /** Without data the page loads GET /api/konto itself; read-only needs data. */
+      data?: undefined;
+      readOnly?: false;
+    }
+);
 
 /**
  * "Minu koolitused" (/konto): the greeting, the filter chips, the course cards (each with its one sentence and at most one
- * button), the empty state. With `data` it shows that (the admin's view, server-rendered); otherwise it loads the
- * signed-in client's dashboard in the browser — the page itself is a static shell, the same for every visitor.
+ * button), the empty state. With `data` it shows that (the admin's view, server-rendered); otherwise AccountLoader loads
+ * the signed-in client's dashboard in the browser — the page itself is a static shell, the same for every visitor.
  */
-export function CoursesTab({ locale, t, data, readOnly = false, now }: Props) {
-  return data ? <CoursesView data={data} locale={locale} t={t} readOnly={readOnly} at={now} /> : <CoursesLoader locale={locale} t={t} at={now} />;
+export function CoursesTab(props: Props) {
+  const { locale, t, now } = props;
+  if (props.data) return <CoursesView data={props.data} locale={locale} t={t} readOnly={props.readOnly ?? false} at={now} />;
+  return (
+    <AccountLoader<Dashboard>
+      path="/api/konto"
+      locale={locale}
+      t={{ ...t.loader, loading: t.loading }}
+      skeleton={<CoursesSkeleton />}
+      render={(data, reload) => <CoursesView data={data} locale={locale} t={t} readOnly={false} at={now} reload={reload} />}
+    />
+  );
 }
 
-/** GET /api/konto: two skeleton cards while it loads; the message and "Saada uus kood" when another device signed in; a plain error with "Proovi uuesti". */
-function CoursesLoader({ locale, t, at }: { locale: Locale; t: CoursesTexts; at?: string }) {
-  const { state, data, reload } = useAccount<Dashboard>("/api/konto", { locale });
-  if (state === "ready" && data) return <CoursesView data={data} locale={locale} t={t} readOnly={false} at={at} reload={reload} />;
-  if (state === "replaced") return <ReplacedNotice locale={locale} t={t} />;
-  if (state === "error")
-    return (
-      <div data-account-state="error">
-        <Notice title={t.loadError}>
-          <button type="button" className={ui.btn} onClick={reload}>
-            {t.retry}
-            <Icon name="arrow" />
-          </button>
-        </Notice>
-      </div>
-    );
-  // loading, or not signed in (on the way to the login page)
+/** While the dashboard loads: the greeting's stand-in and two skeleton cards. */
+function CoursesSkeleton() {
   return (
-    <div className={`${ui.wrap} ${styles.page}`} aria-busy="true" data-account-state={state}>
-      <span className={styles.boneTitle} aria-hidden="true" />
-      <span className={styles.boneLead} aria-hidden="true" />
-      <p className={ui.srOnly} role="status">
-        {t.loading}
-      </p>
+    <div className={`${ui.wrap} ${styles.page}`}>
+      <GreetingSkeleton />
       <div className={styles.list}>
         <CardSkeleton />
         <CardSkeleton />
@@ -74,14 +71,31 @@ function CoursesLoader({ locale, t, at }: { locale: Locale; t: CoursesTexts; at?
   );
 }
 
-function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboard; locale: Locale; t: CoursesTexts; readOnly: boolean; at?: string; reload?: () => void }) {
+function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboard; locale: Locale; t: CoursesTexts; readOnly: boolean; at?: string; reload?: Reload }) {
   // judged once, so the cards do not change under the student's hands
   const [now] = useState(() => (at ? new Date(at) : new Date()));
   const [filter, setFilter] = useState<CardFilter>("all");
   // read once: this view is first drawn in the browser (after the dashboard loaded), never on the server unless read-only
-  const [sent, setSent] = useState<number[]>(() => (readOnly || typeof window === "undefined" ? [] : sentChangeRequests()));
+  const [sent, setSent] = useState<SentRequest[]>(() => (readOnly || typeof window === "undefined" ? [] : sentChangeRequests()));
   const [dialog, setDialog] = useState<{ card: ContactCard; opener: HTMLElement } | null>(null);
   const [justSent, setJustSent] = useState<number | null>(null);
+  /** The card to put the focus on once the dashboard has been loaded again (after a refused request). */
+  const focusAfterReload = useRef<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+
+  // What no longer counts as sent (another date now, or a day old) is dropped from this tab's memory.
+  useEffect(() => {
+    if (!readOnly) pruneChangeRequests(data.cards);
+  }, [data, readOnly]);
+
+  // After a quiet reload: the focus on the card the student was dealing with (or the page heading, if it is not shown now).
+  useEffect(() => {
+    const key = focusAfterReload.current;
+    if (!key) return;
+    focusAfterReload.current = null;
+    const cardHeading = document.querySelector<HTMLElement>(`[data-card="${key}"] h2`);
+    (cardHeading ?? heading.current)?.focus();
+  }, [data]);
 
   const openDialog = useCallback((card: ContactCard, opener: HTMLElement) => setDialog({ card, opener }), []);
 
@@ -91,10 +105,14 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
     if (!card) return;
     if (end === "sent") {
       // "Saadetud …" takes the place (and the focus) of the card's button
-      rememberChangeRequest(card.registrationId);
-      setSent((ids) => [...ids, card.registrationId]);
+      rememberChangeRequest(card);
+      setSent(sentChangeRequests());
       setJustSent(card.registrationId);
-    } else if (end === "stale") reload?.();
+    } else if (end === "stale") {
+      // the registration changed meanwhile: load the cards again behind the page, keeping the chips and the place
+      focusAfterReload.current = cardKey(card);
+      reload?.({ quiet: true });
+    }
   };
 
   const name = firstName(data.client.name);
@@ -104,8 +122,9 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
 
   return (
     <div className={`${ui.wrap} ${styles.page}`} data-account-dashboard="">
-      <h1 className={styles.title}>{name ? fill(t.hello, { name }) : t.helloNoName}</h1>
-      <p className={styles.lead}>{t.lead}</p>
+      <h1 ref={heading} className={styles.title} tabIndex={-1}>
+        {name ? fill(t.hello, { name }) : t.helloNoName}
+      </h1>
 
       {data.cards.length === 0 ? (
         <div className={`${filters.empty} ${styles.empty}`} data-account-empty="">
@@ -124,6 +143,7 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
         </div>
       ) : (
         <>
+          <p className={styles.lead}>{t.lead}</p>
           {showFilters(data.cards, now) && (
             <div className={`${filters.pills} ${styles.chips}`} role="group" aria-label={t.filterLabel} data-account-filters="">
               {FILTERS.map((f) => (
@@ -143,7 +163,13 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
               ))}
             </div>
           )}
-          <ul className={swipe ? `${styles.list} ${styles.swipe}` : styles.list} aria-label={t.listLabel} data-account-cards={swipe ? "swipe" : "list"}>
+          <ul
+            className={swipe ? `${styles.list} ${styles.swipe}` : styles.list}
+            aria-label={t.listLabel}
+            // a row that scrolls sideways can be focused, so the arrow keys scroll it (BlogCarousel's track)
+            tabIndex={swipe ? 0 : undefined}
+            data-account-cards={swipe ? "swipe" : "list"}
+          >
             {cards.map((card) => (
               <li key={cardKey(card)} className={styles.item}>
                 <AccountCourseCard
@@ -153,7 +179,7 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
                   t={t}
                   pay={data.prepayment}
                   readOnly={readOnly}
-                  sent={card.kind === "contact" && sent.includes(card.registrationId)}
+                  sent={isSent(sent, card)}
                   focusSent={card.kind === "contact" && justSent === card.registrationId}
                   onChangeRequest={openDialog}
                 />

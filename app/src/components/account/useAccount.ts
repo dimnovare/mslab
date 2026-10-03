@@ -71,15 +71,21 @@ type Loaded<T> = { state: AccountState; data: T | null };
  *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
  * - anything else, or no answer: "error"; `reload()` asks again.
  * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again.
+ * `reload({ quiet: true })` asks again in the background: the page keeps showing what it has ("ready" and the old data)
+ * until the new answer is in, and a failure leaves it as it is; a 401 still ends the page as above.
  */
-export function useAccount<T>(path: string, options: { redirect?: boolean; locale?: Locale } = {}): { state: AccountState; data: T | null; reload(): void } {
+export function useAccount<T>(
+  path: string,
+  options: { redirect?: boolean; locale?: Locale } = {},
+): { state: AccountState; data: T | null; reload(options?: { quiet?: boolean }): void } {
   const redirect = options.redirect ?? true;
   const locale = options.locale;
   const [loaded, setLoaded] = useState<Loaded<T>>({ state: "loading", data: null });
-  const [round, setRound] = useState(0);
+  const [round, setRound] = useState({ n: 0, quiet: false });
 
   useEffect(() => {
     const abort = new AbortController();
+    const quiet = round.quiet;
     (async () => {
       let res: Response;
       let body: unknown;
@@ -87,7 +93,7 @@ export function useAccount<T>(path: string, options: { redirect?: boolean; local
         res = await fetch(path, { credentials: "same-origin", cache: "no-store", headers: { accept: "application/json" }, signal: abort.signal });
         body = await res.json().catch(() => null);
       } catch {
-        if (!abort.signal.aborted) setLoaded({ state: "error", data: null });
+        if (!abort.signal.aborted && !quiet) setLoaded({ state: "error", data: null });
         return;
       }
       if (abort.signal.aborted) return;
@@ -107,14 +113,15 @@ export function useAccount<T>(path: string, options: { redirect?: boolean; local
         setLoaded({ state: replaced ? "replaced" : "signedOut", data: null });
         return;
       }
-      setLoaded({ state: "error", data: null });
+      if (!quiet) setLoaded({ state: "error", data: null });
     })();
     return () => abort.abort();
   }, [path, redirect, locale, round]);
 
-  const reload = useCallback(() => {
-    setLoaded({ state: "loading", data: null });
-    setRound((n) => n + 1);
+  const reload = useCallback((opts: { quiet?: boolean } = {}) => {
+    const quiet = opts.quiet === true;
+    if (!quiet) setLoaded({ state: "loading", data: null });
+    setRound((r) => ({ n: r.n + 1, quiet }));
   }, []);
 
   return { state: loaded.state, data: loaded.data, reload };

@@ -1,13 +1,12 @@
 /* A course card of "Minu koolitused": prototype B's dashboard .card (white, thin line, 22 px corners) with B .tag, the
    title in Jost, the session line as the course cards' meta (CourseCard .meta / .place), the next-step sentence, and one
-   site button (ui.btn / ui.btnOutline). The skeleton has the same box. Tokens only. */
+   site button (ui.btn / ui.btnOutline). The skeleton (Skeleton.module.css) has the same box. Tokens only. */
 
 .card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-  height: 100%;
   padding: 26px;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -91,59 +90,6 @@
 
 .card[data-past] .tag {
   color: var(--muted);
-}
-
-/* ---------- the loading skeleton ---------- */
-
-.skeleton {
-  gap: 0;
-}
-
-.boneTag,
-.boneTitle,
-.boneLine,
-.boneLineShort,
-.boneButton {
-  display: block;
-  border-radius: 99px;
-  background: var(--first);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.boneTag {
-  width: 84px;
-  height: 24px;
-}
-
-.boneTitle {
-  width: 70%;
-  height: 26px;
-  margin-top: 18px;
-  border-radius: 8px;
-}
-
-.boneLine {
-  width: 90%;
-  height: 14px;
-  margin-top: 26px;
-}
-
-.boneLineShort {
-  width: 55%;
-  height: 14px;
-  margin-top: 10px;
-}
-
-.boneButton {
-  width: 160px;
-  height: 49px;
-  margin-top: 24px;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.55;
-  }
 }
 
 @media (max-width: 640px) {

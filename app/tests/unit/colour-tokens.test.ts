@@ -21,12 +21,16 @@ const COURSE_CSS = [
   "src/app/[locale]/(site)/koolitused/[slug]/course.module.css",
   // the client account (phase 2a)
   "src/components/account/LoginForm.module.css",
-  "src/components/account/AccountGate.module.css",
+  "src/components/account/AccountLoader.module.css",
   "src/components/account/AccountShell.module.css",
   "src/components/account/CoursesTab.module.css",
   "src/components/account/AccountCourseCard.module.css",
+  "src/components/account/Skeleton.module.css",
   "src/components/account/PrepaymentInfo.module.css",
   "src/components/account/ChangeRequestDialog.module.css",
+  // the site's modal dialog (the campaign popup and the account's change request)
+  "src/components/ui/modal.module.css",
+  "src/components/site/CampaignPopup.module.css",
 ];
 
 const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""); // comments aside

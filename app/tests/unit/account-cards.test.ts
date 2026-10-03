@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  cardKey, cardTag, filterCards, firstName, hasPrepayment, isPastCard, nextStep, paymentReference, showFilters, sortCards,
+  cardKey, cardTag, cardTitle, cardWhen, filterCards, firstName, hasPrepayment, isPastCard, nextStep, paymentReference, showFilters, sortCards,
   type AccountCard, type ContactCard, type EcourseCard, type IndividualCard, type PrepaymentInfo, type RequestCard, type WaitlistCard,
 } from "@/domain/account-cards";
 import { fill } from "@/i18n/format";
@@ -64,10 +64,16 @@ describe("nextStep: one sentence and at most one button for every state of a car
     expect(nextStep(contact({ paymentChoice: "full", paidCents: 10000 }), NOW, PAY).vars).toEqual({ amount: "250 €" });
   });
 
-  test("contact, awaiting, no prepayment info: invoice (none, or every field empty)", () => {
+  test("contact, awaiting, no usable prepayment info: invoice (none, every field empty, or no receiver or no IBAN)", () => {
     const want = { key: "invoice", vars: {}, action: { kind: "none" } };
     expect(nextStep(contact(), NOW, null)).toEqual(want);
     expect(nextStep(contact(), NOW, { receiver: "", iban: " ", bank: "", referencePrefix: "" })).toEqual(want);
+    // a setting filled in only partly cannot be followed: Maria sends an invoice
+    expect(nextStep(contact(), NOW, { receiver: "", iban: "", bank: "Swedbank", referencePrefix: "" })).toEqual(want);
+    expect(nextStep(contact(), NOW, { ...PAY, iban: "" })).toEqual(want);
+    expect(nextStep(contact(), NOW, { ...PAY, receiver: " " })).toEqual(want);
+    // receiver and IBAN are enough
+    expect(nextStep(contact(), NOW, { receiver: "MS LAB OÜ", iban: "EE00", bank: "", referencePrefix: "" }).key).toBe("pay");
   });
 
   test("contact, awaiting, no price to measure by: invoice, whatever the instructions say", () => {
@@ -84,18 +90,36 @@ describe("nextStep: one sentence and at most one button for every state of a car
     });
   });
 
-  test("contact, confirmed, paid in full: where and when to meet (Estonian time), and the change button", () => {
+  test("contact, confirmed, paid in full: confirmed (the card's own line says when and where), and the change button", () => {
     expect(nextStep(contact({ status: "confirmed", paidCents: 35000 }), NOW, PAY)).toEqual({
-      key: "confirmed", vars: { date: "14.11", time: "10:00", city: "Pärnu" }, action: { kind: "changeRequest", registrationId: 7 },
+      key: "confirmed", vars: {}, action: { kind: "changeRequest", registrationId: 7 },
     });
     // paid more than the price (a correction in the admin) is still "in full"; a course without a price has no rest
     expect(nextStep(contact({ status: "confirmed", paidCents: 40000 }), NOW, PAY).key).toBe("confirmed");
     expect(nextStep(contact({ status: "confirmed", priceCents: null }), NOW, PAY).key).toBe("confirmed");
   });
 
-  test("a time in summer is Estonian summer time (UTC+3)", () => {
+  test("cardWhen: the session's date and time in Estonian time (summer UTC+3, winter UTC+2) and its place", () => {
     const summer = contact({ status: "confirmed", paidCents: 35000, session: { startsAt: "2027-06-05T07:00:00.000Z", city: "Tartu", venue: "", cancelled: false } });
-    expect(nextStep(summer, NOW, PAY).vars).toEqual({ date: "05.06", time: "10:00", city: "Tartu" });
+    expect(cardWhen(summer, "et")).toEqual({ time: "05.06.2027 · 10:00", place: "Tartu" });
+    expect(cardWhen(contact({ session: { startsAt: FUTURE, city: "Pärnu", venue: "Salong", cancelled: false } }), "ru")).toEqual({ time: "14.11.2026 · 10:00", place: "Pärnu, Salong" });
+    expect(cardWhen(waitlist(), "et")).toEqual({ time: "14.11.2026 · 10:00", place: "Pärnu" });
+    expect(cardWhen(waitlist({ session: null }), "et")).toBeNull();
+    expect(cardWhen(individual(), "et")).toEqual({ time: "november", place: "" });
+    expect(cardWhen(individual({ preferredPeriod: " " }), "et")).toBeNull();
+    expect(cardWhen(request(), "et")).toEqual({ time: "E, K", place: "" });
+    expect(cardWhen(request({ detail: "" }), "et")).toBeNull();
+    expect(cardWhen(ecourse(), "et")).toBeNull();
+  });
+
+  test("cardTitle: the course or the package in the page's language; a plain name when it is gone", () => {
+    const untitled = { individual: "Individuaalkoolitus", practice: "Praktika", course: "Koolitus" };
+    expect(cardTitle(contact(), "ru", untitled)).toBe("Ламинирование бровей");
+    expect(cardTitle(ecourse(), "et", untitled)).toBe("Kulmude lamineerimine");
+    expect(cardTitle(request(), "ru", untitled)).toBe("MINI"); // no Russian name: the Estonian one
+    expect(cardTitle(request({ title: null }), "et", untitled)).toBe("Praktika");
+    expect(cardTitle(request({ title: null, requestKind: "individual" }), "et", untitled)).toBe("Individuaalkoolitus");
+    expect(cardTitle(waitlist({ course: null }), "et", untitled)).toBe("Koolitus");
   });
 
   test("individual (a registration without a session): Maria agrees the time", () => {
@@ -145,7 +169,7 @@ describe("nextStep formats the vars for the locale it is given", () => {
     const paid = contact({ status: "confirmed", paidCents: 17500 });
     const full = contact({ status: "confirmed", paidCents: 35000 });
     expect(nextStep(paid, NOW, PAY, "ru").vars).toEqual({ rest: "175 €" });
-    expect(nextStep(full, NOW, PAY, "ru").vars).toEqual({ date: "14.11", time: "10:00", city: "Pärnu" });
+    expect(nextStep(full, NOW, PAY, "ru").vars).toEqual({});
     expect(nextStep(ecourse(), NOW, PAY, "ru").vars).toEqual({ date: "22.03.2027" });
     expect(nextStep(full, NOW, PAY)).toEqual(nextStep(full, NOW, PAY, "et"));
   });
@@ -172,10 +196,13 @@ describe("nextStep formats the vars for the locale it is given", () => {
 });
 
 describe("hasPrepayment", () => {
-  test("any filled field counts; null and blanks do not", () => {
+  test("the receiver and the IBAN are both needed; the bank and the prefix are not", () => {
     expect(hasPrepayment(null)).toBe(false);
     expect(hasPrepayment({ receiver: "", iban: "  ", bank: "", referencePrefix: "" })).toBe(false);
-    expect(hasPrepayment({ receiver: "", iban: "EE00", bank: "", referencePrefix: "" })).toBe(true);
+    expect(hasPrepayment({ receiver: "", iban: "EE00", bank: "", referencePrefix: "" })).toBe(false);
+    expect(hasPrepayment({ receiver: "MS LAB OÜ", iban: "", bank: "Swedbank", referencePrefix: "MS" })).toBe(false);
+    expect(hasPrepayment({ receiver: "", iban: "", bank: "Swedbank", referencePrefix: "" })).toBe(false);
+    expect(hasPrepayment({ receiver: "MS LAB OÜ", iban: "EE00", bank: "", referencePrefix: "" })).toBe(true);
     expect(hasPrepayment(PAY)).toBe(true);
   });
 });

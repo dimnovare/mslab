@@ -36,39 +36,13 @@
   list-style: none;
 }
 
+/* Each card as tall as its own content: opening one card's prepayment instructions does not stretch the others. */
 .item {
   min-width: 0;
-  height: 100%;
 }
 
 .empty {
   margin-top: 28px;
-}
-
-/* the loading greeting */
-.boneTitle,
-.boneLead {
-  display: block;
-  border-radius: 10px;
-  background: var(--first);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.boneTitle {
-  width: min(320px, 70%);
-  height: clamp(36px, 4vw, 50px);
-}
-
-.boneLead {
-  width: min(220px, 50%);
-  height: 16px;
-  margin-top: 14px;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.55;
-  }
 }
 
 @media (max-width: 1180px) {
@@ -98,7 +72,6 @@
     grid-template-columns: none;
     grid-auto-columns: min(86%, 340px);
     grid-auto-flow: column;
-    align-items: stretch;
     gap: 14px;
     margin-right: calc(-1 * var(--page));
     margin-left: calc(-1 * var(--page));
@@ -112,6 +85,11 @@
 
   .swipe::-webkit-scrollbar {
     display: none;
+  }
+
+  /* focusable, so the row scrolls with the arrow keys too (BlogCarousel .track) */
+  .swipe:focus-visible {
+    outline-offset: -2px;
   }
 
   .swipe .item {

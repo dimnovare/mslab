@@ -1,0 +1,5 @@
+/* While an account page's data loads (or the login page opens): the height of a Notice, so the footer does not jump.
+   A page that brings its own skeleton (the dashboard's cards) is as tall as that instead. */
+.wait {
+  min-height: 52vh;
+}

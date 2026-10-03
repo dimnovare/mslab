@@ -1,87 +1,11 @@
-/* "Tühista või muuda aega": the campaign popup's dialog (CampaignPopup.module.css — prototype D's dimmed, blurred page,
-   a card rising into place, ✕ in its corner; under 640 px a bottom sheet with rounded top corners) holding a short form
-   in the site's parts: B .field for the message, ui.btn for "Saada", the two choices as big B-style tiles. Nothing moves
-   with reduced motion. Tokens only. */
-
-.dialog[open] {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  max-height: none;
-  margin: 0;
-  padding: 20px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  overflow: hidden;
-}
-
-.dialog::backdrop {
-  background: transparent;
-}
-
-.backdrop {
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--ink) 42%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity 0.4s var(--ease);
-}
+/* "Tühista või muuda aega" in the site's modal dialog (components/ui/modal.module.css — the campaign popup's: the dimmed,
+   blurred page, the panel rising into place, ✕, a bottom sheet under 640 px), holding a short form in the site's parts:
+   B .field for the message, ui.btn for "Saada", the two choices as big B-style tiles. Tokens only. */
 
 .panel {
-  position: relative;
   width: min(520px, 100%);
-  max-height: calc(100vh - 40px);
-  max-height: calc(100dvh - 40px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 32px;
-  border-radius: var(--r-tile);
   background: var(--paper);
-  box-shadow: 0 40px 90px -30px color-mix(in srgb, var(--ink) 50%, transparent);
-  opacity: 0;
-  transform: translateY(16px) scale(0.98);
-  transition:
-    opacity 0.45s var(--ease),
-    transform 0.45s var(--ease);
-}
-
-.dialog[data-on] .backdrop {
-  opacity: 1;
-}
-
-.dialog[data-on] .panel {
-  opacity: 1;
-  transform: none;
-}
-
-/* CampaignPopup .close */
-.close {
-  position: absolute;
-  z-index: 2;
-  top: 16px;
-  right: 16px;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--paper);
-  color: var(--ink);
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-
-.close:hover {
-  border-color: var(--fog);
 }
 
 .title {
@@ -202,28 +126,8 @@
 }
 
 @media (max-width: 640px) {
-  .dialog[open] {
-    place-items: end center;
-    padding: 0;
-  }
-
   .panel {
     width: 100%;
-    max-height: 92vh;
-    max-height: 92dvh;
     padding: 28px 22px calc(22px + env(safe-area-inset-bottom));
-    border-radius: 28px 28px 0 0;
-    transform: translateY(40px);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .backdrop,
-  .panel {
-    transition: none;
-  }
-
-  .panel {
-    transform: none;
   }
 }

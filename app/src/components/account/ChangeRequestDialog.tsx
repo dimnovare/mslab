@@ -3,10 +3,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "@/components/site/Icon";
 import ui from "@/components/site/ui.module.css";
-import type { ContactCard } from "@/domain/account-cards";
+import modal from "@/components/ui/modal.module.css";
+import { cardTitle, cardWhen, type ContactCard } from "@/domain/account-cards";
 import type { Locale } from "@/i18n/locales";
 import { lockPageScroll, trapTab } from "@/lib/modal";
-import { cardTitle, cardWhen } from "./AccountCourseCard";
 import type { CoursesTexts } from "./texts";
 import styles from "./ChangeRequestDialog.module.css";
 
@@ -115,7 +115,7 @@ export function ChangeRequestDialog({
   return (
     <dialog
       ref={ref}
-      className={styles.dialog}
+      className={modal.dialog}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -133,13 +133,13 @@ export function ChangeRequestDialog({
         if ((e.target as HTMLElement).hasAttribute("data-change-backdrop")) close();
       }}
     >
-      <div className={styles.backdrop} data-change-backdrop="" aria-hidden="true" />
-      <div className={styles.panel} data-fab-avoid="">
-        <button type="button" className={styles.close} aria-label={r.close} onClick={close}>
+      <div className={modal.backdrop} data-change-backdrop="" aria-hidden="true" />
+      <div className={`${modal.panel} ${styles.panel}`} data-fab-avoid="">
+        <button type="button" className={modal.close} aria-label={r.close} onClick={close}>
           <Icon name="close" size={20} />
         </button>
         <h2 id={titleId} className={styles.title}>
-          {cardTitle(card, locale, t)}
+          {cardTitle(card, locale, t.untitled)}
         </h2>
         {when && (
           <p className={styles.when}>

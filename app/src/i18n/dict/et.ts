@@ -416,7 +416,8 @@ export const et = {
       kept: "Sinu registreeringud jäävad Mariale alles.",
     },
     // The one sentence on each course card (domain/account-cards.ts nextStep): `{amount}` and `{rest}` are euros ("175 €"),
-    // `{date}` a day ("14.11", for the access "22.03.2027"), `{time}` "10:00", `{city}` the session's city.
+    // `{date}` the last day of an e-course access ("22.03.2027"). A session's date, time and place are on the card's own
+    // line, so the sentences do not repeat them.
     next: {
       cancelled: "Registreering on tühistatud.",
       done: "Koolitus on toimunud. Aitäh!",
@@ -424,7 +425,7 @@ export const et = {
       invoice: "Maria saadab sulle arve ettemaksu tasumiseks.",
       confirming: "Makse on laekunud. Maria kinnitab su koha.",
       confirmedRest: "Koht on kinnitatud. Ülejäänud {rest} tasud koolituspäeval.",
-      confirmed: "Koht on kinnitatud. Kohtume {date} kell {time}, {city}.",
+      confirmed: "Koht on kinnitatud.",
       individualPending: "Maria võtab sinuga ühendust, et aeg kokku leppida.",
       requestNew: "Päring on saadetud. Maria vastab peagi.",
       requestDone: "Maria on päringule vastanud.",
@@ -439,7 +440,7 @@ export const et = {
       courses: "Minu koolitused",
       favourites: "Lemmikud",
       details: "Minu andmed",
-      menu: "Minu konto",
+      menu: "Konto menüü",
       logout: "Logi välja",
       logoutFailed: "Väljalogimine ei õnnestunud. Proovi uuesti.",
     },
@@ -464,8 +465,6 @@ export const et = {
       empty: "Sul ei ole veel koolitusi.",
       browse: "Vaata koolitusi",
       loading: "Laadin koolitusi…",
-      loadError: "Ei õnnestunud laadida. Proovi uuesti.",
-      retry: "Proovi uuesti",
       // where to pay the prepayment (components/account/PrepaymentInfo.tsx); "Selgitus" is the bank transfer's explanation field
       payment: {
         receiver: "Saaja",
@@ -521,12 +520,13 @@ export const et = {
       rate: "Liiga palju katseid. Proovi mõne minuti pärast uuesti.",
       server: "Midagi läks valesti. Proovi uuesti.",
     },
-    // The account pages when the visitor is not signed in there (components/account/AccountGate.tsx): another device
-    // signed in (one device only), or the account could not be loaded.
-    signedOut: {
+    // Every account page while its data loads (components/account/AccountLoader.tsx): another device signed in (one
+    // device only), or the data could not be loaded.
+    loader: {
       replaced: "Sinu konto avati teises seadmes",
       sendCode: "Saada uus kood",
-      error: "Midagi läks valesti.",
+      loading: "Laadin…",
+      loadError: "Ei õnnestunud laadida.",
       retry: "Proovi uuesti",
     },
   },

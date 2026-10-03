@@ -1,21 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ui from "@/components/site/ui.module.css";
 import { paymentReference, type PrepaymentInfo as PaySettings } from "@/domain/account-cards";
 import type { CoursesTexts } from "./texts";
 import styles from "./PrepaymentInfo.module.css";
 
 type Row = { key: string; label: string; value: string; copy?: boolean };
 
-/** How long "Kopeeritud" / "Tekst on märgitud" stays. */
-const STATUS_MS = 4000;
+/** How long the pressed "Kopeeri" says "Kopeeritud ✓". */
+const COPIED_MS = 2000;
 
 /**
  * Where to pay the prepayment, opened in place under the card's "Vaata juhiseid" (spec 2.1 rule 5): receiver, IBAN, bank,
  * the amount (the card sentence's own, as nextStep formatted it) and the explanation `{referencePrefix}{registrationId}`,
  * then "Pärast makset kinnitab Maria su koha." A field the admin left empty is left out. IBAN and explanation have
- * "Kopeeri": the clipboard, or where the browser gives none, the text is selected for the student to copy; either way a
- * short line says what happened (aria-live).
+ * "Kopeeri": copied, the pressed button itself says "Kopeeritud ✓" for a moment (both words share one cell, so it keeps
+ * its width); where the browser gives no clipboard, the text is selected and a line says to copy it. A hidden live
+ * region tells a screen reader either way.
  */
 export function PrepaymentInfo({
   id,
@@ -30,7 +32,9 @@ export function PrepaymentInfo({
   amount: string | undefined;
   t: CoursesTexts["payment"];
 }) {
-  const [status, setStatus] = useState<{ text: string; selected: boolean } | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [selected, setSelected] = useState(false);
+  const [status, setStatus] = useState("");
   const timer = useRef(0);
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -42,22 +46,22 @@ export function PrepaymentInfo({
     { key: "reference", label: t.reference, value: paymentReference(pay, registrationId), copy: true },
   ].filter((row) => row.value.trim() !== "");
 
-  const show = (text: string, selected: boolean) => {
-    setStatus({ text, selected });
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setStatus(null), STATUS_MS);
-  };
-
   const copy = async (row: Row, value: HTMLElement | null) => {
+    window.clearTimeout(timer.current);
     try {
       if (!navigator.clipboard?.writeText) throw new Error("no clipboard");
       await navigator.clipboard.writeText(row.value);
-      show(t.copied, false);
+      setCopied(row.key);
+      setSelected(false);
+      setStatus(`${t.copied}: ${row.label}`);
+      timer.current = window.setTimeout(() => setCopied(null), COPIED_MS);
     } catch {
       // No clipboard (an old browser, an insecure page, a refusal): select the text for the student to copy.
       const selection = window.getSelection();
       if (value && selection) selection.selectAllChildren(value);
-      show(t.selected, true);
+      setCopied(null);
+      setSelected(true);
+      setStatus(t.selected);
     }
   };
 
@@ -78,8 +82,10 @@ export function PrepaymentInfo({
                   onClick={(e) => copy(row, e.currentTarget.parentElement?.querySelector<HTMLElement>("[data-pay-value]") ?? null)}
                   aria-label={`${t.copy}: ${row.label}`}
                   data-pay-copy={row.key}
+                  data-copied={copied === row.key || undefined}
                 >
-                  {t.copy}
+                  <span aria-hidden={copied === row.key}>{t.copy}</span>
+                  <span aria-hidden={copied !== row.key}>{t.copied} ✓</span>
                 </button>
               )}
             </dd>
@@ -87,8 +93,13 @@ export function PrepaymentInfo({
         ))}
       </dl>
       <p className={styles.after}>{t.after}</p>
-      <p className={status?.selected ? styles.selected : styles.status} role="status" data-pay-status="">
-        {status?.text ?? ""}
+      {selected && (
+        <p className={styles.selected} data-pay-selected="">
+          {t.selected}
+        </p>
+      )}
+      <p className={ui.srOnly} role="status" data-pay-status="">
+        {status}
       </p>
     </div>
   );
