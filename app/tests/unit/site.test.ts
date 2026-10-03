@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { LINK_ORIGINS, hostOrigin, isLocalHost, linkBase, linkOrigins, requestOrigin } from "@/server/site";
+import { hostOrigin, isLocalHost, linkBase, linkOrigins, requestOrigin } from "@/server/site";
+
+// What the allow-list holds without any Vercel variable: the public domain, local development and the old domains.
+const FIXED = ["https://mslab.diipsolutions.eu", "http://localhost:3000", "https://mslab.ee", "https://www.mslab.ee"];
 
 // The Vercel variables name this deployment's own hosts; these tests run on a developer machine or in CI, so start from none.
 const VERCEL_HOSTS = ["VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_BRANCH_URL", "VERCEL_URL"];
@@ -14,9 +17,8 @@ describe("links in e-mails and Telegram", () => {
   const SITE = "https://mslab.diipsolutions.eu/";
 
   test("an allow-listed request origin is used", () => {
-    expect(LINK_ORIGINS).toEqual(["https://mslab.diipsolutions.eu", "http://localhost:3000", "https://mslab.ee", "https://www.mslab.ee"]);
-    expect(linkOrigins()).toEqual(LINK_ORIGINS); // no Vercel variable set: the fixed list, nothing more
-    for (const o of LINK_ORIGINS) expect(linkBase(o, SITE)).toBe(o);
+    expect(linkOrigins()).toEqual(FIXED); // no Vercel variable set: the fixed list, nothing more
+    for (const o of linkOrigins()) expect(linkBase(o, SITE)).toBe(o);
     expect(linkBase("https://mslab.ee/kontakt", SITE)).toBe("https://mslab.ee");
   });
 
@@ -40,7 +42,7 @@ describe("the Vercel hosts of this deployment", () => {
 
   test("the production URL: a request from it gets its own origin, a forged *.vercel.app gets SITE_URL", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "mslab-x.vercel.app");
-    expect(linkOrigins()).toEqual([...LINK_ORIGINS, "https://mslab-x.vercel.app"]);
+    expect(linkOrigins()).toEqual([...FIXED, "https://mslab-x.vercel.app"]);
     expect(linkBase("https://mslab-x.vercel.app", SITE)).toBe("https://mslab-x.vercel.app");
     expect(linkBase("https://mslab-x.vercel.app/admin", SITE)).toBe("https://mslab-x.vercel.app");
     expect(linkBase(hostOrigin(new Headers({ host: "mslab-x.vercel.app" })), SITE)).toBe("https://mslab-x.vercel.app");
@@ -55,16 +57,16 @@ describe("the Vercel hosts of this deployment", () => {
     vi.stubEnv("VERCEL_BRANCH_URL", "mslab-git-feat-x.vercel.app");
     vi.stubEnv("VERCEL_URL", "mslab-abc123.vercel.app");
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
-    expect(linkOrigins()).toEqual([...LINK_ORIGINS, "https://mslab-git-feat-x.vercel.app", "https://mslab-abc123.vercel.app"]);
+    expect(linkOrigins()).toEqual([...FIXED, "https://mslab-git-feat-x.vercel.app", "https://mslab-abc123.vercel.app"]);
     expect(linkBase("https://mslab-git-feat-x.vercel.app", SITE)).toBe("https://mslab-git-feat-x.vercel.app");
     expect(linkBase("https://mslab-abc123.vercel.app", SITE)).toBe("https://mslab-abc123.vercel.app");
     vi.stubEnv("VERCEL_URL", "   ");
-    expect(linkOrigins()).toEqual([...LINK_ORIGINS, "https://mslab-git-feat-x.vercel.app"]);
+    expect(linkOrigins()).toEqual([...FIXED, "https://mslab-git-feat-x.vercel.app"]);
     expect(linkBase("https://mslab-abc123.vercel.app", SITE)).toBe(SITE);
   });
 
   test("with none set nothing changes: no *.vercel.app host is accepted, and a variable never leaks into the next test", () => {
-    expect(linkOrigins()).toEqual(LINK_ORIGINS);
+    expect(linkOrigins()).toEqual(FIXED);
     expect(linkBase("https://mslab-x.vercel.app", SITE)).toBe(SITE);
     expect(process.env.VERCEL_PROJECT_PRODUCTION_URL).toBeUndefined();
   });
@@ -81,12 +83,12 @@ describe("the Vercel hosts of this deployment", () => {
   test("a value that is not a host is left out instead of breaking the list", () => {
     vi.stubEnv("VERCEL_URL", "bad host with spaces");
     vi.stubEnv("VERCEL_BRANCH_URL", "mslab-b.vercel.app");
-    expect(linkOrigins()).toEqual([...LINK_ORIGINS, "https://mslab-b.vercel.app"]);
+    expect(linkOrigins()).toEqual([...FIXED, "https://mslab-b.vercel.app"]);
   });
 
   test("an explicit source replaces process.env (never the request): headers cannot add to it", () => {
-    expect(linkOrigins({ VERCEL_URL: "mslab-s.vercel.app" })).toEqual([...LINK_ORIGINS, "https://mslab-s.vercel.app"]);
-    expect(linkOrigins({})).toEqual(LINK_ORIGINS);
+    expect(linkOrigins({ VERCEL_URL: "mslab-s.vercel.app" })).toEqual([...FIXED, "https://mslab-s.vercel.app"]);
+    expect(linkOrigins({})).toEqual(FIXED);
   });
 });
 
