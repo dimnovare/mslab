@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { HEAD } from "@/app/api/konto/[[...path]]/route";
 import type { Db } from "@/db/client";
 import { loginMail, verifyLink } from "@/server/account-mail";
 import { accountResponse, clearedCookies, handleAccountApi, sessionCookies, type AccountDeps } from "@/server/account-api";
@@ -11,8 +14,9 @@ import { fakeKv } from "../fakes";
 
 const BASE = "https://mslab.example";
 
-/** A database nobody may touch: any use throws, so a test that gets its answer anyway never reached the database. */
-const noDb = new Proxy({}, { get: () => { throw new Error("the database was used"); } }) as unknown as Db;
+/** A database nobody may touch: any use throws `message`, so a test that gets its answer anyway never reached the database. */
+const failingDb = (message: string) => new Proxy({}, { get: () => { throw new Error(message); } }) as unknown as Db;
+const noDb = failingDb("the database was used");
 
 function deps(over: Partial<AccountDeps> = {}): AccountDeps {
   return {
@@ -65,6 +69,16 @@ describe("routing and the cross-site check", () => {
     for (const r of [post("/login", {}, { origin: BASE }), post("/login", {})]) expect((await handleAccountApi(r, deps()))!.status).toBe(400);
     const res = (await handleAccountApi(req("/me", { headers: { origin: "https://evil.example" } }), deps()))!;
     expect(res.status).toBe(401); // reads are not cross-site-checked: the cookie is SameSite=Lax and the answer is not readable by other sites
+  });
+});
+
+describe("the route's HEAD", () => {
+  test("is refused with 405 (Allow: GET), never run as a GET that would use up a login link", async () => {
+    const res = HEAD();
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("GET");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(await res.text()).toBe("");
   });
 });
 
@@ -157,22 +171,25 @@ describe("bad input is a 400, never a 500, and never reaches the database", () =
 });
 
 describe("failures", () => {
-  test("a failing database is a JSON 500 that names no address and no value", async () => {
-    const res = (await handleAccountApi(post("/login", { email: "kati@example.test" }), deps()))!;
+  test("a failing database is a JSON 500 that names no address and no value (the error's own message does, and is not logged)", async () => {
+    const res = (await handleAccountApi(post("/login", { email: "kati@example.test" }), deps({ db: failingDb("insert failed for kati@example.test") })))!;
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ ok: false, error: "server" });
     const logged = vi.mocked(console.error).mock.calls.flat().join("\n");
     expect(logged).toContain("[account] request failed");
-    expect(logged).not.toMatch(/kati|example\.test|database was used/);
+    expect(logged).not.toMatch(/kati|example\.test|insert failed/);
   });
 
   test("verify with a failing database goes to the login page with ?viga=server, not a JSON page", async () => {
     const token = "A".repeat(43);
-    const res = (await handleAccountApi(req(`/verify?t=${token}`), deps()))!;
+    const res = (await handleAccountApi(req(`/verify?t=${token}`), deps({ db: failingDb(`update failed for token ${token}`) })))!;
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene?viga=server`);
     expect(res.headers.getSetCookie()).toEqual([]);
-    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toContain(token);
+    const logged = vi.mocked(console.error).mock.calls.flat().join("\n"); // the error's message holds the token; only the class is logged
+    expect(logged).toContain("[account] verify failed");
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain("update failed");
   });
 });
 
@@ -216,29 +233,33 @@ describe("verify", () => {
 
 describe("login e-mail", () => {
   const TOKEN = "tok-en_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const LINK = `${BASE}/api/konto/verify?t=${TOKEN}`;
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   test("verifyLink: the site address, the path, the token; a trailing slash is not doubled", () => {
-    expect(verifyLink(BASE, TOKEN)).toBe(`${BASE}/api/konto/verify?t=${TOKEN}`);
-    expect(verifyLink(`${BASE}/`, TOKEN)).toBe(`${BASE}/api/konto/verify?t=${TOKEN}`);
+    expect(verifyLink(BASE, TOKEN)).toBe(LINK);
+    expect(verifyLink(`${BASE}/`, TOKEN)).toBe(LINK);
     expect(verifyLink(BASE, "a b&c")).toBe(`${BASE}/api/konto/verify?t=a%20b%26c`);
   });
 
-  test("Estonian: the code in the subject and alone on a line, the link, 30 minutes, the ignore line", () => {
+  test("Estonian text: the code in the subject and alone on a line, the link, 30 minutes, the ignore line", () => {
     const mail = loginMail(BASE, "kati@example.test", TOKEN, "042917", "et");
     expect(mail.to).toBe("kati@example.test");
     expect(mail.subject).toBe("042917 — MS LAB sisselogimiskood");
-    expect(mail.text.split("\n")).toContain("042917");
-    expect(mail.text).toContain(`${BASE}/api/konto/verify?t=${TOKEN}`);
-    expect(mail.text).toContain("Kood ja link kehtivad 30 minutit.");
-    expect(mail.text).toContain("Kui sa ei palunud sisselogimist, võid selle kirja kustutada.");
-    expect(mail.text).not.toMatch(/\{\w+\}/);
+    expect(mail.text).toBe(
+      [
+        "Tere!", "", "Sinu sisselogimiskood:", "", "042917", "",
+        "Sisesta see kood lehel, kus alustasid sisselogimist. Või ava see link, et logida sisse:", LINK, "",
+        "Kood ja link kehtivad 30 minutit.", "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.", "", "MS LAB Koolituskeskus",
+      ].join("\n"),
+    );
   });
 
-  test("Russian: the same parts in Russian", () => {
+  test("Russian text: the same parts in Russian", () => {
     const mail = loginMail(BASE, "kati@example.test", TOKEN, "042917", "ru");
     expect(mail.subject).toBe("042917 — код входа MS LAB");
     expect(mail.text.split("\n")).toContain("042917");
-    expect(mail.text).toContain(`${BASE}/api/konto/verify?t=${TOKEN}`);
+    expect(mail.text).toContain(LINK);
     expect(mail.text).toMatch(/30 минут/);
     expect(mail.text).toMatch(/[А-Яа-я]/);
     expect(mail.text).not.toMatch(/\{\w+\}/);
@@ -249,5 +270,61 @@ describe("login e-mail", () => {
       expect(loginMail(BASE, "kati@example.test", TOKEN, code, "et").subject).toMatch(new RegExp(`^${code} `));
       expect(loginMail(BASE, "kati@example.test", TOKEN, code, "ru").subject).toMatch(new RegExp(`^${code} `));
     }
+  });
+
+  test.each([
+    ["et", "Logi sisse", "Kood ja link kehtivad 30 minutit.", "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.", "Tere!"],
+    ["ru", "Войти", "Код и ссылка действуют 30 минут.", "Если вы не запрашивали вход, просто удалите это письмо.", "Здравствуйте!"],
+  ] as const)("%s HTML: the code large on its own line, one button to the link, the link written out, the 30 minutes and the delete line", (locale, button, valid, ignore, greeting) => {
+    const html = loginMail(BASE, "kati@example.test", TOKEN, "042917", locale).html!;
+    expect(html).toBeDefined();
+    expect(html.startsWith(`<!doctype html><html lang="${locale}">`)).toBe(true);
+    expect(html).toContain("<title>042917 — ");
+    expect(html).toContain(greeting);
+    expect(html).toContain(valid);
+    expect(html).toContain(ignore);
+    // the code: its own element, large, letter-spaced
+    expect(html).toMatch(/<div style="[^"]*font:600 32px[^"]*letter-spacing:8px[^"]*">042917<\/div>/);
+    // one button: an anchor to the verify URL, labelled, 48 px tall (at least 44), ink pill with white text
+    const buttons = [...html.matchAll(/<a href="([^"]*)" style="([^"]*)">([^<]*)<\/a>/g)].filter((m) => m[3] === button);
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0][1]).toBe(LINK);
+    expect(buttons[0][2]).toContain("line-height:48px");
+    expect(buttons[0][2]).toContain("color:#ffffff");
+    expect(html).toContain('bgcolor="#222222"');
+    // the raw URL below the button, small, for clients that block buttons
+    expect(html).toMatch(new RegExp(`font:400 12px/1\\.5[^"]*"><a href="${escapeRe(LINK)}"[^>]*>${escapeRe(LINK)}</a>`));
+    expect(html.indexOf(`>${LINK}</a>`)).toBeGreaterThan(html.indexOf(`>${button}</a>`));
+    expect(html).not.toMatch(/\{\w+\}/);
+  });
+
+  test("HTML: tables and inline styles only: no images, scripts, external CSS, web fonts or URLs but the link; the site's font stack", () => {
+    for (const locale of ["et", "ru"] as const) {
+      const html = loginMail(BASE, "kati@example.test", TOKEN, "042917", locale).html!;
+      expect(html).not.toMatch(/<(img|script|link|style|iframe|video|svg)\b/i);
+      expect(html).not.toMatch(/@import|@font-face|url\(|src=/i);
+      expect(html.match(/https?:\/\/[^"'<\s]+/g)!.every((u) => u === LINK)).toBe(true);
+      expect(html).toContain("font:600 16px/48px Jost, Manrope, Arial, sans-serif");
+    }
+  });
+
+  test("HTML: every colour is one of the site's tokens (src/styles/tokens.css)", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles/tokens.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const tokens = new Set(css.match(/#[0-9a-f]{6}\b/gi)!.map((c) => c.toLowerCase()));
+    const used = new Set(loginMail(BASE, "kati@example.test", TOKEN, "042917", "et").html!.match(/#[0-9a-f]{3,8}\b/gi)!.map((c) => c.toLowerCase()));
+    expect(used.size).toBeGreaterThan(3);
+    for (const colour of used) expect(tokens.has(colour), colour).toBe(true);
+  });
+
+  test("HTML: every value is escaped (the address of the link, the token, the code)", () => {
+    const html = loginMail(`https://x.example/a?b=1&c="2"<i>`, "kati@example.test", `t&<>"'k`, "<b>&", "et").html!;
+    expect(html).not.toContain("<b>");
+    expect(html).not.toContain("<i>");
+    expect(html).toContain("&lt;b&gt;&amp;"); // the code
+    expect(html).toContain('href="https://x.example/a?b=1&amp;c=&quot;2&quot;&lt;i&gt;/api/konto/verify?t=t%26%3C%3E%22&#39;k"'); // encodeURIComponent leaves the apostrophe, the escape takes it
+    // an attribute value cannot end early: every href is one quoted string without a quote or a tag in it
+    const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+    expect(hrefs).toHaveLength(2);
+    for (const href of hrefs) expect(href).not.toMatch(/["<>]/);
   });
 });

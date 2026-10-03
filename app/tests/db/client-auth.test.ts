@@ -44,10 +44,25 @@ test("one device: a new login ends the other session with 'replaced'", async () 
   const a = await redeemClientLink(db, (await issueClientLogin(db, "kati@example.test", T0))!.token, T0);
   const b = await redeemClientLink(db, (await issueClientLogin(db, "kati@example.test", T0))!.token, later(1000));
   expect(await getClientSession(db, a!.sessionRaw, later(2000))).toEqual({ ended: "replaced" });
-  expect(await getClientSession(db, b!.sessionRaw, later(2000))).toEqual({ clientId: b!.clientId });
+  expect(await getClientSession(db, b!.sessionRaw, later(2000))).toEqual({ clientId: b!.clientId, renewed: false });
   expect(await db.select().from(clientSessions).where(isNull(clientSessions.endedAt))).toHaveLength(1);
   await endClientSession(db, b!.sessionRaw, later(3000));
   expect(await getClientSession(db, b!.sessionRaw, later(4000))).toEqual({ ended: "logout" });
+});
+
+test("a session is renewed on use, at most once a day, and says so (the caller then sends the cookies again)", async () => {
+  const db = await makeTestDb();
+  const day = 86_400_000;
+  const s = (await redeemClientLink(db, (await issueClientLogin(db, "kati@example.test", T0))!.token, T0))!;
+  const expiry = async () => (await db.select().from(clientSessions))[0].expiresAt.getTime();
+  expect(await expiry()).toBe(T0.getTime() + 180 * day);
+  expect(await getClientSession(db, s.sessionRaw, later(3_600_000))).toEqual({ clientId: s.clientId, renewed: false }); // within the first day
+  expect(await expiry()).toBe(T0.getTime() + 180 * day);
+  expect(await getClientSession(db, s.sessionRaw, later(100 * day))).toEqual({ clientId: s.clientId, renewed: true });
+  expect(await expiry()).toBe(T0.getTime() + 280 * day);
+  expect(await getClientSession(db, s.sessionRaw, later(100 * day + 3_600_000))).toEqual({ clientId: s.clientId, renewed: false }); // same day
+  expect(await getClientSession(db, s.sessionRaw, later(181 * day))).toEqual({ clientId: s.clientId, renewed: true }); // past the first 180 days
+  expect(await getClientSession(db, s.sessionRaw, later(181 * day + 280 * day))).toEqual({ ended: "expired" });
 });
 
 test("at most 3 live logins per address", async () => {

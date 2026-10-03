@@ -393,25 +393,20 @@ export const et = {
     accountSoon: "Õppija konto avaneb peagi",
   },
 
-  // The client account (server/account-mail.ts). The login e-mail is plain text: {code} is the 6-digit code, {link} the sign-in link.
+  // The client account (server/account-mail.ts). The login e-mail has a plain-text and an HTML body, both put together
+  // from these parts: the greeting, the code intro, the 6-digit code, `useCode`, `orLink`, the sign-in link (the button
+  // in HTML), `valid`, `ignore` and the signature. {code} in the subject is the code.
   account: {
     mail: {
       subject: "{code} — MS LAB sisselogimiskood",
-      text: [
-        "Tere!",
-        "",
-        "Sinu sisselogimiskood:",
-        "",
-        "{code}",
-        "",
-        "Sisesta see kood lehel, kus alustasid sisselogimist. Või ava see link, et logida sisse:",
-        "{link}",
-        "",
-        "Kood ja link kehtivad 30 minutit.",
-        "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.",
-        "",
-        "MS LAB Koolituskeskus",
-      ].join("\n"),
+      greeting: "Tere!",
+      codeIntro: "Sinu sisselogimiskood:",
+      useCode: "Sisesta see kood lehel, kus alustasid sisselogimist.",
+      orLink: "Või ava see link, et logida sisse:",
+      button: "Logi sisse",
+      valid: "Kood ja link kehtivad 30 minutit.",
+      ignore: "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.",
+      signature: "MS LAB Koolituskeskus",
     },
   },
 

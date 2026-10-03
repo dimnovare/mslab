@@ -26,8 +26,7 @@ beforeEach(async () => {
   await db.delete(clientSessions);
   await db.delete(clients);
   await db.delete(mailQuota);
-  vi.spyOn(console, "info").mockImplementation(() => {});
-  vi.spyOn(console, "error").mockImplementation(() => {});
+  for (const method of ["info", "error", "log", "warn"] as const) vi.spyOn(console, method).mockImplementation(() => {});
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -95,7 +94,7 @@ const tokenOf = (link: string) => new URL(link).searchParams.get("t")!;
 /** Resend as the stub fetch sees it: the e-mails sent. */
 function resend(respond: () => Response = () => Response.json({ id: "email_1" })) {
   const f = stubFetch(respond);
-  return { mails: () => f.calls.filter((c) => c.url.includes("resend")).map((c) => c.body as { from: string; to: string; subject: string; text: string }), calls: f.calls };
+  return { mails: () => f.calls.filter((c) => c.url.includes("resend")).map((c) => c.body as { from: string; to: string; subject: string; text: string; html?: string }), calls: f.calls };
 }
 const codeOf = (mail: { text: string }) => mail.text.split("\n").find((l) => /^\d{6}$/.test(l))!;
 
@@ -183,6 +182,10 @@ describe("login outside development", () => {
     const code = codeOf(mail);
     expect(mail.subject).toBe(`${code} — MS LAB sisselogimiskood`);
     expect(mail.text).toContain(`${SITE}/api/konto/verify?t=`);
+    // the HTML body goes out with it: the same code, and the same link behind the button
+    expect(mail.html).toContain(`>${code}</div>`);
+    expect(mail.html).toContain(">Logi sisse</a>");
+    expect(mail.html).toContain(`href="${mail.text.match(/https:\/\/\S+/)![0]}"`);
     // the e-mailed code and the e-mailed link each sign in (the first one used wins)
     const link = new URL(mail.text.match(/https:\/\/\S+/)![0]);
     const signedIn = await call(deps, `${link.pathname.slice("/api/konto".length)}${link.search}`);
@@ -514,6 +517,31 @@ describe("logout and me", () => {
     expect(await res.json()).toEqual({ ok: false, reason: "expired" });
   });
 
+  test("the cookies are sent again when the session is renewed (at most once a day), so they outlive the first 180 days", async () => {
+    const day = 86_400_000;
+    const at = (days: number, extraMs = 0) => setup({ now: new Date(NOW.getTime() + days * day + extraMs) }).deps;
+    const cookie = await signIn(setup().deps);
+    const raw = rawOf(cookie);
+
+    const hour = await call(at(0, 3_600_000), "/me", { cookie });
+    expect(hour.status).toBe(200);
+    expect(hour.headers.getSetCookie()).toEqual([]); // not renewed within the first day
+
+    const d100 = await call(at(100), "/me", { cookie });
+    expect(d100.status).toBe(200);
+    expect(d100.headers.getSetCookie()).toEqual(sessionCookies(raw)); // both cookies, 180 days from now
+    expect((await sessions())[0].expiresAt).toEqual(new Date(NOW.getTime() + 280 * day));
+
+    const same = await call(at(100, 3_600_000), "/me", { cookie });
+    expect(same.status).toBe(200);
+    expect(same.headers.getSetCookie()).toEqual([]); // the same day: nothing to renew
+
+    const d181 = await call(at(181), "/me", { cookie }); // past the first 180 days: alive because day 100 renewed it
+    expect(d181.status).toBe(200);
+    expect(await d181.json()).toMatchObject({ ok: true, email: EMAIL });
+    expect(d181.headers.getSetCookie()).toEqual(sessionCookies(raw));
+  });
+
   test("an unknown session id is 401 { reason: \"none\" }", async () => {
     const { deps } = setup();
     const res = await call(deps, "/me", { cookie: `__Host-mslab_client=${"C".repeat(43)}` });
@@ -562,7 +590,7 @@ describe("logs hold no personal data", () => {
     await db.update(mailQuota).set({ sent: LOGIN_MAIL_DAILY_CAP });
     await call(deps, "/login", { body: { email: "other@example.com" } });
 
-    const logged = ["info", "error", "log", "warn"].flatMap((m) => (console as unknown as Record<string, { mock?: { calls: unknown[][] } }>)[m].mock?.calls ?? []).flat().join("\n");
+    const logged = (["info", "error", "log", "warn"] as const).flatMap((m) => vi.mocked(console[m]).mock.calls).flat().join("\n");
     expect(logged.length).toBeGreaterThan(0);
     for (const secret of [MAILED, "kati", "other@example", code, token, rawOf(cookie)]) expect(logged).not.toContain(secret);
   });

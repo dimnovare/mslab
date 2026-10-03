@@ -66,8 +66,8 @@ export const clearedCookies = (): string[] => [CLEARED_SESSION_COOKIE, CLEARED_H
 /** The value of cookie `name` in a Cookie header, or undefined. */
 function cookieValue(header: string | null, name: string): string | undefined {
   for (const part of (header ?? "").split(";")) {
-    const eq = part.indexOf("=");
-    if (eq > 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+    const sep = part.indexOf("=");
+    if (sep > 0 && part.slice(0, sep).trim() === name) return part.slice(sep + 1).trim();
   }
   return undefined;
 }
@@ -197,23 +197,32 @@ export type SessionEnd = "none" | "replaced" | "logout" | "expired";
 /** 401 `{ reason }` for a request without a live session; clears the hint cookie so the pages stop showing "Minu konto". */
 export const unauthorized = (reason: SessionEnd): Response => accountResponse({ ok: false, reason }, 401, [CLEARED_HINT_COOKIE]);
 
+/** A signed-in request: the client, and the cookies the answer must carry (none, or the session's two cookies when it was just renewed). */
+export type ClientSession = { clientId: number; cookies: string[] };
+
 /**
  * The client of this request's session cookie, or the 401 answer to return (`reason`: no cookie or an unknown session,
- * or why the session ended: another device signed in, logout, 180 days unused). The data endpoints start with this.
+ * or why the session ended: another device signed in, logout, 180 days unused). Every endpoint behind a session starts with
+ * this and answers with `clientResponse(session, body)`: the session is renewed in the database at most once a day, and
+ * then the cookies are sent again with a fresh Max-Age, or the browser would drop them 180 days after the login.
  */
-export async function requireClient(request: Request, deps: AccountDeps): Promise<{ clientId: number } | Response> {
-  const session = await getClientSession(deps.db, cookieValue(request.headers.get("cookie"), CLIENT_COOKIE), deps.now);
+export async function requireClient(request: Request, deps: AccountDeps): Promise<ClientSession | Response> {
+  const raw = cookieValue(request.headers.get("cookie"), CLIENT_COOKIE);
+  const session = await getClientSession(deps.db, raw, deps.now);
   if (!session) return unauthorized("none");
   if (session.ended) return unauthorized(session.ended);
-  return { clientId: session.clientId };
+  return { clientId: session.clientId, cookies: session.renewed && raw ? sessionCookies(raw) : [] };
 }
+
+/** The answer for a signed-in client: `body` plus the cookies of a renewed session (see requireClient). */
+export const clientResponse = (session: ClientSession, body: unknown, status = 200): Response => accountResponse(body, status, session.cookies);
 
 /** GET /me: `{ ok: true, email, name }` of the signed-in client. */
 async function me(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
   const [client] = await deps.db.select({ email: clients.email, name: clients.name }).from(clients).where(eq(clients.id, session.clientId)).limit(1);
-  return client ? accountResponse({ ok: true, email: client.email, name: client.name }) : unauthorized("none");
+  return client ? clientResponse(session, { ok: true, email: client.email, name: client.name }) : unauthorized("none");
 }
 
 /** The data endpoints (dashboard, favourites, profile, …) come with Task 4; until then every other path is unknown. */

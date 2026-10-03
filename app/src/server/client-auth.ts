@@ -112,6 +112,11 @@ export async function redeemClientCode(db: Db, email: string, code: string, now 
   });
 }
 
+/**
+ * The session of a cookie value: its client, or why it is over (`ended`). A live session is renewed (180 days from now) at most
+ * once a day; `renewed` says it was, and then the caller must send the cookies again (api: account-api.ts requireClient), or the
+ * browser drops them 180 days after the login however often the student comes back.
+ */
 export async function getClientSession(db: Db, raw: string | undefined, now = new Date()) {
   if (!isTokenShape(raw)) return null;
   const idHash = await sha256(raw);
@@ -119,10 +124,11 @@ export async function getClientSession(db: Db, raw: string | undefined, now = ne
   if (!row) return null;
   if (row.endedAt) return { ended: row.endReason ?? "logout" } as const;
   if (row.expiresAt <= now) return { ended: "expired" } as const;
-  if (row.expiresAt.getTime() - now.getTime() < CLIENT_SESSION_TTL_MS - RENEW_AFTER_MS) {
+  const renewed = row.expiresAt.getTime() - now.getTime() < CLIENT_SESSION_TTL_MS - RENEW_AFTER_MS;
+  if (renewed) {
     await db.update(clientSessions).set({ expiresAt: new Date(now.getTime() + CLIENT_SESSION_TTL_MS) }).where(eq(clientSessions.idHash, idHash));
   }
-  return { clientId: row.clientId } as const;
+  return { clientId: row.clientId, renewed } as const;
 }
 
 export async function endClientSession(db: Db, raw: string | undefined, now = new Date()): Promise<void> {

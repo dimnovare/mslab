@@ -19,7 +19,8 @@ export type Env = {
   TELEGRAM_CHAT_ID?: string;
 };
 
-export type Mail = { to: string; subject: string; text: string; replyTo?: string };
+/** `text` is always there; `html`, when given, is the same message for clients that show HTML (the text stays as the fallback). */
+export type Mail = { to: string; subject: string; text: string; html?: string; replyTo?: string };
 
 const TELEGRAM_MAX = 3900;
 export const TG_CHAT_KEY = "tg:chat";
@@ -37,7 +38,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Sends one plain-text e-mail. true = Resend accepted it. */
+/** Sends one e-mail: plain text, plus HTML when `mail.html` is set. true = Resend accepted it. */
 export async function sendMail(env: Env, mail: Mail): Promise<boolean> {
   if (!env.RESEND_API_KEY) {
     console.info("[notify] RESEND_API_KEY is not set: e-mail skipped");
@@ -50,6 +51,7 @@ export async function sendMail(env: Env, mail: Mail): Promise<boolean> {
         to: mail.to,
         subject: mail.subject,
         text: mail.text,
+        ...(mail.html ? { html: mail.html } : {}),
         ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
       }),
       NOTIFY_TIMEOUT_MS,

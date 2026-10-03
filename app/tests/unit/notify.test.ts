@@ -40,6 +40,18 @@ describe("e-mail (Resend)", () => {
     expect(call.body).toMatchObject({ from: "MS LAB <info@send.diipsolutions.eu>", to: "maria@example.com", subject: "S", text: "T", reply_to: "visitor@example.com" });
   });
 
+  test("sends the HTML body next to the text when the mail has one; a text-only mail carries no html", async () => {
+    const f = stubFetch(() => Response.json({ id: "email_123" }));
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const key = env({ RESEND_API_KEY: "re_test" });
+    expect(await sendMail(key, { to: "x@example.com", subject: "S", text: "T", html: "<p>H</p>" })).toBe(true);
+    expect(f.calls[0].body).toMatchObject({ subject: "S", text: "T", html: "<p>H</p>" });
+    expect(await sendMail(key, { to: "x@example.com", subject: "S", text: "T", html: "" })).toBe(true); // an empty html is left out
+    expect(await sendMail(key, { to: "x@example.com", subject: "S", text: "T" })).toBe(true);
+    for (const call of f.calls.slice(1)) expect(Object.keys(call.body as object)).not.toContain("html");
+    expect(f.calls[1].body).toMatchObject({ text: "T" });
+  });
+
   test("a rejected or failed send is reported as false; the log has the error name and status, not the message", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     stubFetch(() =>
