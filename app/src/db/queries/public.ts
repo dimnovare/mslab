@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
-import type { Db } from "../client";
+import type { Db, Q } from "../client";
 import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "../schema";
 
@@ -109,6 +109,12 @@ export async function getPage(db: Db, key: string): Promise<Page | null> {
 
 export async function getGallery(db: Db, group: string): Promise<GalleryItem[]> {
   return db.select().from(galleryItems).where(eq(galleryItems.group, group)).orderBy(asc(galleryItems.sort), asc(galleryItems.id));
+}
+
+/** One settings value, or null when the key is not stored. Takes the database or an open transaction (the admin's save reads inside its own). */
+export async function readSetting(q: Q, key: string): Promise<unknown> {
+  const [row] = await q.select().from(settings).where(eq(settings.key, key)).limit(1);
+  return row ? row.value : null;
 }
 
 export async function getSettings(db: Db): Promise<Record<string, unknown>> {

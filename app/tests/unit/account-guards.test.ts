@@ -45,6 +45,11 @@ describe("the data endpoints of the account API", () => {
     }
   });
 
+  test("no handler builds a response of its own: not Response.json, not new Response (clientResponse and accountResponse set the headers and the cookies)", () => {
+    expect(section).not.toMatch(/Response\.json\(|new Response\(/);
+    for (const handler of handlers) expect(handler, nameOf(handler)).not.toMatch(/Response\.json\(|new Response\(/);
+  });
+
   test("the 400 helper answers through clientResponse", () => {
     expect(section.slice(0, section.indexOf("\n\n"))).toContain("clientResponse(session, { ok: false, error: field }, 400)");
   });

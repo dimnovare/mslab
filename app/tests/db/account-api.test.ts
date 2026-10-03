@@ -707,7 +707,7 @@ describe("GET /api/konto/kursus/:slug: an e-course", () => {
     seeded = await seedCourses();
   });
 
-  test("with access: the view, with the terms still to accept; without it, for another client's access, an unpublished or unknown course: 404", async () => {
+  test("with access: the view, with the terms still to accept; without it, or for another client's access, or an unknown course: 404", async () => {
     const { deps, cookie, client } = await account();
     const mari = (await db.insert(clients).values({ email: "mari@example.test" }).returning())[0];
     await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
@@ -719,16 +719,27 @@ describe("GET /api/konto/kursus/:slug: an e-course", () => {
     await grantAccess(mari.id, seeded.online.id);
     expect((await call(deps, "/kursus/veebikursus", { cookie })).status).toBe(404); // Mari's access is Mari's
     await grantAccess(client.id, seeded.online.id);
-    await grantAccess(client.id, seeded.hidden.id);
     const res = await call(deps, "/kursus/veebikursus", { cookie });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.json()).toEqual({
       course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika" }] },
       access: { expiresAt: at(180).toISOString() },
-      terms: { accepted: false, text: { et: "Ligipääs on isiklik." } },
+      terms: { version: "1", accepted: false, text: { et: "Ligipääs on isiklik." } },
     });
-    expect((await call(deps, "/kursus/peidus-kursus", { cookie })).status).toBe(404);
+  });
+
+  test("active access to a course that was unpublished since stays: the card, the view and the acceptance", async () => {
+    const { deps, cookie, client } = await account();
+    await grantAccess(client.id, seeded.hidden.id);
+    const view = await call(deps, "/kursus/peidus-kursus", { cookie });
+    expect(view.status).toBe(200);
+    const { terms } = await view.json();
+    expect(terms).toEqual({ version: "1", accepted: false, text: null });
+    expect((await call(deps, "/tingimused", { cookie, body: { slug: "peidus-kursus", version: terms.version } })).status).toBe(200);
+    expect((await (await call(deps, "/kursus/peidus-kursus", { cookie })).json()).terms.accepted).toBe(true);
+    const { cards } = await (await call(deps, "", { cookie })).json();
+    expect(cards.map((c: { kind: string; course?: { slug: string } }) => c.kind === "ecourse" && c.course?.slug)).toEqual(["peidus-kursus"]);
   });
 
   test("access that has ended is a 404; a slug that is not decodable or cannot be one is a 404, not a 500", async () => {
@@ -742,29 +753,60 @@ describe("GET /api/konto/kursus/:slug: an e-course", () => {
     }
   });
 
-  test("the terms: accepting stores the version, the view then has none to accept; a changed version asks again", async () => {
+  test("the terms: the page sends back the version it showed; accepting stores it, the view then has none to accept; a changed version asks again", async () => {
     const { deps, cookie, client } = await account();
     await grantAccess(client.id, seeded.online.id);
-    const accept = await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus" } });
+    const shown = (await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms;
+    expect(shown.version).toBe("1");
+    const accept = await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus", version: shown.version } });
     expect(accept.status).toBe(200);
     expect(await accept.json()).toEqual({ ok: true });
     expect(await db.select().from(termsAcceptances)).toEqual([{ clientId: client.id, courseId: seeded.online.id, termsVersion: "1", acceptedAt: NOW }]);
-    expect((await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms).toEqual({ accepted: true, text: null });
+    expect((await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms).toEqual({ version: "1", accepted: true, text: null });
     await db.insert(settings).values({ key: "courseTermsVersion", value: "2026-10-02T09:00:00.000Z" });
-    expect((await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms.accepted).toBe(false);
+    expect((await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms).toMatchObject({ version: "2026-10-02T09:00:00.000Z", accepted: false });
   });
 
-  test("accepting terms needs active access to a published course: another client's access, none, ended, unpublished, unknown: 404 { error: \"slug\" }", async () => {
+  test("a version that is not the current one: 409 { error: \"version\" }, nothing stored; the current one, after reloading, is accepted", async () => {
+    const { deps, cookie, client } = await account();
+    await grantAccess(client.id, seeded.online.id);
+    const seen = (await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms.version; // the page is open with the old text
+    await db.insert(settings).values({ key: "courseTermsVersion", value: "2026-10-02T09:00:00.000Z" }); // the admin saves new terms
+    const stale = await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus", version: seen } });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ ok: false, error: "version" });
+    expect(stale.headers.get("cache-control")).toBe("private, no-store");
+    expect(await db.select().from(termsAcceptances)).toEqual([]);
+    const current = (await (await call(deps, "/kursus/veebikursus", { cookie })).json()).terms.version;
+    expect((await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus", version: current } })).status).toBe(200);
+    expect((await db.select().from(termsAcceptances)).map((t) => t.termsVersion)).toEqual(["2026-10-02T09:00:00.000Z"]);
+  });
+
+  test("accepting terms needs active access: another client's access, none, ended, unknown: 404 { error: \"slug\" }, before the version is looked at", async () => {
     const { deps, cookie, client } = await account();
     const mari = (await db.insert(clients).values({ email: "mari@example.test" }).returning())[0];
     await grantAccess(mari.id, seeded.online.id);
-    await grantAccess(client.id, seeded.hidden.id);
+    await grantAccess(client.id, seeded.hidden.id, { expiresAt: at(-1) });
     for (const slug of ["veebikursus", "peidus-kursus", "olematu", "kulmude-lami"]) {
-      const res = await call(deps, "/tingimused", { cookie, body: { slug } });
-      expect(res.status, slug).toBe(404);
-      expect(await res.json()).toEqual({ ok: false, error: "slug" });
+      for (const version of ["1", "not the current one"]) {
+        const res = await call(deps, "/tingimused", { cookie, body: { slug, version } });
+        expect(res.status, slug).toBe(404);
+        expect(await res.json()).toEqual({ ok: false, error: "slug" });
+      }
     }
     expect(await db.select().from(termsAcceptances)).toEqual([]);
+  });
+
+  test("a body without a version, or with one that is not a string of at most 64 characters: 400 { error: \"version\" }", async () => {
+    const { deps, cookie, client } = await account();
+    await grantAccess(client.id, seeded.online.id);
+    for (const version of [undefined, null, 1, ["1"], "", "v".repeat(65), "a\u0000b"]) {
+      const res = await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus", version } });
+      expect(res.status, JSON.stringify(version)).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: "version" });
+    }
+    expect((await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus", version: "1" } })).status).toBe(200);
+    expect(await db.select().from(termsAcceptances)).toHaveLength(1);
   });
 });
 
@@ -891,6 +933,27 @@ describe("POST /muutmine: a request to cancel or change a registration", () => {
     expect(f.calls).toEqual([]);
   });
 
+  test("a cancelled registration, a past one and one whose training was called off: 404 { error: \"registration\" }, nothing stored, nobody told", async () => {
+    const f = resend();
+    const { deps, cookie, client, queued, flush } = await account();
+    const past = (await db.insert(courseSessions).values({ courseId: seeded.lami.id, startsAt: at(-5), city: "Tartu" }).returning())[0];
+    const called = (await db.insert(courseSessions).values({ courseId: seeded.lami.id, startsAt: at(20), city: "Tartu", status: "cancelled" }).returning())[0];
+    const regs = [
+      await register(client.id, { status: "cancelled" }),
+      await register(client.id, { status: "confirmed", courseSessionId: past.id }),
+      await register(client.id, { status: "confirmed", courseSessionId: called.id }),
+    ];
+    for (const reg of regs) {
+      const res = await call(deps, "/muutmine", { cookie, body: { registrationId: reg.id, kind: "cancel", message: "" } });
+      expect(res.status, String(reg.id)).toBe(404);
+      expect(await res.json()).toEqual({ ok: false, error: "registration" });
+    }
+    expect(await db.select().from(requests)).toEqual([]);
+    expect(queued()).toBe(0);
+    await flush();
+    expect(f.calls).toEqual([]);
+  });
+
   test("5 an hour per client, then 429 { error: \"rate\" }: no row, no mail; a failing rate store lets it through", async () => {
     const f = resend();
     const kv = fakeKv();
@@ -967,6 +1030,24 @@ describe("POST /kustuta: deleting the account", () => {
     const after = await call(deps, "/me", { cookie });
     expect(after.status).toBe(401);
     expect(await after.json()).toEqual({ ok: false, reason: "none" });
+  });
+
+  test("a login code or link still waiting (\"Saada uuesti\") does not bring the account back: it is dead after the deletion", async () => {
+    const { deps, cookie } = await account();
+    const second = await (await call(deps, "/login", { body: { email: EMAIL } })).json(); // a second live login, as after "Saada uuesti"
+    const third = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
+    expect(await tokens()).toHaveLength(3); // the used one and two live
+    expect((await call(deps, "/kustuta", { cookie, body: { confirm: true } })).status).toBe(200);
+    expect(await tokens()).toEqual([]);
+    const code = await call(deps, "/code", { body: { email: EMAIL, code: second.devCode } });
+    expect(code.status).toBe(400);
+    expect(await code.json()).toEqual({ ok: false, error: "expired" });
+    expect(code.headers.getSetCookie()).toEqual([]);
+    const link = await call(deps, `/verify?t=${tokenOf(third.devLink)}`);
+    expect(link.status).toBe(303);
+    expect(link.headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    expect(link.headers.getSetCookie()).toEqual([]);
+    expect(await db.select().from(clients)).toEqual([]);
   });
 
   test("a renewed session's cookies are not sent: the answer clears them", async () => {
@@ -1046,13 +1127,15 @@ describe("every endpoint behind a session answers through the session", () => {
     ["PATCH", "/andmed", () => ({ name: "Kati", phone: "", locale: "et" }), {}],
     ["POST", "/uudiskiri", () => ({ on: true }), {}],
     ["POST", "/muutmine", (id) => ({ registrationId: id, kind: "cancel", message: "" }), {}],
-    ["POST", "/tingimused", () => ({ slug: "veebikursus" }), {}],
+    ["POST", "/tingimused", () => ({ slug: "veebikursus", version: "1" }), {}],
   ];
   test.each(ENDPOINTS)("%s %s at day 100 sends the renewed session's cookies, on success and on a refusal alike", async (method, path, okBody, bad) => {
+    // a date still ahead on day 100 (a change request for a training that has begun is refused)
+    const far = (await db.insert(courseSessions).values({ courseId: seeded.lami.id, startsAt: at(200), city: "Tartu" }).returning())[0];
     for (const [label, status] of [["success", 200], ["refusal", null]] as const) {
       for (const table of [termsAcceptances, clientFavourites, courseAccess, registrations, requests, subscribers]) await db.delete(table); // the second round starts as the first
       const first = await account();
-      const reg = await register(first.client.id);
+      const reg = await register(first.client.id, { courseSessionId: far.id });
       await grantAccess(first.client.id, seeded.online.id);
       const body = label === "success" ? okBody(reg.id) : bad;
       const later = setup({ now: at(100) });
@@ -1098,8 +1181,9 @@ describe("every endpoint behind a session answers through the session", () => {
       ["PATCH", "/andmed", "[]", "body"],
       ["POST", "/uudiskiri", { on: "true" }, "on"],
       ["POST", "/uudiskiri", {}, "on"],
-      ["POST", "/tingimused", { slug: "" }, "slug"],
-      ["POST", "/tingimused", { slug: "a".repeat(201) }, "slug"],
+      ["POST", "/tingimused", { slug: "", version: "1" }, "slug"],
+      ["POST", "/tingimused", { slug: "a".repeat(201), version: "1" }, "slug"],
+      ["POST", "/tingimused", { slug: "veebikursus" }, "version"],
       ["POST", "/lemmikud", { slug: "x", on: true, padding: "p".repeat(5000) }, "body"], // longer than the endpoint reads
     ];
     for (const [method, path, body, error] of cases) {

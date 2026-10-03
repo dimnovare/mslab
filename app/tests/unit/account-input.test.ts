@@ -129,11 +129,18 @@ describe("change request { registrationId, kind, message }", () => {
   });
 });
 
-describe("terms { slug } and deletion { confirm }", () => {
-  test("terms: a slug", () => {
-    expect(parseTerms({ slug: "veebikursus" })).toEqual(ok({ slug: "veebikursus" }));
-    expect(parseTerms({ slug: 5 })).toEqual(err("slug"));
+describe("terms { slug, version } and deletion { confirm }", () => {
+  test("terms: a slug and the version the page showed", () => {
+    expect(parseTerms({ slug: "veebikursus", version: "2026-10-02T09:00:00.000Z" })).toEqual(ok({ slug: "veebikursus", version: "2026-10-02T09:00:00.000Z" }));
+    expect(parseTerms({ slug: "x", version: "v".repeat(LIMITS.version) })).toMatchObject({ ok: true });
+    expect(parseTerms({ slug: 5, version: "1" })).toEqual(err("slug"));
+    expect(parseTerms({ version: "1" })).toEqual(err("slug"));
     expect(parseTerms({})).toEqual(err("slug"));
+  });
+
+  test("terms: the version is a string of 1 to 64 characters the database can hold, and it is required", () => {
+    expect(parseTerms({ slug: "veebikursus" })).toEqual(err("version"));
+    for (const version of ["", "v".repeat(LIMITS.version + 1), 1, null, ["1"], { v: 1 }, "a\u0000b", "a\ud800"]) expect(parseTerms({ slug: "veebikursus", version }), JSON.stringify(version)).toEqual(err("version"));
   });
 
   test("deletion: confirm is exactly true", () => {

@@ -15,13 +15,15 @@ export type PrepaymentInfo = { receiver: string; iban: string; bank: string; ref
 
 export type CourseRef = { slug: string; title: I18n };
 export type SessionRef = { startsAt: string; city: string; venue: string };
+/** A date on the calendar; `cancelled` is true when Maria called the training off. */
+export type CalendarSession = SessionRef & { cancelled: boolean };
 
-/** A contact-course registration for one session. `cancelled` is true when the training itself was called off. */
+/** A contact-course registration for one session. */
 export type ContactCard = {
   kind: "contact";
   registrationId: number;
   course: CourseRef;
-  session: SessionRef & { cancelled: boolean };
+  session: CalendarSession;
   status: RegStatus;
   paymentChoice: "full" | "half";
   /** What the registration is measured against (domain/registration.ts registrationPrice), cents; null when the course has no such price. */
@@ -56,7 +58,9 @@ export type WaitlistCard = {
   kind: "waitlist";
   requestId: number;
   course: CourseRef | null;
-  session: SessionRef | null;
+  session: CalendarSession | null;
+  /** Maria has dealt with the entry (the admin's "Käsitletud"). */
+  handled: boolean;
   createdAt: string;
 };
 
@@ -137,7 +141,9 @@ export function nextStep(card: AccountCard, now: Date, pay: PrepaymentInfo | nul
     case "request":
       return step(card.handled ? "requestDone" : "requestNew");
     case "waitlist":
-      return step("waitlist");
+      // a called-off date ends the wait; an entry Maria has dealt with is answered
+      if (card.session?.cancelled) return step("cancelled");
+      return step(card.handled ? "requestDone" : "waitlist");
     case "ecourse": {
       const expiresAt = new Date(card.expiresAt);
       if (card.revoked || expiresAt <= now) return step("accessEnded");
@@ -156,24 +162,27 @@ export function isPastCard(card: AccountCard, now: Date): boolean {
     case "request":
       return card.handled;
     case "waitlist":
-      return card.session !== null && begun(card.session.startsAt, now);
+      return card.handled || (card.session !== null && (card.session.cancelled || begun(card.session.startsAt, now)));
     case "ecourse":
       return card.revoked || new Date(card.expiresAt) <= now;
   }
 }
 
-/** The instant a card is ordered by: a session's start, else when the request was made or the access granted. */
-function cardTime(card: AccountCard): number {
+/** The start of the session a card is about (a contact registration, a waitlist entry with a date); null for a card without a date. */
+function sessionTime(card: AccountCard): number | null {
   switch (card.kind) {
     case "contact":
       return new Date(card.session.startsAt).getTime();
     case "waitlist":
-      return new Date(card.session?.startsAt ?? card.createdAt).getTime();
-    case "ecourse":
-      return new Date(card.grantedAt).getTime();
+      return card.session ? new Date(card.session.startsAt).getTime() : null;
     default:
-      return new Date(card.createdAt).getTime();
+      return null;
   }
+}
+
+/** When a card was made or granted: what a card without a date is placed by. */
+function madeTime(card: AccountCard): number {
+  return new Date(card.kind === "ecourse" ? card.grantedAt : card.createdAt).getTime();
 }
 
 /** A stable key of a card (the id of its registration, request or course) for lists. */
@@ -190,10 +199,26 @@ export function cardKey(card: AccountCard): string {
   }
 }
 
-/** Open cards first, over ones last; within each, the newest first (a session's date, else when it was made), then the key. Does not change `cards`. */
+/** Numeric-aware, so "registration-9" comes before "registration-10". */
+const byKey = (a: string, b: string): number => a.localeCompare(b, "en", { numeric: true });
+
+/**
+ * The order of the dashboard:
+ * - open cards first, then the over ones (isPastCard);
+ * - open cards with a date (a booked or waitlisted session) by that date, the soonest first;
+ * - then the open cards without a date (an individual registration, a request, an e-course) by when they were made or granted, the newest first;
+ * - over cards, all together, the most recent first (a session's date, else when it was made or granted).
+ * Equal times keep a fixed order (by key). Does not change `cards`.
+ */
 export function sortCards(cards: AccountCard[], now: Date): AccountCard[] {
   return cards
-    .map((card) => ({ card, past: isPastCard(card, now), time: cardTime(card), key: cardKey(card) }))
-    .sort((a, b) => Number(a.past) - Number(b.past) || b.time - a.time || (a.key < b.key ? 1 : a.key > b.key ? -1 : 0))
+    .map((card) => ({ card, past: isPastCard(card, now), session: sessionTime(card), made: madeTime(card), key: cardKey(card) }))
+    .sort((a, b) => {
+      if (a.past !== b.past) return a.past ? 1 : -1;
+      if (a.past) return (b.session ?? b.made) - (a.session ?? a.made) || byKey(a.key, b.key);
+      if (a.session !== null && b.session !== null) return a.session - b.session || byKey(a.key, b.key);
+      if (a.session !== null || b.session !== null) return a.session !== null ? -1 : 1;
+      return b.made - a.made || byKey(a.key, b.key);
+    })
     .map((x) => x.card);
 }

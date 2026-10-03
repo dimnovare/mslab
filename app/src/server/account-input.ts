@@ -7,7 +7,7 @@ import { z } from "zod";
 
 export type Input<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100 } as const;
+export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100, version: 64 } as const;
 
 /** Postgres rejects a NUL character in text, and a lone surrogate in a jsonb value (the change request's message): both would be a 500. */
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
@@ -30,7 +30,7 @@ const merge = z.object({ slugs: z.array(slug).max(LIMITS.mergeSlugs) });
 const profile = z.object({ name: line(LIMITS.name), phone: line(LIMITS.phone), locale: z.enum(["et", "ru"]) });
 const newsletter = z.object({ on: z.boolean() });
 const changeRequest = z.object({ registrationId: rowId, kind: z.enum(["cancel", "change"]), message: text(LIMITS.message).optional().transform((m) => m ?? "") });
-const terms = z.object({ slug });
+const terms = z.object({ slug, version: z.string().min(1).max(LIMITS.version).refine(storable) });
 const deletion = z.object({ confirm: z.literal(true) });
 
 export type FavouriteInput = z.infer<typeof favourite>;

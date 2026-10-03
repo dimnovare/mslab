@@ -1,14 +1,16 @@
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { readSetting } from "@/db/queries/admin-site";
+import { readSetting } from "@/db/queries/public";
 import {
-  clientFavourites, clients, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, subscribers,
+  clientFavourites, clientLoginTokens, clients, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, subscribers,
   termsAcceptances,
 } from "@/db/schema";
 import { sortCards, type AccountCard, type PrepaymentInfo } from "@/domain/account-cards";
+import { upcomingFrom } from "@/domain/calendar";
 import { registrationPrice } from "@/domain/registration";
 import { normalizeEmail } from "@/domain/email";
 import type { I18n } from "@/i18n/field";
+import { lockAddress } from "./client-auth";
 import { newToken } from "./token";
 
 // What a signed-in client sees and may change, for the JSON endpoints under /api/konto (account-api.ts) and the admin's
@@ -41,8 +43,11 @@ export type Dashboard = {
 export type EcourseView = {
   course: { slug: string; title: I18n; modules: I18n[] };
   access: { expiresAt: string };
-  /** `accepted`: the client has accepted the current terms for this course. `text` is the terms text, only while it is still to be accepted (null: none stored). */
-  terms: { accepted: boolean; text: I18n | null };
+  /**
+   * `version`: the current terms version (send it back when accepting, so a student who saw the old text cannot accept a new one unseen).
+   * `accepted`: the client has accepted that version for this course. `text`: the terms text, only while it is still to be accepted (null: none stored).
+   */
+  terms: { version: string; accepted: boolean; text: I18n | null };
 };
 
 const iso = (d: Date): string => d.toISOString();
@@ -102,6 +107,7 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
         startsAt: courseSessions.startsAt,
         city: courseSessions.city,
         venue: courseSessions.venue,
+        sessionStatus: courseSessions.status,
       })
       .from(requests)
       .leftJoin(courses, and(inArray(requests.kind, ["individual", "waitlist"]), eq(courses.slug, sql`${requests.payload}->>'course'`)))
@@ -118,7 +124,7 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
       .select({ grantedAt: courseAccess.grantedAt, expiresAt: courseAccess.expiresAt, revokedAt: courseAccess.revokedAt, slug: courses.slug, title: courses.title })
       .from(courseAccess)
       .innerJoin(courses, eq(courseAccess.courseId, courses.id))
-      .where(and(eq(courseAccess.clientId, clientId), eq(courses.published, true))),
+      .where(eq(courseAccess.clientId, clientId)),
     favouriteSlugs(db, clientId),
     db
       .select({
@@ -162,7 +168,8 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
         kind: "waitlist",
         requestId: r.id,
         course: r.courseSlug !== null && r.courseTitle !== null ? { slug: r.courseSlug, title: r.courseTitle } : null,
-        session: r.startsAt !== null ? { startsAt: iso(r.startsAt), city: r.city ?? "", venue: r.venue ?? "" } : null,
+        session: r.startsAt !== null ? { startsAt: iso(r.startsAt), city: r.city ?? "", venue: r.venue ?? "", cancelled: r.sessionStatus === "cancelled" } : null,
+        handled: r.handled,
         createdAt: iso(r.createdAt),
       });
     } else {
@@ -191,46 +198,52 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
 
 // ---------- an e-course ----------
 
-/** The course of a published e-course the client has access to right now (not revoked, not expired), or null. */
+/**
+ * The e-course the client has access to right now (not revoked, not expired), or null. Whether the course is still published does not
+ * matter: access is granted to the client and stays until it ends; only the favourites are limited to published courses.
+ */
 async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
   const [row] = await db
     .select({ course: { id: courses.id, slug: courses.slug, title: courses.title, modules: courses.modules }, expiresAt: courseAccess.expiresAt })
     .from(courseAccess)
     .innerJoin(courses, eq(courseAccess.courseId, courses.id))
-    .where(and(eq(courseAccess.clientId, clientId), eq(courses.slug, slug), eq(courses.published, true), isNull(courseAccess.revokedAt), gt(courseAccess.expiresAt, now)))
+    .where(and(eq(courseAccess.clientId, clientId), eq(courses.slug, slug), isNull(courseAccess.revokedAt), gt(courseAccess.expiresAt, now)))
     .limit(1);
   return row ?? null;
 }
 
-/** The e-course page's data: null without access (none, revoked, expired, or the course is not published). The terms notice shows while `terms.accepted` is false. */
+/**
+ * The e-course page's data: null without active access (none, revoked or expired). The terms notice shows while `terms.accepted` is false;
+ * the page then sends back `terms.version` with the acceptance. The version, the client's acceptances of the course and the terms text are read together.
+ */
 export async function loadEcourse(db: Db, clientId: number, slug: string, now: Date): Promise<EcourseView | null> {
   const access = await activeAccess(db, clientId, slug, now);
   if (!access) return null;
-  const version = await courseTermsVersion(db);
-  const [accepted] = await db
-    .select({ at: termsAcceptances.acceptedAt })
-    .from(termsAcceptances)
-    .where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, access.course.id), eq(termsAcceptances.termsVersion, version)))
-    .limit(1);
-  let text: I18n | null = null;
-  if (!accepted) {
-    const [page] = await db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1);
-    text = page?.body ?? null;
-  }
+  const [version, accepted, page] = await Promise.all([
+    courseTermsVersion(db),
+    db.select({ version: termsAcceptances.termsVersion }).from(termsAcceptances).where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, access.course.id))),
+    db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1),
+  ]);
+  const isAccepted = accepted.some((row) => row.version === version);
   return {
     course: { slug: access.course.slug, title: access.course.title, modules: access.course.modules },
     access: { expiresAt: iso(access.expiresAt) },
-    terms: { accepted: !!accepted, text },
+    terms: { version, accepted: isAccepted, text: isAccepted ? null : (page[0]?.body ?? null) },
   };
 }
 
-/** Stores that the client accepted the current terms for the e-course. false: no active access to a published course of that slug. Accepting twice is fine. */
-export async function acceptTerms(db: Db, clientId: number, slug: string, now: Date): Promise<boolean> {
+/**
+ * Stores that the client accepted the terms `version` for the e-course.
+ * - `"noAccess"`: no active access to that course (nothing is stored).
+ * - `"stale"`: `version` is not the current terms version (the admin saved new terms after the page was loaded; nothing is stored).
+ * - `"accepted"`: stored (accepting twice is fine).
+ */
+export async function acceptTerms(db: Db, clientId: number, slug: string, version: string, now: Date): Promise<"accepted" | "noAccess" | "stale"> {
   const access = await activeAccess(db, clientId, slug, now);
-  if (!access) return false;
-  const termsVersion = await courseTermsVersion(db);
-  await db.insert(termsAcceptances).values({ clientId, courseId: access.course.id, termsVersion, acceptedAt: now }).onConflictDoNothing();
-  return true;
+  if (!access) return "noAccess";
+  if (version !== (await courseTermsVersion(db))) return "stale";
+  await db.insert(termsAcceptances).values({ clientId, courseId: access.course.id, termsVersion: version, acceptedAt: now }).onConflictDoNothing();
+  return "accepted";
 }
 
 // ---------- favourites ----------
@@ -316,7 +329,8 @@ export type ChangeRequestInfo = {
 
 /**
  * Records a wish to cancel or change the date of one of the client's registrations as a `change_request` for the admin's inbox. Nothing
- * on the registration changes. false when the registration is not this client's (or there is no such client).
+ * on the registration changes. false (nothing stored) when the registration is not this client's, is cancelled, belongs to a training
+ * that has begun or was called off (the card has no button then), or there is no such client.
  */
 export async function createChangeRequest(
   db: Db,
@@ -324,9 +338,12 @@ export async function createChangeRequest(
   registrationId: number,
   kind: "cancel" | "change",
   message: string,
+  now: Date,
 ): Promise<ChangeRequestInfo | false> {
   const [row] = await db
     .select({
+      status: registrations.status,
+      sessionStatus: courseSessions.status,
       name: registrations.name,
       phone: registrations.phone,
       title: courses.title,
@@ -344,7 +361,8 @@ export async function createChangeRequest(
     .leftJoin(courseSessions, eq(registrations.courseSessionId, courseSessions.id))
     .where(and(eq(registrations.id, registrationId), eq(registrations.clientId, clientId)))
     .limit(1);
-  if (!row) return false;
+  if (!row || row.status === "cancelled" || row.sessionStatus === "cancelled") return false;
+  if (row.startsAt && row.startsAt < upcomingFrom(now)) return false;
   await db.insert(requests).values({ kind: "change_request", payload: { registrationId, kind, message, email: row.email }, clientId });
   return {
     registrationId,
@@ -360,15 +378,22 @@ export async function createChangeRequest(
 // ---------- deleting the account ----------
 
 /**
- * Deletes the client with its sessions, favourites, terms acceptances and course access, and the newsletter subscription of its
- * address. Registrations and requests stay with Maria, their name and e-mail as given, only unlinked (client_id null). Returns
- * the address and language the confirmation mail goes to; null when the client was already gone.
+ * Deletes the client with its sessions, favourites, terms acceptances and course access, the login codes and links still waiting for its
+ * address (they are keyed by address, so no cascade reaches them; a live one would otherwise sign in again and re-create the account), and the
+ * newsletter subscription of the address. Registrations and requests stay with Maria, their name and e-mail as given, only unlinked
+ * (client_id null). Takes the address lock the logins take, so a login in flight finishes before this runs or finds nothing after it.
+ * Returns the address and language the confirmation mail goes to; null when the client was already gone.
  */
 export async function deleteClient(db: Db, clientId: number): Promise<{ email: string; locale: "et" | "ru" } | null> {
   return db.transaction(async (tx) => {
+    const [existing] = await tx.select({ email: clients.email }).from(clients).where(eq(clients.id, clientId)).limit(1);
+    if (!existing) return null;
+    const address = normalizeEmail(existing.email);
+    await lockAddress(tx as unknown as Db, address);
     const [row] = await tx.delete(clients).where(eq(clients.id, clientId)).returning(); // (returning(fields) has no common overload on the Db union)
     if (!row) return null;
-    await tx.delete(subscribers).where(sql`lower(${subscribers.email}) = ${normalizeEmail(row.email)}`);
+    await tx.delete(clientLoginTokens).where(eq(clientLoginTokens.email, address));
+    await tx.delete(subscribers).where(sql`lower(${subscribers.email}) = ${address}`);
     return { email: row.email, locale: row.locale };
   });
 }

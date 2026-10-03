@@ -27,7 +27,7 @@ const request = (over: Partial<RequestCard> = {}): RequestCard => ({
   kind: "request", requestId: 3, requestKind: "practice", title: { et: "MINI" }, detail: "E, K", handled: false, createdAt: "2026-10-01T09:00:00.000Z", ...over,
 });
 const waitlist = (over: Partial<WaitlistCard> = {}): WaitlistCard => ({
-  kind: "waitlist", requestId: 4, course, session: { startsAt: FUTURE, city: "Pärnu", venue: "" }, createdAt: "2026-10-01T09:00:00.000Z", ...over,
+  kind: "waitlist", requestId: 4, course, session: { startsAt: FUTURE, city: "Pärnu", venue: "", cancelled: false }, handled: false, createdAt: "2026-10-01T09:00:00.000Z", ...over,
 });
 const ecourse = (over: Partial<EcourseCard> = {}): EcourseCard => ({
   kind: "ecourse", course, grantedAt: "2026-09-22T09:00:00.000Z", expiresAt: "2027-03-22T09:00:00.000Z", revoked: false, ...over,
@@ -118,6 +118,14 @@ describe("nextStep: one sentence and at most one button for every state of a car
     expect(nextStep(waitlist({ course: null, session: null }), NOW, null).key).toBe("waitlist");
   });
 
+  test("waitlist, handled by Maria: answered; the date called off: cancelled, handled or not", () => {
+    const called = { startsAt: FUTURE, city: "Pärnu", venue: "", cancelled: true };
+    expect(nextStep(waitlist({ handled: true }), NOW, PAY)).toEqual({ key: "requestDone", vars: {}, action: { kind: "none" } });
+    expect(nextStep(waitlist({ session: called }), NOW, PAY)).toEqual({ key: "cancelled", vars: {}, action: { kind: "none" } });
+    expect(nextStep(waitlist({ session: called, handled: true }), NOW, PAY).key).toBe("cancelled");
+    expect(nextStep(waitlist({ session: null, handled: true }), NOW, PAY).key).toBe("requestDone");
+  });
+
   test("e-course, active: access until a date, and the open button", () => {
     expect(nextStep(ecourse(), NOW, PAY)).toEqual({
       key: "openCourse", vars: { date: "22.03.2027" }, action: { kind: "openCourse", slug: "kulmude-lami" },
@@ -146,7 +154,7 @@ describe("nextStep formats the vars for the locale it is given", () => {
     const cards: AccountCard[] = [
       contact({ status: "cancelled" }), contact({ session: { startsAt: PAST, city: "x", venue: "", cancelled: false } }), contact(), contact({ priceCents: null }),
       contact({ paidCents: 35000 }), contact({ status: "confirmed", paidCents: 100 }), contact({ status: "confirmed", paidCents: 35000 }),
-      individual(), request(), request({ handled: true }), waitlist(), ecourse(), ecourse({ revoked: true }),
+      individual(), request(), request({ handled: true }), waitlist(), waitlist({ handled: true }), ecourse(), ecourse({ revoked: true }),
     ];
     const keys = new Set<string>();
     for (const locale of ["et", "ru"] as const) {
@@ -185,14 +193,16 @@ describe("isPastCard and sortCards", () => {
     expect(isPastCard(request(), NOW)).toBe(false);
     expect(isPastCard(request({ handled: true }), NOW)).toBe(true);
     expect(isPastCard(waitlist(), NOW)).toBe(false);
-    expect(isPastCard(waitlist({ session: { startsAt: PAST, city: "x", venue: "" } }), NOW)).toBe(true);
+    expect(isPastCard(waitlist({ session: session(PAST) }), NOW)).toBe(true);
+    expect(isPastCard(waitlist({ session: session(FUTURE, true) }), NOW)).toBe(true);
+    expect(isPastCard(waitlist({ handled: true }), NOW)).toBe(true);
     expect(isPastCard(waitlist({ session: null }), NOW)).toBe(false);
     expect(isPastCard(ecourse(), NOW)).toBe(false);
     expect(isPastCard(ecourse({ revoked: true }), NOW)).toBe(true);
     expect(isPastCard(ecourse({ expiresAt: PAST }), NOW)).toBe(true);
   });
 
-  test("open cards first, the newest first; over ones last, also the newest first; the input is left alone", () => {
+  test("open cards by date, the soonest first, then the open cards without a date, the newest first; over cards last, the most recent first; the input is left alone", () => {
     const later = contact({ registrationId: 1, session: session("2026-12-01T08:00:00.000Z") });
     const sooner = contact({ registrationId: 2, session: session("2026-11-01T08:00:00.000Z") });
     const pastRecent = contact({ registrationId: 3, session: session("2026-09-25T08:00:00.000Z") });
@@ -200,30 +210,42 @@ describe("isPastCard and sortCards", () => {
     const cancelled = contact({ registrationId: 5, status: "cancelled", session: session("2027-01-10T08:00:00.000Z") });
     const req = request({ requestId: 9, createdAt: "2026-10-02T08:00:00.000Z" });
     const course = ecourse({ grantedAt: "2026-09-30T08:00:00.000Z" });
-    const input = [pastOld, req, cancelled, sooner, pastRecent, course, later];
+    const pending = individual({ registrationId: 10, createdAt: "2026-10-01T08:00:00.000Z" });
+    const input = [pastOld, req, cancelled, later, pastRecent, pending, course, sooner];
     const copy = [...input];
     expect(sortCards(input, NOW).map(cardKey)).toEqual([
-      "registration-1", // 1 Dec
-      "registration-2", // 1 Nov
-      "request-9", // made 2 Oct
-      "course-kulmude-lami", // granted 30 Sep
-      "registration-5", // over: cancelled, but a date later than the others
-      "registration-3",
-      "registration-4",
+      "registration-2", // open, with a date: 1 Nov
+      "registration-1", // open, with a date: 1 Dec
+      "request-9", // open, no date: made 2 Oct
+      "registration-10", // open, no date: made 1 Oct
+      "course-kulmude-lami", // open, no date: granted 30 Sep
+      "registration-5", // over: cancelled, its date (10 Jan) is the latest
+      "registration-3", // over: 25 Sep
+      "registration-4", // over: 1 Jun
     ]);
     expect(input).toEqual(copy);
   });
 
-  test("equal times keep a fixed order", () => {
-    const a = request({ requestId: 1 });
-    const b = request({ requestId: 2 });
-    expect(sortCards([a, b], NOW).map(cardKey)).toEqual(sortCards([b, a], NOW).map(cardKey));
+  test("a waitlist entry with a date is placed among the dated cards; without one, among the undated", () => {
+    const booked = contact({ registrationId: 1, session: session("2026-11-10T08:00:00.000Z") });
+    const waiting = waitlist({ requestId: 2, session: session("2026-11-05T08:00:00.000Z") });
+    const undated = waitlist({ requestId: 3, session: null, createdAt: "2026-10-02T08:00:00.000Z" });
+    const old = request({ requestId: 4, createdAt: "2026-09-01T08:00:00.000Z" });
+    expect(sortCards([old, undated, booked, waiting], NOW).map(cardKey)).toEqual(["request-2", "registration-1", "request-3", "request-4"]);
   });
 
-  test("a waitlist entry without a session is ordered by when it was made", () => {
-    const entry = waitlist({ requestId: 5, session: null, createdAt: "2026-10-02T08:00:00.000Z" });
-    const old = request({ requestId: 6, createdAt: "2026-09-01T08:00:00.000Z" });
-    expect(sortCards([old, entry], NOW).map(cardKey)).toEqual(["request-5", "request-6"]);
+  test("an over card without a date is placed by when it was made or granted, among the dated ones by their date", () => {
+    const pastSession = contact({ registrationId: 1, session: session("2026-09-20T08:00:00.000Z") });
+    const handled = request({ requestId: 2, handled: true, createdAt: "2026-09-28T08:00:00.000Z" });
+    const ended = ecourse({ revoked: true, grantedAt: "2026-09-01T08:00:00.000Z" });
+    expect(sortCards([ended, pastSession, handled], NOW).map(cardKey)).toEqual(["request-2", "registration-1", "course-kulmude-lami"]);
+  });
+
+  test("equal times keep a fixed order, whatever the input order (numbers by value)", () => {
+    const cards = [request({ requestId: 9 }), request({ requestId: 10 }), contact({ registrationId: 2 }), contact({ registrationId: 11 })];
+    const keys = sortCards(cards, NOW).map(cardKey);
+    expect(keys).toEqual(["registration-2", "registration-11", "request-9", "request-10"]);
+    expect(sortCards([...cards].reverse(), NOW).map(cardKey)).toEqual(keys);
   });
 
   test("cardKey tells registrations, requests and courses apart", () => {

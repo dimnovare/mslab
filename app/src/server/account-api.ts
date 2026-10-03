@@ -311,7 +311,7 @@ async function newsletter(request: Request, deps: AccountDeps): Promise<Response
 /**
  * POST /muutmine `{ registrationId, kind, message }`: a request to cancel (`cancel`) or move (`change`) one of the client's own
  * registrations. It changes nothing itself: it is stored for the admin's inbox and Maria is told after the response. 404
- * `{ error: "registration" }` for a registration that is not the client's, 429 `{ error: "rate" }` after 5 in an hour.
+ * `{ error: "registration" }` for a registration that is not the client's (or is cancelled, past or called off), 429 `{ error: "rate" }` after 5 in an hour.
  */
 async function changeRequest(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
@@ -323,22 +323,26 @@ async function changeRequest(request: Request, deps: AccountDeps): Promise<Respo
     return clientResponse(session, { ok: false, error: "rate" }, 429);
   }
   const { registrationId, kind, message } = input.data;
-  const info = await createChangeRequest(deps.db, session.clientId, registrationId, kind, message);
+  const info = await createChangeRequest(deps.db, session.clientId, registrationId, kind, message, deps.now);
   if (!info) return clientResponse(session, { ok: false, error: "registration" }, 404);
   const summary = changeRequestSummary({ ...info, kind, message }, adminUrl(deps.siteUrl));
   deps.later(() => notifyMaria(deps.env, summary.subject, summary.text, { short: summary.short, replyTo: info.email, siteUrl: deps.siteUrl }));
   return clientResponse(session, { ok: true });
 }
 
-/** POST /tingimused `{ slug }`: the client accepts the e-course terms (the current version). 404 `{ error: "slug" }` without active access to that course. */
+/**
+ * POST /tingimused `{ slug, version }`: the client accepts the e-course terms, the version the page showed (`terms.version` of the e-course view).
+ * 404 `{ error: "slug" }` without active access to that course; 409 `{ error: "version" }` when the terms have changed since the page was loaded
+ * (nothing is stored: the page loads the course again and shows the new text).
+ */
 async function terms(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
   const input = parseTerms(await readObject(request));
   if (!input.ok) return badInput(session, input.error);
-  return (await acceptTerms(deps.db, session.clientId, input.data.slug, deps.now))
-    ? clientResponse(session, { ok: true })
-    : clientResponse(session, { ok: false, error: "slug" }, 404);
+  const result = await acceptTerms(deps.db, session.clientId, input.data.slug, input.data.version, deps.now);
+  if (result === "accepted") return clientResponse(session, { ok: true });
+  return result === "stale" ? clientResponse(session, { ok: false, error: "version" }, 409) : clientResponse(session, { ok: false, error: "slug" }, 404);
 }
 
 /**

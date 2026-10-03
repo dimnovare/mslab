@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import type { Db } from "@/db/client";
 import {
-  clientFavourites, clients, clientSessions, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, settings,
+  clientFavourites, clientLoginTokens, clients, clientSessions, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, settings,
   subscribers, termsAcceptances,
 } from "@/db/schema";
 import { nextStep } from "@/domain/account-cards";
@@ -10,6 +10,7 @@ import {
   acceptTerms, courseTermsVersion, createChangeRequest, deleteClient, favouriteSlugs, loadDashboard, loadEcourse, mergeFavourites, parsePrepayment,
   setFavourite, setNewsletter, updateProfile,
 } from "@/server/client-data";
+import { issueClientLogin, redeemClientCode, redeemClientLink } from "@/server/client-auth";
 import { makeTestDb } from "./helpers";
 
 // What a client sees and may change (server/client-data.ts) against a real (PGlite) database. Every address is `@example.test`.
@@ -80,7 +81,7 @@ const grant = async (clientId: number, courseId: number, over: Partial<typeof co
 const setting = (key: string, value: unknown) => db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
 
 describe("loadDashboard", () => {
-  test("lists the client's registrations, requests (waitlist included) and e-course access; newest session first, over cards last", async () => {
+  test("lists the client's registrations, requests (waitlist included) and e-course access; open ones soonest session first, then undated open ones, over cards last", async () => {
     const kati = await client();
     const soon = await register(kati.id, f.lami.id, f.soon.id, { status: "confirmed", paidCents: 17500, paymentChoice: "half" });
     const later = await register(kati.id, f.lami.id, f.later.id);
@@ -98,16 +99,16 @@ describe("loadDashboard", () => {
     expect(dash.favourites).toEqual([]);
     expect(dash.prepayment).toBeNull();
 
-    // open ones by their date, the newest first: a session's start, else when the request was made or the access granted
+    // open ones with a date, the soonest first; then open ones without a date, the newest first (made or granted); over ones, the most recent first
     const order = dash.cards.map((c) => (c.kind === "contact" || c.kind === "individual" ? `reg${c.registrationId}` : c.kind === "ecourse" ? `course:${c.course.slug}` : `req${c.requestId}`));
     expect(order).toEqual([
-      `reg${later.id}`, // session in 60 days
-      `req${wait.id}`, // waitlist for the session in 50 days
       `reg${soon.id}`, // session in 30 days
-      `reg${individual.id}`, // made yesterday
-      `req${practice.id}`, // made 3 days ago
-      `course:veebikursus`, // granted 10 days ago
-      // over: the cancelled registration (its session is in 60 days), the handled request (yesterday), the past session
+      `req${wait.id}`, // waitlist for the session in 50 days
+      `reg${later.id}`, // session in 60 days
+      `reg${individual.id}`, // no date: made yesterday
+      `req${practice.id}`, // no date: made 3 days ago
+      `course:veebikursus`, // no date: granted 10 days ago
+      // over: the cancelled registration (its session is in 60 days), the handled request (yesterday), the past session (20 days ago)
       `reg${cancelled.id}`,
       `req${individualRequest.id}`,
       `reg${past.id}`,
@@ -166,8 +167,22 @@ describe("loadDashboard", () => {
     expect(JSON.stringify(cards)).not.toContain("salajane"); // the message stays out of the card
     expect(cards.find((c) => c.kind === "waitlist")).toEqual({
       kind: "waitlist", requestId: wait.id, course: { slug: "kulmude-lami", title: { et: "Kulmude lamineerimine", ru: "Ламинирование бровей" } },
-      session: { startsAt: f.later.startsAt.toISOString(), city: "Tartu", venue: "Salong" }, createdAt: wait.createdAt.toISOString(),
+      session: { startsAt: f.later.startsAt.toISOString(), city: "Tartu", venue: "Salong", cancelled: false }, handled: false, createdAt: wait.createdAt.toISOString(),
     });
+  });
+
+  test("a waitlist card knows when Maria has dealt with it and when its date was called off; the sentences follow", async () => {
+    const kati = await client();
+    const open = await request(kati.id, "waitlist", { session: f.later.id, course: "kulmude-lami" });
+    const handled = await request(kati.id, "waitlist", { session: f.later.id, course: "kulmude-lami" }, { handled: true });
+    const called = await request(kati.id, "waitlist", { session: f.called.id, course: "kulmude-lami" });
+    const { cards } = (await loadDashboard(db, kati.id, NOW))!;
+    const card = (id: number) => cards.find((c) => c.kind === "waitlist" && c.requestId === id)!;
+    expect(card(handled.id)).toMatchObject({ handled: true, session: { cancelled: false } });
+    expect(card(called.id)).toMatchObject({ handled: false, session: { cancelled: true } });
+    expect([open, handled, called].map((r) => nextStep(card(r.id), NOW, null).key)).toEqual(["waitlist", "requestDone", "cancelled"]);
+    // the open one first, then the over ones by their date, the later first (the handled one's date is in 60 days, the called-off one's in 45)
+    expect(cards.map((c) => c.kind === "waitlist" && c.requestId)).toEqual([open.id, handled.id, called.id]);
   });
 
   test("a request whose payload points nowhere (no such session, a session that is not a number, a course that is gone) still shows, and the query does not fail", async () => {
@@ -214,19 +229,20 @@ describe("loadDashboard", () => {
     expect((await loadDashboard(db, mari.id, NOW))!.cards).toHaveLength(3);
   });
 
-  test("e-course access: active, expired and revoked are cards (the sentence differs); one for an unpublished course is hidden", async () => {
+  test("e-course access: active, expired and revoked are cards (the sentence differs), also for a course that is no longer published", async () => {
     const kati = await client();
     const second = await db.insert(courses).values({ ...base, slug: "teine-kursus", type: "e_learning", title: { et: "Teine" }, published: true, price: 100 }).returning();
     const third = await db.insert(courses).values({ ...base, slug: "kolmas-kursus", type: "e_learning", title: { et: "Kolmas" }, published: true, price: 100 }).returning();
     await grant(kati.id, f.online.id);
     await grant(kati.id, second[0].id, { expiresAt: at(-1), grantedAt: at(-30) });
     await grant(kati.id, third[0].id, { revokedAt: at(-5), grantedAt: at(-20) });
-    await grant(kati.id, f.hiddenOnline.id);
+    await grant(kati.id, f.hiddenOnline.id, { grantedAt: at(-5) }); // the course was unpublished after the access was granted: the access stays
     const { cards } = (await loadDashboard(db, kati.id, NOW))!;
-    expect(cards.map((c) => c.kind === "ecourse" && c.course.slug)).toEqual(["veebikursus", "kolmas-kursus", "teine-kursus"]); // active first; over ones newest grant first
-    expect(cards.map((c) => nextStep(c, NOW, null).key)).toEqual(["openCourse", "accessEnded", "accessEnded"]);
-    expect(cards[0]).toEqual({ kind: "ecourse", course: { slug: "veebikursus", title: { et: "Veebikursus" } }, grantedAt: at(-10).toISOString(), expiresAt: at(170).toISOString(), revoked: false });
-    expect(cards[1]).toMatchObject({ revoked: true });
+    // open ones newest grant first, then over ones the most recent first
+    expect(cards.map((c) => c.kind === "ecourse" && c.course.slug)).toEqual(["peidus-kursus", "veebikursus", "kolmas-kursus", "teine-kursus"]);
+    expect(cards.map((c) => nextStep(c, NOW, null).key)).toEqual(["openCourse", "openCourse", "accessEnded", "accessEnded"]);
+    expect(cards[1]).toEqual({ kind: "ecourse", course: { slug: "veebikursus", title: { et: "Veebikursus" } }, grantedAt: at(-10).toISOString(), expiresAt: at(170).toISOString(), revoked: false });
+    expect(cards[2]).toMatchObject({ revoked: true });
   });
 
   test("favourites are the published courses the client hearted, newest first; the profile and newsletter flag are the client's", async () => {
@@ -359,7 +375,7 @@ describe("createChangeRequest", () => {
   test("stores a change_request for the client's own registration and changes nothing else", async () => {
     const kati = await client();
     const reg = await register(kati.id, f.lami.id, f.soon.id, { status: "confirmed", paidCents: 35000 });
-    const info = await createChangeRequest(db, kati.id, reg.id, "cancel", "Haigestusin");
+    const info = await createChangeRequest(db, kati.id, reg.id, "cancel", "Haigestusin", NOW);
     expect(info).toEqual({
       registrationId: reg.id, course: "Kulmude lamineerimine", session: { startsAt: f.soon.startsAt, city: "Pärnu", venue: "Salong" },
       name: "Kati Tamm", email: "kati@example.test", phone: "+3725551234", locale: "et",
@@ -377,8 +393,16 @@ describe("createChangeRequest", () => {
     const kati = await client();
     const reg = await register(kati.id, f.lami.id, null, { kind: "individual", name: "", phone: "" });
     await db.update(clients).set({ name: "Kati", phone: "123" }).where(eq(clients.id, kati.id));
-    expect(await createChangeRequest(db, kati.id, reg.id, "change", "")).toMatchObject({ session: null, name: "Kati", phone: "123" });
+    expect(await createChangeRequest(db, kati.id, reg.id, "change", "", NOW)).toMatchObject({ session: null, name: "Kati", phone: "123" });
     expect((await db.select().from(requests))[0].payload).toEqual({ registrationId: reg.id, kind: "change", message: "", email: "kati@example.test" });
+  });
+
+  test("an awaiting registration may ask too, and one whose session is today but not yet begun", async () => {
+    const kati = await client();
+    const reg = await register(kati.id, f.lami.id, f.soon.id);
+    expect(await createChangeRequest(db, kati.id, reg.id, "change", "", NOW)).not.toBe(false);
+    const justBefore = new Date(f.soon.startsAt.getTime() - 1);
+    expect(await createChangeRequest(db, kati.id, reg.id, "change", "", justBefore)).not.toBe(false);
   });
 
   test("refused (false, nothing stored) for another client's registration, one linked to nobody, and one that does not exist", async () => {
@@ -386,41 +410,56 @@ describe("createChangeRequest", () => {
     const mari = await client("mari@example.test");
     const maris = await register(mari.id, f.lami.id, f.soon.id, { email: "mari@example.test" });
     const loose = await register(null, f.lami.id, f.soon.id); // the same address as Kati's, not linked
-    expect(await createChangeRequest(db, kati.id, maris.id, "cancel", "x")).toBe(false);
-    expect(await createChangeRequest(db, kati.id, loose.id, "cancel", "x")).toBe(false);
-    expect(await createChangeRequest(db, kati.id, 987654, "cancel", "x")).toBe(false);
+    expect(await createChangeRequest(db, kati.id, maris.id, "cancel", "x", NOW)).toBe(false);
+    expect(await createChangeRequest(db, kati.id, loose.id, "cancel", "x", NOW)).toBe(false);
+    expect(await createChangeRequest(db, kati.id, 987654, "cancel", "x", NOW)).toBe(false);
+    expect(await db.select().from(requests)).toEqual([]);
+  });
+
+  test("refused (false, nothing stored) for a cancelled registration, a session that has begun (also the instant it begins) and a session that was called off", async () => {
+    const kati = await client();
+    const cancelled = await register(kati.id, f.lami.id, f.soon.id, { status: "cancelled" });
+    const past = await register(kati.id, f.lami.id, f.past.id, { status: "confirmed" });
+    const called = await register(kati.id, f.lami.id, f.called.id, { status: "confirmed" });
+    const starting = await register(kati.id, f.lami.id, f.soon.id, { status: "confirmed" });
+    expect(await createChangeRequest(db, kati.id, cancelled.id, "change", "x", NOW)).toBe(false);
+    expect(await createChangeRequest(db, kati.id, past.id, "cancel", "x", NOW)).toBe(false);
+    expect(await createChangeRequest(db, kati.id, called.id, "cancel", "x", NOW)).toBe(false);
+    expect(await createChangeRequest(db, kati.id, starting.id, "cancel", "x", f.soon.startsAt)).toBe(false); // begun: the calendar's own boundary
+    expect(await createChangeRequest(db, kati.id, starting.id, "cancel", "x", at(31))).toBe(false);
     expect(await db.select().from(requests)).toEqual([]);
   });
 });
 
 describe("e-course and terms", () => {
   const TERMS = { title: { et: "E-koolituse tingimused" }, body: { et: "Ligipääs on isiklik.", ru: "Доступ личный." } };
+  const V2 = "2026-11-01T09:00:00.000Z";
 
-  test("the e-course view: the course, its modules, the access end and the terms still to accept (with their text)", async () => {
+  test("the e-course view: the course, its modules, the access end and the terms still to accept (with their version and text)", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
     await db.insert(pages).values({ key: "course_terms", ...TERMS });
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toEqual({
       course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika", ru: "Практика" }] },
       access: { expiresAt: at(170).toISOString() },
-      terms: { accepted: false, text: TERMS.body },
+      terms: { version: "1", accepted: false, text: TERMS.body },
     });
+    await setting("courseTermsVersion", V2);
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.version).toBe(V2);
   });
 
   test("no terms text stored: the notice has no text, the acceptance is still asked for", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
-    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ accepted: false, text: null });
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ version: "1", accepted: false, text: null });
   });
 
-  test("null without access: none, another client's, revoked, expired, an unpublished course, an unknown slug", async () => {
+  test("null without active access: none, another client's, revoked, expired, an unknown slug", async () => {
     const kati = await client();
     const mari = await client("mari@example.test");
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toBeNull();
     await grant(mari.id, f.online.id);
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toBeNull();
-    await grant(kati.id, f.hiddenOnline.id);
-    expect(await loadEcourse(db, kati.id, "peidus-kursus", NOW)).toBeNull();
     expect(await loadEcourse(db, kati.id, "olematu", NOW)).toBeNull();
     await grant(kati.id, f.online.id, { revokedAt: at(-1) });
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toBeNull();
@@ -433,6 +472,17 @@ describe("e-course and terms", () => {
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).not.toBeNull();
   });
 
+  test("active access survives unpublishing the course: the view opens and the terms can be accepted; ended access does not", async () => {
+    const kati = await client();
+    await grant(kati.id, f.hiddenOnline.id);
+    expect(await loadEcourse(db, kati.id, "peidus-kursus", NOW)).toMatchObject({ course: { slug: "peidus-kursus" }, terms: { version: "1", accepted: false } });
+    expect(await acceptTerms(db, kati.id, "peidus-kursus", "1", NOW)).toBe("accepted");
+    expect((await loadEcourse(db, kati.id, "peidus-kursus", NOW))!.terms.accepted).toBe(true);
+    await db.update(courseAccess).set({ revokedAt: at(-1) }).where(eq(courseAccess.clientId, kati.id));
+    expect(await loadEcourse(db, kati.id, "peidus-kursus", NOW)).toBeNull();
+    expect(await acceptTerms(db, kati.id, "peidus-kursus", "1", NOW)).toBe("noAccess");
+  });
+
   test("the version is the settings key courseTermsVersion, \"1\" until the admin has saved the terms", async () => {
     expect(await courseTermsVersion(db)).toBe("1");
     await setting("courseTermsVersion", "");
@@ -443,26 +493,46 @@ describe("e-course and terms", () => {
     expect(await courseTermsVersion(db)).toBe("2026-10-01T09:00:00.000Z");
   });
 
-  test("accepting stores the current version for this client and course; the notice then stays away, and the text is not sent again", async () => {
+  test("accepting stores the version for this client and course; the notice then stays away, and the text is not sent again", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
     await db.insert(pages).values({ key: "course_terms", ...TERMS });
-    expect(await acceptTerms(db, kati.id, "veebikursus", NOW)).toBe(true);
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("accepted");
     expect(await db.select().from(termsAcceptances)).toEqual([{ clientId: kati.id, courseId: f.online.id, termsVersion: "1", acceptedAt: NOW }]);
-    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ accepted: true, text: null });
-    expect(await acceptTerms(db, kati.id, "veebikursus", at(1))).toBe(true); // again: nothing changes
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ version: "1", accepted: true, text: null });
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", at(1))).toBe("accepted"); // again: nothing changes
     expect(await db.select().from(termsAcceptances)).toHaveLength(1);
   });
 
   test("a new terms version asks again, and accepting stores that version next to the old one", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
-    await acceptTerms(db, kati.id, "veebikursus", NOW);
-    await setting("courseTermsVersion", "2026-11-01T09:00:00.000Z");
-    expect((await loadEcourse(db, kati.id, "veebikursus", at(40)))!.terms.accepted).toBe(false);
-    await acceptTerms(db, kati.id, "veebikursus", at(40));
-    expect((await db.select().from(termsAcceptances)).map((t) => t.termsVersion).sort()).toEqual(["1", "2026-11-01T09:00:00.000Z"]);
+    await acceptTerms(db, kati.id, "veebikursus", "1", NOW);
+    await setting("courseTermsVersion", V2);
+    expect((await loadEcourse(db, kati.id, "veebikursus", at(40)))!.terms).toMatchObject({ version: V2, accepted: false });
+    expect(await acceptTerms(db, kati.id, "veebikursus", V2, at(40))).toBe("accepted");
+    expect((await db.select().from(termsAcceptances)).map((t) => t.termsVersion).sort()).toEqual(["1", V2]);
     expect((await loadEcourse(db, kati.id, "veebikursus", at(40)))!.terms.accepted).toBe(true);
+  });
+
+  test("a stale version is refused and nothing is stored: the student saw the old text, the admin has saved a new one", async () => {
+    const kati = await client();
+    await grant(kati.id, f.online.id);
+    const seen = (await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.version; // the page was loaded with "1"
+    await setting("courseTermsVersion", V2); // the admin saves new terms
+    expect(await acceptTerms(db, kati.id, "veebikursus", seen, NOW)).toBe("stale");
+    expect(await db.select().from(termsAcceptances)).toEqual([]);
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.accepted).toBe(false);
+    // any other version is stale too, also a newer one the page cannot have seen, and an empty one
+    for (const version of ["2", "2026-12-01T09:00:00.000Z", "", V2.slice(0, -1)]) expect(await acceptTerms(db, kati.id, "veebikursus", version, NOW), version).toBe("stale");
+    expect(await db.select().from(termsAcceptances)).toEqual([]);
+    expect(await acceptTerms(db, kati.id, "veebikursus", V2, NOW)).toBe("accepted"); // after reloading, the current one
+  });
+
+  test("no access is reported before a stale version (a client without access learns nothing about the terms)", async () => {
+    const kati = await client();
+    await setting("courseTermsVersion", V2);
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("noAccess");
   });
 
   test("an acceptance is per client: another client's does not count", async () => {
@@ -470,24 +540,22 @@ describe("e-course and terms", () => {
     const mari = await client("mari@example.test");
     await grant(kati.id, f.online.id);
     await grant(mari.id, f.online.id);
-    await acceptTerms(db, mari.id, "veebikursus", NOW);
+    await acceptTerms(db, mari.id, "veebikursus", "1", NOW);
     expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.accepted).toBe(false);
   });
 
-  test("accepting needs active access to a published course: none, expired, revoked, unpublished, another client's, unknown slug (false, nothing stored)", async () => {
+  test("accepting needs active access: none, expired, revoked, another client's, unknown slug (\"noAccess\", nothing stored)", async () => {
     const kati = await client();
     const mari = await client("mari@example.test");
-    expect(await acceptTerms(db, kati.id, "veebikursus", NOW)).toBe(false);
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("noAccess");
     await grant(mari.id, f.online.id);
-    expect(await acceptTerms(db, kati.id, "veebikursus", NOW)).toBe(false);
-    await grant(kati.id, f.hiddenOnline.id);
-    expect(await acceptTerms(db, kati.id, "peidus-kursus", NOW)).toBe(false);
-    expect(await acceptTerms(db, kati.id, "olematu", NOW)).toBe(false);
-    expect(await acceptTerms(db, kati.id, "kulmude-lami", NOW)).toBe(false); // a published course, but no access
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("noAccess");
+    expect(await acceptTerms(db, kati.id, "olematu", "1", NOW)).toBe("noAccess");
+    expect(await acceptTerms(db, kati.id, "kulmude-lami", "1", NOW)).toBe("noAccess"); // a published course, but no access
     await grant(kati.id, f.online.id, { expiresAt: at(-1) });
-    expect(await acceptTerms(db, kati.id, "veebikursus", NOW)).toBe(false);
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("noAccess");
     await db.update(courseAccess).set({ expiresAt: at(30), revokedAt: at(-1) }).where(and(eq(courseAccess.clientId, kati.id), eq(courseAccess.courseId, f.online.id)));
-    expect(await acceptTerms(db, kati.id, "veebikursus", NOW)).toBe(false);
+    expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("noAccess");
     expect(await db.select().from(termsAcceptances)).toEqual([]);
   });
 });
@@ -501,7 +569,7 @@ describe("deleteClient", () => {
     const req = await request(kati.id, "individual", { course: "kulmude-lami", preferredPeriod: "x", email: "kati@example.test" });
     await grant(kati.id, f.online.id);
     await grant(mari.id, f.online.id);
-    await acceptTerms(db, kati.id, "veebikursus", NOW);
+    await acceptTerms(db, kati.id, "veebikursus", "1", NOW);
     await db.insert(clientFavourites).values([{ clientId: kati.id, courseId: f.lami.id }, { clientId: mari.id, courseId: f.lami.id }]);
     await db.insert(clientSessions).values({ idHash: "h1", clientId: kati.id, expiresAt: at(100) });
     await db.insert(subscribers).values([{ email: "Kati@example.test", token: "t1", confirmedAt: NOW, clientId: kati.id }, { email: "mari@example.test", token: "t2", clientId: mari.id }]);
@@ -518,6 +586,28 @@ describe("deleteClient", () => {
     expect((await db.select().from(registrations).where(eq(registrations.id, reg.id)))[0]).toEqual({ ...reg, clientId: null });
     expect((await db.select().from(requests).where(eq(requests.id, req.id)))[0]).toEqual({ ...req, clientId: null });
     expect((await db.select().from(registrations).where(eq(registrations.id, maris.id)))[0]).toEqual(maris);
+  });
+
+  test("the login codes and links still waiting for the address are deleted with it: no token row is left, and a code or link issued before no longer signs in", async () => {
+    const T0 = new Date("2026-10-03T09:50:00Z"); // a live login at NOW: issued ten minutes ago, valid 30
+    const first = (await issueClientLogin(db, "kati@example.test", T0))!;
+    const kati = (await redeemClientCode(db, "kati@example.test", first.code, T0)) as { clientId: number }; // the first login makes the account
+    // "Saada uuesti": more logins issued while signed in, one for a mail in another case and one for another address
+    const resent = (await issueClientLogin(db, "Kati@Example.test", T0))!;
+    const again = (await issueClientLogin(db, "kati@example.test", T0))!;
+    const other = (await issueClientLogin(db, "mari@example.test", T0))!;
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(4); // the used one and three live ones, one for Mari
+
+    expect(await deleteClient(db, kati.clientId)).toEqual({ email: "kati@example.test", locale: "et" });
+
+    expect((await db.select().from(clientLoginTokens)).map((t) => t.email)).toEqual(["mari@example.test"]);
+    expect(await redeemClientCode(db, "kati@example.test", resent.code, NOW)).toBeNull();
+    expect(await redeemClientCode(db, "kati@example.test", again.code, NOW)).toBeNull();
+    expect(await redeemClientLink(db, again.token, NOW)).toBeNull();
+    expect(await redeemClientLink(db, resent.token, NOW)).toBeNull();
+    expect(await db.select().from(clients)).toEqual([]); // nothing signed in again, so nothing re-created the account
+    // another address keeps its login
+    expect(await redeemClientCode(db, "mari@example.test", other.code, NOW)).toMatchObject({ isNew: true });
   });
 
   test("a client that is gone: null (deleting twice is fine)", async () => {

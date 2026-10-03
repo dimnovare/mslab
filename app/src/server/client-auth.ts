@@ -27,7 +27,7 @@ const tx = <T>(db: Db, fn: (t: Db) => Promise<T>) =>
  * client or both leave a session open (the one-device rule). Re-entrant within a transaction, so taking it again is harmless.
  * Always taken before any token row is locked (lock order address, then row), so a link and a code for one token cannot deadlock.
  */
-async function lockAddress(t: Db, address: string): Promise<void> {
+export async function lockAddress(t: Db, address: string): Promise<void> {
   await t.execute(sql`select pg_advisory_xact_lock(hashtext(${"client-login:" + address}))`);
 }
 

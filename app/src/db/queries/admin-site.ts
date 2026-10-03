@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Q, Tx } from "../client";
-import { campaign, faq, galleryItems, heroSlides, pages, posts, practicePackages, settings } from "../schema";
+import { campaign, faq, galleryItems, heroSlides, pages, posts, practicePackages } from "../schema";
 import type { Campaign, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "../schema";
 import type { I18n } from "@/i18n/field";
 
@@ -34,11 +34,8 @@ export async function readPage(q: Q, key: string): Promise<Page | null> {
   return row ?? null;
 }
 
-/** A settings value, or null when the key is not stored. */
-export async function readSetting(q: Q, key: string): Promise<unknown> {
-  const [row] = await q.select().from(settings).where(eq(settings.key, key)).limit(1);
-  return row ? row.value : null;
-}
+/** A settings value, or null when the key is not stored (the reader lives with the public queries; the admin's editors use it too). */
+export { readSetting } from "./public";
 
 export async function readPackage(q: Q, code: string): Promise<PracticePackage | null> {
   const [row] = await q.select().from(practicePackages).where(eq(practicePackages.code, code)).limit(1);
