@@ -71,6 +71,7 @@ export class PgKv implements TextKv, FeedbackKv {
  */
 export async function sweepExpired(db: Db, now: Date = new Date()): Promise<number> {
   // Returns a constant per row: the keys hold visitors' addresses and need not leave the database to be counted.
+  // The cast picks one member of the Db union (as in auth.ts): on the union itself, returning(fields) has no common overload.
   const gone = await (db as PostgresJsDatabase<typeof schema>).delete(kvEntries).where(lte(kvEntries.expiresAt, now))
     .returning({ one: sql<number>`1` });
   return gone.length;
