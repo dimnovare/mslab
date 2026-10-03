@@ -29,21 +29,39 @@ const hex = (buffer: ArrayBuffer) => [...new Uint8Array(buffer)].map((b) => b.to
 const ANSWER_TIMEOUT_MS = 10_000;
 
 /**
+ * The signing keys, as aws4fetch's AwsClient keeps them: one entry per secret, day, region and service. They live here
+ * and not in r2Store because mediaStore() makes a new store for every request: a function instance derives the day's key
+ * (four HMACs) once, not once a request. Emptied when it has grown past a few days' worth, so it never piles up.
+ */
+const signingKeys = new Map<string, ArrayBuffer>();
+const MAX_SIGNING_KEYS = 8;
+
+/**
+ * Lets go of a body nobody reads (R2's answer to a PUT, its XML error). Not awaited: cancelling a body that is one branch
+ * of a tee waits for the other branch, which may never come, and the answer to the visitor must not wait for that.
+ */
+function discard(res: Response): void {
+  res.body?.cancel().catch(() => {});
+}
+
+/**
  * The image store on R2. `fetchImpl` is the platform's fetch (it is looked up at each call); tests pass a fake that
  * records the signed request.
  */
 export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init) => fetch(input, init)): MediaStore {
-  const signingKeys = new Map<string, ArrayBuffer>(); // aws4fetch keeps the day's signing key here, as its AwsClient does
   const urlOf = (key: string) => `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
   // Only aws4fetch's signer is used: its AwsClient.fetch() would retry up to 10 times with growing pauses, far longer than
   // a request may take here, and one attempt is made.
   // The signed request goes to fetch as an address and an init that holds the signal, never as a Request object. In a
   // route handler fetch is Next.js's: it folds the init of a Request into the Request, and then deduplicates a GET whose
-  // init has no signal, handing back one branch of a tee of the body while the other branch waits, unread, for a repeat
-  // of the request. Cancelling that body (the 404 and error answers below) waits for the other branch, so it never
-  // finished and /media never answered. A signal in the init is Next.js's opt-out of that deduplication.
+  // init has no signal: the caller gets one branch of a tee of the response body, and the other branch stays unread,
+  // released only at garbage collection. Cancelling the caller's branch (the 404 and error answers below) waits for that
+  // other branch, so it never finished and /media never answered. A signal in the init is Next.js's opt-out of that
+  // deduplication. The bodies that are only thrown away are not awaited either (discard): no tee or wrapper can hold an
+  // answer back again.
   async function send(key: string, init: { method: "GET" | "PUT"; headers?: Record<string, string>; body?: ArrayBuffer }): Promise<Response> {
+    if (signingKeys.size > MAX_SIGNING_KEYS) signingKeys.clear();
     const signer = new AwsV4Signer({ ...init, url: urlOf(key), accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, service: "s3", region: "auto", cache: signingKeys });
     const signed = await signer.sign();
     const controller = new AbortController();
@@ -61,14 +79,14 @@ export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init
       // signature covers the bytes, and R2 refuses an upload whose bytes do not match.
       const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
       const res = await send(key, { method: "PUT", body: bytes, headers: { "content-type": contentType, "x-amz-content-sha256": sha256 } });
-      await res.body?.cancel();
+      discard(res);
       if (!res.ok) throw new R2Error("put", res.status);
     },
 
     async get(key) {
       const res = await send(key, { method: "GET" });
       if (res.ok) return { body: res.body ?? new ArrayBuffer(0), contentType: res.headers.get("content-type"), etag: res.headers.get("etag") };
-      await res.body?.cancel();
+      discard(res);
       if (res.status === 404) return null; // NoSuchKey
       throw new R2Error("get", res.status);
     },

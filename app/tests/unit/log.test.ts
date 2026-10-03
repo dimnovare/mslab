@@ -15,6 +15,27 @@ test("errorSummary keeps the class, SQLSTATE and HTTP status, never the message 
   expect(errorSummary(Object.assign(new Error("x"), { code: "mari@example.com is bad" }))).toBe("Error");
 });
 
+test("errorSummary names an error by its own name first: a minified class name (\"_\" in a production build) does not hide it", () => {
+  // what the minifier does to `class R2Error extends Error`: the constructor is called "_", the instance keeps the name it sets
+  const _ = class extends Error {
+    constructor(readonly status: number) {
+      super("R2 get answered 403 for https://acct.r2.cloudflarestorage.com/bucket/img/key.jpg");
+      this.name = "R2Error";
+    }
+  };
+  Object.defineProperty(_, "name", { value: "_" });
+  expect(new _(403).constructor.name).toBe("_");
+  expect(errorSummary(new _(403))).toBe("R2Error (status 403)");
+  // a name that is empty, plain "Error" or not a short code gives way to the class name
+  class Boom extends Error {}
+  expect(errorSummary(Object.assign(new Boom("x"), { name: "" }))).toBe("Boom");
+  expect(errorSummary(new Boom("x"))).toBe("Boom"); // name stays "Error": the class name is the best there is
+  expect(errorSummary(Object.assign(new Boom("x"), { name: "mari@example.com failed" }))).toBe("Boom");
+  expect(errorSummary(Object.assign(new Error("x"), { name: "mari@example.com failed" }))).toBe("Error");
+  // and a built-in error is still named by its name
+  expect(errorSummary(new RangeError("x"))).toBe("RangeError");
+});
+
 test("pages, layouts, routes and components log failures through logFailure only, never with console.error (final review M5)", () => {
   const files: string[] = [];
   const walk = (dir: string) => {

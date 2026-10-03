@@ -3,6 +3,8 @@ import { NO_MEDIA, serveMedia } from "@/server/media";
 import { mediaStore } from "@/server/media-store";
 
 export const dynamic = "force-dynamic";
+// R2 is given 10 s to answer (server/r2.ts); whatever else holds a request up ends after 30 s, not after the default 300 s
+export const maxDuration = 30;
 
 /**
  * GET /media/img/<uuid>.<jpg|png|webp> — an uploaded image from the image store (public: the site shows them): R2 through

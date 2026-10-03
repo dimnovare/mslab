@@ -12,8 +12,11 @@ vi.mock("@/server/auth", () => ({
   withAdmin: (handler: (request: Request, ctx: unknown, admin: { email: string }) => Response | Promise<Response>) => (request: Request, ctx: unknown) => handler(request, ctx, { email: "admin@example.test" }),
 }));
 
-import { POST } from "@/app/api/admin/upload/route";
-import { GET } from "@/app/media/[...key]/route";
+import * as uploadRoute from "@/app/api/admin/upload/route";
+import * as mediaRoute from "@/app/media/[...key]/route";
+
+const { POST } = uploadRoute;
+const { GET } = mediaRoute;
 
 const ID = "0f8b6c2e-3d4a-4b5c-8d9e-0a1b2c3d4e5f";
 const JPEG = [0xff, 0xd8, 0xff, 0xe0, 1, 2, 3];
@@ -142,5 +145,12 @@ describe("GET /media/<key>", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("vercel-cdn-cache-control")).toBeNull();
     expect(log.mock.calls.map((c) => c.join(" "))).toEqual(["[media] read failed: Error"]);
+  });
+});
+
+describe("the time limit of the routes that reach R2", () => {
+  test("both end after 30 s at most, not after Vercel's default 300 s of a request that hangs", () => {
+    expect(uploadRoute.maxDuration).toBe(30);
+    expect(mediaRoute.maxDuration).toBe(30);
   });
 });

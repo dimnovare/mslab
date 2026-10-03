@@ -9,9 +9,12 @@ type Inspectable = { name?: unknown; code?: unknown; status?: unknown; statusCod
 
 function className(e: unknown): string {
   if (e instanceof Error) {
+    // The error's own `name` first: a production build renames classes (R2Error becomes "_"), but a name the class sets
+    // itself survives. A name that is empty, plain "Error" or not a short code gives way to the class name.
+    const own = e.name;
+    if (typeof own === "string" && own !== "Error" && SHORT_CODE.test(own)) return own;
     const ctor = e.constructor?.name;
-    const name = ctor && ctor !== "Error" ? ctor : e.name;
-    return typeof name === "string" && SHORT_CODE.test(name) ? name : "Error";
+    return typeof ctor === "string" && ctor !== "Error" && SHORT_CODE.test(ctor) ? ctor : "Error";
   }
   const name = typeof e === "object" && e !== null ? (e as Inspectable).name : undefined;
   if (typeof name === "string" && SHORT_CODE.test(name)) return name; // e.g. a Resend error object: "validation_error"

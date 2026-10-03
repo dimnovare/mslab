@@ -4,6 +4,8 @@ import { MAX_IMAGE_BYTES, putImage, UploadError, type UploadReason } from "@/ser
 import { mediaStore } from "@/server/media-store";
 
 export const dynamic = "force-dynamic";
+// R2 is given 10 s to answer (server/r2.ts); whatever else holds a request up ends after 30 s, not after the default 300 s
+export const maxDuration = 30;
 
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 const STATUS: Record<UploadReason, number> = { type: 415, size: 413, empty: 400, content: 415 };

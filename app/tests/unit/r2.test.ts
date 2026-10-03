@@ -165,20 +165,81 @@ describe("the address", () => {
   });
 });
 
+/** The promise, or an error when it has not settled within `ms` (the bug that /media had: it never did). */
+const within = <T>(promise: Promise<T>, ms = 2_000) =>
+  Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`no answer within ${ms} ms`)), ms))]);
+
+// Whatever sits between the store and R2 (a tee, a wrapper), the bodies the store throws away are not waited for: it
+// answers at once, also when cancelling a body never finishes. (A branch of a tee does that when its sibling is unread.)
+describe("a body that never finishes cancelling does not hold the answer back", () => {
+  /** An answer whose body can be read but whose cancel() never settles. */
+  const stuck = (status: number) => {
+    const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new TextEncoder().encode("<Error/>")), cancel: () => new Promise<void>(() => {}) });
+    return new Response(body, { status });
+  };
+
+  test("the stuck body really is stuck (the tests below would prove nothing otherwise)", async () => {
+    const settled = await Promise.race([stuck(404).body!.cancel().then(() => "cancelled"), new Promise<string>((r) => setTimeout(() => r("stuck"), 100))]);
+    expect(settled).toBe("stuck");
+  });
+
+  test("get: a 404 is null and a 403 an R2Error, at once", async () => {
+    expect(await within(r2Store(CONFIG, fakeFetch(() => stuck(404)).fetch).get(KEY))).toBeNull();
+    const err = await within(r2Store(CONFIG, fakeFetch(() => stuck(403)).fetch).get(KEY).catch((e) => e));
+    expect(err).toBeInstanceOf(R2Error);
+    expect(err.status).toBe(403);
+  });
+
+  test("put: a 200 is done and a 403 an R2Error, at once", async () => {
+    await within(r2Store(CONFIG, fakeFetch(() => stuck(200)).fetch).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "image/jpeg"));
+    const err = await within(r2Store(CONFIG, fakeFetch(() => stuck(403)).fetch).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "image/jpeg").catch((e) => e));
+    expect(err).toBeInstanceOf(R2Error);
+    expect(err.status).toBe(403);
+  });
+
+  test("a body that refuses to cancel (a rejected cancel) is no failure either", async () => {
+    const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new Uint8Array([1])), cancel: () => Promise.reject(new Error("no")) });
+    expect(await within(r2Store(CONFIG, fakeFetch(() => new Response(body, { status: 404 })).fetch).get(KEY))).toBeNull();
+  });
+});
+
+// The signing key (four HMACs) depends on the secret and the day only: it is derived once for every request of a function
+// instance, also though mediaStore() makes a new store for each of them.
+describe("the signing key", () => {
+  test("is derived once a day, not once a request, across stores", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T10:00:00Z"));
+    const config = { ...CONFIG, secretAccessKey: "a-secret-that-no-other-test-uses" };
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+    try {
+      const { fetch } = fakeFetch();
+      await r2Store(config, fetch).get(KEY);
+      const first = importKey.mock.calls.length; // the key's four steps and the signature itself
+      expect(first).toBeGreaterThan(1);
+      await r2Store(config, fetch).get(KEY);
+      await r2Store(config, fetch).get(KEY);
+      expect(importKey.mock.calls.length - first).toBe(2); // one HMAC for each signature, the key is not derived again
+      vi.setSystemTime(new Date("2026-10-04T00:00:01Z")); // the next day: a new key
+      await r2Store(config, fetch).get(KEY);
+      expect(importKey.mock.calls.length - first).toBe(2 + first);
+    } finally {
+      importKey.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
 // In a route handler `fetch` is Next.js's own (next/dist/server/lib/patch-fetch.js over dedupe-fetch.js, as patchFetch
 // installs them). Two of its steps met here: a Request handed to it absorbs the init (the AbortSignal goes into the
 // Request), and a GET whose init carries no signal is deduplicated: the caller gets one branch of a tee of the response
-// body, the other branch is kept for an identical fetch and never read. Cancelling such a branch waits for the other one,
-// so `res.body.cancel()` on a 404 or 403 never finished and /media never answered (Vercel's 300 s time-out). These tests
-// run the store through those two real functions, inside a route's work store.
+// body, and the other branch stays unread, released only at garbage collection. Cancelling such a branch waits for the
+// other one, so `res.body.cancel()` on a 404 or 403 never finished and /media never answered (Vercel's 300 s time-out).
+// These tests run the store through those two real functions, inside a route's work store.
 describe("inside Next.js's fetch (a route handler)", () => {
   /** What patch-fetch.js reads of the work store for a force-dynamic route such as /media. */
   const ROUTE = { route: "/media/[...key]", isDraftMode: false, forceDynamic: true, forceStatic: false, isStaticGeneration: false, isBuildTimePrerendering: false, isUnstableNoStore: false } as unknown as WorkStore;
   const nextFetch = (upstream: typeof fetch) => createPatchedFetcher(createDedupeFetch(upstream), { workAsyncStorage, workUnitAsyncStorage }) as typeof fetch;
   const inRoute = <T>(fn: () => Promise<T>) => workAsyncStorage.run(ROUTE, fn);
-  /** The promise, or an error when it has not settled within `ms` (the bug: it never did). */
-  const within = <T>(promise: Promise<T>, ms = 2_000) =>
-    Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`no answer within ${ms} ms`)), ms))]);
 
   test("a missing key (R2's 404) is null at once", async () => {
     const { fetch } = fakeFetch(() => new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 }));
@@ -198,7 +259,32 @@ describe("inside Next.js's fetch (a route handler)", () => {
     expect([...new Uint8Array(await new Response(object!.body).arrayBuffer())]).toEqual([...JPEG]);
     expect(seen[0].request.url).toBe(URL_OF_KEY);
     expect(signatureIsValid(seen[0].request, CONFIG.secretAccessKey)).toBe(true);
-    expect(seen[0].request.signal).toBeInstanceOf(AbortSignal);
+    // the init that Next.js's fetch hands on to the platform's fetch carries the signal (the request's own signal is
+    // always set, so it would prove nothing): it is what keeps the response from being a tee branch
+    expect(seen[0].signal).toBeInstanceOf(AbortSignal);
+    expect(seen[0].signal!.aborted).toBe(false);
+  });
+
+  test("a PUT (R2's 200) is done at once: the signed bytes and the content type arrive", async () => {
+    const { seen, fetch } = fakeFetch(() => new Response(null, { status: 200 }));
+    await within(inRoute(() => r2Store(CONFIG, nextFetch(fetch)).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "image/jpeg")));
+    expect(seen).toHaveLength(1);
+    const { request, body, signal } = seen[0];
+    expect(request.method).toBe("PUT");
+    expect(request.url).toBe(URL_OF_KEY);
+    expect(request.headers.get("content-type")).toBe("image/jpeg");
+    expect([...body]).toEqual([...JPEG]);
+    expect(request.headers.get("x-amz-content-sha256")).toBe(sha256hex(JPEG));
+    expect(signatureIsValid(request, CONFIG.secretAccessKey)).toBe(true);
+    expect(signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("a PUT refused (R2's 403) is an R2Error at once", async () => {
+    const { fetch } = fakeFetch(() => new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403 }));
+    const err = await within(inRoute(() => r2Store(CONFIG, nextFetch(fetch)).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "image/jpeg")).catch((e) => e));
+    expect(err).toBeInstanceOf(R2Error);
+    expect(err.status).toBe(403);
+    expect(errorSummary(err)).toBe("R2Error (status 403)");
   });
 
   test("an R2 that never answers is given up after 10 s (an AbortError: the route's 500)", async () => {
@@ -222,5 +308,23 @@ describe("inside Next.js's fetch (a route handler)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // The canary. r2.ts sends the signed request as an address and an init because Next.js's fetch treats the old call
+  // shape, fetch(new Request(url), { signal }), badly: it folds the signal into the Request, deduplicates the GET and hands
+  // back one branch of a tee (an own `url` property: cloneResponse's mark), whose cancel() waits for an unread sibling.
+  // This test keeps that observation alive. It passes while Next.js still does so; when it fails, Next.js has changed, and
+  // the workaround (r2.ts send() and discard()) and the tests around it need a second look, probably to be simplified.
+  test("canary: Next.js's fetch still tees the response of the old call shape, fetch(new Request(url), { signal })", async () => {
+    const { fetch } = fakeFetch(() => new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 }));
+    const controller = new AbortController();
+    const res = await within(inRoute(() => nextFetch(fetch)(new Request(URL_OF_KEY), { signal: controller.signal })));
+    const ownUrl = Object.prototype.hasOwnProperty.call(res, "url"); // a platform Response has `url` on its prototype
+    const cancelled = ownUrl || (await Promise.race([res.body!.cancel().then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 300))]));
+    expect(
+      ownUrl || cancelled === false,
+      "Next.js changed: its patched fetch no longer tees the response of fetch(new Request(url), { signal }) (no own url property, and cancel() of the body answers). " +
+        "The R2 workaround in src/server/r2.ts (address and init, discard of unread bodies) and its tests in this file need review.",
+    ).toBe(true);
   });
 });
