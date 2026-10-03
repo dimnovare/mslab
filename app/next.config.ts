@@ -36,7 +36,8 @@ const nextConfig: NextConfig = {
   //   same-origin frame);
   // - links to other sites carry the origin only.
   // A redirect made by src/middleware.ts sets its own X-Robots-Tag. The admin area and the login endpoints answer per
-  // visitor and are never cached (by the browser or a CDN). /_next/static files get Next.js's own year-long immutable
+  // visitor and are never cached (by the browser or a CDN); the client account's API is private to the visitor too, and
+  // its login link keeps its token out of the Referer. /_next/static files get Next.js's own year-long immutable
   // Cache-Control.
   // A header given here replaces the one a route sets itself, and of two rules for the same path and header the later
   // one wins: so the routes with a stricter value of their own get it here again, after the rule for every path.
@@ -54,10 +55,14 @@ const nextConfig: NextConfig = {
       { source: "/admin/:path*", headers: noStore },
       { source: "/api/auth/:path*", headers: noStore },
       { source: "/api/admin/:path*", headers: noStore },
+      // the client account's API: one visitor's data, never kept by a CDN or a shared cache (server/account-api.ts)
+      { source: "/api/konto/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
       // uploaded images: nothing in them may run (server/media.ts)
       { source: "/media/:path*", headers: [{ key: "Content-Security-Policy", value: MEDIA_CSP }] },
       // the login link: its token is in the address, so it is never sent on as a Referer (api/auth/verify/route.ts)
       { source: "/api/auth/verify", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+      // the client login link: its token is in the address, so it is never sent on as a Referer
+      { source: "/api/konto/verify", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
     ];
   },
 };

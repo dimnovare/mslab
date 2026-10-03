@@ -1,0 +1,253 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { Db } from "@/db/client";
+import { loginMail, verifyLink } from "@/server/account-mail";
+import { accountResponse, clearedCookies, handleAccountApi, sessionCookies, type AccountDeps } from "@/server/account-api";
+import { isPrefetch } from "@/server/prefetch";
+import { fakeKv } from "../fakes";
+
+// The client account's router without a database: the answers that never need one (routing, the cross-site check, the
+// cookies, the headers, bad input) and the e-mail. A database that throws on any use proves the bad-input answers come
+// before it. The sign-in flows themselves are tests/db/account-api.test.ts.
+
+const BASE = "https://mslab.example";
+
+/** A database nobody may touch: any use throws, so a test that gets its answer anyway never reached the database. */
+const noDb = new Proxy({}, { get: () => { throw new Error("the database was used"); } }) as unknown as Db;
+
+function deps(over: Partial<AccountDeps> = {}): AccountDeps {
+  return {
+    db: noDb,
+    env: { KV: fakeKv(), MAIL_FROM: "MS LAB <info@send.example>", MARIA_EMAIL: "maria@example.test", SITE_URL: BASE },
+    now: new Date("2026-10-02T10:00:00Z"),
+    siteUrl: BASE,
+    later: () => {},
+    dev: false,
+    ...over,
+  };
+}
+
+const req = (path: string, init: RequestInit = {}) => new Request(`${BASE}/api/konto${path}`, init);
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  req(path, { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body), headers: { "content-type": "application/json", ...headers } });
+
+beforeEach(() => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "info").mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
+
+describe("routing and the cross-site check", () => {
+  test("a path outside /api/konto is not ours (null), a lookalike too", async () => {
+    for (const path of ["https://mslab.example/api/auth/request", "https://mslab.example/konto", "https://mslab.example/api/kontoX", "https://mslab.example/api"])
+      expect(await handleAccountApi(new Request(path), deps()), path).toBeNull();
+  });
+
+  test("an unknown path or method under /api/konto answers 404 { ok: false }", async () => {
+    for (const r of [req(""), req("/"), req("/nothing"), req("/login"), req("/me", { method: "POST" }), req("/me", { method: "HEAD" }), req("/andmed", { method: "PATCH" })]) {
+      const res = (await handleAccountApi(r, deps()))!;
+      expect(res.status, `${r.method} ${new URL(r.url).pathname}`).toBe(404);
+      expect(await res.json()).toEqual({ ok: false });
+    }
+  });
+
+  test("a cross-site POST, PATCH or DELETE is refused with 403 before anything else", async () => {
+    for (const method of ["POST", "PATCH", "DELETE", "PUT"])
+      for (const path of ["/login", "/code", "/logout", "/andmed", "/nothing"]) {
+        const res = (await handleAccountApi(req(path, { method, headers: { origin: "https://evil.example" }, body: "{}" }), deps()))!;
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await res.json()).toEqual({ ok: false });
+      }
+    // an Origin that is not an address ("null": sandboxed frames) counts as another site too
+    expect((await handleAccountApi(post("/login", {}, { origin: "null" }), deps()))!.status).toBe(403);
+  });
+
+  test("a same-origin POST, a POST without Origin and a cross-site GET are not refused", async () => {
+    for (const r of [post("/login", {}, { origin: BASE }), post("/login", {})]) expect((await handleAccountApi(r, deps()))!.status).toBe(400);
+    const res = (await handleAccountApi(req("/me", { headers: { origin: "https://evil.example" } }), deps()))!;
+    expect(res.status).toBe(401); // reads are not cross-site-checked: the cookie is SameSite=Lax and the answer is not readable by other sites
+  });
+});
+
+describe("cookies", () => {
+  test("sessionCookies: the HttpOnly session cookie and the readable hint, 180 days", () => {
+    expect(sessionCookies("x")).toEqual([
+      "__Host-mslab_client=x; Path=/; Max-Age=15552000; HttpOnly; Secure; SameSite=Lax",
+      "mslab_in=1; Path=/; Max-Age=15552000; Secure; SameSite=Lax",
+    ]);
+  });
+
+  test("clearedCookies: both, expired now", () => {
+    expect(clearedCookies()).toEqual([
+      "__Host-mslab_client=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+      "mslab_in=; Path=/; Max-Age=0; Secure; SameSite=Lax",
+    ]);
+  });
+
+  test("accountResponse puts each cookie on its own Set-Cookie line", () => {
+    const res = accountResponse({ ok: true }, 200, sessionCookies("abc"));
+    expect(res.headers.getSetCookie()).toEqual(sessionCookies("abc"));
+    expect(accountResponse({ ok: true }).headers.getSetCookie()).toEqual([]);
+  });
+});
+
+describe("every answer is private and kept out of search engines", () => {
+  const expectPrivate = (res: Response, what: string) => {
+    expect(res.headers.get("cache-control"), what).toBe("private, no-store");
+    expect(res.headers.get("x-robots-tag"), what).toBe("noindex, nofollow");
+  };
+
+  test("accountResponse", async () => {
+    for (const status of [200, 400, 401, 403, 404, 429, 500]) expectPrivate(accountResponse({ ok: false }, status), String(status));
+    expect(accountResponse({ a: 1 }).headers.get("content-type")).toMatch(/^application\/json/);
+  });
+
+  test("the router: 403, 404, 400, 401, 303, 500 and the logout answer", async () => {
+    const answers: [string, Response][] = [
+      ["403", (await handleAccountApi(post("/login", {}, { origin: "https://evil.example" }), deps()))!],
+      ["404", (await handleAccountApi(req("/nothing"), deps()))!],
+      ["login 400", (await handleAccountApi(post("/login", { email: "x" }), deps()))!],
+      ["code 400", (await handleAccountApi(post("/code", { email: "x" }), deps()))!],
+      ["me 401", (await handleAccountApi(req("/me"), deps()))!],
+      ["logout", (await handleAccountApi(post("/logout", {}), deps()))!],
+      ["verify prefetch", (await handleAccountApi(req("/verify?t=x", { headers: { "sec-purpose": "prefetch" } }), deps()))!],
+      ["500", (await handleAccountApi(post("/login", { email: "kati@example.test" }), deps()))!], // the database throws
+    ];
+    expect(answers.map(([, r]) => r.status)).toEqual([403, 404, 400, 400, 401, 200, 303, 500]);
+    for (const [what, res] of answers) expectPrivate(res, what);
+  });
+});
+
+describe("bad input is a 400, never a 500, and never reaches the database", () => {
+  const bad: [string, unknown][] = [
+    ["not JSON", "email=kati@example.test"],
+    ["an empty body", ""],
+    ["null", "null"],
+    ["an array", "[]"],
+    ["a number", "7"],
+    ["a string", '"kati@example.test"'],
+    ["an object without fields", {}],
+    ["an e-mail that is a number", { email: 7, code: "123456" }],
+    ["an e-mail that is an object", { email: { a: 1 }, code: "123456" }],
+    ["an e-mail that is a list", { email: ["kati@example.test"], code: "123456" }],
+    ["no @", { email: "kati.example.test", code: "123456" }],
+    ["an e-mail of 255 characters", { email: `${"a".repeat(242)}@example.test`, code: "123456" }],
+    ["a body of 5000 characters", { email: "kati@example.test", code: "123456", padding: "x".repeat(5000) }],
+  ];
+
+  test.each(bad)("login: %s", async (_name, body) => {
+    const res = (await handleAccountApi(post("/login", body), deps()))!;
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "email" });
+  });
+
+  test.each([
+    ...bad,
+    ["a code that is a number", { email: "kati@example.test", code: 123456 }],
+    ["a code that is a list", { email: "kati@example.test", code: ["123456"] }],
+    ["no code", { email: "kati@example.test" }],
+    ["five digits", { email: "kati@example.test", code: "12345" }],
+    ["seven digits", { email: "kati@example.test", code: "1234567" }],
+    ["letters", { email: "kati@example.test", code: "12345a" }],
+    ["a code of 5000 characters", { email: "kati@example.test", code: "1".repeat(5000) }],
+  ] as [string, unknown][])("code: %s", async (_name, body) => {
+    const res = (await handleAccountApi(post("/code", body), deps()))!;
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "code" });
+  });
+});
+
+describe("failures", () => {
+  test("a failing database is a JSON 500 that names no address and no value", async () => {
+    const res = (await handleAccountApi(post("/login", { email: "kati@example.test" }), deps()))!;
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ ok: false, error: "server" });
+    const logged = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(logged).toContain("[account] request failed");
+    expect(logged).not.toMatch(/kati|example\.test|database was used/);
+  });
+
+  test("verify with a failing database goes to the login page with ?viga=server, not a JSON page", async () => {
+    const token = "A".repeat(43);
+    const res = (await handleAccountApi(req(`/verify?t=${token}`), deps()))!;
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene?viga=server`);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).not.toContain(token);
+  });
+});
+
+describe("me and logout without a session", () => {
+  test("no cookie, a cookie that is not a token, or other cookies only: 401 none, hint cookie cleared, session cookie untouched", async () => {
+    for (const cookie of [undefined, "", "__Host-mslab_client=", "__Host-mslab_client=short", "other=1; mslab_in=1", "x__Host-mslab_client=" + "A".repeat(43)]) {
+      const res = (await handleAccountApi(req("/me", { headers: cookie === undefined ? {} : { cookie } }), deps()))!;
+      expect(res.status, String(cookie)).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, reason: "none" });
+      expect(res.headers.getSetCookie(), String(cookie)).toEqual([clearedCookies()[1]]);
+    }
+  });
+
+  test("logout without a session still succeeds and clears both cookies", async () => {
+    const res = (await handleAccountApi(post("/logout", {}), deps()))!;
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(res.headers.getSetCookie()).toEqual(clearedCookies());
+  });
+});
+
+describe("verify", () => {
+  test("a prefetch or prerender goes to the login page without touching the token; the Location is absolute, no Referer is sent on", async () => {
+    for (const headers of [{ "sec-purpose": "prefetch" }, { "sec-purpose": "prefetch;prerender" }, { purpose: "prefetch" }, { "sec-purpose": "prerender" }] as Record<string, string>[]) {
+      const res = (await handleAccountApi(req(`/verify?t=${"A".repeat(43)}`, { headers }), deps()))!;
+      expect(res.status, JSON.stringify(headers)).toBe(303);
+      expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene`);
+      expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(res.headers.getSetCookie()).toEqual([]);
+    }
+  });
+
+  test("isPrefetch", () => {
+    expect(isPrefetch(new Headers({ "sec-purpose": "prefetch" }))).toBe(true);
+    expect(isPrefetch(new Headers({ purpose: "Prefetch" }))).toBe(true);
+    expect(isPrefetch(new Headers({ "sec-purpose": "prerender" }))).toBe(true);
+    expect(isPrefetch(new Headers({ "sec-fetch-dest": "document" }))).toBe(false);
+    expect(isPrefetch(new Headers())).toBe(false);
+  });
+});
+
+describe("login e-mail", () => {
+  const TOKEN = "tok-en_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+  test("verifyLink: the site address, the path, the token; a trailing slash is not doubled", () => {
+    expect(verifyLink(BASE, TOKEN)).toBe(`${BASE}/api/konto/verify?t=${TOKEN}`);
+    expect(verifyLink(`${BASE}/`, TOKEN)).toBe(`${BASE}/api/konto/verify?t=${TOKEN}`);
+    expect(verifyLink(BASE, "a b&c")).toBe(`${BASE}/api/konto/verify?t=a%20b%26c`);
+  });
+
+  test("Estonian: the code in the subject and alone on a line, the link, 30 minutes, the ignore line", () => {
+    const mail = loginMail(BASE, "kati@example.test", TOKEN, "042917", "et");
+    expect(mail.to).toBe("kati@example.test");
+    expect(mail.subject).toBe("042917 — MS LAB sisselogimiskood");
+    expect(mail.text.split("\n")).toContain("042917");
+    expect(mail.text).toContain(`${BASE}/api/konto/verify?t=${TOKEN}`);
+    expect(mail.text).toContain("Kood ja link kehtivad 30 minutit.");
+    expect(mail.text).toContain("Kui sa ei palunud sisselogimist, võid selle kirja kustutada.");
+    expect(mail.text).not.toMatch(/\{\w+\}/);
+  });
+
+  test("Russian: the same parts in Russian", () => {
+    const mail = loginMail(BASE, "kati@example.test", TOKEN, "042917", "ru");
+    expect(mail.subject).toBe("042917 — код входа MS LAB");
+    expect(mail.text.split("\n")).toContain("042917");
+    expect(mail.text).toContain(`${BASE}/api/konto/verify?t=${TOKEN}`);
+    expect(mail.text).toMatch(/30 минут/);
+    expect(mail.text).toMatch(/[А-Яа-я]/);
+    expect(mail.text).not.toMatch(/\{\w+\}/);
+  });
+
+  test("the subject carries the 6 digits for every code, leading zeros kept", () => {
+    for (const code of ["000000", "000123", "999999"]) {
+      expect(loginMail(BASE, "kati@example.test", TOKEN, code, "et").subject).toMatch(new RegExp(`^${code} `));
+      expect(loginMail(BASE, "kati@example.test", TOKEN, code, "ru").subject).toMatch(new RegExp(`^${code} `));
+    }
+  });
+});

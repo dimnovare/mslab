@@ -3,9 +3,7 @@ import { getDb } from "@/db/client";
 import { SESSION_COOKIE, SESSION_TTL_MS, redeemLoginToken, sessionCookieOptions } from "@/server/auth";
 import { serverEnv } from "@/server/env";
 import { logFailure } from "@/server/log";
-
-/** A browser or proxy fetching the link ahead of the click (Chrome's `Sec-Purpose: prefetch`, older `Purpose: prefetch`). */
-const isPrefetch = (h: Headers) => /prefetch|prerender/i.test(`${h.get("sec-purpose") ?? ""} ${h.get("purpose") ?? ""}`);
+import { isPrefetch } from "@/server/prefetch";
 
 /**
  * The link in the login e-mail (`?t=<token>`): uses the token (single use, 15 minutes), starts a session of 30 days in

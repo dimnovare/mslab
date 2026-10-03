@@ -51,6 +51,17 @@ describe("next.config.ts headers()", () => {
     expect(valueFor(rules, "/koolitused", "cache-control")).toBeUndefined(); // Next.js's own for the cached pages
   });
 
+  test("the client account's API is private and never cached; its login link sends no Referer (the token is in the address)", async () => {
+    const rules = (await (await config()).headers!()) as Rule[];
+    for (const path of ["/api/konto", "/api/konto/me", "/api/konto/login", "/api/konto/verify", "/api/konto/kursus/some-course"])
+      expect(valueFor(rules, path, "cache-control"), path).toBe("private, no-store");
+    expect(valueFor(rules, "/api/konto/verify", "referrer-policy")).toBe("no-referrer");
+    for (const path of ["/api/konto", "/api/konto/me", "/api/konto/login", "/api/konto/code"])
+      expect(valueFor(rules, path, "referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+    for (const path of ["/api/konto/verify", "/api/konto/me"]) expect(valueFor(rules, path, "x-robots-tag"), path).toBe("noindex, nofollow");
+    expect(valueFor(rules, "/konto", "cache-control")).toBeUndefined(); // the static shell pages keep the CDN's caching
+  });
+
   test("the e2e page cache only when the e2e run's production build asks for it (E2E_PAGE_CACHE)", async () => {
     expect((await config({ E2E_PAGE_CACHE: undefined, VERCEL: undefined })).cacheHandler).toBeUndefined();
     expect((await config({ E2E_PAGE_CACHE: "/tmp/stale", VERCEL: undefined })).cacheHandler).toMatch(/tests[\\/]e2e[\\/]page-cache\.cjs$/);
