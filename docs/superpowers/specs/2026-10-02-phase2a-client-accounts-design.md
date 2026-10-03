@@ -1,8 +1,6 @@
 # MS LAB phase 2a — client accounts and dashboard
 
-> **Note (03.10.2026):** this describes the Cloudflare Workers setup, which is retired. The site runs on Vercel now (the design hub is static files in `app/public`); see [`docs/deploy.md`](../../deploy.md) for the current hosting.
-
-Date: 2026-10-02 · Status: approved by Dim (with the simplicity rules in section 2.1)
+Date: 2026-10-02 · Status: approved by Dim (with the simplicity rules in section 2.1) · Hosting parts updated 03.10.2026 for the move to Vercel Hobby
 Builds on: `2026-10-01-main-site-phase1-design.md` (phase plan, section 1). Requirements: checklist rows S1–S5, S7 (account part), P6, P16, A4 (students) in `docs/feedback/2026-10-01-checklist.md`.
 
 ## 1. Scope
@@ -28,7 +26,7 @@ Non-goals for 2a: taking payments, lesson content (e-courses show "Sisu lisandub
 | Client actions | Edit name, phone and language (ET/RU); newsletter on/off; "Soovin tühistada / muuta aega" on a contact registration (creates an admin request, changes nothing itself); delete account. |
 | View as client | Admins open any client's dashboard read-only from "Õpilased", with a banner and every action disabled. |
 | Dashboard design | Prototype B's dashboard (Maria, C34), with a simpler menu (C35). |
-| Hosting | Stays on Cloudflare Workers **Free** (10 ms CPU per request). Paid plans are ruled out. |
+| Hosting | Vercel **Hobby** (project `mslab`, functions in Frankfurt `fra1`, `docs/deploy.md`), Railway Postgres, R2 for images. Paid plans are ruled out. Limits that shape 2a: 1M function invocations a month, 4.5 MB request body, cron jobs at most daily, 100 GB data transfer; Resend Free sends 100 mails a day. |
 | Audience | Brow and lash students who are not confident with computers, mostly on phones. Fewest possible steps; see section 2.1. |
 
 ## 2.1 Simplicity rules (Dim, binding for every screen and e-mail)
@@ -44,14 +42,14 @@ The users are brow and lash students, many not confident with computers, mostly 
 7. **Mobile first.** Designed at 390 px first; bottom tab bar with icons + labels; nothing needs horizontal scrolling except the swipeable course list.
 8. **Forgiving forms.** E-mail is trimmed and lower-cased; obvious typos in common domains (gmial.com, gmail.ee …) get a "Kas mõtlesid …?" suggestion before sending. Errors say what to do, never only what went wrong.
 9. **Dangerous actions are rare and clear.** Only "Kustuta konto" needs a confirmation; it sits at the very bottom of "Minu andmed".
-10. **Same design as the site (Dim).** Simplicity means fewer steps and words, not a new look: the client area follows the current design rules — prototype B's dashboard (`site/p/b`), the public site's components, fonts (Jost/Manrope), colour tokens and button styles. No new visual language.
+10. **Same design as the site (Dim).** Simplicity means fewer steps and words, not a new look: the client area follows the current design rules — prototype B's dashboard (`app/public/p/b`), the public site's components, fonts (Jost/Manrope), colour tokens and button styles. No new visual language.
 
-## 3. Architecture — fit the Free plan
+## 3. Architecture — fit the Hobby plan
 
-Personal pages cannot come from the shared page cache, and a server render costs 40–60 ms CPU. So the client area is split:
+Personal pages cannot come from the shared page cache, and rendering a page for every visit would cost a function invocation each time (Hobby: 1M a month) and bring personal data next to cached pages. So the client area is split:
 
-- **Shell pages** `/konto`, `/konto/lemmikud`, `/konto/andmed`, `/konto/kursus/[slug]`, `/konto/sisene` (and `/ru/…`) are ordinary cached pages: identical for every visitor, no personal data, served by the existing cache front.
-- **Personal data** comes from small JSON endpoints under `/api/konto/*`, answered **in the Worker entry before OpenNext** (like `/media`), because OpenNext's own path alone costs 4–9 ms. Each call opens its own request-scoped Postgres client (closed with `ctx.waitUntil`), does a few small indexed queries (run in parallel) and no React rendering. The same handler is also mounted as a Next route for `next dev`. Budget: **≤ 8 ms CPU per call**, measured on the deployed Worker.
+- **Shell pages** `/konto`, `/konto/lemmikud`, `/konto/andmed`, `/konto/kursus/[slug]`, `/konto/sisene` (and `/ru/…`) are ordinary static pages: identical for every visitor, no personal data, and on the server they never read cookies, headers or the query string. Vercel's CDN serves them like the other public pages (ISR) without rendering them per visit, and no personal data can ever enter a shared cache.
+- **Personal data** comes from small JSON endpoints under `/api/konto/*`: one ordinary Next route handler (`app/api/konto/[[...path]]/route.ts`) that hands the request to a framework-free router (`handleAccountApi`, which the tests drive without Next). Each call uses the app's shared Postgres pool, runs a few small indexed queries (in parallel where they are independent) and no React rendering, and answers with `Cache-Control: private, no-store`. E-mails and notifications go out after the response (`after()`).
 - Client components fetch the JSON after load and show skeleton placeholders meanwhile. Unauthenticated → the shell redirects to `/konto/sisene` (client-side). "Replaced by another device" → a 401 with `reason: "replaced"` → the message, then the login page.
 - Mutations are POSTs to `/api/konto/*` with the same Origin check the admin uses. No server actions here, because they render a page in the response.
 
@@ -59,7 +57,7 @@ Personal pages cannot come from the shared page cache, and a server render costs
 
 - `clients` — id, email (unique, lowercased), name, phone, locale (`et`/`ru`), created_at. Deleting an account deletes the row (section 6).
 - `client_login_tokens` — hash (SHA-256 of a 256-bit token), code_hash (SHA-256 of the 6-digit code + per-token salt), email, expires_at (30 min), attempts, used_at. Single use (link or code, whichever comes first), consumed atomically; a code allows 5 wrong attempts, then the token is dead.
-- `client_sessions` — id_hash, client_id, created_at, expires_at (180 days, sliding), ended_at, end_reason (`logout` / `replaced` / `deleted`). A login inserts a session and sets `ended_at = now, end_reason = 'replaced'` on every other open session of that client, in one transaction.
+- `client_sessions` — id_hash, client_id, created_at, expires_at (180 days, sliding), ended_at, end_reason (`logout` / `replaced`; deleting the account deletes its sessions). A login inserts a session and sets `ended_at = now, end_reason = 'replaced'` on every other open session of that client, in one transaction.
 - `course_access` — client_id, course_id, granted_by (admin e-mail or `payment`), granted_at, expires_at, revoked_at.
 - `terms_acceptances` — client_id, course_id, terms_version, accepted_at.
 - `client_favourites` — client_id, course_id, created_at (unique pair).
@@ -72,7 +70,7 @@ The terms text is a new `pages` key `course_terms` (ET/RU, edited in the admin);
 
 - `/konto/sisene`: e-mail field (pre-filled from this browser) → POST `/api/konto/login` → the page switches to a 6-digit code field: "Saatsime koodi aadressile …". Always the same answer whether or not the address is known (no account enumeration). "Saada uuesti" after 60 s.
 - Code → POST `/api/konto/code` (rate-limited per address and IP; 5 wrong tries end the token).
-- Rate limits: the existing KV limiter per IP (/64) and per address (3 live links per address, as for the admin), plus a **global daily cap on outgoing login e-mails** (default 60/day, a counter row in Postgres, so it cannot fail open like the KV limits). This protects the Resend Free quota (100/day) shared with form notifications.
+- Rate limits: the existing limiter per IP (/64) — a fixed-window counter in the Postgres table `kv_entries` (`src/server/ratelimit.ts`, `src/server/kv.ts`) — and per address (3 live links per address, as for the admin), plus a **global daily cap on outgoing login e-mails** (default 60/day, a counter row in Postgres raised in one conditional statement, so it cannot fail open the way the rate limits do when their store fails). This protects the Resend Free quota (100/day) shared with form notifications.
 - Link → GET `/api/konto/verify?t=…`, or a correct code → consumes the token, creates the client if new, links earlier records, starts the session (ending others), sets cookie `__Host-mslab_client` (HttpOnly, Secure, SameSite=Lax, Path=/), redirects to `/konto` (or `/ru/konto` by the client's locale). Link-preview scanners: same handling as the admin link today.
 - Logout: POST `/api/konto/logout` ends the session.
 - Favourites merge: after login, the client sends its browser favourites once (`POST /api/konto/lemmikud/merge`), then the localStorage copy is cleared and hearts read and write the account while logged in.
@@ -121,7 +119,7 @@ The terms text is a new `pages` key `course_terms` (ET/RU, edited in the admin);
 
 - Unit/DB (PGlite): token issue/consume/expiry/reuse; one-device rule (second login ends the first with `replaced`); linking by e-mail incl. case; access grant/expiry/revoke; terms acceptance per version; deletion unlinks but keeps registrations; daily mail cap; guard coverage.
 - E2E (desktop + mobile, local fixtures, Dim-only admin sign-in): login via dev link and via code (wrong code ×5 kills the token); e-mail pre-fill; "Saada uus kood" from the signed-out-elsewhere message; next-step sentence per card state; typo suggestion; dashboard shows the sample registrations of that address; favourites merge; terms notice blocks until accepted; change request reaches the admin inbox; profile edit; account deletion; second-device message; admin grant access → client sees the e-course; "view as" shows the same cards with disabled buttons; swipe on the phone course list.
-- Free-plan acceptance on the deployed Worker: `/api/konto` calls ≤ 8 ms CPU (measured with `wrangler tail`), shells served from the cache front (0–2 ms), `tools/cache-smoke.mjs` still passes.
+- Hobby-plan acceptance on the deployed site (https://mslab.diipsolutions.eu): the `/konto…` shells come from Vercel's CDN (`x-vercel-cache` HIT, PRERENDER or STALE, no `set-cookie`); `/api/konto/*` answers `Cache-Control: private, no-store` and is never cached (`/api/konto/me` without a session: 401); `tools/cache-smoke.mjs`, extended with the shells, still passes; the `/api/konto*` function durations are read from Vercel's runtime logs and noted.
 - Sample data: the removable sample registrations (`@example.test`) are reused; a sample client can be viewed through "view as".
 
 ## 11. Open for later (not blocking 2a)
