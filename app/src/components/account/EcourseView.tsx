@@ -5,6 +5,7 @@ import { pick, pickList } from "@/i18n/field";
 import type { Locale } from "@/i18n/locales";
 import type { EcourseView as EcourseData } from "@/server/client-data";
 import type { EcourseTexts } from "./texts";
+import page from "./EcoursePage.module.css";
 import styles from "./EcourseView.module.css";
 
 /** A ref that focuses its element once, when it appears (stable, so a later render does not focus it again). */
@@ -18,8 +19,8 @@ const focusOnMount = (el: HTMLElement | null) => el?.focus();
 export function EcourseView({ data, locale, t, focusHeading = false }: { data: EcourseData; locale: Locale; t: EcourseTexts; focusHeading?: boolean }) {
   const modules = pickList(data.course.modules, locale);
   return (
-    <div className={`${ui.wrap} ${styles.page}`} data-ecourse="">
-      <h1 ref={focusHeading ? focusOnMount : undefined} className={styles.title} tabIndex={-1}>
+    <div className={`${ui.wrap} ${page.page}`} data-ecourse="">
+      <h1 ref={focusHeading ? focusOnMount : undefined} className={page.title} tabIndex={-1}>
         {pick(data.course.title, locale)}
       </h1>
       <p className={styles.access} data-ecourse-access="">

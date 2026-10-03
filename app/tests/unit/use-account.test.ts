@@ -17,8 +17,8 @@ type Hook = ReturnType<typeof useAccount<{ email?: string; n?: number }>>;
 /** What the hook returned at the last commit. */
 const probe: { current: Hook | null } = { current: null };
 const hook = (): Hook => probe.current!;
-function Probe({ redirect = true }: { redirect?: boolean }) {
-  const result = useAccount<{ email?: string; n?: number }>("/api/konto", { locale: "et", redirect });
+function Probe({ redirect = true, notFound = false }: { redirect?: boolean; notFound?: boolean }) {
+  const result = useAccount<{ email?: string; n?: number }>("/api/konto", { locale: "et", redirect, notFound });
   useEffect(() => {
     probe.current = result;
   });
@@ -38,8 +38,8 @@ const settle = () =>
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
   });
 
-async function mount(redirect = true) {
-  await act(async () => root.render(createElement(Probe, { redirect })));
+async function mount(redirect = true, notFound = false) {
+  await act(async () => root.render(createElement(Probe, { redirect, notFound })));
   await settle();
 }
 
@@ -70,7 +70,7 @@ describe("useAccount", () => {
 
     localStorage.clear();
     fetchMock.mockResolvedValueOnce(json(200, { client: { email: "mari@example.test" } }));
-    await act(async () => hook().reload());
+    await act(async () => void hook().reload());
     await settle();
     expect(localStorage.getItem(EMAIL_KEY)).toBe("mari@example.test");
   });
@@ -116,7 +116,7 @@ describe("useAccount", () => {
     }
     let answer: (r: Response) => void = () => {};
     fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answer = resolve)));
-    await act(async () => hook().reload());
+    await act(async () => void hook().reload());
     expect(hook().state).toBe("loading"); // a plain reload shows the waiting state
     await act(async () => answer(json(200, { n: 1 })));
     await settle();
@@ -124,41 +124,119 @@ describe("useAccount", () => {
     expect(hook().data).toEqual({ n: 1 });
   });
 
-  test("404 is its own state, \"notFound\" (nothing for this client, e.g. no access to an e-course): no redirect, no sign-in event; a quiet reload gets there too", async () => {
+  test("a page that asks for it gets 404 as its own state, \"notFound\", when it is the API's own answer: no redirect, no sign-in event", async () => {
     const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {});
     const told = vi.fn();
     window.addEventListener(ACCOUNT_EVENT, told);
     fetchMock.mockResolvedValueOnce(json(404, { ok: false }));
-    await mount();
+    await mount(true, true);
     expect(hook().state).toBe("notFound");
     expect(hook().data).toBeNull();
     expect(replace).not.toHaveBeenCalled();
     expect(told).not.toHaveBeenCalled();
     window.removeEventListener(ACCOUNT_EVENT, told);
 
-    // an answer without a body is the same
+    fetchMock.mockResolvedValueOnce(json(404, { ok: false, error: "slug" }));
     await act(async () => root.unmount());
     root = createRoot(container);
-    fetchMock.mockResolvedValueOnce(text(404, ""));
-    await mount();
+    await mount(true, true);
     expect(hook().state).toBe("notFound");
+  });
 
-    // a page that was ready finds out on a quiet reload (access ended meanwhile); reload() asks again from the top
-    await act(async () => root.unmount());
-    root = createRoot(container);
+  test("any other 404 is an error, never \"notFound\": a page of the platform or a proxy (HTML, no body, JSON that is not the API's), and every 404 for a page that did not ask", async () => {
+    for (const [asked, answer] of [
+      [true, () => text(404, "<html>404 This page could not be found</html>")],
+      [true, () => text(404, "")],
+      [true, () => json(404, { message: "not found" })],
+      [true, () => json(404, null)],
+      [true, () => json(404, [])],
+      [false, () => json(404, { ok: false })],
+    ] as const) {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValueOnce(answer());
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await mount(true, asked);
+      expect(hook().state, `asked: ${asked}`).toBe("error");
+    }
+  });
+
+  test("a quiet reload: the API's 404 moves a page that asked for it to \"notFound\"; for any other 404 it keeps the page as it is", async () => {
     fetchMock.mockResolvedValueOnce(json(200, { n: 1 }));
-    await mount();
+    await mount(true, true);
     expect(hook().state).toBe("ready");
+    // a platform 404 (HTML) is a failure of the reload, which a quiet reload ignores
+    fetchMock.mockResolvedValueOnce(text(404, "<html>404</html>"));
+    await act(async () => void hook().reload({ quiet: true }));
+    await settle();
+    expect(hook().state).toBe("ready");
+    expect(hook().data).toEqual({ n: 1 });
+    // the API's own answer is one the page shows
     fetchMock.mockResolvedValueOnce(json(404, { ok: false }));
-    await act(async () => hook().reload({ quiet: true }));
+    await act(async () => void hook().reload({ quiet: true }));
     await settle();
     expect(hook().state).toBe("notFound");
     expect(hook().data).toBeNull();
     fetchMock.mockResolvedValueOnce(json(200, { n: 2 }));
-    await act(async () => hook().reload());
+    await act(async () => void hook().reload());
     await settle();
     expect(hook().state).toBe("ready");
     expect(hook().data).toEqual({ n: 2 });
+
+    // a page that did not ask: the same 404 changes nothing in a quiet reload
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    fetchMock.mockResolvedValueOnce(json(200, { n: 1 }));
+    await mount(true, false);
+    fetchMock.mockResolvedValueOnce(json(404, { ok: false }));
+    await act(async () => void hook().reload({ quiet: true }));
+    await settle();
+    expect(hook().state).toBe("ready");
+    expect(hook().data).toEqual({ n: 1 });
+  });
+
+  test("reload() says whether the server answered: true for an answer the page shows (also one that ends it), false for a failure or when it is overtaken", async () => {
+    fetchMock.mockResolvedValueOnce(json(200, { n: 1 }));
+    await mount(true, true);
+    const outcomes: boolean[] = [];
+    const ask = async (answer: () => Promise<Response>, opts = { quiet: true }) => {
+      fetchMock.mockImplementationOnce(answer);
+      let done: Promise<boolean> | undefined;
+      await act(async () => {
+        done = hook().reload(opts);
+      });
+      await settle();
+      outcomes.push(await done!);
+    };
+    await ask(async () => json(200, { n: 2 }));
+    await ask(async () => json(500, { ok: false }));
+    await ask(() => Promise.reject(new TypeError("network")));
+    await ask(async () => json(200, null));
+    await ask(async () => text(404, "<html>404</html>"));
+    vi.spyOn(window.location, "replace").mockImplementation(() => {});
+    await ask(async () => json(401, { ok: false, reason: "replaced" }));
+    expect(outcomes).toEqual([true, false, false, false, false, true]);
+    await ask(async () => json(404, { ok: false }), { quiet: false });
+    expect(outcomes.at(-1)).toBe(true); // an answer that ends the page: the API's 404
+
+    // overtaken by a newer reload: the first answers false, the second as it is answered
+    let answerFirst: (r: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answerFirst = resolve)));
+    let first: Promise<boolean> | undefined;
+    await act(async () => {
+      first = hook().reload({ quiet: true });
+    });
+    fetchMock.mockImplementationOnce(async () => json(200, { n: 3 }));
+    let second: Promise<boolean> | undefined;
+    await act(async () => {
+      second = hook().reload({ quiet: true });
+    });
+    await settle();
+    await act(async () => answerFirst(json(200, { n: 9 })));
+    await settle();
+    expect(await first!).toBe(false);
+    expect(await second!).toBe(true);
+    expect(hook().data).toEqual({ n: 3 });
   });
 
   test("a quiet reload keeps the page (ready, the old data) while it asks, takes the new data, and ignores a failure", async () => {
@@ -168,7 +246,7 @@ describe("useAccount", () => {
 
     let answer: (r: Response) => void = () => {};
     fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answer = resolve)));
-    await act(async () => hook().reload({ quiet: true }));
+    await act(async () => void hook().reload({ quiet: true }));
     expect(hook().state).toBe("ready");
     expect(hook().data).toEqual({ n: 1 });
     await act(async () => answer(json(200, { n: 2 })));
@@ -178,7 +256,7 @@ describe("useAccount", () => {
 
     for (const failure of [() => Promise.resolve(json(500, { ok: false })), () => Promise.reject(new TypeError("network")), () => Promise.resolve(json(200, null))]) {
       fetchMock.mockImplementationOnce(failure);
-      await act(async () => hook().reload({ quiet: true }));
+      await act(async () => void hook().reload({ quiet: true }));
       await settle();
       expect(hook().state).toBe("ready");
       expect(hook().data).toEqual({ n: 2 });
@@ -187,7 +265,7 @@ describe("useAccount", () => {
     // a 401 still ends the page, quiet or not
     vi.spyOn(window.location, "replace").mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(json(401, { ok: false, reason: "replaced" }));
-    await act(async () => hook().reload({ quiet: true }));
+    await act(async () => void hook().reload({ quiet: true }));
     await settle();
     expect(hook().state).toBe("replaced");
   });

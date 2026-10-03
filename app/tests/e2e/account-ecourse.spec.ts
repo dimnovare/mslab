@@ -1,10 +1,10 @@
 import type { Page, Response } from "@playwright/test";
 import { formatDate } from "../../src/i18n/format";
 import {
-  clientEmail, currentTermsVersion, E2E_TERMS, insertEcourseAccess, SEED_ECOURSE_SLUG, setTerms, signInAsClient, storedAcceptances, takeTerms,
+  clientEmail, currentTermsVersion, E2E_TERMS, insertEcourseAccess, removeTermsPage, SEED_ECOURSE_SLUG, setTerms, signInAsClient, storedAcceptances, takeTerms,
 } from "./account";
 import { adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
-import { onLocalDb, removeAdminRows, removeClientRows } from "./fixtures";
+import { LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows } from "./fixtures";
 import { PROD_BUILD } from "./target";
 import { submitsForms, test, expect } from "./test";
 
@@ -18,7 +18,9 @@ let restoreTerms: (() => Promise<void>) | null = null;
 /** The addresses this worker's tests made rows for: removed after each test (the admin course list would show their courses). */
 const made = new Set<string>();
 
-test.beforeEach(async () => {
+test.beforeEach(async ({}, info) => {
+  // the wait for the shared terms (another test may hold them for a while) is part of this test's time, not taken from it
+  info.setTimeout(info.timeout + LOCK_WAIT_MS);
   restoreTerms = await takeTerms();
 });
 
@@ -122,11 +124,28 @@ test("the notice shows first: title, the text, one checkbox, one button that sta
   await expect(start(page)).toBeDisabled();
   expect(await storedAcceptances(c.clientId)).toEqual([]);
 
-  // it spans the page like the rest of the page's content, and its targets are big enough
+  // The text is in the public legal pages' column (750 px at most: a computer reads it at that measure; a phone's screen is narrower
+  // anyway), the button is directly under the checkbox and starts where it starts, and its targets are big enough.
   const viewport = page.viewportSize()!.width;
-  expect((await page.locator("[data-terms-text]").boundingBox())!.width).toBeGreaterThan(viewport * 0.85);
-  expect((await start(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  expect((await page.locator("[data-terms-gate] label").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  const text = (await page.locator("[data-terms-text]").boundingBox())!;
+  const label = (await page.locator("[data-terms-gate] label").boundingBox())!;
+  const button = (await start(page).boundingBox())!;
+  expect(text.width).toBeLessThanOrEqual(751);
+  if (viewport <= 640) expect(text.width).toBeGreaterThan(viewport * 0.85);
+  expect(label.y, "the box is under the text").toBeGreaterThan(text.y + text.height);
+  expect(button.y, "the button is directly under the box").toBeGreaterThanOrEqual(label.y + label.height);
+  expect(button.y - (label.y + label.height), "…and close to it").toBeLessThan(24);
+  expect(Math.abs(button.x - label.x), "…starting where it starts").toBeLessThan(2);
+  expect(button.height).toBeGreaterThanOrEqual(44);
+  expect(label.height).toBeGreaterThanOrEqual(44);
+  if (viewport <= 640) expect(button.width, "a phone gets the button across the screen").toBeGreaterThan(viewport * 0.85);
+  // the live region for a failure is in the page when it is empty (a screen reader announces what appears in it), with no height
+  const alert = page.locator("[data-terms-failed]");
+  await expect(alert).toHaveAttribute("role", "alert");
+  const shape = await alert.evaluate((el) => ({ display: getComputedStyle(el).display, height: el.getBoundingClientRect().height, visibility: getComputedStyle(el).visibility }));
+  expect(shape.display).not.toBe("none");
+  expect(shape.visibility).toBe("visible");
+  expect(shape.height).toBe(0);
   expect(await noOverflow(page)).toBe(true);
 });
 
@@ -265,6 +284,54 @@ test("a 409: new terms saved after the page loaded, before the click — the fre
   expect(second.request().postDataJSON()).toEqual({ slug: c.slug, version });
   await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText(c.title.et);
   expect(await storedAcceptances(c.clientId)).toEqual([{ slug: c.slug, version }]);
+});
+
+test("a 409 whose reload fails: the plain sentence, the box still ticked, nothing stored; when the server answers again, the new text and an empty box", async ({ page }, info) => {
+  const c = await signedIn(page, "stalefail", info.project.name);
+  await openFromDashboard(page, c.slug);
+  await box(page).check();
+  const version = (await setTerms({ et: "E2E uus tekst, kui laadimine õnnestub.", ru: "E2E новый текст." }))!;
+  // the page cannot be loaded again right now
+  const down = (route: { abort(code: string): Promise<void> }) => route.abort("failed");
+  await page.route(`**/api/konto/kursus/${c.slug}`, down);
+  const answer = page.waitForResponse((r) => r.url().endsWith("/api/konto/tingimused") && r.request().method() === "POST");
+  await start(page).click();
+  expect((await answer).status()).toBe(409);
+  await expect(page.locator("[data-terms-failed]")).toHaveText("Ei õnnestunud salvestada. Proovi uuesti.");
+  await expect(box(page)).toBeChecked(); // not cleared silently
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(paragraphs(E2E_TERMS.et)); // still the text that was read
+  await expect(start(page)).toBeEnabled();
+  expect(await storedAcceptances(c.clientId)).toEqual([]);
+
+  // asked again, with the page reachable: the new text, an empty box, no sentence
+  await page.unroute(`**/api/konto/kursus/${c.slug}`, down);
+  await start(page).click();
+  await expect(gate(page)).toHaveAttribute("data-terms-version", version);
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(["E2E uus tekst, kui laadimine õnnestub."]);
+  await expect(box(page)).not.toBeChecked();
+  await expect(page.locator("[data-terms-failed]")).toHaveText("");
+});
+
+test("with no terms text stored there is nothing to accept: the course opens at once and nothing is recorded; a text added later brings the notice", async ({ page }, info) => {
+  const c = await signedIn(page, "notext", info.project.name);
+  await removeTermsPage();
+  await openFromDashboard(page, c.slug);
+  await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText(c.title.et);
+  await expect(gate(page)).toHaveCount(0);
+  expect(await storedAcceptances(c.clientId)).toEqual([]);
+  // the same through the API, and a POST that arrives anyway is refused as a changed version (the page would load again)
+  const view = await page.request.get(`/api/konto/kursus/${c.slug}`);
+  expect(((await view.json()) as { terms: unknown }).terms).toEqual({ version: "1", accepted: true, text: null });
+  const post = await page.request.post("/api/konto/tingimused", { data: { slug: c.slug, version: "1" }, headers: { origin: new URL(page.url()).origin } });
+  expect(post.status()).toBe(409);
+  expect(await storedAcceptances(c.clientId)).toEqual([]);
+
+  // the admin writes the terms: from then on the notice shows
+  const version = (await setTerms({ et: "E2E tingimused tulid hiljem.", ru: "E2E условия появились позже." }))!;
+  await page.reload();
+  await expect(gate(page)).toHaveAttribute("data-terms-version", version);
+  await expect(gate(page).locator("[data-legal-body] p")).toHaveText(["E2E tingimused tulid hiljem."]);
+  await expect(courseView(page)).toHaveCount(0);
 });
 
 test("if the answer does not come, one plain sentence stays with the box ticked, and pressing again works", async ({ page }, info) => {

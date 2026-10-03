@@ -1,27 +1,6 @@
-/* The e-course page after the terms are accepted: the title in Jost as on the dashboard (B .student-page h1), one muted line
-   for the end of the access, the numbered module list (the public course page's, CourseLists.module.css) in a column of the
-   readable width, and the one sentence under it. Tokens only. */
-
-.page {
-  padding-top: clamp(28px, 4vw, 52px);
-  padding-bottom: clamp(48px, 6vw, 96px);
-}
-
-.title {
-  margin: 0;
-  font: 400 clamp(34px, 4vw, 49px) / 1.08 var(--font-display);
-  letter-spacing: -0.01em;
-  overflow-wrap: anywhere;
-}
-
-.title:focus {
-  outline: none;
-}
-
-.title:focus-visible {
-  outline: 2px solid var(--rose);
-  outline-offset: 6px;
-}
+/* The e-course page after the terms are accepted: one muted line for the end of the access, the numbered module list (the public
+   course page's, CourseLists.module.css) in a column of the readable width, and the one sentence under it. The page and its title
+   are EcoursePage.module.css's. Tokens only. */
 
 .access {
   margin: 10px 0 0;

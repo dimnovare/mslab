@@ -71,7 +71,7 @@ function EcourseBody({ data, locale, t, reload }: { data: EcourseData; locale: L
         onAccepted={() => setAcceptedVersion(version)}
         onRefresh={() => {
           setReshown(true);
-          reload({ quiet: true });
+          return reload({ quiet: true });
         }}
       />
     );

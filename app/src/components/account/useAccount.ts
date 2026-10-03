@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import { HINT_COOKIE } from "@/lib/account-cookies";
@@ -69,21 +69,34 @@ type Loaded<T> = { state: AccountState; data: T | null };
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
  * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
  *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
- * - 404 (the endpoint says there is nothing for this client: an e-course without access): "notFound", for the page to say so;
- *   a quiet reload that learns it moves the page there too (it is an answer, not a failure).
+ * - 404 with the API's own JSON answer (`{ ok: false, … }`: there is nothing for this client, e.g. an e-course without access), when the
+ *   page asked for it with `notFound: true`: "notFound", for the page to say so; a quiet reload that learns it moves the page there too
+ *   (it is an answer, not a failure). Any other 404 (a page of the platform, no JSON) and every 404 for a page that did not ask are
+ *   plain failures, as below.
  * - anything else, no answer, or a 200 without a JSON object: "error"; `reload()` asks again.
  * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again.
  * `reload({ quiet: true })` asks again in the background: the page keeps showing what it has ("ready" and the old data)
  * until the new answer is in, and a failure leaves it as it is; a 401 still ends the page as above.
+ * `reload()` answers with a promise: true when the server gave an answer the page now shows (also a 401 or a 404 that ends it), false
+ * when it did not (no answer, an error status, a broken body: a quiet reload then leaves the page as it was). A reload that a newer
+ * one overtakes answers false.
  */
 export function useAccount<T>(
   path: string,
-  options: { redirect?: boolean; locale?: Locale } = {},
-): { state: AccountState; data: T | null; reload(options?: { quiet?: boolean }): void } {
+  options: { redirect?: boolean; locale?: Locale; notFound?: boolean } = {},
+): { state: AccountState; data: T | null; reload(options?: { quiet?: boolean }): Promise<boolean> } {
   const redirect = options.redirect ?? true;
   const locale = options.locale;
+  const wantsNotFound = options.notFound === true;
   const [loaded, setLoaded] = useState<Loaded<T>>({ state: "loading", data: null });
   const [round, setRound] = useState({ n: 0, quiet: false });
+  /** What the latest reload() waits for (an effect that is dropped, as the dev server's second run is, never settles it). */
+  const waiting = useRef<((answered: boolean) => void) | null>(null);
+  const settle = useCallback((answered: boolean) => {
+    const done = waiting.current;
+    waiting.current = null;
+    done?.(answered);
+  }, []);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -95,14 +108,16 @@ export function useAccount<T>(
         res = await fetch(path, { credentials: "same-origin", cache: "no-store", headers: { accept: "application/json" }, signal: abort.signal });
         body = await res.json().catch(() => null);
       } catch {
-        if (!abort.signal.aborted && !quiet) setLoaded({ state: "error", data: null });
-        return;
+        if (abort.signal.aborted) return;
+        if (!quiet) setLoaded({ state: "error", data: null });
+        return settle(false);
       }
       if (abort.signal.aborted) return;
+      const isObject = body !== null && typeof body === "object" && !Array.isArray(body);
       // A 200 without a JSON object (an empty or broken answer) is no data: an error, or for a quiet reload nothing.
-      if (res.ok && (body === null || typeof body !== "object" || Array.isArray(body))) {
+      if (res.ok && !isObject) {
         if (!quiet) setLoaded({ state: "error", data: null });
-        return;
+        return settle(false);
       }
       if (res.ok) {
         // /me answers { email }, the dashboard { client: { email } }
@@ -110,7 +125,7 @@ export function useAccount<T>(
         const email = answer?.email ?? answer?.client?.email;
         if (typeof email === "string" && email) rememberEmail(email);
         setLoaded({ state: "ready", data: body as T });
-        return;
+        return settle(true);
       }
       if (res.status === 401) {
         window.dispatchEvent(new Event(ACCOUNT_EVENT));
@@ -118,21 +133,27 @@ export function useAccount<T>(
         // signed out: the page keeps its waiting look while the login page loads
         if (!replaced && redirect) window.location.replace(loginPath(locale));
         setLoaded({ state: replaced ? "replaced" : "signedOut", data: null });
-        return;
+        return settle(true);
       }
-      if (res.status === 404) {
+      if (res.status === 404 && wantsNotFound && isObject && (body as { ok?: unknown }).ok === false) {
         setLoaded({ state: "notFound", data: null });
-        return;
+        return settle(true);
       }
       if (!quiet) setLoaded({ state: "error", data: null });
+      settle(false);
     })();
     return () => abort.abort();
-  }, [path, redirect, locale, round]);
+  }, [path, redirect, locale, wantsNotFound, round, settle]);
 
-  const reload = useCallback((opts: { quiet?: boolean } = {}) => {
+  const reload = useCallback((opts: { quiet?: boolean } = {}): Promise<boolean> => {
     const quiet = opts.quiet === true;
+    waiting.current?.(false); // an earlier reload that has not been answered is overtaken
+    const answered = new Promise<boolean>((resolve) => {
+      waiting.current = resolve;
+    });
     if (!quiet) setLoaded({ state: "loading", data: null });
     setRound((r) => ({ n: r.n + 1, quiet }));
+    return answered;
   }, []);
 
   return { state: loaded.state, data: loaded.data, reload };

@@ -33,12 +33,14 @@ export const FIXTURES = {
 /**
  * Fixtures and test rows are written to and deleted from a local database only, never a shared one (local-db.ts).
  * Against the local production build, closing a connection also marks the cached pages stale (prod-build.ts): what
- * was written here must show on the next page view, as it does under `next dev`.
+ * was written here must show on the next page view, as it does under `next dev`. `marksPages: false` for rows no public page
+ * shows (the account tests' clients, access, terms): a mark makes every page render again, which the cache tests running
+ * beside them have to wait out, so it is not made for nothing.
  */
-const connect = () => {
+const connect = (marksPages = true) => {
   if (!isLocalDbUrl(DB_URL)) assertLocalDatabases([{ source: "E2E_DATABASE_URL", url: DB_URL }]);
   const sql = postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
-  if (!PROD_BUILD) return sql;
+  if (!PROD_BUILD || !marksPages) return sql;
   const end = sql.end.bind(sql);
   return Object.assign(sql, { end: async (...args: Parameters<typeof end>) => { await end(...args); revalidateLocalPages(); } });
 };
@@ -290,7 +292,7 @@ export function accountCourseSlug(email: string): string {
 export async function removeClientRows(email?: string): Promise<number> {
   const match = email ?? CLIENT_EMAIL_PATTERN;
   const courses = email ? accountCourseSlug(email) : `${ACCOUNT_COURSE_PREFIX}%`;
-  const sql = connect();
+  const sql = connect(false); // clients and their unpublished courses: no public page shows them
   try {
     await sql`delete from registrations where email like ${match} or course_id in (select id from courses where slug like ${courses})`;
     await sql`delete from requests where payload->>'email' like ${match}`;
@@ -309,15 +311,31 @@ export async function removeClientRows(email?: string): Promise<number> {
   }
 }
 
+/** How long a test waits for a lock another test holds, and how often it asks (holdLocalLock). */
+export const LOCK_WAIT_MS = 60_000;
+const LOCK_POLL_MS = 200;
+
 /**
  * Holds a lock that every worker process shares (a Postgres advisory lock on a connection of its own) until the returned
  * function is called; a crashed worker's connection closes, and the lock with it. For a test that changes a shared row
- * other tests of the same kind read (the dashboard's prepayment setting): the desktop and phone projects run side by side.
+ * other tests of the same kind read (the dashboard's prepayment setting, the e-course terms): the desktop and phone projects
+ * run side by side.
+ *
+ * The lock is asked for with pg_try_advisory_lock every 200 ms for at most `waitMs` (a minute), then this fails saying so. A
+ * waiting request is never left in Postgres (pg_advisory_lock would queue one): a wait that has given up cannot be granted
+ * the lock later and hold it for a worker that has moved on. A caller whose own timeout is shorter than `waitMs` should
+ * lengthen it (test.setTimeout), or the wait would run on after the test has failed.
  */
-export async function holdLocalLock(name: string): Promise<() => Promise<void>> {
-  const sql = connect();
+export async function holdLocalLock(name: string, waitMs = LOCK_WAIT_MS): Promise<() => Promise<void>> {
+  const sql = connect(false); // a lock changes no public page
+  const giveUpAt = Date.now() + waitMs;
   try {
-    await sql`select pg_advisory_lock(hashtext(${name}))`;
+    for (;;) {
+      const [{ got }] = await sql<{ got: boolean }[]>`select pg_try_advisory_lock(hashtext(${name})) as got`;
+      if (got) break;
+      if (Date.now() >= giveUpAt) throw new Error(`e2e: the lock "${name}" was not free within ${Math.round(waitMs / 1000)} s: another test holds it, or a worker that died has not let go yet`);
+      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+    }
   } catch (e) {
     await sql.end();
     throw e;
@@ -700,26 +718,27 @@ async function columnTypes(sql: postgres.Sql, table: string): Promise<Record<str
 }
 
 /** Saves rows (all of a table, or those where column = value) before a test changes them; returns the restore function. */
-export async function snapshotRows(table: SnapshotTable, match: RowMatch = null): Promise<() => Promise<void>> {
+export async function snapshotRows(table: SnapshotTable, match: RowMatch = null, opts: { marksPages?: boolean } = {}): Promise<() => Promise<void>> {
   if (!SNAPSHOT_TABLES.includes(table)) throw new Error(`e2e: no snapshots of ${table}`);
-  const sql = connect();
+  const marksPages = opts.marksPages !== false;
+  const sql = connect(marksPages);
   try {
     const rows = match ? await sql`select * from ${sql(table)} where ${sql(match.column)} = ${match.value}` : await sql`select * from ${sql(table)}`;
     mkdirSync(SNAPSHOT_DIR, { recursive: true });
     const file = rowsFile(table, match);
     if (!existsSync(file)) writeFileSync(file, JSON.stringify({ table, match, rows: [...rows] } satisfies RowsSnapshot));
-    return () => restoreRows(file);
+    return () => restoreRows(file, marksPages);
   } finally {
     await sql.end();
   }
 }
 
 /** Writes a rows snapshot back (the matching rows are replaced by the saved ones) and deletes its file. */
-async function restoreRows(file: string): Promise<void> {
+async function restoreRows(file: string, marksPages = true): Promise<void> {
   if (!existsSync(file)) return;
   const s = JSON.parse(readFileSync(file, "utf8")) as RowsSnapshot;
   if (!SNAPSHOT_TABLES.includes(s.table as SnapshotTable)) throw new Error(`e2e: bad snapshot ${file}`);
-  const sql = connect();
+  const sql = connect(marksPages);
   try {
     const types = await columnTypes(sql, s.table);
     await sql.begin(async (tx) => {
@@ -764,9 +783,12 @@ export async function removePostRows(project?: string): Promise<number> {
   }
 }
 
-/** Runs SQL on the local test database (a change "made elsewhere" behind an open editor). */
-export async function onLocalDb<T>(work: (sql: postgres.Sql) => Promise<T>): Promise<T> {
-  const sql = connect();
+/**
+ * Runs SQL on the local test database (a change "made elsewhere" behind an open editor). `marksPages: false` when no public page
+ * shows what is written (see connect).
+ */
+export async function onLocalDb<T>(work: (sql: postgres.Sql) => Promise<T>, opts: { marksPages?: boolean } = {}): Promise<T> {
+  const sql = connect(opts.marksPages !== false);
   try {
     return await work(sql);
   } finally {

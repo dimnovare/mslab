@@ -40,6 +40,9 @@ export function cartPage(pathname: string, search: URLSearchParams): string | nu
   return `/${m[1] ? "ru" : "et"}/ostukorv/${encodeURIComponent(course)}`;
 }
 
+/** The client account's shells (/konto…, /ru/konto…) as pages of the app, with their locale: "/et/konto/sisene", "/ru/konto/kursus/x". */
+const ACCOUNT_SHELL = /^\/(et|ru)\/konto(\/|$)/;
+
 /**
  * The pages of app/[locale]/(site) without their locale (tests/unit/site-routing.test.ts checks them against the app),
  * with the client account's shells (/konto…, phase 2a: the login page, favourites and my details).
@@ -78,8 +81,9 @@ export type SiteRoute =
   /** a permanent redirect to the canonical path (same query) */
   | { kind: "redirect"; path: string }
   /** a public page of app/[locale]: `page` is the path it renders ("/et/koolitused"); `rewritten` when it is not the
-   *  visitor's own path (the ET rewrite, the cart) */
-  | { kind: "page"; page: string; rewritten: boolean }
+   *  visitor's own path (the ET rewrite, the cart); `queryFree` for the account's shells: they render without the visitor's query
+   *  (see known()), which the browser reads from its own address */
+  | { kind: "page"; page: string; rewritten: boolean; queryFree?: true }
   /** admin, /media, Next.js files and static files: served as they are */
   | { kind: "other" };
 
@@ -97,7 +101,14 @@ export function routeSitePath(pathname: string, search: URLSearchParams): SiteRo
   return known("/et" + (pathname === "/" ? "" : pathname), true);
 }
 
-/** A page of the site as it is, or else its locale's 404 page (the address bar keeps the visitor's URL). */
+/**
+ * A page of the site as it is, or else its locale's 404 page (the address bar keeps the visitor's URL).
+ *
+ * The account's shells are `queryFree`: Next.js stores the address (path and query) of the request that renders a page in the page
+ * it caches, and sends that copy to every later visitor. These pages take queries (?viga=link, ?korda=1, an e-mail address) that are
+ * read by the browser only, so the middleware renders them without the visitor's query and no one's can end up in the cache.
+ */
 function known(page: string, rewritten: boolean): SiteRoute {
-  return isKnownPage(page) ? { kind: "page", page, rewritten } : { kind: "page", page: notFoundPage(page), rewritten: true };
+  if (!isKnownPage(page)) return { kind: "page", page: notFoundPage(page), rewritten: true };
+  return ACCOUNT_SHELL.test(page) ? { kind: "page", page, rewritten, queryFree: true } : { kind: "page", page, rewritten };
 }

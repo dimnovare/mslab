@@ -41,7 +41,9 @@ export type EcourseView = {
   access: { expiresAt: string };
   /**
    * `version`: the current terms version (send it back when accepting, so a student who saw the old text cannot accept a new one unseen).
-   * `accepted`: the client has accepted that version for this course. `text`: the terms text, only while it is still to be accepted (null: none stored).
+   * `accepted`: nothing is left to accept: the client has accepted that version for this course, or there is no terms text (none stored,
+   * or an empty one: nothing to read or agree to, so no notice and no acceptance recorded; when the admin saves a text, the version moves
+   * and the notice shows). `text`: the terms text, only while `accepted` is false (so never null then).
    */
   terms: { version: string; accepted: boolean; text: I18n | null };
 };
@@ -208,6 +210,9 @@ async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
   return row ?? null;
 }
 
+/** The terms text as stored, or null when there is none to accept: no page row, or a page whose Estonian text is empty (the Estonian text is the one the others fall back to). */
+const termsText = (body: I18n | null | undefined): I18n | null => (body && body.et.trim() ? body : null);
+
 /**
  * The e-course page's data: null without active access (none, revoked or expired). The terms notice shows while `terms.accepted` is false;
  * the page then sends back `terms.version` with the acceptance. The version is read BEFORE the text: an admin save that lands
@@ -225,24 +230,28 @@ export async function loadEcourse(db: Db, clientId: number, slug: string, now: D
     versionThenText(),
     db.select({ version: termsAcceptances.termsVersion }).from(termsAcceptances).where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, access.course.id))),
   ]);
-  const isAccepted = accepted.some((row) => row.version === version);
+  const text = termsText(page[0]?.body);
+  const isAccepted = text === null || accepted.some((row) => row.version === version);
   return {
     course: { slug: access.course.slug, title: access.course.title, modules: access.course.modules },
     access: { expiresAt: iso(access.expiresAt) },
-    terms: { version, accepted: isAccepted, text: isAccepted ? null : (page[0]?.body ?? null) },
+    terms: { version, accepted: isAccepted, text: isAccepted ? null : text },
   };
 }
 
 /**
  * Stores that the client accepted the terms `version` for the e-course.
  * - `"noAccess"`: no active access to that course (nothing is stored).
- * - `"stale"`: `version` is not the current terms version (the admin saved new terms after the page was loaded; nothing is stored).
+ * - `"stale"`: `version` is not the current terms version (the admin saved new terms after the page was loaded; nothing is stored), or there is no
+ *   terms text any more (nothing to accept: nothing is stored, and the page, loaded again, finds the course open).
  * - `"accepted"`: stored (accepting twice is fine).
  */
 export async function acceptTerms(db: Db, clientId: number, slug: string, version: string, now: Date): Promise<"accepted" | "noAccess" | "stale"> {
   const access = await activeAccess(db, clientId, slug, now);
   if (!access) return "noAccess";
   if (version !== (await courseTermsVersion(db))) return "stale";
+  const [page] = await db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1);
+  if (termsText(page?.body) === null) return "stale";
   await db.insert(termsAcceptances).values({ clientId, courseId: access.course.id, termsVersion: version, acceptedAt: now }).onConflictDoNothing();
   return "accepted";
 }

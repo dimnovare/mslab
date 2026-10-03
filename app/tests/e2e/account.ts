@@ -4,6 +4,9 @@ import { accountCourseSlug, holdLocalLock, onLocalDb, sha256Hex, snapshotRows } 
 import { LOCAL_URL, PROD_BUILD, TARGET } from "./target";
 import { expect } from "./test";
 
+/** The local database for rows no public page shows (clients, logins, access, terms): writing them does not make every cached page render again (fixtures.ts connect). */
+const localDb = <T>(work: Parameters<typeof onLocalDb<T>>[0]): Promise<T> => onLocalDb(work, { marksPages: false });
+
 // Signing in to the client account in the e2e tests (local dev server or the local production build only).
 //
 // Every address is `e2e-client-<label>-<project>@example.test` (clientEmail): a sample address, so nothing is ever mailed,
@@ -22,7 +25,7 @@ export function clientEmail(label: string, project: string): string {
 /** Stores a live login for `email` (in the LOCAL database) with this link token and code, as issueClientLogin would. */
 async function storeLogin(email: string, token: string, code: string): Promise<void> {
   const hash = sha256Hex(token);
-  await onLocalDb(
+  await localDb(
     (sql) => sql`insert into client_login_tokens (hash, code_hash, email, expires_at)
                  values (${hash}, ${sha256Hex(`${hash}:${code}`)}, ${email}, ${new Date(Date.now() + LOGIN_TTL_MS)})`,
   );
@@ -68,7 +71,7 @@ export async function knownLoginCode(email: string): Promise<string> {
 
 /** Makes every live login of `email` expire a minute ago (the 30 minutes cannot be waited out). */
 export async function expireLogins(email: string): Promise<void> {
-  await onLocalDb((sql) => sql`update client_login_tokens set expires_at = now() - interval '1 minute' where email = ${email} and used_at is null`);
+  await localDb((sql) => sql`update client_login_tokens set expires_at = now() - interval '1 minute' where email = ${email} and used_at is null`);
 }
 
 // ---------- the dashboard's rows (account-dashboard.spec.ts) ----------
@@ -107,7 +110,7 @@ export async function insertAccountFixtures(
   const cards = new Set(opts.cards ?? []);
   const slug = accountCourseSlug(email);
   const title = "Kulmude lamineerimine";
-  return onLocalDb(async (sql) => {
+  return localDb(async (sql) => {
     const [client] = await sql<{ id: number }[]>`
       insert into clients (email, name, locale) values (${email}, ${opts.name ?? ""}, ${opts.locale ?? "et"}) returning id`;
     const [course] = await sql<{ id: number }[]>`
@@ -161,7 +164,7 @@ export const TEST_PREPAYMENT = { receiver: "MS LAB OÜ", iban: "EE38 2200 2210 2
 
 /** Sets (or, with null, removes) the prepayment instructions in the LOCAL database. */
 export async function setPrepayment(value: typeof TEST_PREPAYMENT | null): Promise<void> {
-  await onLocalDb(async (sql) => {
+  await localDb(async (sql) => {
     await sql`delete from settings where key = 'prepayment'`;
     if (value) await sql`insert into settings (key, value) values ('prepayment', ${sql.json(value)})`;
   });
@@ -169,7 +172,7 @@ export async function setPrepayment(value: typeof TEST_PREPAYMENT | null): Promi
 
 /** The change requests stored for a client. */
 export async function storedChangeRequests(clientId: number): Promise<{ payload: Record<string, unknown> }[]> {
-  return onLocalDb((sql) => sql<{ payload: Record<string, unknown> }[]>`select payload from requests where kind = 'change_request' and client_id = ${clientId} order by id`);
+  return localDb((sql) => sql<{ payload: Record<string, unknown> }[]>`select payload from requests where kind = 'change_request' and client_id = ${clientId} order by id`);
 }
 
 // ---------- the e-course page and its terms (account-ecourse.spec.ts) ----------
@@ -192,7 +195,7 @@ export type EcourseFixture = {
  * - `own: true`: the test's own e-course `e2e-konto-<label>-<project>`, not published (removeClientRows deletes it), with two modules.
  */
 export async function insertEcourseAccess(email: string, opts: { own?: boolean; access?: boolean; locale?: "et" | "ru"; name?: string } = {}): Promise<EcourseFixture> {
-  return onLocalDb(async (sql) => {
+  return localDb(async (sql) => {
     const [client] = await sql<{ id: number }[]>`insert into clients (email, name, locale) values (${email}, ${opts.name ?? ""}, ${opts.locale ?? "et"}) returning id`;
     let slug = ECOURSE_SLUG;
     if (opts.own) {
@@ -233,7 +236,7 @@ let termsStamp = 0;
  */
 export async function setTerms(body: { et: string; ru?: string }, version: string | null | undefined = undefined): Promise<string | null> {
   const stored = version === undefined ? new Date(Date.now() + ++termsStamp).toISOString() : version;
-  await onLocalDb(async (sql) => {
+  await localDb(async (sql) => {
     await sql`
       insert into pages (key, title, body) values ('course_terms', ${sql.json({ et: "E-koolituse tingimused", ru: "Условия онлайн-обучения" })}, ${sql.json(body)})
       on conflict (key) do update set body = excluded.body`;
@@ -243,15 +246,20 @@ export async function setTerms(body: { et: string; ru?: string }, version: strin
   return stored;
 }
 
+/** Takes the terms page out (no text stored: nothing to accept); takeTerms puts the original back afterwards. */
+export async function removeTermsPage(): Promise<void> {
+  await localDb((sql) => sql`delete from pages where key = 'course_terms'`);
+}
+
 /** The version the students are asked about now: the stored settings value, "1" when there is none. */
 export async function currentTermsVersion(): Promise<string> {
-  const [row] = await onLocalDb((sql) => sql<{ value: unknown }[]>`select value from settings where key = 'courseTermsVersion'`);
+  const [row] = await localDb((sql) => sql<{ value: unknown }[]>`select value from settings where key = 'courseTermsVersion'`);
   return typeof row?.value === "string" && row.value ? row.value : "1";
 }
 
 /** The terms a client has accepted: course slug and version, oldest first. */
 export async function storedAcceptances(clientId: number): Promise<{ slug: string; version: string }[]> {
-  return onLocalDb(
+  return localDb(
     (sql) => sql<{ slug: string; version: string }[]>`
       select c.slug, t.terms_version as version from terms_acceptances t join courses c on c.id = t.course_id where t.client_id = ${clientId} order by t.accepted_at, t.terms_version`,
   );
@@ -265,8 +273,8 @@ export async function storedAcceptances(clientId: number): Promise<{ slug: strin
 export async function takeTerms(): Promise<() => Promise<void>> {
   const unlock = await holdLocalLock(TERMS_LOCK);
   try {
-    const restorePage = await snapshotRows("pages", { column: "key", value: "course_terms" });
-    const restoreVersion = await snapshotRows("settings", { column: "key", value: "courseTermsVersion" });
+    const restorePage = await snapshotRows("pages", { column: "key", value: "course_terms" }, { marksPages: false });
+    const restoreVersion = await snapshotRows("settings", { column: "key", value: "courseTermsVersion" }, { marksPages: false });
     await setTerms(E2E_TERMS, null);
     return async () => {
       try {

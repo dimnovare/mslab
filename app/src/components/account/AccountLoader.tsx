@@ -10,8 +10,8 @@ import type { LoaderTexts } from "./texts";
 import { useAccount } from "./useAccount";
 import styles from "./AccountLoader.module.css";
 
-/** Asks again: `quiet` keeps the page as it is while the new answer comes (useAccount). */
-export type Reload = (options?: { quiet?: boolean }) => void;
+/** Asks again: `quiet` keeps the page as it is while the new answer comes (useAccount). Answers whether the server answered. */
+export type Reload = (options?: { quiet?: boolean }) => Promise<boolean>;
 
 /**
  * "Sinu konto avati teises seadmes" and its one button, "Saada uus kood", which opens the login page with the code already
@@ -36,8 +36,8 @@ export function ReplacedNotice({ locale, t }: { locale: Locale; t: { replaced: s
  * - Loading: `skeleton` (the page's own stand-ins), or an empty space of a message's height; aria-busy.
  * - Not signed in: useAccount sends the visitor to the login page meanwhile (the waiting look stays).
  * - Another device signed in since (one device only): ReplacedNotice.
- * - A 404 (nothing for this client, e.g. an e-course without access): `notFound` when the page gives one — its own plain
- *   sentence, never hidden behind the error — else the same as an error.
+ * - A 404 that is the API's own answer (nothing for this client, e.g. an e-course without access): `notFound` when the page gives
+ *   one — its own plain sentence, never hidden behind the error. Any other 404, and every 404 for a page without `notFound`, is an error.
  * - No answer, a server error or a 200 without a JSON object: "Ei õnnestunud laadida." and "Proovi uuesti".
  * - Loaded: `render(data, reload)`; `reload({ quiet: true })` refreshes it in the background.
  */
@@ -57,11 +57,11 @@ export function AccountLoader<T>({
   /** What a 404 shows (nothing: the load error). */
   notFound?: React.ReactNode;
 }) {
-  const { state, data, reload } = useAccount<T>(path, { locale });
+  const { state, data, reload } = useAccount<T>(path, { locale, notFound: notFound !== undefined });
   if (state === "ready" && data !== null) return render(data, reload);
   if (state === "replaced") return <ReplacedNotice locale={locale} t={t} />;
   if (state === "notFound" && notFound) return notFound;
-  if (state === "error" || state === "notFound")
+  if (state === "error")
     return (
       <div data-account-state="error">
         <Notice title={t.loadError}>

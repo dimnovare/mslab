@@ -48,9 +48,16 @@ describe("routeSitePath", () => {
         expect(isKnownPage(`/${locale}${p}`), `/${locale}${p}`).toBe(true);
     for (const p of ["/et/konto/x/y", "/et/konto/x", "/et/konto/kursus", "/et/konto/kursus/A", "/et/konto/kursus/x/y", "/ru/konto/sisene/x", "/et/konto/lemmikud/x"])
       expect(isKnownPage(p), p).toBe(false);
-    expect(route("/konto/sisene?viga=link")).toEqual({ kind: "page", page: "/et/konto/sisene", rewritten: true });
-    expect(route("/ru/konto/sisene?korda=1")).toEqual({ kind: "page", page: "/ru/konto/sisene", rewritten: false });
-    expect(route("/konto/kursus/kulmude-lami")).toEqual({ kind: "page", page: "/et/konto/kursus/kulmude-lami", rewritten: true });
+    // the account's shells render without the visitor's query (the browser reads it from its own address); no other page does
+    expect(route("/konto/sisene?viga=link")).toEqual({ kind: "page", page: "/et/konto/sisene", rewritten: true, queryFree: true });
+    expect(route("/ru/konto/sisene?korda=1")).toEqual({ kind: "page", page: "/ru/konto/sisene", rewritten: false, queryFree: true });
+    expect(route("/konto/kursus/kulmude-lami")).toEqual({ kind: "page", page: "/et/konto/kursus/kulmude-lami", rewritten: true, queryFree: true });
+  });
+
+  test("only the account's shells are query free: not the public pages, not an unknown address under /konto", () => {
+    for (const p of ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/x", "/ru/konto/kursus/x"]) expect(route(p), p).toHaveProperty("queryFree", true);
+    for (const p of ["/", "/ru", "/koolitused", "/koolitused/x?sessioon=1", "/kontakt", "/ru/kontakt", "/ostukorv?kursus=x", "/konto/x/y", "/konto/kursus", "/kontoo"])
+      expect(route(p), p).not.toHaveProperty("queryFree");
   });
 
   test("redirects, the hub, the API and everything served as it is", () => {

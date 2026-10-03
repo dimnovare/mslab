@@ -1,9 +1,10 @@
-import { describe, expect, test } from "vitest";
-import { NextRequest } from "next/server";
-import { canonicalPath, middleware } from "@/middleware";
+import { describe, expect, test, vi } from "vitest";
+import { NextRequest, type NextResponse } from "next/server";
+import { canonicalPath, middleware, RELAY_HEADER } from "@/middleware";
 
 // The path is appended to the origin as it is: new URL("//evil.example/", base) would parse "evil.example" as the host.
-const run = (path: string) => middleware(new NextRequest(`http://localhost${path}`));
+// (the answer is a promise only for the relay of an account shell asked for with a query of its own: those tests use `relayed`)
+const run = (path: string) => middleware(new NextRequest(`http://localhost${path}`)) as NextResponse;
 const rewrittenTo = (path: string) => {
   const to = run(path).headers.get("x-middleware-rewrite");
   return to ? new URL(to).pathname + new URL(to).search : null;
@@ -28,11 +29,131 @@ describe("noindex (the whole host stays out of search engines)", () => {
   });
 });
 
+describe("an account shell asked for with a query of its own", () => {
+  // Next.js keeps the address of the request that renders a page (path and query) in the page it stores, for every later visitor, and a
+  // rewrite cannot change it. So such a request never renders the shell: the middleware asks for the address without the query and
+  // passes the answer on (middleware.ts relayWithoutQuery).
+  const shell = () =>
+    new Response("<html>the shell</html>", {
+      status: 200,
+      headers: { "content-type": "text/html", "x-nextjs-cache": "HIT", "cache-control": "s-maxage=86400, stale-while-revalidate=31536000", "x-robots-tag": "noindex, nofollow", "content-encoding": "identity", "set-cookie": "a=b", "x-middleware-rewrite": "/et/konto/sisene", "x-middleware-request-x-foo": "1", "x-nextjs-rewritten-path": "/et/konto/sisene" },
+    });
+  const relayed = async (path: string, headers: Record<string, string> = {}, answer: () => Promise<Response> = async () => shell()) => {
+    const fetchMock = vi.fn<(input: URL | string, init?: RequestInit) => Promise<Response>>(answer);
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const res = (await middleware(new NextRequest(`http://localhost${path}`, { headers }))) as NextResponse;
+      return { res, fetchMock, asked: fetchMock.mock.calls.map(([url]) => String(url)), sent: new Headers(fetchMock.mock.calls[0]?.[1]?.headers) };
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  };
+  const rewrite = (res: NextResponse) => new URL(res.headers.get("x-middleware-rewrite")!).pathname;
+
+  test("ET and RU: the clean address is fetched, whatever the query was, and its answer is the answer", async () => {
+    for (const [path, clean] of [
+      ["/konto/sisene?viga=link&korda=1&email=probe%40example.test", "http://localhost/konto/sisene"],
+      ["/konto?viga=server", "http://localhost/konto"],
+      ["/konto/kursus/kulmude-lami?x=1", "http://localhost/konto/kursus/kulmude-lami"],
+      ["/ru/konto/sisene?korda=1", "http://localhost/ru/konto/sisene"],
+      ["/ru/konto/kursus/kulmude-lami?email=probe%40example.test", "http://localhost/ru/konto/kursus/kulmude-lami"],
+    ] as const) {
+      const { res, asked } = await relayed(path);
+      expect(asked, path).toEqual([clean]);
+      expect(res.status, path).toBe(200);
+      expect(await res.text(), path).toBe("<html>the shell</html>");
+      expect(res.headers.get("x-middleware-rewrite"), path).toBeNull();
+      expect(res.headers.get("x-nextjs-cache"), path).toBe("HIT");
+    }
+  });
+
+  test("Next.js's own _rsc stays and nothing else of the query; the visitor's page headers go along, a cookie never does", async () => {
+    const { asked, sent } = await relayed("/konto/sisene?viga=link&_rsc=abc12&email=probe%40example.test", {
+      rsc: "1",
+      "next-router-prefetch": "1",
+      "next-router-state-tree": "%5B%5D",
+      accept: "text/x-component",
+      cookie: "__Host-mslab_client=secret; mslab_in=1",
+      authorization: "Bearer x",
+      "x-forwarded-for": "10.0.0.1",
+    });
+    expect(asked).toEqual(["http://localhost/konto/sisene?_rsc=abc12"]);
+    expect([...sent.keys()].sort()).toEqual(["accept", "next-router-prefetch", "next-router-state-tree", "rsc", RELAY_HEADER].sort());
+    expect(sent.get("cookie")).toBeNull();
+  });
+
+  test("the answer is not kept by anyone on the way, and carries no header another layer adds again or that fetch has already used up", async () => {
+    const { res } = await relayed("/konto/sisene?viga=link");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    for (const name of ["content-encoding", "content-length", "transfer-encoding", "set-cookie", "x-robots-tag"]) expect(res.headers.get(name), name).toBeNull();
+    // the headers of the middleware that answered the relayed request are for that request (here they would be taken for this one's own)
+    expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(res.headers.get("x-middleware-request-x-foo")).toBeNull();
+    // the router's own information about the page goes on
+    expect(res.headers.get("x-nextjs-rewritten-path")).toBe("/et/konto/sisene");
+    expect(res.headers.get("content-type")).toBe("text/html");
+  });
+
+  test("a status and a redirect of the clean address are passed on as they are (never followed)", async () => {
+    const { res, fetchMock } = await relayed("/konto/sisene?viga=link", {}, async () => new Response(null, { status: 307, headers: { location: "/konto/sisene?_rsc=zz" } }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("/konto/sisene?_rsc=zz");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: "manual", method: "GET" });
+  });
+
+  test("no answer from the clean address, or one that is no shell (4xx, 5xx: a platform's page that wants a sign-in): the page is rendered as for any other request (a rewrite), never that answer in its place", async () => {
+    const fail = async (): Promise<Response> => {
+      throw new TypeError("fetch failed");
+    };
+    expect(rewrite((await relayed("/konto/sisene?viga=link", {}, fail)).res)).toBe("/et/konto/sisene");
+    expect(rewrite((await relayed("/ru/konto/sisene?viga=link", {}, fail)).res)).toBe("/ru/konto/sisene");
+    for (const status of [401, 403, 404, 500, 503]) {
+      const { res } = await relayed("/konto/sisene?viga=link", {}, async () => new Response("<html>sign in to see this deployment</html>", { status, headers: { "content-type": "text/html" } }));
+      expect(res.status, String(status)).toBe(200);
+      expect(rewrite(res), String(status)).toBe("/et/konto/sisene");
+    }
+  });
+
+  test("a relay never relays again, and only a GET is relayed; the public pages and the API are never relayed", async () => {
+    const again = await relayed("/konto/sisene?viga=link", { [RELAY_HEADER]: "1" });
+    expect(again.asked).toEqual([]);
+    expect(rewrite(again.res)).toBe("/et/konto/sisene");
+    for (const path of ["/koolitused/x?sessioon=1", "/ru/koolitused?x=1", "/?uudiskiri=kinnitatud", "/ostukorv?kursus=x", "/api/konto/verify?t=abc", "/admin?x=1", "/konto/x/y?z=1"]) {
+      const { asked } = await relayed(path);
+      expect(asked, path).toEqual([]);
+    }
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const post = middleware(new NextRequest("http://localhost/konto/sisene?viga=link", { method: "POST" })) as NextResponse;
+      expect(rewrite(post)).toBe("/et/konto/sisene");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("locale middleware", () => {
   test("Estonian pages are served from the et locale without changing the URL", () => {
     expect(rewrittenTo("/")).toBe("/et");
     expect(rewrittenTo("/koolitused")).toBe("/et/koolitused");
     expect(rewrittenTo("/koolitused/kulmumeistri-baaskoolitus?sessioon=3")).toBe("/et/koolitused/kulmumeistri-baaskoolitus?sessioon=3");
+  });
+
+  test("an account shell with no query of its own is served as before: ET rewritten to /et, RU as it is (Next's own _rsc does not count)", () => {
+    expect(rewrittenTo("/konto/sisene")).toBe("/et/konto/sisene");
+    expect(rewrittenTo("/konto/kursus/kulmude-lami")).toBe("/et/konto/kursus/kulmude-lami");
+    expect(rewrittenTo("/konto/sisene?_rsc=abc12")).toBe("/et/konto/sisene?_rsc=abc12");
+    expect(passesThrough("/ru/konto/sisene")).toBe(true);
+    expect(passesThrough("/ru/konto")).toBe(true);
+    expect(passesThrough("/ru/konto?_rsc=abc12")).toBe(true);
+  });
+
+  test("the public pages keep their query (the cart's course, the course page's date, the practice package)", () => {
+    expect(rewrittenTo("/koolitused/kulmude-lami?sessioon=3")).toBe("/et/koolitused/kulmude-lami?sessioon=3");
+    expect(rewrittenTo("/ostukorv?kursus=x")).toBe("/et/ostukorv/x?kursus=x");
+    expect(passesThrough("/ru/koolitused?kategooria=x")).toBe(true);
   });
 
   test("Russian pages render app/[locale]=ru directly", () => {

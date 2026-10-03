@@ -435,11 +435,14 @@ describe("createChangeRequest", () => {
 describe("e-course and terms", () => {
   const TERMS = { title: { et: "E-koolituse tingimused" }, body: { et: "Ligipääs on isiklik.", ru: "Доступ личный." } };
   const V2 = "2026-11-01T09:00:00.000Z";
+  // the terms text exists unless a test says otherwise (without one there is nothing to accept)
+  beforeEach(async () => {
+    await db.insert(pages).values({ key: "course_terms", ...TERMS });
+  });
 
   test("the e-course view: the course, its modules, the access end and the terms still to accept (with their version and text)", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
-    await db.insert(pages).values({ key: "course_terms", ...TERMS });
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toEqual({
       course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika", ru: "Практика" }] },
       access: { expiresAt: at(170).toISOString() },
@@ -449,10 +452,38 @@ describe("e-course and terms", () => {
     expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.version).toBe(V2);
   });
 
-  test("no terms text stored: the notice has no text, the acceptance is still asked for", async () => {
+  test("no terms text stored (no page row, or an empty Estonian text): nothing to accept, the course opens, and no acceptance is recorded", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
-    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ version: "1", accepted: false, text: null });
+    for (const clear of [
+      () => db.delete(pages).where(eq(pages.key, "course_terms")),
+      async () => {
+        await db.insert(pages).values({ key: "course_terms", title: { et: "x" }, body: { et: "  ", ru: "Только по-русски" } });
+      },
+    ]) {
+      await db.delete(pages);
+      await clear();
+      expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ version: "1", accepted: true, text: null });
+      // a stale page (loaded when there was a text) that accepts now: nothing is stored, and the page loaded again finds the course open
+      expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("stale");
+      expect(await db.select().from(termsAcceptances)).toEqual([]);
+    }
+  });
+
+  test("a text added later brings the notice: the version moves with the admin's save, and accepting then stores it", async () => {
+    const kati = await client();
+    await grant(kati.id, f.online.id);
+    await db.delete(pages);
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.accepted).toBe(true);
+    const s = await loadSettings(db);
+    const fd = new FormData();
+    fd.set("data", JSON.stringify({ parts: { course_terms: { version: s.versions.course_terms, value: { body: { et: "Esimesed tingimused." } } } } }));
+    expect(await saveSettingsForm(db, fd)).toMatchObject({ ok: true });
+    const view = (await loadEcourse(db, kati.id, "veebikursus", NOW))!;
+    expect(view.terms).toEqual({ version: await courseTermsVersion(db), accepted: false, text: { et: "Esimesed tingimused." } });
+    expect(view.terms.version).not.toBe("1");
+    expect(await acceptTerms(db, kati.id, "veebikursus", view.terms.version, NOW)).toBe("accepted");
+    expect(await db.select().from(termsAcceptances)).toHaveLength(1);
   });
 
   test("null without active access: none, another client's, revoked, expired, an unknown slug", async () => {
@@ -497,7 +528,6 @@ describe("e-course and terms", () => {
   test("accepting stores the version for this client and course; the notice then stays away, and the text is not sent again", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
-    await db.insert(pages).values({ key: "course_terms", ...TERMS });
     expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW)).toBe("accepted");
     expect(await db.select().from(termsAcceptances)).toEqual([{ clientId: kati.id, courseId: f.online.id, termsVersion: "1", acceptedAt: NOW }]);
     expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ version: "1", accepted: true, text: null });
@@ -519,7 +549,6 @@ describe("e-course and terms", () => {
   test("the admin's own save of new terms (Seaded) asks a student who accepted before again, and the 409 case follows from it", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
-    await db.insert(pages).values({ key: "course_terms", ...TERMS });
     const save = async (et: string) => {
       const s = await loadSettings(db);
       const fd = new FormData();

@@ -1,6 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 import { SEED_ECOURSE_SLUG } from "./account";
 import { testEmail } from "./fixtures";
+import { revalidateLocalPages } from "./prod-build";
 import { PROD_BUILD } from "./target";
 import { submitsForms, test, expect } from "./test";
 
@@ -32,6 +33,22 @@ async function fromCache(request: APIRequestContext, path: string, options: Get 
   let res = await request.get(path, { ...options, failOnStatusCode: false });
   for (let i = 0; i < 3 && res.headers()["x-nextjs-cache"] !== "HIT"; i++) res = await request.get(path, { ...options, failOnStatusCode: false });
   return res;
+}
+
+/**
+ * Asks until two answers in a row come from the cache and say the same, and returns that text. Another test's fixture (or a
+ * browser elsewhere) may mark every page stale or render one meanwhile (tests/e2e/prod-build.ts): a request in that gap renders
+ * the page itself, and Next.js keeps the address that rendered it in the page it stores.
+ */
+async function settledText(request: APIRequestContext, path: string, options: Get = {}): Promise<string> {
+  let before: string | null = null;
+  for (let i = 0; i < 10; i++) {
+    const res = await request.get(path, { ...options, failOnStatusCode: false });
+    const text = res.headers()["x-nextjs-cache"] === "HIT" ? await res.text() : null;
+    if (text !== null && text === before) return text;
+    before = text;
+  }
+  throw new Error(`${path}: no two answers in a row from the cache that agree`);
 }
 
 test("a page, its navigation payload and its prefetch tree come from the cache, which only a CDN may keep", async ({ request }) => {
@@ -73,8 +90,16 @@ test("the pages that list course dates are rendered again after 5 minutes (a ses
 });
 
 test("per-visitor addresses share the one cached page, and nothing of the query is in it", async ({ request }) => {
-  const plain = await (await fromCache(request, "/")).text();
-  const notice = await fromCache(request, "/?uudiskiri=kinnitatud");
+  // The clean address is settled first (two answers in a row from the cache that agree), then the one with a query must be answered
+  // from the same entry. If a fixture of another test marks the pages stale in between, the request with the query renders the page
+  // itself, and Next.js stores that request's address in it: not a failure of this test, so it starts again (three times at most).
+  let plain = "";
+  let notice = await fromCache(request, "/?uudiskiri=kinnitatud");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    plain = await settledText(request, "/");
+    notice = await request.get("/?uudiskiri=kinnitatud", { failOnStatusCode: false });
+    if (notice.headers()["x-nextjs-cache"] === "HIT") break;
+  }
   expect(notice.headers()["x-nextjs-cache"]).toBe("HIT");
   const html = await notice.text();
   expect(html, "the same cached page").toBe(plain);
@@ -82,8 +107,14 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
   expect(html).toContain('data-flash-notice=""');
   expect(html).not.toMatch(/data-flash-notice="(ok|warn)"/);
 
-  const page = await (await fromCache(request, COURSE)).text();
-  const linked = await (await fromCache(request, `${COURSE}?sessioon=1`)).text();
+  let page = "";
+  let linked = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    page = await settledText(request, COURSE);
+    const res = await request.get(`${COURSE}?sessioon=1`, { failOnStatusCode: false });
+    linked = await res.text();
+    if (res.headers()["x-nextjs-cache"] === "HIT") break;
+  }
   expect(linked, "the same cached page").toBe(page);
   expect(linked, "no date is picked in the server's HTML").not.toMatch(/data-session="\d+"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-session="\d+"/);
 
@@ -121,9 +152,9 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
     expect(prefetch.headers()["set-cookie"], `prefetch ${label}`).toBeUndefined();
   }
   // the query is read by the browser, never by the server: the same page
-  const login = await (await fromCache(request, "/konto/sisene")).text();
+  const login = await settledText(request, "/konto/sisene");
   for (const query of ["?viga=link", "?viga=server", "?korda=1"]) {
-    const res = await fromCache(request, `/konto/sisene${query}`);
+    const res = await request.get(`/konto/sisene${query}`, { failOnStatusCode: false });
     expect(res.headers()["x-nextjs-cache"], query).toBe("HIT");
     expect(await res.text(), query).toBe(login);
   }
@@ -133,6 +164,45 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
   expect(await me.json()).toEqual({ ok: false, reason: "none" });
   expect(me.headers()["cache-control"]).toBe("private, no-store");
   expect(me.headers()["x-nextjs-cache"]).toBeUndefined();
+});
+
+// Next.js stores the address of the request that renders a page (path and query) in the page it caches, and the next visitor is sent
+// that copy. The account's pages take queries (?viga=link, ?viga=server, ?korda=1, and an e-mail address later): a render started by a
+// request with one must not leave it in the shell. Checked by marking every page stale, as the fixtures do, so that the request with
+// the query is the one that renders the shell (its answer says MISS), once as a page and once as the navigation payload; then the
+// address without a query is asked until two answers in a row come from the cache. Neither the page nor the payload may name it.
+const PROBE_QUERY = "viga=link&korda=1&email=probe%40example.test";
+const LEAKS = /probe|viga|korda/;
+/** The first mention of the probe's query with the text around it ("" when there is none), for the failure message. */
+const leak = (text: string): string => {
+  const at = text.search(LEAKS);
+  return at < 0 ? "" : text.slice(Math.max(0, at - 80), at + 80);
+};
+
+test("an account shell rendered by a request with a query never keeps the query for the next visitor", async ({ request }) => {
+  test.setTimeout(180_000);
+  for (const path of ACCOUNT_SHELLS) {
+    for (const asPayload of [false, true]) {
+      const how = asPayload ? "payload" : "page";
+      // the request with the query must be the one that renders the shell (another test may render it first: then again)
+      let rendered = false;
+      for (let attempt = 0; attempt < 5 && !rendered; attempt++) {
+        revalidateLocalPages();
+        const probe = await request.get(asPayload ? `${path}?${PROBE_QUERY}&_rsc=q1` : `${path}?${PROBE_QUERY}`, {
+          headers: asPayload ? { RSC: "1" } : {},
+          failOnStatusCode: false,
+        });
+        expect(probe.status(), `${path} with the query (${how})`).toBe(200);
+        rendered = probe.headers()["x-nextjs-cache"] === "MISS";
+      }
+      expect(rendered, `${path}: the request with the query rendered the shell (${how})`).toBe(true);
+
+      const page = await settledText(request, path);
+      const payload = await settledText(request, `${path}?_rsc=c1`, { headers: { RSC: "1" } });
+      expect(leak(page), `${path}: the cached page after a ${how} render with the query`).toBe("");
+      expect(leak(payload), `${path}: the cached payload after a ${how} render with the query`).toBe("");
+    }
+  }
 });
 
 test("admin pages and the API never come from the page cache, and no CDN may keep them", async ({ request }) => {

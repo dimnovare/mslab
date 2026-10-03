@@ -782,12 +782,12 @@ describe("GET /api/konto: the dashboard", () => {
 describe("GET /api/konto/kursus/:slug: an e-course", () => {
   beforeEach(async () => {
     seeded = await seedCourses();
+    await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
   });
 
   test("with access: the view, with the terms still to accept; without it, or for another client's access, or an unknown course: 404", async () => {
     const { deps, cookie, client } = await account();
     const mari = (await db.insert(clients).values({ email: "mari@example.test" }).returning())[0];
-    await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
     for (const slug of ["veebikursus", "peidus-kursus", "olematu", "kulmude-lami"]) {
       const res = await call(deps, `/kursus/${slug}`, { cookie });
       expect(res.status, slug).toBe(404);
@@ -812,11 +812,23 @@ describe("GET /api/konto/kursus/:slug: an e-course", () => {
     const view = await call(deps, "/kursus/peidus-kursus", { cookie });
     expect(view.status).toBe(200);
     const { terms } = await view.json();
-    expect(terms).toEqual({ version: "1", accepted: false, text: null });
+    expect(terms).toEqual({ version: "1", accepted: false, text: { et: "Ligipääs on isiklik." } });
     expect((await call(deps, "/tingimused", { cookie, body: { slug: "peidus-kursus", version: terms.version } })).status).toBe(200);
     expect((await (await call(deps, "/kursus/peidus-kursus", { cookie })).json()).terms.accepted).toBe(true);
     const { cards } = await (await call(deps, "", { cookie })).json();
     expect(cards.map((c: { kind: string; course?: { slug: string } }) => c.kind === "ecourse" && c.course?.slug)).toEqual(["peidus-kursus"]);
+  });
+
+  test("no terms text stored: the view has nothing to accept, and an acceptance is refused as a changed version (nothing stored), so the page loads again", async () => {
+    const { deps, cookie, client } = await account();
+    await grantAccess(client.id, seeded.online.id);
+    await db.delete(pages);
+    const view = await (await call(deps, "/kursus/veebikursus", { cookie })).json();
+    expect(view.terms).toEqual({ version: "1", accepted: true, text: null });
+    const res = await call(deps, "/tingimused", { cookie, body: { slug: "veebikursus", version: view.terms.version } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ ok: false, error: "version" });
+    expect(await db.select().from(termsAcceptances)).toEqual([]);
   });
 
   test("access that has ended is a 404; a slug that is not decodable or cannot be one is a 404, not a 500", async () => {
@@ -1192,6 +1204,7 @@ describe("POST /kustuta: deleting the account", () => {
 describe("every endpoint behind a session answers through the session", () => {
   beforeEach(async () => {
     seeded = await seedCourses();
+    await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
   });
 
   // [method, path, the body of a request that succeeds for a client with that registration (id) and access to the e-course, the same endpoint with a body it refuses]

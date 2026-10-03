@@ -96,6 +96,14 @@ describe("without access (the API's 404)", () => {
     expect(state.querySelector("a")?.getAttribute("href")).toBe("/ru/koolitused/veebikursus");
   });
 
+  test("a 404 that is not the API's own answer (the platform's HTML page) is the error with its retry button, never the no-access sentence", async () => {
+    fetchMock.mockResolvedValue(new Response("<html>404 This page could not be found</html>", { status: 404, headers: { "content-type": "text/html" } }));
+    await mount();
+    expect($("[data-account-state='error']")).not.toBeNull();
+    expect($("[data-account-state='noAccess']")).toBeNull();
+    expect(document.body.textContent).not.toContain("ligipääsu");
+  });
+
   test("a server error is still the error with its retry button, never the no-access sentence", async () => {
     fetchMock.mockResolvedValue(json(500, { ok: false }));
     await mount();
@@ -138,10 +146,19 @@ describe("the terms notice", () => {
     expect($$("[data-legal-body] p").map((p) => p.textContent)).toEqual(["Ainult eesti."]);
   });
 
-  test("no text stored: the notice has no text, the acceptance is still asked for", async () => {
+  test("no terms text stored: the server says nothing is left to accept, so the course opens at once: no notice, nothing sent", async () => {
+    fetchMock.mockResolvedValue(json(200, view({ accepted: true })));
+    await mount();
+    expect($("[data-terms-gate]")).toBeNull();
+    expect($("[data-ecourse]")).not.toBeNull();
+    expect(posts()).toHaveLength(0);
+  });
+
+  test("a notice that is somehow sent without its text still shows its title, box and button", async () => {
     fetchMock.mockResolvedValue(json(200, view({ text: null })));
     await mount();
     expect($("[data-terms-text]")).toBeNull();
+    expect($("[data-terms-gate] h1")?.textContent).toBe("Enne alustamist");
     expect(button().disabled).toBe(true);
   });
 
@@ -215,10 +232,11 @@ describe("accepting", () => {
     await tick();
     await click(button());
     expect(posts()[0][1]).toMatchObject({ body: JSON.stringify({ slug: "veebikursus", version: V1 }) });
-    // while the new answer is on its way the notice stays (no skeleton), box cleared already, no message
+    // while the new answer is on its way the notice stays (no skeleton), still sending, no message; the box is cleared by the new notice
     expect($("[data-account-state='loading']")).toBeNull();
     expect($("[data-terms-gate]")).not.toBeNull();
-    expect(($("input[name='terms']") as HTMLInputElement).checked).toBe(false);
+    expect(($("input[name='terms']") as HTMLInputElement).checked).toBe(true);
+    expect(button().getAttribute("aria-disabled")).toBe("true");
     expect($("[data-terms-failed]")?.textContent).toBe("");
     await act(async () => answerReload(json(200, view({ version: V2, text: { et: "Uus tekst." } }))));
     await settle();
@@ -238,6 +256,35 @@ describe("accepting", () => {
     await click(button());
     expect(posts()[1][1]).toMatchObject({ body: JSON.stringify({ slug: "veebikursus", version: V2 }) });
     expect($("[data-ecourse]")).not.toBeNull();
+  });
+
+  test.each([
+    ["a server error", () => Promise.resolve(json(500, { ok: false }))],
+    ["no answer", () => Promise.reject(new TypeError("network"))],
+    ["a platform 404 page", () => Promise.resolve(new Response("<html>404</html>", { status: 404, headers: { "content-type": "text/html" } }))],
+    ["an empty answer", () => Promise.resolve(json(200, null))],
+  ])("a 409 whose reload fails (%s): the plain sentence, the box still ticked, pressing again asks again", async (_name, failure) => {
+    let loads = 0;
+    fetchMock.mockImplementation((_input, init) => {
+      if (init?.method === "POST") return Promise.resolve(json(409, { ok: false, error: "version" }));
+      return ++loads === 1 ? Promise.resolve(json(200, view())) : failure();
+    });
+    await mount();
+    await tick();
+    await click(button());
+    expect(loads).toBe(2);
+    expect($("[data-terms-failed]")?.textContent).toBe("Ei õnnestunud salvestada. Proovi uuesti.");
+    expect(($("input[name='terms']") as HTMLInputElement).checked).toBe(true); // not cleared silently
+    expect(button().disabled).toBe(false);
+    expect(button().getAttribute("aria-disabled")).toBeNull();
+    expect($("[data-terms-gate]")?.getAttribute("data-terms-version")).toBe(V1);
+
+    // pressed again once the server answers: the new notice, the box empty, no sentence
+    fetchMock.mockImplementation((_input, init) => Promise.resolve(init?.method === "POST" ? json(409, { ok: false, error: "version" }) : json(200, view({ version: V2, text: { et: "Uus tekst." } }))));
+    await click(button());
+    expect($("[data-terms-gate]")?.getAttribute("data-terms-version")).toBe(V2);
+    expect(($("input[name='terms']") as HTMLInputElement).checked).toBe(false);
+    expect($("[data-terms-failed]")?.textContent).toBe("");
   });
 
   test("a 409 whose reload finds the new version already accepted goes to the course", async () => {
