@@ -124,9 +124,15 @@ export async function getClientSession(db: Db, raw: string | undefined, now = ne
   if (!row) return null;
   if (row.endedAt) return { ended: row.endReason ?? "logout" } as const;
   if (row.expiresAt <= now) return { ended: "expired" } as const;
-  const renewed = row.expiresAt.getTime() - now.getTime() < CLIENT_SESSION_TTL_MS - RENEW_AFTER_MS;
-  if (renewed) {
-    await db.update(clientSessions).set({ expiresAt: new Date(now.getTime() + CLIENT_SESSION_TTL_MS) }).where(eq(clientSessions.idHash, idHash));
+  let renewed = false;
+  if (row.expiresAt.getTime() - now.getTime() < CLIENT_SESSION_TTL_MS - RENEW_AFTER_MS) {
+    // Only an open session is renewed: a logout or a newer login between the read and this write keeps it ended, and then
+    // no fresh cookies go out. (The cast: on the Db union, returning(fields) has no common overload.)
+    const done = await (db as PostgresJsDatabase<typeof schema>).update(clientSessions)
+      .set({ expiresAt: new Date(now.getTime() + CLIENT_SESSION_TTL_MS) })
+      .where(and(eq(clientSessions.idHash, idHash), isNull(clientSessions.endedAt)))
+      .returning({ one: sql<number>`1` });
+    renewed = done.length > 0;
   }
   return { clientId: row.clientId, renewed } as const;
 }

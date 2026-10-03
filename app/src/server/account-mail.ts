@@ -62,7 +62,7 @@ function loginHtml(mail: MailTexts, subject: string, locale: Locale, code: strin
     row(`padding:12px 28px 0;${text(16)}`, esc(mail.orLink)),
     row(
       "padding:16px 28px 0;",
-      `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td align="center" height="48" bgcolor="${INK}" style="background:${INK};border-radius:99px;">` +
+      `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td align="center" height="48" bgcolor="${INK}" style="background:${INK};border-radius:99px;mso-padding-alt:0 32px;">` +
         `<a href="${esc(link)}" style="display:inline-block;padding:0 32px;height:48px;line-height:48px;font:600 16px/48px ${FONT};color:${PAPER};text-decoration:none;border-radius:99px;">${esc(mail.button)}</a>` +
         "</td></tr></table>",
     ),
