@@ -643,7 +643,7 @@ export function HEAD(): Response {
 | PATCH `/api/konto/andmed` | `{ name, phone, locale }` (name ≤ 120, phone ≤ 40, locale et/ru) | `{ ok }` |
 | POST `/api/konto/uudiskiri` | `{ on }` | `{ ok }` |
 | POST `/api/konto/muutmine` | `{ registrationId, kind, message }` (message ≤ 1000) | `{ ok }`; `deps.later(() => notifyMaria(deps.env, …changeRequestSummary…, { siteUrl: deps.siteUrl }))` |
-| POST `/api/konto/tingimused` | `{ slug }` | `{ ok }` |
+| POST `/api/konto/tingimused` | `{ slug, version }` (version = `EcourseView.terms.version` as shown, ≤ 64) | `{ ok }`; 409 `{ ok: false, error: "version" }` when the terms changed since the page loaded (nothing stored) |
 | POST `/api/konto/kustuta` | `{ confirm: true }` | `{ ok }` + cleared cookies; deletion e-mail queued with `deps.later` |
 
 - [ ] **Step 6: Tests PASS; commit** `feat(accounts): dashboard data, favourites, profile, change requests, terms, deletion`.
@@ -721,6 +721,7 @@ The shell page: `generateStaticParams()` returns `[]` (rendered on the first vis
 **Behaviour (spec S5/C54):**
 - Without access → "Sul ei ole sellele koolitusele ligipääsu." + "Vaata koolitust" → public course page.
 - With access, terms for the current version not accepted → a full-width notice (not a dismissable modal): title "Enne alustamist", the `course_terms` text, one checkbox "Olen tutvunud ja nõustun tingimustega" and one button "Alusta koolitust" (disabled until checked) → POST `/api/konto/tingimused` → the course view.
+- The acceptance sends `{ slug, version }` with the version the notice showed; a 409 `version` answer means the admin saved new terms meanwhile: reload the course view (the notice shows the new text, checkbox cleared) — no error message beyond the fresh notice.
 - Course view: title, "Ligipääs kuni {date}", the module list (locked icons as on the public page), and "Sisu lisandub peagi." — nothing else.
 - Admin changes the terms text → version changes → the notice shows again on next open.
 

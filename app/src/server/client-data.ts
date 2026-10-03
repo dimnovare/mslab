@@ -214,15 +214,20 @@ async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
 
 /**
  * The e-course page's data: null without active access (none, revoked or expired). The terms notice shows while `terms.accepted` is false;
- * the page then sends back `terms.version` with the acceptance. The version, the client's acceptances of the course and the terms text are read together.
+ * the page then sends back `terms.version` with the acceptance. The version is read BEFORE the text: an admin save that lands
+ * in between then pairs the old version with the new text (the next visit shows the notice again), never a new version with
+ * text the student did not see. The client's acceptances are read alongside.
  */
 export async function loadEcourse(db: Db, clientId: number, slug: string, now: Date): Promise<EcourseView | null> {
   const access = await activeAccess(db, clientId, slug, now);
   if (!access) return null;
-  const [version, accepted, page] = await Promise.all([
-    courseTermsVersion(db),
+  const versionThenText = async () => {
+    const current = await courseTermsVersion(db);
+    return [current, await db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1)] as const;
+  };
+  const [[version, page], accepted] = await Promise.all([
+    versionThenText(),
     db.select({ version: termsAcceptances.termsVersion }).from(termsAcceptances).where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, access.course.id))),
-    db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1),
   ]);
   const isAccepted = accepted.some((row) => row.version === version);
   return {
