@@ -21,6 +21,16 @@ export type ClientLogin = { sessionRaw: string; clientId: number; locale: "et" |
 const tx = <T>(db: Db, fn: (t: Db) => Promise<T>) =>
   (db as PostgresJsDatabase<typeof schema>).transaction((t) => fn(t as unknown as Db));
 
+/**
+ * Serialises everything that counts or starts a login for one address, until the transaction ends: parallel code
+ * guesses are counted one after another (so 5 wrong tries really end the token), and two logins cannot both create the
+ * client or both leave a session open (the one-device rule). Re-entrant within a transaction, so taking it again is harmless.
+ * Always taken before any token row is locked (lock order address, then row), so a link and a code for one token cannot deadlock.
+ */
+async function lockAddress(t: Db, address: string): Promise<void> {
+  await t.execute(sql`select pg_advisory_xact_lock(hashtext(${"client-login:" + address}))`);
+}
+
 /** Six digits, uniform (rejection sampling). */
 function sixDigits(): string {
   const a = new Uint32Array(1);
@@ -32,7 +42,7 @@ function sixDigits(): string {
 export async function issueClientLogin(db: Db, email: string, now = new Date()): Promise<{ token: string; code: string } | null> {
   const address = normalizeEmail(email);
   return tx(db, async (t) => {
-    await t.execute(sql`select pg_advisory_xact_lock(hashtext(${"client-login:" + address}))`);
+    await lockAddress(t, address);
     await t.delete(clientLoginTokens).where(lt(clientLoginTokens.expiresAt, now));
     const [{ n }] = await t.select({ n: count() }).from(clientLoginTokens)
       .where(and(eq(clientLoginTokens.email, address), isNull(clientLoginTokens.usedAt), gt(clientLoginTokens.expiresAt, now)));
@@ -49,6 +59,7 @@ export async function issueClientLogin(db: Db, email: string, now = new Date()):
 
 /** Creates the client if new, ends its other sessions, links its records and starts a session. */
 async function startSession(t: Db, address: string, now: Date): Promise<ClientLogin> {
+  await lockAddress(t, address); // the code path already holds it (re-entrant); the link path takes it here at the latest
   const [existing] = await t.select().from(clients).where(eq(clients.email, address)).limit(1);
   const client = existing ?? (await t.insert(clients).values({ email: address }).returning())[0];
   await t.update(clientSessions).set({ endedAt: now, endReason: "replaced" })
@@ -64,8 +75,14 @@ async function startSession(t: Db, address: string, now: Date): Promise<ClientLo
 export async function redeemClientLink(db: Db, token: string, now = new Date()): Promise<ClientLogin | null> {
   if (!isTokenShape(token)) return null;
   return tx(db, async (t) => {
+    const hash = await sha256(token);
+    // The address lock comes before the token row is locked by the UPDATE below: a code redeem for the same token
+    // (lock, then row) would otherwise wait for this row while this waits for its lock.
+    const [peek] = await t.select({ email: clientLoginTokens.email }).from(clientLoginTokens).where(eq(clientLoginTokens.hash, hash)).limit(1);
+    if (!peek) return null;
+    await lockAddress(t, peek.email);
     const [row] = await t.update(clientLoginTokens).set({ usedAt: now })
-      .where(and(eq(clientLoginTokens.hash, await sha256(token)), isNull(clientLoginTokens.usedAt), gt(clientLoginTokens.expiresAt, now),
+      .where(and(eq(clientLoginTokens.hash, hash), isNull(clientLoginTokens.usedAt), gt(clientLoginTokens.expiresAt, now),
         lt(clientLoginTokens.attempts, CODE_ATTEMPTS)))
       .returning();
     return row ? startSession(t, row.email, now) : null;
@@ -77,6 +94,7 @@ export async function redeemClientCode(db: Db, email: string, code: string, now 
   const address = normalizeEmail(email);
   if (!/^\d{6}$/.test(code)) return "wrong";
   return tx(db, async (t) => {
+    await lockAddress(t, address); // before reading the attempts: parallel guesses are counted one after another
     const live = await t.select().from(clientLoginTokens)
       .where(and(eq(clientLoginTokens.email, address), isNull(clientLoginTokens.usedAt), gt(clientLoginTokens.expiresAt, now),
         lt(clientLoginTokens.attempts, CODE_ATTEMPTS)));
