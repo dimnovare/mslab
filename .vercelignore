@@ -1,0 +1,13 @@
+# Vercel builds only app/ (project Root Directory = app). Upload nothing else, and never local secrets or test output.
+/*
+!/app
+/app/node_modules
+/app/.next
+/app/.env*
+!/app/.env.example
+/app/.vercel
+/app/.media-local
+/app/test-results
+/app/playwright-report
+/app/visual-shots
+/app/.dev.vars*
