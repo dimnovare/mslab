@@ -1,13 +1,32 @@
-# Vercel builds only app/ (project Root Directory = app). Upload nothing else, and never local secrets or test output.
+# Which files `vercel deploy` uploads when it runs in this folder (the repository root; the CLI reads the
+# .vercelignore of the folder it runs in, and a deploy from app/ is refused: the project's Root Directory is `app`).
+# An ALLOW-LIST: everything is left out unless it is listed, so a new local folder (Wrangler state, build output,
+# media, test output, screenshots) is never uploaded by default. Keep it to exactly what `next build` in app/ reads.
+# A guard test (app/tests/unit/vercelignore.test.ts) pins the exclusions below. Manual deploys: docs/deploy.md section 3.
 /*
 !/app
-/app/node_modules
-/app/.next
-/app/.env*
-!/app/.env.example
-/app/.vercel
-/app/.media-local
-/app/test-results
-/app/playwright-report
-/app/visual-shots
-/app/.dev.vars*
+/app/*
+!/app/src
+!/app/public
+!/app/drizzle
+!/app/package.json
+!/app/package-lock.json
+!/app/next.config.ts
+!/app/tsconfig.json
+!/app/vercel.json
+!/app/drizzle.config.ts
+
+# Local state and secrets that must never go up, at any depth, even inside a folder listed above (a copied folder
+# can carry its own .wrangler). These come after the allow-list on purpose: the last matching rule wins.
+.env*
+.dev.vars*
+.wrangler
+.open-next
+.vercel
+.next
+node_modules
+.media-local
+test-results
+playwright-report
+visual-shots
+*.tsbuildinfo
