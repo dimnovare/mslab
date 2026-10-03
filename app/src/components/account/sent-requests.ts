@@ -43,9 +43,15 @@ export function sentChangeRequests(now: number = Date.now()): SentRequest[] {
   return read().filter(fresh(now));
 }
 
-/** Remembers that a request was sent for this registration's session (replacing an older one for it). */
-export function rememberChangeRequest(card: ContactCard, now: number = Date.now()): void {
-  write([...read().filter((e) => e.id !== card.registrationId && fresh(now)(e)), { id: card.registrationId, startsAt: card.session.startsAt, at: now }]);
+/**
+ * Remembers that a request was sent for this registration's session (replacing an older one for it) and returns the
+ * entry: the page keeps it in its own state, so "Saadetud" shows even when storage is blocked or full (storage only
+ * carries it over a reload).
+ */
+export function rememberChangeRequest(card: ContactCard, now: number = Date.now()): SentRequest {
+  const entry: SentRequest = { id: card.registrationId, startsAt: card.session.startsAt, at: now };
+  write([...read().filter((e) => e.id !== card.registrationId && fresh(now)(e)), entry]);
+  return entry;
 }
 
 /** Was a request sent from this tab about this card, as it is now (the same registration and the same session date)? */

@@ -20,6 +20,9 @@ import styles from "./CoursesTab.module.css";
 
 const FILTERS: CardFilter[] = ["all", "upcoming", "past"];
 
+/** How long after a refused request the reloaded cards may still take the focus. */
+const FOCUS_WAIT_MS = 10_000;
+
 type Props = {
   locale: Locale;
   t: CoursesTexts;
@@ -79,8 +82,11 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
   const [sent, setSent] = useState<SentRequest[]>(() => (readOnly || typeof window === "undefined" ? [] : sentChangeRequests()));
   const [dialog, setDialog] = useState<{ card: ContactCard; opener: HTMLElement } | null>(null);
   const [justSent, setJustSent] = useState<number | null>(null);
-  /** The card to put the focus on once the dashboard has been loaded again (after a refused request). */
-  const focusAfterReload = useRef<string | null>(null);
+  /**
+   * The card to put the focus on once the dashboard has been loaded again (after a refused request), until when: a quiet
+   * reload that fails changes nothing, and a later, unrelated reload must not move the focus.
+   */
+  const focusAfterReload = useRef<{ key: string; until: number } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
   // What no longer counts as sent (another date now, or a day old) is dropped from this tab's memory.
@@ -90,10 +96,11 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
 
   // After a quiet reload: the focus on the card the student was dealing with (or the page heading, if it is not shown now).
   useEffect(() => {
-    const key = focusAfterReload.current;
-    if (!key) return;
+    const pending = focusAfterReload.current;
+    if (!pending) return;
     focusAfterReload.current = null;
-    const cardHeading = document.querySelector<HTMLElement>(`[data-card="${key}"] h2`);
+    if (Date.now() > pending.until) return;
+    const cardHeading = document.querySelector<HTMLElement>(`[data-card="${pending.key}"] h2`);
     (cardHeading ?? heading.current)?.focus();
   }, [data]);
 
@@ -105,18 +112,22 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
     if (!card) return;
     if (end === "sent") {
       // "Saadetud …" takes the place (and the focus) of the card's button
-      rememberChangeRequest(card);
-      setSent(sentChangeRequests());
+      const entry = rememberChangeRequest(card);
+      setSent((list) => [...list.filter((e) => e.id !== entry.id), entry]);
       setJustSent(card.registrationId);
     } else if (end === "stale") {
       // the registration changed meanwhile: load the cards again behind the page, keeping the chips and the place
-      focusAfterReload.current = cardKey(card);
+      focusAfterReload.current = { key: cardKey(card), until: Date.now() + FOCUS_WAIT_MS };
       reload?.({ quiet: true });
     }
   };
 
   const name = firstName(data.client.name);
-  const cards = filterCards(data.cards, filter, now);
+  // The chips show only while they can change what is seen; without them (the cards changed under a chosen chip, e.g.
+  // a refused request turned the last upcoming one into a cancelled one) everything is shown, never an empty list.
+  const chips = showFilters(data.cards, now);
+  const active: CardFilter = chips ? filter : "all";
+  const cards = filterCards(data.cards, active, now);
   // Phones: a row to swipe through when two or more of the cards shown are still ahead (CSS; a computer shows a grid).
   const swipe = cards.filter((card) => !isPastCard(card, now)).length >= 2;
 
@@ -144,14 +155,14 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
       ) : (
         <>
           <p className={styles.lead}>{t.lead}</p>
-          {showFilters(data.cards, now) && (
+          {chips && (
             <div className={`${filters.pills} ${styles.chips}`} role="group" aria-label={t.filterLabel} data-account-filters="">
               {FILTERS.map((f) => (
                 <button
                   key={f}
                   type="button"
                   className={filters.pill}
-                  aria-pressed={filter === f}
+                  aria-pressed={active === f}
                   onClick={() => {
                     setFilter(f);
                     setJustSent(null);

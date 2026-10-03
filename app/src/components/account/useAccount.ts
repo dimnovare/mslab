@@ -69,7 +69,7 @@ type Loaded<T> = { state: AccountState; data: T | null };
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
  * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
  *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
- * - anything else, or no answer: "error"; `reload()` asks again.
+ * - anything else, no answer, or a 200 without a JSON object: "error"; `reload()` asks again.
  * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again.
  * `reload({ quiet: true })` asks again in the background: the page keeps showing what it has ("ready" and the old data)
  * until the new answer is in, and a failure leaves it as it is; a 401 still ends the page as above.
@@ -97,6 +97,11 @@ export function useAccount<T>(
         return;
       }
       if (abort.signal.aborted) return;
+      // A 200 without a JSON object (an empty or broken answer) is no data: an error, or for a quiet reload nothing.
+      if (res.ok && (body === null || typeof body !== "object")) {
+        if (!quiet) setLoaded({ state: "error", data: null });
+        return;
+      }
       if (res.ok) {
         // /me answers { email }, the dashboard { client: { email } }
         const answer = body as { email?: unknown; client?: { email?: unknown } } | null;

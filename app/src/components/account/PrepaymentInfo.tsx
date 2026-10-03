@@ -54,7 +54,11 @@ export function PrepaymentInfo({
       setCopied(row.key);
       setSelected(false);
       setStatus(`${t.copied}: ${row.label}`);
-      timer.current = window.setTimeout(() => setCopied(null), COPIED_MS);
+      // back to "Kopeeri", and the live region empty again, so a second copy is announced too
+      timer.current = window.setTimeout(() => {
+        setCopied(null);
+        setStatus("");
+      }, COPIED_MS);
     } catch {
       // No clipboard (an old browser, an insecure page, a refusal): select the text for the student to copy.
       const selection = window.getSelection();
@@ -62,6 +66,7 @@ export function PrepaymentInfo({
       setCopied(null);
       setSelected(true);
       setStatus(t.selected);
+      timer.current = window.setTimeout(() => setStatus(""), COPIED_MS);
     }
   };
 
