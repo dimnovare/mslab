@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from "node:crypto";
 import type { Page } from "@playwright/test";
-import { onLocalDb, sha256Hex } from "./fixtures";
+import { accountCourseSlug, onLocalDb, sha256Hex } from "./fixtures";
 import { LOCAL_URL, PROD_BUILD, TARGET } from "./target";
 import { expect } from "./test";
 
@@ -69,4 +69,104 @@ export async function knownLoginCode(email: string): Promise<string> {
 /** Makes every live login of `email` expire a minute ago (the 30 minutes cannot be waited out). */
 export async function expireLogins(email: string): Promise<void> {
   await onLocalDb((sql) => sql`update client_login_tokens set expires_at = now() - interval '1 minute' where email = ${email} and used_at is null`);
+}
+
+// ---------- the dashboard's rows (account-dashboard.spec.ts) ----------
+
+export type AccountCardKind = "awaiting" | "confirmed" | "cancelled" | "practice" | "waitlist" | "ecourse";
+
+export type AccountFixtures = {
+  clientId: number;
+  /** The test's own course: not published, group price 350 € (so half is 175 €). */
+  course: { id: number; slug: string; title: string };
+  /** Its one session, about 40 days ahead. */
+  session: { id: number; startsAt: Date; city: string };
+  registrations: Partial<Record<"awaiting" | "confirmed" | "cancelled", number>>;
+  requests: Partial<Record<"practice" | "waitlist", number>>;
+  /** The published seed e-course the access is to; `expiresAt` when access was granted. */
+  ecourse: { slug: string; title: string; expiresAt?: Date };
+};
+
+/** The seed e-course the dashboard tests grant access to (access rows change no public page). */
+const ECOURSE_SLUG = "kulmumeistri-e-koolitus";
+
+/**
+ * A client with the given cards, written straight to the LOCAL database and linked to the client (as a login would link
+ * them by e-mail):
+ * - awaiting: a group registration, 50 % chosen, nothing paid (→ "tasu ettemaks 175 €" or "Maria saadab sulle arve");
+ * - confirmed: paid in full, ahead (→ "Kohtume … " and "Tühista või muuda aega");
+ * - cancelled: a cancelled registration (over);
+ * - practice: a MINI practice request; waitlist: a waitlist entry for the session;
+ * - ecourse: six months of access to the seed e-course (→ "Ava koolitus").
+ * The registrations are on the test's own unpublished course (removeClientRows deletes it), so no public seat count moves.
+ */
+export async function insertAccountFixtures(
+  email: string,
+  opts: { name?: string; locale?: "et" | "ru"; cards?: AccountCardKind[] } = {},
+): Promise<AccountFixtures> {
+  const cards = new Set(opts.cards ?? []);
+  const slug = accountCourseSlug(email);
+  const title = "Kulmude lamineerimine";
+  return onLocalDb(async (sql) => {
+    const [client] = await sql<{ id: number }[]>`
+      insert into clients (email, name, locale) values (${email}, ${opts.name ?? ""}, ${opts.locale ?? "et"}) returning id`;
+    const [course] = await sql<{ id: number }[]>`
+      insert into courses (slug, type, level, title, summary, body, price_group, price_individual, published)
+      values (${slug}, 'contact', 'basic', ${sql.json({ et: title, ru: "Ламинирование бровей" })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 35000, 45000, false)
+      returning id`;
+    const [session] = await sql<{ id: number; startsAt: Date }[]>`
+      insert into course_sessions (course_id, starts_at, city, venue, capacity)
+      values (${course.id}, date_trunc('day', now()) + interval '40 days 8 hours', 'Pärnu', 'MS LAB stuudio', 6)
+      returning id, starts_at as "startsAt"`;
+    const registration = async (status: string, choice: string, paid: number) => {
+      const [row] = await sql<{ id: number }[]>`
+        insert into registrations (course_id, course_session_id, kind, name, email, phone, payment_choice, status, paid_cents, client_id)
+        values (${course.id}, ${session.id}, 'group', ${opts.name || "E2E Õpilane"}, ${email}, '+372 5555 0101', ${choice}, ${status}, ${paid}, ${client.id})
+        returning id`;
+      return row.id;
+    };
+    const request = async (kind: string, payload: Record<string, string | number>) => {
+      const [row] = await sql<{ id: number }[]>`insert into requests (kind, payload, client_id) values (${kind}, ${sql.json(payload)}, ${client.id}) returning id`;
+      return row.id;
+    };
+    const out: AccountFixtures = {
+      clientId: client.id,
+      course: { id: course.id, slug, title },
+      session: { id: session.id, startsAt: session.startsAt, city: "Pärnu" },
+      registrations: {},
+      requests: {},
+      ecourse: { slug: ECOURSE_SLUG, title: "Kulmumeistri e-koolitus" },
+    };
+    if (cards.has("awaiting")) out.registrations.awaiting = await registration("awaiting_prepayment", "half", 0);
+    if (cards.has("confirmed")) out.registrations.confirmed = await registration("confirmed", "full", 35000);
+    if (cards.has("cancelled")) out.registrations.cancelled = await registration("cancelled", "full", 0);
+    const name = opts.name || "E2E Õpilane";
+    if (cards.has("practice"))
+      out.requests.practice = await request("practice", { package: "MINI", name, email, phone: "+372 5555 0101", course: "Kulmumeistri baaskoolitus", times: "Tööpäeviti pärast kella 17", locale: "et" });
+    if (cards.has("waitlist")) out.requests.waitlist = await request("waitlist", { session: session.id, course: slug, name, email, locale: "et" });
+    if (cards.has("ecourse")) {
+      const [access] = await sql<{ expiresAt: Date }[]>`
+        insert into course_access (client_id, course_id, granted_by, expires_at)
+        select ${client.id}, id, 'e2e', now() + interval '6 months' from courses where slug = ${ECOURSE_SLUG}
+        returning expires_at as "expiresAt"`;
+      out.ecourse.expiresAt = access.expiresAt;
+    }
+    return out;
+  });
+}
+
+/** The prepayment instructions the dashboard tests set (settings key "prepayment"; sample values). */
+export const TEST_PREPAYMENT = { receiver: "MS LAB OÜ", iban: "EE38 2200 2210 2014 5685", bank: "Swedbank", referencePrefix: "MSLAB-" };
+
+/** Sets (or, with null, removes) the prepayment instructions in the LOCAL database. */
+export async function setPrepayment(value: typeof TEST_PREPAYMENT | null): Promise<void> {
+  await onLocalDb(async (sql) => {
+    await sql`delete from settings where key = 'prepayment'`;
+    if (value) await sql`insert into settings (key, value) values ('prepayment', ${sql.json(value)})`;
+  });
+}
+
+/** The change requests stored for a client. */
+export async function storedChangeRequests(clientId: number): Promise<{ payload: Record<string, unknown> }[]> {
+  return onLocalDb((sql) => sql<{ payload: Record<string, unknown> }[]>`select payload from requests where kind = 'change_request' and client_id = ${clientId} order by id`);
 }

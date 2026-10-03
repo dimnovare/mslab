@@ -246,12 +246,12 @@ test.describe("signed in", () => {
     expect((await storedAdminRegistration(f.registration.id)).status).toBe("confirmed");
   });
 
-  test("requests: tabs Kontakt / Individuaal / Praktika / Ootenimekiri, the practice request, 'Märgi tehtuks'", async ({ page, context, visitorIp }, info) => {
+  test("requests: tabs Kontakt / Individuaal / Praktika / Ootenimekiri / Muutmine, the practice request, 'Märgi tehtuks'", async ({ page, context, visitorIp }, info) => {
     const f = await fixtures(info.project.name);
     await signIn(page, context, visitorIp);
     await page.goto("/admin/paringud");
     const tabs = page.locator("[data-request-tabs]");
-    await expect(tabs.getByRole("link")).toHaveText([/^Kontakt/, /^Individuaal/, /^Praktika/, /^Ootenimekiri/]);
+    await expect(tabs.getByRole("link")).toHaveText([/^Kontakt/, /^Individuaal/, /^Praktika/, /^Ootenimekiri/, /^Muutmine/]);
     await expect(tabs.locator('[data-tab="kontakt"]')).toHaveAttribute("aria-current", "page");
 
     // Kontakt: the message and the e-learning purchase interest (tagged)

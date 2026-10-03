@@ -12,26 +12,32 @@ import styles from "./AccountGate.module.css";
 export type SignedOutTexts = { replaced: string; sendCode: string; error: string; retry: string };
 
 /**
+ * "Sinu konto avati teises seadmes" and its one button, "Saada uus kood", which opens the login page with the code already
+ * sent to the remembered e-mail (?korda=1). Shown by every account page whose data answered that another device signed in.
+ */
+export function ReplacedNotice({ locale, t }: { locale: Locale; t: { replaced: string; sendCode: string } }) {
+  return (
+    <div data-account-state="replaced">
+      <Notice title={t.replaced}>
+        <Link className={ui.btn} href={href(locale, "/konto/sisene?korda=1")}>
+          {t.sendCode}
+          <Icon name="arrow" />
+        </Link>
+      </Notice>
+    </div>
+  );
+}
+
+/**
  * The signed-in part of an account page (/konto…), shown once /api/konto/me says who the visitor is. Until then an empty
  * space of the same height (the static shell is the same for everyone). Not signed in: useAccount sends the visitor to the
- * login page. Signed in on another device since (one device only): "Sinu konto avati teises seadmes" and one button,
- * "Saada uus kood", which opens the login page with the code already sent to the remembered e-mail (?korda=1).
+ * login page. Signed in on another device since (one device only): ReplacedNotice.
  */
 export function AccountGate({ locale, t, children }: { locale: Locale; t: SignedOutTexts; children: React.ReactNode }) {
   const { state, reload } = useAccount<{ email: string; name: string }>("/api/konto/me", { locale });
 
   if (state === "ready") return children;
-  if (state === "replaced")
-    return (
-      <div data-account-state="replaced">
-        <Notice title={t.replaced}>
-          <Link className={ui.btn} href={href(locale, "/konto/sisene?korda=1")}>
-            {t.sendCode}
-            <Icon name="arrow" />
-          </Link>
-        </Notice>
-      </div>
-    );
+  if (state === "replaced") return <ReplacedNotice locale={locale} t={t} />;
   if (state === "error")
     return (
       <div data-account-state="error">

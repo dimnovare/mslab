@@ -147,6 +147,6 @@ describe("admin menu (prototype B sidebar, A1)", () => {
     expect(adminEt.registrations.status).toEqual({ awaiting_prepayment: "Ootab ettemaksu", confirmed: "Kinnitatud", cancelled: "Tühistatud" });
     expect(adminEt.registrations.type).toEqual({ all: "Kõik", e: "E-õpe", k: "Kontaktõpe" });
     expect(adminEt.registrations.eNote).toBe("E-õppe ostud lisanduvad koos maksetega.");
-    expect(adminEt.requests.tabs).toEqual({ kontakt: "Kontakt", individuaal: "Individuaal", praktika: "Praktika", ootenimekiri: "Ootenimekiri" });
+    expect(adminEt.requests.tabs).toEqual({ kontakt: "Kontakt", individuaal: "Individuaal", praktika: "Praktika", ootenimekiri: "Ootenimekiri", muutmine: "Muutmine" });
   });
 });

@@ -65,7 +65,7 @@ type Loaded<T> = { state: AccountState; data: T | null };
 
 /**
  * Loads one account endpoint (`path`, e.g. "/api/konto/me") with the session cookie.
- * - 200: "ready" with the JSON as `data`; an `email` in it is remembered for the next login in this browser.
+ * - 200: "ready" with the JSON as `data`; an `email` in it (or `client.email`, the dashboard's) is remembered for the next login in this browser.
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
  * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
  *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
@@ -92,7 +92,9 @@ export function useAccount<T>(path: string, options: { redirect?: boolean; local
       }
       if (abort.signal.aborted) return;
       if (res.ok) {
-        const email = (body as { email?: unknown } | null)?.email;
+        // /me answers { email }, the dashboard { client: { email } }
+        const answer = body as { email?: unknown; client?: { email?: unknown } } | null;
+        const email = answer?.email ?? answer?.client?.email;
         if (typeof email === "string" && email) rememberEmail(email);
         setLoaded({ state: "ready", data: body as T });
         return;

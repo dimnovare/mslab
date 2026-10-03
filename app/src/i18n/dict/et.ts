@@ -392,7 +392,6 @@ export const et = {
     next: "Järgmine",
     imageViewer: "Pildivaatur",
     openImage: "Ava pilt suuremalt",
-    accountSoon: "Õppija konto avaneb peagi",
   },
 
   // The client account (server/account-mail.ts). The login e-mail has a plain-text and an HTML body, both put together
@@ -432,6 +431,69 @@ export const et = {
       waitlist: "Oled ootenimekirjas. Anname teada, kui koht vabaneb.",
       accessEnded: "Ligipääs on lõppenud.",
       openCourse: "Ligipääs kuni {date}.",
+    },
+    // The account pages' frame (components/account/AccountShell.tsx): the three tabs (top on a computer, a bar at the
+    // bottom on a phone) and the round menu button with "Logi välja".
+    shell: {
+      label: "Minu konto",
+      courses: "Minu koolitused",
+      favourites: "Lemmikud",
+      details: "Minu andmed",
+      menu: "Minu konto",
+      logout: "Logi välja",
+      logoutFailed: "Väljalogimine ei õnnestunud. Proovi uuesti.",
+    },
+    // "Minu koolitused" /konto (components/account/CoursesTab.tsx and the card parts). {name} is the first name.
+    dashboard: {
+      hello: "Tere, {name}!",
+      helloNoName: "Tere!",
+      lead: "Siin on sinu koolitused.",
+      filterLabel: "Näita",
+      all: "Kõik",
+      upcoming: "Tulevased",
+      past: "Möödunud",
+      listLabel: "Sinu koolitused",
+      tag: { contact: "Kontaktõpe", ecourse: "E-õpe", request: "Päring", waitlist: "Ootenimekiri" },
+      // a card whose course or practice package is gone
+      untitled: { individual: "Individuaalkoolitus", practice: "Praktika", course: "Koolitus" },
+      // the card's one button
+      pay: "Vaata juhiseid",
+      payHide: "Peida juhised",
+      change: "Tühista või muuda aega",
+      open: "Ava koolitus",
+      empty: "Sul ei ole veel koolitusi.",
+      browse: "Vaata koolitusi",
+      loading: "Laadin koolitusi…",
+      loadError: "Ei õnnestunud laadida. Proovi uuesti.",
+      retry: "Proovi uuesti",
+      // where to pay the prepayment (components/account/PrepaymentInfo.tsx); "Selgitus" is the bank transfer's explanation field
+      payment: {
+        receiver: "Saaja",
+        iban: "IBAN",
+        bank: "Pank",
+        amount: "Summa",
+        reference: "Selgitus",
+        after: "Pärast makset kinnitab Maria su koha.",
+        copy: "Kopeeri",
+        copied: "Kopeeritud",
+        // when the browser gives no clipboard: the text is selected for the student to copy
+        selected: "Tekst on märgitud. Kopeeri see.",
+      },
+      // "Tühista või muuda aega" (components/account/ChangeRequestDialog.tsx)
+      request: {
+        question: "Mida soovid?",
+        cancel: "Soovin tühistada",
+        change: "Soovin muuta aega",
+        message: "Sõnum Mariale (kui soovid)",
+        send: "Saada",
+        close: "Sulge",
+        pick: "Vali üks neist.",
+        sent: "Saadetud. Maria võtab sinuga ühendust.",
+        // the registration was cancelled or has begun meanwhile
+        notAllowed: "Seda registreeringut ei saa enam muuta. Võta Mariaga ühendust.",
+        rate: "Oled saatnud juba mitu soovi. Proovi tunni aja pärast uuesti.",
+        failed: "Saatmine ei õnnestunud. Proovi uuesti.",
+      },
     },
     // The login page /konto/sisene (components/account/LoginForm.tsx): the e-mail, then the 6-digit code from the e-mail.
     // {fixed} is the address with its domain corrected, {email} the address the code went to, {s} the seconds left.

@@ -10,7 +10,8 @@ import { submitsForms, test, expect } from "./test";
 // browser itself, so such an address never reaches the server.
 
 const LOGIN = "/konto/sisene";
-const PLACEHOLDER = "Õppija konto avaneb peagi"; // the signed-in /konto until the dashboard (Task 6)
+/** The signed-in /konto: "Minu koolitused" (account-dashboard.spec.ts tests it). */
+const DASHBOARD = "[data-account-dashboard]";
 
 const emailField = (page: Page) => page.getByLabel("E-post", { exact: true });
 const codeField = (page: Page) => page.getByLabel("Kood", { exact: true });
@@ -92,7 +93,7 @@ test("a code by e-mail signs in and opens Minu konto; the header follows, and Lo
   // the sixth digit signs in by itself
   await field.pressSequentially(await knownLoginCode(email));
   await expect(page).toHaveURL(/\/konto$/);
-  await expect(page.getByRole("heading", { name: PLACEHOLDER })).toBeVisible();
+  await expect(page.locator(DASHBOARD)).toBeVisible();
   await expectAccountButton(page, isMobile, true);
 
   await page.evaluate(() => fetch("/api/konto/logout", { method: "POST" }));
@@ -353,7 +354,7 @@ test("signed in on another device: one message and one button, which sends a new
   const email = clientEmail("replaced", info.project.name);
   await removeClientRows(email);
   await signInAsClient(page, email);
-  await expect(page.getByRole("heading", { name: PLACEHOLDER })).toBeVisible();
+  await expect(page.locator(DASHBOARD)).toBeVisible();
 
   // the same student signs in on another device (another browser)
   const other = await browser.newContext({ baseURL: TARGET || LOCAL_URL });
@@ -377,17 +378,17 @@ test("signed in on another device: one message and one button, which sends a new
   await expect(codeField(page)).toBeFocused();
   await codeField(page).pressSequentially(await knownLoginCode(email));
   await expect(page).toHaveURL(/\/konto$/);
-  await expect(page.getByRole("heading", { name: PLACEHOLDER })).toBeVisible();
+  await expect(page.locator(DASHBOARD)).toBeVisible();
   expect(posts.login, "?korda=1 sends exactly one code").toBe(1);
 });
 
 test("an account page that cannot load says so, and Proovi uuesti asks again (here: not signed in, so the login page opens)", async ({ page }) => {
   let failing = true;
-  await page.route("**/api/konto/me", (route) =>
+  await page.route("**/api/konto", (route) =>
     failing ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false, error: "server" }) }) : route.fallback(),
   );
   await page.goto("/konto");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Midagi läks valesti.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ei õnnestunud laadida. Proovi uuesti.");
   await expect(page).toHaveURL(/\/konto$/); // no redirect: the visitor may well be signed in
   failing = false;
   await page.getByRole("button", { name: "Proovi uuesti" }).click();
@@ -408,7 +409,8 @@ test("in Russian: the page speaks Russian, the code opens /ru/konto and a first 
   await expect(page.locator("[data-login-wait]")).toHaveText(/^Новый код можно отправить через \d+ с\.$/);
   await page.getByLabel("Код", { exact: true }).pressSequentially(await knownLoginCode(email));
   await expect(page).toHaveURL(/\/ru\/konto$/);
-  await expect(page.getByRole("heading", { name: "Личный кабинет ученика скоро откроется" })).toBeVisible();
+  await expect(page.locator(DASHBOARD)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Здравствуйте!"); // "Мои курсы" in Russian
   const [client] = await onLocalDb((sql) => sql<{ locale: string }[]>`select locale from clients where email = ${email}`);
   expect(client.locale, "the account speaks the language of the page it was made on").toBe("ru");
 

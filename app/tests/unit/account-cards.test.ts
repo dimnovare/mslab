@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  cardKey, hasPrepayment, isPastCard, nextStep, sortCards,
+  cardKey, cardTag, filterCards, firstName, hasPrepayment, isPastCard, nextStep, paymentReference, showFilters, sortCards,
   type AccountCard, type ContactCard, type EcourseCard, type IndividualCard, type PrepaymentInfo, type RequestCard, type WaitlistCard,
 } from "@/domain/account-cards";
 import { fill } from "@/i18n/format";
@@ -254,5 +254,43 @@ describe("isPastCard and sortCards", () => {
     expect(cardKey(request())).toBe("request-3");
     expect(cardKey(waitlist())).toBe("request-4");
     expect(cardKey(ecourse())).toBe("course-kulmude-lami");
+  });
+});
+
+describe("the dashboard's view helpers", () => {
+  test("firstName: the first word of the name, nothing without one", () => {
+    expect(firstName("Kati Tamm")).toBe("Kati");
+    expect(firstName("  Anna-Liisa   Mets ")).toBe("Anna-Liisa");
+    expect(firstName("")).toBe("");
+    expect(firstName("   ")).toBe("");
+  });
+
+  test("paymentReference: the admin's prefix and the registration number", () => {
+    expect(paymentReference(PAY, 42)).toBe("MS42");
+    expect(paymentReference({ ...PAY, referencePrefix: " MSLAB-" }, 7)).toBe("MSLAB-7");
+    expect(paymentReference({ ...PAY, referencePrefix: "" }, 7)).toBe("7");
+  });
+
+  test("cardTag: an individual registration is a contact course too", () => {
+    expect([contact(), individual(), ecourse(), request(), waitlist()].map(cardTag)).toEqual(["contact", "contact", "ecourse", "request", "waitlist"]);
+  });
+
+  test("filterCards: Kõik keeps everything in its order, Tulevased the open cards, Möödunud the over ones", () => {
+    const over = contact({ registrationId: 1, status: "cancelled" });
+    const ahead = contact({ registrationId: 2 });
+    const answered = request({ handled: true });
+    const cards = [ahead, over, answered, ecourse()];
+    expect(filterCards(cards, "all", NOW)).toBe(cards);
+    expect(filterCards(cards, "upcoming", NOW).map(cardKey)).toEqual(["registration-2", "course-kulmude-lami"]);
+    expect(filterCards(cards, "past", NOW).map(cardKey)).toEqual(["registration-1", "request-3"]);
+  });
+
+  test("showFilters: only when two or more cards are partly ahead and partly over", () => {
+    const over = contact({ registrationId: 1, status: "cancelled" });
+    expect(showFilters([], NOW)).toBe(false);
+    expect(showFilters([contact()], NOW)).toBe(false);
+    expect(showFilters([contact(), ecourse()], NOW)).toBe(false); // all ahead: Möödunud would show nothing
+    expect(showFilters([over, request({ handled: true })], NOW)).toBe(false); // all over
+    expect(showFilters([contact(), over], NOW)).toBe(true);
   });
 });

@@ -16,6 +16,9 @@ const PATHS = {
   lock: ["M6.5 11h11v9h-11z", "M9 11V8a3 3 0 0 1 6 0v3"],
   search: ["M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z", "m20 20-4.4-4.4"],
   pin: ["M12 21s-6.5-5.7-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.3 12 21 12 21Z", "M12 7.6a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Z"],
+  // B `book` and `user` (the client account's tabs and its menu button)
+  book: ["M12 5v15M3 4c4-1 6 0 9 2 3-2 5-3 9-2v15c-4-1-6 0-9 2-3-2-5-3-9-2V4Z"],
+  user: ["M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M4 22v-3a8 8 0 0 1 16 0v3"],
 } as const;
 
 export type IconName = keyof typeof PATHS;

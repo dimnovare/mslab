@@ -249,28 +249,65 @@ export async function expireAuthToken(rawToken: string): Promise<void> {
   }
 }
 
-// ---------- client account rows (account-login.spec.ts) ----------
+// ---------- client account rows (account-login.spec.ts, account-dashboard.spec.ts) ----------
 // The account tests sign in as `e2e-client-<label>-<project>@example.test` (tests/e2e/account.ts clientEmail): a sample
 // address, never mailed. Each test starts by removing its own address's rows (a retry starts clean), and global-setup /
-// global-teardown remove every one of them: the clients (their sessions, favourites and access go with them) and the
-// login tokens, which are kept by address.
+// global-teardown remove every one of them: the clients (their sessions, favourites and access go with them), the login
+// tokens, which are kept by address, and what the dashboard tests made for them: registrations and requests with the
+// address (the change requests the app stores carry it too), and their own course `e2e-konto-<label>-<project>`, which
+// is not published, so its seats never show on a public page (its sessions go with it).
 
 export const CLIENT_EMAIL_PATTERN = "e2e-client-%@example.test";
+export const ACCOUNT_COURSE_PREFIX = "e2e-konto-";
+
+/** The dashboard tests' course of one test address: e2e-client-dash-mobile@example.test → e2e-konto-dash-mobile. */
+export function accountCourseSlug(email: string): string {
+  return ACCOUNT_COURSE_PREFIX + email.slice("e2e-client-".length, email.indexOf("@"));
+}
 
 /** Deletes the account rows of one test address, or of all of them; returns how many are left (0 when clean). */
 export async function removeClientRows(email?: string): Promise<number> {
   const match = email ?? CLIENT_EMAIL_PATTERN;
+  const courses = email ? accountCourseSlug(email) : `${ACCOUNT_COURSE_PREFIX}%`;
   const sql = connect();
   try {
+    await sql`delete from registrations where email like ${match} or course_id in (select id from courses where slug like ${courses})`;
+    await sql`delete from requests where payload->>'email' like ${match}`;
+    await sql`delete from courses where slug like ${courses}`; // on delete cascade: its sessions
     await sql`delete from client_login_tokens where email like ${match}`;
     await sql`delete from clients where email like ${match}`; // on delete cascade: sessions, favourites, access, terms
     const [{ n }] = await sql<{ n: number }[]>`
       select (select count(*) from client_login_tokens where email like ${match})
-           + (select count(*) from clients where email like ${match})::int as n`;
+           + (select count(*) from clients where email like ${match})
+           + (select count(*) from registrations where email like ${match})
+           + (select count(*) from requests where payload->>'email' like ${match})
+           + (select count(*) from courses where slug like ${courses})::int as n`;
     return Number(n);
   } finally {
     await sql.end();
   }
+}
+
+/**
+ * Holds a lock that every worker process shares (a Postgres advisory lock on a connection of its own) until the returned
+ * function is called; a crashed worker's connection closes, and the lock with it. For a test that changes a shared row
+ * other tests of the same kind read (the dashboard's prepayment setting): the desktop and phone projects run side by side.
+ */
+export async function holdLocalLock(name: string): Promise<() => Promise<void>> {
+  const sql = connect();
+  try {
+    await sql`select pg_advisory_lock(hashtext(${name}))`;
+  } catch (e) {
+    await sql.end();
+    throw e;
+  }
+  return async () => {
+    try {
+      await sql`select pg_advisory_unlock(hashtext(${name}))`;
+    } finally {
+      await sql.end();
+    }
+  };
 }
 
 // ---------- admin inbox fixtures ----------

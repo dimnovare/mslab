@@ -21,11 +21,12 @@ export const metadata: Metadata = { title: adminTitle(adminEt.nav.requests) };
 
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
-// ?liik=kontakt|individuaal|praktika|ootenimekiri (A3: the waitlist has its own tab). Kontakt is the default.
+// ?liik=kontakt|individuaal|praktika|ootenimekiri|muutmine (A3: the waitlist has its own tab; muutmine: a student's wish to
+// cancel or move a registration, sent from the account page). Kontakt is the default.
 // ?leht=<n>: 50 requests a page, open ones first (the order comes from the query, across pages).
-const TABS = ["kontakt", "individuaal", "praktika", "ootenimekiri"] as const;
+const TABS = ["kontakt", "individuaal", "praktika", "ootenimekiri", "muutmine"] as const;
 type Tab = (typeof TABS)[number];
-const KIND: Record<Tab, RequestKind> = { kontakt: "contact", individuaal: "individual", praktika: "practice", ootenimekiri: "waitlist" };
+const KIND: Record<Tab, RequestKind> = { kontakt: "contact", individuaal: "individual", praktika: "practice", ootenimekiri: "waitlist", muutmine: "change_request" };
 
 type Field = keyof typeof adminEt.requests.fields;
 /** The payload keys of each kind, in the order they are shown, with their label. */
@@ -45,7 +46,7 @@ const FIELDS: Record<RequestKind | "interest", [string, Field][]> = {
   ],
   practice: [["package", "package"], ["name", "name"], ["email", "email"], ["phone", "phone"], ["course", "completedCourse"], ["times", "times"], ["locale", "locale"]],
   waitlist: [["name", "name"], ["email", "email"], ["course", "course"], ["session", "session"], ["locale", "locale"]],
-  // A client's cancel / change-date request from the account page. Its own tab and the registration link come with the admin clients task.
+  // A client's cancel / change-date request from the account page (tab Muutmine). The registration link comes with the admin clients task.
   change_request: [["email", "email"], ["message", "message"]],
 };
 /** Stored for the system, not for reading. */

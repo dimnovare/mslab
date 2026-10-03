@@ -234,9 +234,9 @@ export const adminEt = {
   requests: {
     eyebrow: "Postkast",
     title: "Päringud",
-    lead: "Kontaktivormi sõnumid, individuaalõppe soovid, praktikataotlused ja ootenimekiri. Tehtud päringud jäävad nimekirja lõppu.",
+    lead: "Kontaktivormi sõnumid, individuaalõppe soovid, praktikataotlused, ootenimekiri ja õpilaste tühistamise või ajamuutmise soovid. Tehtud päringud jäävad nimekirja lõppu.",
     tabsLabel: "Päringu liik",
-    tabs: { kontakt: "Kontakt", individuaal: "Individuaal", praktika: "Praktika", ootenimekiri: "Ootenimekiri" },
+    tabs: { kontakt: "Kontakt", individuaal: "Individuaal", praktika: "Praktika", ootenimekiri: "Ootenimekiri", muutmine: "Muutmine" },
     tabCount: "{n} tegemata",
     interest: "E-õppe huvi",
     handled: "Tehtud",

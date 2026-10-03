@@ -222,3 +222,50 @@ export function sortCards(cards: AccountCard[], now: Date): AccountCard[] {
     })
     .map((x) => x.card);
 }
+
+// ---------- for the dashboard's view (components/account) ----------
+
+/** The greeting's name: the first word of the client's name ("Kati Tamm" → "Kati"); "" without a name. */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? "";
+}
+
+/** The payment's explanation on the prepayment instructions: the admin's prefix and the registration number ("MSLAB-" + 42). */
+export function paymentReference(pay: PrepaymentInfo, registrationId: number): string {
+  return `${pay.referencePrefix.trim()}${registrationId}`;
+}
+
+/** The small tag on a card: what kind of thing it is (an individual registration is a contact course too). */
+export type CardTag = "contact" | "ecourse" | "request" | "waitlist";
+
+export function cardTag(card: AccountCard): CardTag {
+  switch (card.kind) {
+    case "contact":
+    case "individual":
+      return "contact";
+    case "ecourse":
+      return "ecourse";
+    case "request":
+      return "request";
+    case "waitlist":
+      return "waitlist";
+  }
+}
+
+export type CardFilter = "all" | "upcoming" | "past";
+
+/** The cards a filter chip shows (Kõik / Tulevased / Möödunud), in the order given. */
+export function filterCards(cards: AccountCard[], filter: CardFilter, now: Date): AccountCard[] {
+  if (filter === "all") return cards;
+  return cards.filter((card) => isPastCard(card, now) === (filter === "past"));
+}
+
+/**
+ * The chips are shown only when they can change what is seen: two or more cards, of which some are still ahead and some
+ * are over. With only upcoming (or only past) cards one of the chips would show everything and the other nothing.
+ */
+export function showFilters(cards: AccountCard[], now: Date): boolean {
+  if (cards.length < 2) return false;
+  const past = cards.filter((card) => isPastCard(card, now)).length;
+  return past > 0 && past < cards.length;
+}
