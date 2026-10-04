@@ -6,6 +6,7 @@ import { ClientDetailView } from "@/components/admin/ClientDrawer";
 import { AddStudentForm } from "@/components/admin/ClientForms";
 import { Drawer } from "@/components/admin/Drawer";
 import { Pager } from "@/components/admin/Pager";
+import listTable from "@/components/admin/list-table.module.css";
 import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
 import ui from "@/components/admin/ui.module.css";
@@ -130,27 +131,28 @@ export default async function ClientsPage({ searchParams }: Props) {
           </Form>
         </div>
 
-        <section className={`${ui.card} ${styles.card}`} aria-label={t.title}>
+        <section className={`${ui.card} ${listTable.card}`} aria-label={t.title}>
           <p className={`${ui.muted} ${ui.small} ${styles.count}`}>{fill(t.count, { n: list.total })}</p>
+          <p className={`${ui.muted} ${ui.small} ${styles.count}`} data-courses-hint="">
+            {t.coursesHint}
+          </p>
           {list.rows.length === 0 ? (
             <p className={ui.empty}>{filtered ? t.emptyFiltered : t.empty}</p>
           ) : (
-            <table className={`${ui.table} ${styles.table}`}>
+            <table className={`${ui.table} ${listTable.table}`}>
               <thead>
                 <tr>
                   <th scope="col">{t.col.name}</th>
                   <th scope="col">{t.col.created}</th>
-                  <th scope="col" title={t.coursesHint}>
-                    {t.col.courses}
-                  </th>
+                  <th scope="col">{t.col.courses}</th>
                 </tr>
               </thead>
               <tbody>
                 {list.rows.map((c) => (
                   <tr key={c.id} data-client={c.id}>
                     <td data-label={t.col.name}>
-                      <div className={styles.who}>
-                        <Link id={`client-${c.id}`} className={styles.name} href={href(view, c.id)} scroll={false} aria-label={fill(t.open, { name: c.name || c.email })}>
+                      <div className={listTable.who}>
+                        <Link id={`client-${c.id}`} className={listTable.name} href={href(view, c.id)} scroll={false} aria-label={fill(t.open, { name: c.name || c.email })}>
                           {c.name || c.email}
                         </Link>
                         {c.name && <span className={styles.email}>{c.email}</span>}
@@ -178,7 +180,7 @@ export default async function ClientsPage({ searchParams }: Props) {
           closeLabel={t.drawer.close}
           returnFocus={open ? `client-${open.client.id}` : undefined}
         >
-          {open ? <ClientDetailView detail={open} ecourses={ecourses} now={now} /> : <p className={ui.empty}>{t.drawer.notFound}</p>}
+          {open ? <ClientDetailView key={open.client.id} detail={open} ecourses={ecourses} now={now} /> : <p className={ui.empty}>{t.drawer.notFound}</p>}
         </Drawer>
       )}
     </Shell>

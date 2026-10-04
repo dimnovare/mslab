@@ -35,6 +35,8 @@ const COURSE_CSS = [
   "src/components/account/DetailsTab.module.css",
   // the admin's Õpilased and its read-only "view as client" (phase 2a Task 9)
   "src/components/admin/ClientDrawer.module.css",
+  "src/components/admin/list-table.module.css",
+  "src/app/admin/(panel)/registreerimised/registrations.module.css",
   "src/app/admin/(panel)/opilased/clients.module.css",
   "src/app/admin/(panel)/opilased/[id]/vaade/view.module.css",
   // the site's modal dialog (the campaign popup and the account's change request)

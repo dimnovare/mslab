@@ -29,6 +29,12 @@
   overflow-wrap: anywhere;
 }
 
+.subject {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .head .meta {
   color: var(--ink);
   font-size: 14px;
@@ -135,6 +141,25 @@
 .add {
   flex: 0 1 460px;
   min-width: 0;
+}
+
+/* "Kas mõtlesid …?" (the login page's question, B .notice) */
+.typo {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--rose);
+  border-radius: 0 10px 10px 0;
+  background: var(--first);
+}
+
+.typo p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.typo b {
+  font-weight: 600;
 }
 
 .addInput {

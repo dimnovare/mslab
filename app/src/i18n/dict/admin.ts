@@ -285,13 +285,18 @@ export const adminEt = {
     empty: "Õpilasi veel pole.",
     emptyFiltered: "Selle valikuga õpilasi pole.",
     col: { name: "Nimi ja e-post", created: "Lisatud", courses: "Koolitusi" },
-    coursesHint: "Registreerimised ja e-koolitused kokku.",
+    // what "Koolitusi" counts (shown above the list)
+    coursesHint: "Koolitusi: tema registreerimised (tühistatuid arvestamata) ja e-koolitused (lõpetatuid arvestamata).",
     open: "Ava {name}",
     add: {
       label: "Lisa õpilane e-posti järgi",
       button: "Lisa õpilane",
       hint: "Nt e-koolituse ostja, kes pole veel sisse loginud. Kui õpilane on juba olemas, avaneb tema kaart.",
       invalid: "Sisesta korrektne e-posti aadress.",
+      // an obvious typo in a common domain asks first (the login page's words)
+      typo: "Kas mõtlesid {fixed}?",
+      typoYes: "Jah, paranda",
+      typoNo: "Ei, lisa nii",
     },
     drawer: {
       label: "Õpilane: {name}",
@@ -320,8 +325,11 @@ export const adminEt = {
       title: "Ava ligipääs",
       course: "E-koolitus",
       draft: "mustand",
+      // a course she can open now (granting it again moves the day)
+      openUntil: "(avatud kuni {date})",
       until: "Ligipääs kuni",
       untilHint: "Täidetud koolituse ligipääsu kestusega tänasest. Võid muuta.",
+      untilHintDefault: "Koolitusel pole kestust määratud — täidetud {n} kuuga. Võid muuta.",
       button: "Ava ligipääs",
       done: "Ligipääs on avatud.",
       noCourses: "E-koolitusi pole. Lisa esmalt koolitus õppevormiga „E-õpe“.",

@@ -130,13 +130,15 @@ describe("Kopeeri", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const pay = { receiver: "MS LAB OÜ", iban: "EE00 0000 0000 0000 0000", bank: "", referencePrefix: "MS" };
+    // stored as Seaded stores it (no spaces); read in groups of four, copied without spaces
+    const pay = { receiver: "MS LAB OÜ", iban: "EE382200221020145685", bank: "", referencePrefix: "MS" };
     await act(async () => root.render(createElement(PrepaymentInfo, { id: "p", pay, registrationId: 42, amount: "175 €", t: t.payment })));
+    expect($("[data-pay-row='iban'] [data-pay-value]")?.textContent).toBe("EE38 2200 2210 2014 5685");
 
     const button = $("[data-pay-copy='iban']") as HTMLButtonElement;
     const status = () => $("[data-pay-status]")?.textContent;
     await act(async () => button.click());
-    expect(writeText).toHaveBeenCalledWith("EE00 0000 0000 0000 0000");
+    expect(writeText).toHaveBeenCalledWith("EE382200221020145685");
     expect(button.hasAttribute("data-copied")).toBe(true);
     expect(status()).toBe("Kopeeritud: IBAN");
 

@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { tallinnToday } from "@/domain/client-access";
+import { DEFAULT_ACCESS_MONTHS, tallinnToday } from "@/domain/client-access";
+import { registrationHeading } from "@/domain/registration-card";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick } from "@/i18n/field";
 import { fill, formatDate, formatTime } from "@/i18n/format";
-import { registrationHeading, type ClientDetail, type EcourseOption } from "@/server/admin-clients";
+import { getDict } from "@/i18n/locales";
+import type { ClientDetail, ClientRequestRow, EcourseOption } from "@/server/admin-clients";
 import { GrantAccessForm, RevokeAccess } from "./ClientForms";
 import { StatusPill } from "./StatusPill";
 import ui from "./ui.module.css";
@@ -13,6 +15,13 @@ import styles from "./ClientDrawer.module.css";
 const REQUEST_TAB = { contact: "kontakt", individual: "individuaal", practice: "praktika", waitlist: "ootenimekiri", change_request: "muutmine" } as const;
 
 const stamp = (d: Date) => `${formatDate(d, "et")} ${formatTime(d, "et")}`;
+
+/** A request named as Päringud names it: the wish of a change request, "E-õppe huvi" for the cart's purchase request, else its tab. */
+function requestLabel(q: ClientRequestRow): string {
+  if (q.wish) return adminEt.requests.wish[q.wish];
+  if (q.interest) return adminEt.requests.interest;
+  return adminEt.requests.tabs[REQUEST_TAB[q.kind]];
+}
 
 /**
  * One student in the Õpilased drawer: who she is and "Vaata tema vaadet" (her account page, read-only); her e-courses
@@ -24,9 +33,16 @@ export function ClientDetailView({ detail, ecourses, now }: { detail: ClientDeta
   const g = adminEt.clients.grant;
   const r = adminEt.clients.revoke;
   const c = detail.client;
-  const open = new Set(detail.access.filter((a) => a.state === "active").map((a) => a.courseId));
+  const open = new Map(detail.access.filter((a) => a.state === "active").map((a) => [a.courseId, a.expiresAt]));
   // the first e-course she cannot open now: the likeliest one to grant
   const first = ecourses.find((e) => !open.has(e.id)) ?? ecourses[0];
+  const untitled = getDict("et").account.dashboard.untitled;
+  // a course she has open already says until when (granting it again moves the day)
+  const courseLabel = (e: EcourseOption) => {
+    const title = e.published ? pick(e.title, "et") : `${pick(e.title, "et")} (${g.draft})`;
+    const until = open.get(e.id);
+    return until ? `${title} ${fill(g.openUntil, { date: formatDate(until, "et") })}` : title;
+  };
 
   return (
     <div className={styles.detail} data-client-detail={c.id}>
@@ -86,10 +102,10 @@ export function ClientDetailView({ detail, ecourses, now }: { detail: ClientDeta
         {first ? (
           <GrantAccessForm
             clientId={c.id}
-            courses={ecourses.map((e) => ({ id: e.id, label: e.published ? pick(e.title, "et") : `${pick(e.title, "et")} (${g.draft})`, until: e.until }))}
+            courses={ecourses.map((e) => ({ id: e.id, label: courseLabel(e), until: e.until, defaulted: !e.accessMonths }))}
             initialCourseId={first.id}
             today={tallinnToday(now)}
-            t={{ ...g, saving: adminEt.common.saving, error: adminEt.common.saveError }}
+            t={{ ...g, untilHintDefault: fill(g.untilHintDefault, { n: DEFAULT_ACCESS_MONTHS }), saving: adminEt.common.saving, error: adminEt.common.saveError }}
           />
         ) : (
           <p className={ui.notice}>{g.noCourses}</p>
@@ -105,7 +121,7 @@ export function ClientDetailView({ detail, ecourses, now }: { detail: ClientDeta
         ) : (
           <ul className={styles.rows}>
             {detail.registrations.map((reg) => {
-              const h = registrationHeading(reg);
+              const h = registrationHeading(reg, untitled);
               return (
                 <li key={reg.id} className={styles.row} data-client-registration={reg.id}>
                   <div className={styles.rowHead}>
@@ -134,9 +150,10 @@ export function ClientDetailView({ detail, ecourses, now }: { detail: ClientDeta
             {detail.requests.map((q) => (
               <li key={q.id} className={styles.row} data-client-request={q.id}>
                 <div className={styles.rowHead}>
-                  <strong>{q.wish ? adminEt.requests.wish[q.wish] : adminEt.requests.tabs[REQUEST_TAB[q.kind]]}</strong>
+                  <strong>{requestLabel(q)}</strong>
                   <span className={`${ui.tag} ${q.handled ? ui.ok : ui.warn}`}>{q.handled ? adminEt.requests.handled : adminEt.requests.open}</span>
                 </div>
+                {q.subject && <p className={styles.subject}>{q.subject}</p>}
                 <p className={styles.meta}>{fill(adminEt.requests.received, { date: stamp(q.createdAt) })}</p>
                 <Link className={ui.link} href={`/admin/paringud?liik=${REQUEST_TAB[q.kind]}`}>
                   {t.openRequests}

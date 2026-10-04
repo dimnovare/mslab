@@ -4,6 +4,7 @@
 // React.
 
 import type { I18n } from "@/i18n/field";
+import { compactIban } from "./account-cards";
 import { centsToInput } from "./money";
 
 export const SITE_LIMITS = {
@@ -307,7 +308,7 @@ export function prepaymentDraft(value: unknown): PrepaymentDraft {
 }
 
 /** An IBAN as typed → as stored: every space (also a non-breaking one, as copied from a bank page) taken out, upper case. */
-export const normalizeIban = (typed: string): string => typed.replace(/\s+/g, "").toUpperCase();
+export const normalizeIban = (typed: string): string => compactIban(typed);
 
 /** The shape of a stored IBAN: country letters, two check digits, 10–30 letters and digits (no checksum test: a typo shows on the bank's side). */
 export const isIban = (iban: string): boolean => /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban);

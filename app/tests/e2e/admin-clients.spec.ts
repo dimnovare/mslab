@@ -3,7 +3,7 @@ import { addMonths, defaultExpiryDate, tallinnToday } from "../../src/domain/cli
 import { formatDate, formatTime } from "../../src/i18n/format";
 import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, TEST_PREPAYMENT, type AccountCardKind } from "./account";
 import { ADMIN, adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
-import { holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
+import { accountCourseSlug, holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
 import { LOCAL_URL, TARGET } from "./target";
 import { submitsForms, test, expect } from "./test";
 
@@ -80,6 +80,13 @@ test("guard: Õpilased and the student's view need an admin session", async ({ r
 
 test("Lisa õpilane by e-mail, Ava ligipääs → she logs in and sees the e-course; Lõpeta ligipääs → it is over", async ({ page, context, browser, visitorIp }, info) => {
   const email = await fresh("add", info.project.name);
+  // a draft e-course of this test without access months (removeClientRows deletes it): the grant form's default length
+  const noLength = `E2E e-koolitus kestuseta ${info.project.name}`;
+  await onLocalDb(
+    (sql) => sql`insert into courses (slug, type, level, title, summary, body, price, access_months, published, sort)
+      values (${accountCourseSlug(email)}, 'e_learning', 'basic', ${sql.json({ et: noLength })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 9500, null, false, 999)`,
+    { marksPages: false },
+  );
   await signInAsAdmin(page, context, visitorIp, created);
   await page.goto("/admin/opilased");
   await adminReady(page);
@@ -104,11 +111,16 @@ test("Lisa õpilane by e-mail, Ava ligipääs → she logs in and sees the e-cou
   await expect(field).toHaveValue(""); // the form starts again
   expect(await sessions(id)).toEqual([]); // no session: she has never logged in
 
-  // Ava ligipääs: the course picked, the date filled in with today + its 6 months; one press
+  // Ava ligipääs: the course picked, the date filled in with today + its 6 months; one press. A course without its own
+  // length is filled in with 12 months, and the hint says so
   const grant = d.locator("[data-grant-form]");
+  await grant.getByLabel("E-koolitus").selectOption({ label: `${noLength} (mustand)` });
+  await expect(grant.getByLabel("Ligipääs kuni")).toHaveValue(defaultExpiryDate(new Date(), null));
+  await expect(grant.locator("[data-grant-hint]")).toHaveText("Koolitusel pole kestust määratud — täidetud 12 kuuga. Võid muuta.");
   await grant.getByLabel("E-koolitus").selectOption({ label: "Kulmumeistri e-koolitus" });
   const until = defaultExpiryDate(new Date(), 6);
   await expect(grant.getByLabel("Ligipääs kuni")).toHaveValue(until);
+  await expect(grant.locator("[data-grant-hint]")).toHaveText("Täidetud koolituse ligipääsu kestusega tänasest. Võid muuta.");
   await expect(grant.getByLabel("Ligipääs kuni")).toHaveAttribute("min", tallinnToday(new Date()));
   // a day already gone is refused in plain words; a changed day clears the answer about the old one
   await grant.getByLabel("Ligipääs kuni").fill(addMonths(tallinnToday(new Date()), -1)!);
@@ -126,6 +138,8 @@ test("Lisa õpilane by e-mail, Ava ligipääs → she logs in and sees the e-cou
   await expect(row).toContainText("Kulmumeistri e-koolitus");
   await expect(row).toContainText(`Avatud kuni ${shown}`);
   await expect(row).toContainText(`Avas ${ADMIN}`);
+  // a course she has open says until when in the list to pick from (granting it again stays possible)
+  await expect(grant.getByLabel("E-koolitus").locator("option", { hasText: "Kulmumeistri e-koolitus" })).toHaveText(`Kulmumeistri e-koolitus (avatud kuni ${shown})`);
   const [stored] = await onLocalDb(
     (sql) => sql<{ grantedBy: string; revokedAt: Date | null }[]>`select granted_by as "grantedBy", revoked_at as "revokedAt" from course_access where client_id = ${id}`,
     { marksPages: false },
@@ -177,11 +191,59 @@ test("Lisa õpilane by e-mail, Ava ligipääs → she logs in and sees the e-cou
   expect(await noOverflow(page)).toBe(true);
 });
 
+test("Lisa õpilane asks about an obvious typo first: Ei, lisa nii adds it as typed; Jah, paranda adds the corrected address", async ({ page, context, visitorIp }, info) => {
+  // built at run time, as account-login.spec does: a typo domain is not an example address (nothing is mailed here)
+  const typed = [`e2e-client-adm-typo-${info.project.name}`, "gmial.com"].join("@");
+  const fixed = typed.replace("gmial.com", "gmail.com");
+  const cleanup = () => onLocalDb((sql) => sql`delete from clients where email in (${typed}, ${fixed})`, { marksPages: false });
+  await cleanup();
+  try {
+    await signInAsAdmin(page, context, visitorIp, created);
+    await page.goto("/admin/opilased");
+    await adminReady(page);
+    const form = page.locator("[data-add-student]");
+    const field = form.getByRole("textbox", { name: "Lisa õpilane e-posti järgi" });
+    await field.fill(typed);
+    await form.getByRole("button", { name: "Lisa õpilane", exact: true }).click();
+    const ask = form.locator("[data-add-typo]");
+    await expect(ask).toHaveText(new RegExp(`^Kas mõtlesid ${fixed.replace(/\./g, "\\.")}\\?`));
+    await expect(ask.getByRole("button", { name: "Jah, paranda" })).toBeFocused();
+    await expect(form.getByRole("button", { name: "Lisa õpilane", exact: true })).toHaveCount(0);
+    expect(await onLocalDb((sql) => sql`select 1 from clients where email in (${typed}, ${fixed})`, { marksPages: false })).toHaveLength(0); // nothing yet
+    // typing again takes the question away
+    await field.press("End");
+    await field.press("Backspace");
+    await expect(ask).toHaveCount(0);
+    await field.fill(typed);
+    await form.getByRole("button", { name: "Lisa õpilane", exact: true }).click();
+    await ask.getByRole("button", { name: "Ei, lisa nii" }).click();
+    await expect(page).toHaveURL(/\/admin\/opilased\?id=\d+$/);
+    await expect(drawer(page).getByRole("link", { name: typed })).toBeVisible();
+
+    await page.goto("/admin/opilased");
+    await adminReady(page);
+    await field.fill(typed);
+    await form.getByRole("button", { name: "Lisa õpilane", exact: true }).click();
+    await ask.getByRole("button", { name: "Jah, paranda" }).click();
+    await expect(page).toHaveURL(/\/admin\/opilased\?id=\d+$/);
+    await expect(drawer(page).getByRole("link", { name: fixed })).toBeVisible();
+    expect((await onLocalDb((sql) => sql<{ email: string }[]>`select email from clients where email in (${typed}, ${fixed}) order by email`, { marksPages: false })).map((r) => r.email)).toEqual([fixed, typed].sort());
+  } finally {
+    await cleanup();
+  }
+});
+
 test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the number of courses; the drawer lists her courses", async ({ page, context, visitorIp }, info) => {
   const eStudent = await fresh("list-e", info.project.name);
   const kStudent = await fresh("list-k", info.project.name);
   await insertAccountFixtures(eStudent, { name: `Eva E2E ${info.project.name}`, cards: ["ecourse"] });
   const k = await insertAccountFixtures(kStudent, { name: `Kai E2E ${info.project.name}`, cards: ["confirmed", "cancelled"] });
+  // the e-learning cart's request ("E-õppe huvi")
+  await onLocalDb(
+    (sql) => sql`insert into requests (kind, payload, client_id)
+      values ('contact', ${sql.json({ course: "kulmumeistri-e-koolitus", intent: "purchase", email: kStudent, locale: "et" })}, ${k.clientId})`,
+    { marksPages: false },
+  );
   await signInAsAdmin(page, context, visitorIp, created);
   await page.goto("/admin/opilased");
   await adminReady(page);
@@ -194,7 +256,8 @@ test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the numb
   const mine = rows.filter({ hasText: info.project.name.toLowerCase() });
   await expect(mine).toHaveCount(2);
   await expect(mine.filter({ hasText: eStudent }).locator("[data-client-courses]")).toHaveText("1");
-  await expect(mine.filter({ hasText: kStudent }).locator("[data-client-courses]")).toHaveText("2"); // a cancelled one counts too
+  await expect(mine.filter({ hasText: kStudent }).locator("[data-client-courses]")).toHaveText("1"); // the cancelled one does not count
+  await expect(page.locator("[data-courses-hint]")).toHaveText("Koolitusi: tema registreerimised (tühistatuid arvestamata) ja e-koolitused (lõpetatuid arvestamata).");
   await expect(mine.filter({ hasText: kStudent }).getByRole("link")).toHaveText(`Kai E2E ${info.project.name}`); // the registration's name
 
   const filters = page.locator("[data-type-filter]");
@@ -225,6 +288,10 @@ test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the numb
   // the drawer: her registrations (named as her cards name them), each opening its own drawer
   const d = await openStudent(page, kStudent);
   await expect(d.getByRole("heading", { level: 2 })).toHaveText(`Kai E2E ${info.project.name}`);
+  const reqs = d.locator("[data-client-request]");
+  await expect(reqs).toHaveCount(1);
+  await expect(reqs.locator("strong")).toHaveText("E-õppe huvi");
+  await expect(reqs).toContainText("Kulmumeistri e-koolitus");
   const regs = d.locator("[data-client-registration]");
   await expect(regs).toHaveCount(2);
   const start = k.session.startsAt;
@@ -366,7 +433,7 @@ test("a change request in Päringud: the course and its date as the heading, the
   expect(await noOverflow(page)).toBe(true);
 });
 
-test("Ettemaksu juhised in Seaded: saved, her unpaid card shows the IBAN (stored without spaces); cleared, Maria sends an invoice", async ({ page, context, browser, visitorIp }, info) => {
+test("Ettemaksu juhised in Seaded: saved (the IBAN without spaces), her unpaid card shows it in groups of four; cleared, Maria sends an invoice", async ({ page, context, browser, visitorIp }, info) => {
   // The prepayment instructions are one shared setting (the dashboard tests use it too): the runs take turns.
   info.setTimeout(info.timeout + LOCK_WAIT_MS);
   const release = await holdLocalLock("e2e-prepayment-setting");
@@ -406,7 +473,7 @@ test("Ettemaksu juhised in Seaded: saved, her unpaid card shows the IBAN (stored
       const panel = unpaid.locator("[data-prepayment]");
       await expect(panel.locator("[data-pay-row]")).toHaveText([
         /^Saaja\s*MS LAB OÜ$/,
-        /^IBAN\s*EE382200221020145685\s*Kopeeri/,
+        /^IBAN\s*EE38 2200 2210 2014 5685\s*Kopeeri/, // stored without spaces, read in groups of four
         /^Pank\s*Swedbank$/,
         /^Summa\s*175 €$/,
         new RegExp(`^Selgitus\\s*MSLAB-${f.registrations.awaiting}\\s*Kopeeri`),

@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { listRegistrations } from "@/db/queries/admin";
-import { clients, clientSessions, courseAccess, courses, courseSessions, registrations, requests, subscribers, termsAcceptances } from "@/db/schema";
+import { clients, clientSessions, courseAccess, courses, courseSessions, practicePackages, registrations, requests, subscribers, termsAcceptances } from "@/db/schema";
 import { PAGE_SIZE } from "@/domain/paging";
+import { registrationHeading as heading } from "@/domain/registration-card";
+import { getDict } from "@/i18n/locales";
 import {
   addClient,
   addClientForm,
@@ -14,7 +16,6 @@ import {
   grantAccessForm,
   listClients,
   listEcourses,
-  registrationHeading,
   revokeAccess,
   revokeAccessForm,
 } from "@/server/admin-clients";
@@ -23,6 +24,8 @@ import { loadDashboard } from "@/server/client-data";
 
 // Phase 2a Task 9: the admin's Õpilased on a real (PGlite) database — the list (filters, search, paging, the course count),
 // one student's drawer, "Lisa õpilane", and e-course access granted and ended by an admin.
+
+const registrationHeading = (r: Parameters<typeof heading>[0]) => heading(r, getDict("et").account.dashboard.untitled);
 
 const NOW = new Date("2026-10-04T09:00:00Z"); // 12:00 in Tallinn (summer time)
 const ADMIN = "maria@example.test";
@@ -59,13 +62,14 @@ const access = async (clientId: number, over: Partial<typeof courseAccess.$infer
   (await db.insert(courseAccess).values({ clientId, courseId: ecourse.id, grantedBy: "e2e", expiresAt: new Date("2027-04-04T20:59:59.999Z"), ...over }).returning())[0];
 
 describe("listClients", () => {
-  test("newest first, with the name (own, else the latest registration's) and the number of courses (registrations + accesses)", async () => {
+  test("newest first, with the name (own, else the latest registration's) and the number of courses (registrations not cancelled + accesses not ended by an admin)", async () => {
     const kati = await client("kati@example.test", { name: "Kati Kask", createdAt: new Date("2026-10-01T10:00:00Z") });
     const liis = await client("liis@example.test", { createdAt: new Date("2026-10-02T10:00:00Z") });
     const olga = await client("olga@example.test", { createdAt: new Date("2026-10-03T10:00:00Z") });
     await register(liis.id, liis.email, { name: "Liis Vana", createdAt: new Date("2026-09-01T10:00:00Z") });
     await register(liis.id, liis.email, { name: "Liis Tamm", status: "cancelled", createdAt: new Date("2026-09-20T10:00:00Z") });
     await access(liis.id, { revokedAt: NOW });
+    await access(liis.id, { courseId: draftEcourse.id });
     await access(kati.id, { courseId: draftEcourse.id, expiresAt: new Date("2026-01-01T00:00:00Z") });
     await register(null, "someone@example.test"); // not linked: counts for nobody
 
@@ -73,8 +77,8 @@ describe("listClients", () => {
     expect(list).toMatchObject({ page: 1, pages: 1, total: 3 });
     expect(list.rows.map((r) => [r.email, r.name, r.courses])).toEqual([
       ["olga@example.test", "", 0],
-      ["liis@example.test", "Liis Tamm", 3], // cancelled and ended ones count too
-      ["kati@example.test", "Kati Kask", 1],
+      ["liis@example.test", "Liis Tamm", 2], // the cancelled registration and the ended access do not count
+      ["kati@example.test", "Kati Kask", 1], // an access that ran out does: she took that course
     ]);
     expect(list.rows[0].createdAt).toEqual(olga.createdAt);
   });
@@ -131,14 +135,20 @@ describe("listClients", () => {
 });
 
 describe("clientDetail", () => {
-  test("her registrations, requests (a change request with its wish), accesses with their state, terms; nothing of anybody else", async () => {
+  test("her registrations, requests (named and with their subject, as Päringud), accesses with their state, terms; nothing of anybody else", async () => {
     const kati = await client("kati@example.test", { phone: "+372 5555 0101", locale: "ru" });
     const other = await client("other@example.test");
     const reg = await register(kati.id, kati.email, { name: "Kati Kask" });
     await register(other.id, other.email);
+    await db.insert(practicePackages).values({ code: "MINI", name: { et: "Mini praktika" }, tagline: { et: "" }, models: 2, durationLabel: { et: "4 ak" }, price: 9000 });
+    const at = (day: number) => new Date(Date.UTC(2026, 9, day, 10));
     await db.insert(requests).values([
-      { kind: "change_request", payload: { registrationId: reg.id, kind: "cancel", message: "", email: kati.email }, clientId: kati.id, createdAt: new Date("2026-10-03T10:00:00Z") },
-      { kind: "individual", payload: { email: kati.email }, clientId: kati.id, handled: true, createdAt: new Date("2026-10-01T10:00:00Z") },
+      { kind: "change_request", payload: { registrationId: reg.id, kind: "cancel", message: "", email: kati.email }, clientId: kati.id, createdAt: at(3) },
+      { kind: "contact", payload: { course: "e-kulm", intent: "purchase", email: kati.email, locale: "ru" }, clientId: kati.id, createdAt: at(2) },
+      { kind: "practice", payload: { package: "MINI", course: "vaba tekst", email: kati.email }, clientId: kati.id, createdAt: at(1) },
+      { kind: "contact", payload: { name: "Kati", message: "Tere!", email: kati.email }, clientId: kati.id, handled: true, createdAt: new Date("2026-09-30T10:00:00Z") },
+      { kind: "individual", payload: { course: "kulm", email: kati.email }, clientId: kati.id, handled: true, createdAt: new Date("2026-09-29T10:00:00Z") },
+      { kind: "change_request", payload: { registrationId: 999_999, kind: "change", email: kati.email }, clientId: kati.id, createdAt: new Date("2026-09-28T10:00:00Z") },
       { kind: "practice", payload: { email: other.email }, clientId: other.id },
     ]);
     const open = await access(kati.id, { grantedBy: ADMIN, grantedAt: new Date("2026-10-01T10:00:00Z") });
@@ -149,9 +159,13 @@ describe("clientDetail", () => {
     expect(d.client).toMatchObject({ id: kati.id, email: "kati@example.test", name: "Kati Kask", ownName: "", phone: "+372 5555 0101", locale: "ru" });
     expect(d.registrations.map((r) => r.id)).toEqual([reg.id]);
     expect(registrationHeading(d.registrations[0])).toEqual({ title: "Kulmude lamineerimine", time: "14.11.2026 · 10:00", place: "Pärnu, MS LAB stuudio" });
-    expect(d.requests.map((r) => [r.kind, r.wish, r.handled])).toEqual([
-      ["change_request", "cancel", false],
-      ["individual", null, true],
+    expect(d.requests.map((r) => [r.kind, r.interest, r.wish, r.subject, r.handled])).toEqual([
+      ["change_request", false, "cancel", "Kulmude lamineerimine — 14.11.2026 · 10:00", false],
+      ["contact", true, null, "Kulmumeistri e-koolitus", false], // E-õppe huvi
+      ["practice", false, null, "Mini praktika (MINI)", false], // the package, not the free-text course
+      ["contact", false, null, null, true],
+      ["individual", false, null, "Kulmude lamineerimine", true],
+      ["change_request", false, "change", null, false], // its registration is gone
     ]);
     expect(d.access.map((a) => [a.courseId, a.state, a.grantedBy])).toEqual([
       [ecourse.id, "active", ADMIN],
@@ -197,6 +211,31 @@ describe("Lisa õpilane", () => {
     expect((await db.select({ c: subscribers.clientId }).from(subscribers))[0].c).toBe(id);
     expect(await db.select().from(clientSessions)).toHaveLength(0);
     expect((await clientDetail(db, id, NOW))!.registrations.map((x) => x.id)).toContain(latest.id);
+  });
+
+  test("her language is the one she last used: of her newest registration or request (an e-course buyer has only the cart's request)", async () => {
+    // only the e-learning cart's purchase request, in Russian
+    await db.insert(requests).values({ kind: "contact", payload: { course: "e-kulm", intent: "purchase", email: "Olga@Example.test", locale: "ru" } });
+    const olga = (await addClient(db, "olga@example.test")) as { id: number };
+    expect((await db.select().from(clients).where(eq(clients.id, olga.id)))[0].locale).toBe("ru");
+    // an older Russian request, a newer Estonian registration: Estonian
+    await db.insert(requests).values({ kind: "contact", payload: { course: "e-kulm", intent: "purchase", email: "anu@example.test", locale: "ru" }, createdAt: new Date("2026-09-01T10:00:00Z") });
+    await register(null, "anu@example.test", { locale: "et", createdAt: new Date("2026-09-10T10:00:00Z") });
+    const anu = (await addClient(db, "anu@example.test")) as { id: number };
+    expect((await db.select().from(clients).where(eq(clients.id, anu.id)))[0].locale).toBe("et");
+    // an older Estonian registration, a newer Russian request: Russian
+    await register(null, "irina@example.test", { locale: "et", createdAt: new Date("2026-09-01T10:00:00Z") });
+    await db.insert(requests).values({ kind: "individual", payload: { course: "kulm", email: "irina@example.test", locale: "ru" }, createdAt: new Date("2026-09-10T10:00:00Z") });
+    const irina = (await addClient(db, "irina@example.test")) as { id: number };
+    expect((await db.select().from(clients).where(eq(clients.id, irina.id)))[0].locale).toBe("ru");
+    // a request without a language (or an odd one) is not asked
+    await db.insert(requests).values([
+      { kind: "contact", payload: { email: "mari@example.test", locale: "xx" }, createdAt: new Date("2026-09-20T10:00:00Z") },
+      { kind: "contact", payload: { email: "mari@example.test" }, createdAt: new Date("2026-09-21T10:00:00Z") },
+    ]);
+    await register(null, "mari@example.test", { locale: "ru", createdAt: new Date("2026-09-01T10:00:00Z") });
+    const mari = (await addClient(db, "mari@example.test")) as { id: number };
+    expect((await db.select().from(clients).where(eq(clients.id, mari.id)))[0].locale).toBe("ru");
   });
 
   test("an address without registrations: Estonian; an existing student: the same one, nothing created", async () => {

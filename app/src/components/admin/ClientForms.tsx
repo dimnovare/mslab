@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { isEmail, normalizeEmail, typoSuggestion } from "@/domain/email";
 import { fill } from "@/i18n/format";
 import { addStudent, grantCourseAccess, revokeCourseAccess } from "@/server/actions/admin-clients";
 import type { ClientResult } from "@/server/admin-clients";
@@ -21,16 +22,54 @@ const submitWith = (action: Action, pending: boolean) => (e: FormEvent<HTMLFormE
   startTransition(() => action(fd));
 };
 
-export type AddStudentTexts = { label: string; button: string; hint: string; invalid: string; saving: string; error: string };
+export type AddStudentTexts = {
+  label: string;
+  button: string;
+  hint: string;
+  invalid: string;
+  typo: string;
+  typoYes: string;
+  typoNo: string;
+  saving: string;
+  error: string;
+};
 
-/** "Lisa õpilane": an e-mail and one button. The server opens the student's drawer (new or existing). */
+/**
+ * "Lisa õpilane": an e-mail and one button. The server opens the student's drawer (new or existing). An obvious typo in a
+ * common domain ("gmial.com") asks first, as the login page does (spec 2.1 rule 8): "Kas mõtlesid …?" with "Jah, paranda"
+ * (adds the corrected address) and "Ei, lisa nii" (adds it as typed); typing again takes the question away.
+ */
 export function AddStudentForm({ t }: { t: AddStudentTexts }) {
   const uid = useId();
   const [email, setEmail] = useState("");
+  const [typo, setTypo] = useState<string | null>(null);
   const [state, action, pending] = useActionState<ClientResult | null, FormData>(addStudent, null);
+  const yes = useRef<HTMLButtonElement>(null);
   const error = state && !state.ok ? (state.error === "email" ? t.invalid : t.error) : null;
+
+  useEffect(() => {
+    if (typo) yes.current?.focus();
+  }, [typo]);
+
+  const send = (address: string) => {
+    if (pending) return;
+    setTypo(null);
+    const fd = new FormData();
+    fd.set("email", address);
+    startTransition(() => action(fd));
+  };
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (pending) return;
+    const address = normalizeEmail(email);
+    const fixed = isEmail(address) ? typoSuggestion(address) : null;
+    if (fixed) setTypo(fixed);
+    else send(email);
+  };
+  const [before, after = ""] = t.typo.split("{fixed}");
+
   return (
-    <form className={styles.add} onSubmit={submitWith(action, pending)} noValidate data-add-student="">
+    <form className={styles.add} onSubmit={submit} noValidate data-add-student="">
       <div className={ui.field}>
         <label htmlFor={`${uid}-email`}>{t.label}</label>
         <div className={forms.inline}>
@@ -44,14 +83,44 @@ export function AddStudentForm({ t }: { t: AddStudentTexts }) {
             maxLength={254}
             className={`${ui.input} ${styles.addInput}`}
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setTypo(null);
+            }}
             aria-invalid={state && !state.ok && state.error === "email" ? true : undefined}
             aria-describedby={`${uid}-hint ${uid}-msg`}
           />
-          <button type="submit" className={`${ui.btn} ${ui.smallBtn}`} aria-disabled={pending || undefined}>
-            {pending ? t.saving : t.button}
-          </button>
+          {!typo && (
+            <button type="submit" className={`${ui.btn} ${ui.smallBtn}`} aria-disabled={pending || undefined}>
+              {pending ? t.saving : t.button}
+            </button>
+          )}
         </div>
+        {typo && (
+          <div className={styles.typo} role="group" aria-labelledby={`${uid}-typo`} data-add-typo="">
+            <p id={`${uid}-typo`}>
+              {before}
+              <b>{typo}</b>
+              {after}
+            </p>
+            <div className={forms.actions}>
+              <button
+                ref={yes}
+                type="button"
+                className={`${ui.btn} ${ui.smallBtn}`}
+                onClick={() => {
+                  setEmail(typo);
+                  send(typo);
+                }}
+              >
+                {t.typoYes}
+              </button>
+              <button type="button" className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`} onClick={() => send(email)}>
+                {t.typoNo}
+              </button>
+            </div>
+          </div>
+        )}
         <p id={`${uid}-hint`} className={ui.hint}>
           {t.hint}
         </p>
@@ -68,6 +137,8 @@ export type GrantTexts = {
   course: string;
   until: string;
   untilHint: string;
+  /** the hint when the course has no access months of its own and the default filled the day in */
+  untilHintDefault: string;
   button: string;
   done: string;
   courseError: string;
@@ -76,7 +147,8 @@ export type GrantTexts = {
   saving: string;
   error: string;
 };
-export type GrantCourse = { id: number; label: string; until: string };
+/** `defaulted`: the course has no access months of its own, so `until` is the default length from today. */
+export type GrantCourse = { id: number; label: string; until: string; defaulted: boolean };
 
 /**
  * "Ava ligipääs": the e-course (drafts marked) and the last day, filled in with today + the course's access months (a
@@ -92,6 +164,9 @@ export function GrantAccessForm({ clientId, courses, initialCourseId, today, t }
   const answer = edited ? null : state;
   const error = answer && !answer.ok ? (answer.error === "date" ? t.date : answer.error === "course" ? t.courseError : answer.error === "notFound" ? t.notFound : t.error) : null;
   const message = pending ? t.saving : (error ?? (answer?.ok ? t.done : ""));
+  const courseError = answer && !answer.ok && answer.error === "course";
+  const dateError = answer && !answer.ok && answer.error === "date";
+  const defaulted = courses.find((c) => c.id === courseId)?.defaulted ?? false;
   return (
     <form
       className={`${forms.form} ${styles.grant}`}
@@ -117,7 +192,8 @@ export function GrantAccessForm({ clientId, courses, initialCourseId, today, t }
             setUntil(courses.find((c) => c.id === next)?.until ?? until);
             setEdited(true);
           }}
-          aria-invalid={answer && !answer.ok && answer.error === "course" ? true : undefined}
+          aria-invalid={courseError || undefined}
+          aria-describedby={courseError ? `${uid}-msg` : undefined}
         >
           {courses.map((c) => (
             <option key={c.id} value={c.id}>
@@ -139,11 +215,11 @@ export function GrantAccessForm({ clientId, courses, initialCourseId, today, t }
             setUntil(e.target.value);
             setEdited(true);
           }}
-          aria-invalid={answer && !answer.ok && answer.error === "date" ? true : undefined}
-          aria-describedby={`${uid}-hint`}
+          aria-invalid={dateError || undefined}
+          aria-describedby={dateError ? `${uid}-hint ${uid}-msg` : `${uid}-hint`}
         />
-        <p id={`${uid}-hint`} className={ui.hint}>
-          {t.untilHint}
+        <p id={`${uid}-hint`} className={ui.hint} data-grant-hint="">
+          {defaulted ? t.untilHintDefault : t.untilHint}
         </p>
       </div>
       <div className={forms.actions}>
@@ -151,7 +227,7 @@ export function GrantAccessForm({ clientId, courses, initialCourseId, today, t }
           {pending ? t.saving : t.button}
         </button>
       </div>
-      <p role="status" className={error ? ui.error : ui.success} data-grant-status="">
+      <p id={`${uid}-msg`} role="status" className={error ? ui.error : ui.success} data-grant-status="">
         {message}
       </p>
     </form>

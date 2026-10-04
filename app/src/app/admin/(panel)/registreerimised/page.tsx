@@ -6,6 +6,7 @@ import { Pager } from "@/components/admin/Pager";
 import { RegistrationForms } from "@/components/admin/RegistrationForms";
 import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
+import listTable from "@/components/admin/list-table.module.css";
 import { StatusPill } from "@/components/admin/StatusPill";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
@@ -136,12 +137,12 @@ export default async function RegistrationsPage({ searchParams }: Props) {
           </p>
         )}
 
-        <section className={`${ui.card} ${styles.card}`} aria-label={t.title}>
+        <section className={`${ui.card} ${listTable.card}`} aria-label={t.title}>
           <p className={`${ui.muted} ${ui.small} ${styles.count}`}>{fill(t.count, { n: list.total })}</p>
           {rows.length === 0 ? (
             <p className={ui.empty}>{filtered ? t.emptyFiltered : t.empty}</p>
           ) : (
-            <table className={`${ui.table} ${styles.table}`}>
+            <table className={`${ui.table} ${listTable.table}`}>
               <thead>
                 <tr>
                   <th scope="col">{t.col.date}</th>
@@ -165,8 +166,8 @@ export default async function RegistrationsPage({ searchParams }: Props) {
                       </span>
                     </td>
                     <td data-label={t.col.name}>
-                      <div className={styles.who}>
-                        <Link id={`reg-${r.id}`} className={styles.name} href={href(view, r.id)} scroll={false} aria-label={fill(t.open, { name: r.name })}>
+                      <div className={listTable.who}>
+                        <Link id={`reg-${r.id}`} className={listTable.name} href={href(view, r.id)} scroll={false} aria-label={fill(t.open, { name: r.name })}>
                           {r.name}
                         </Link>
                         <a className={`${ui.contactLink} ${styles.contact}`} href={`mailto:${r.email}`}>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { accessState, addMonths, defaultExpiryDate, endOfDayTallinn, grantExpiry, tallinnToday } from "@/domain/client-access";
 import { containsPattern, parseSearch } from "@/domain/paging";
+import { compactIban, groupIban } from "@/domain/account-cards";
 import { isIban, normalizeIban, prepaymentDraft } from "@/domain/site-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
@@ -75,6 +76,14 @@ describe("Ettemaksu juhised", () => {
     expect(isIban("EE382200221020145685")).toBe(true);
     expect(isIban("GB82WEST12345698765432")).toBe(true);
     for (const bad of ["", "EE38", "EE38220022102", "E382200221020145685", "EEX82200221020145685", "EE38220022102014568-", `EE38${"1".repeat(31)}`]) expect(isIban(bad), bad).toBe(false);
+  });
+
+  test("the student's card reads the IBAN in groups of four and copies it without spaces", () => {
+    expect(groupIban("EE382200221020145685")).toBe("EE38 2200 2210 2014 5685");
+    expect(groupIban(" ee38 2200 2210 2014 5685")).toBe("EE38 2200 2210 2014 5685"); // a row written by hand
+    expect(groupIban("GB82WEST12345698765432")).toBe("GB82 WEST 1234 5698 7654 32");
+    expect(compactIban("EE38 2200 2210 2014 5685")).toBe("EE382200221020145685");
+    expect(groupIban("")).toBe("");
   });
 
   test("the draft: the four fields as strings, empty for a missing or odd setting", () => {

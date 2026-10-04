@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import ui from "@/components/site/ui.module.css";
-import { paymentReference, type PrepaymentInfo as PaySettings } from "@/domain/account-cards";
+import { compactIban, groupIban, paymentReference, type PrepaymentInfo as PaySettings } from "@/domain/account-cards";
 import type { CoursesTexts } from "./texts";
 import styles from "./PrepaymentInfo.module.css";
 
-type Row = { key: string; label: string; value: string; copy?: boolean };
+/** `value`: what "Kopeeri" copies; `shown`: what is read, when it differs (the IBAN in groups of four). */
+type Row = { key: string; label: string; value: string; shown?: string; copy?: boolean };
 
 /** How long the pressed "Kopeeri" says "Kopeeritud ✓". */
 const COPIED_MS = 2000;
@@ -14,7 +15,8 @@ const COPIED_MS = 2000;
 /**
  * Where to pay the prepayment, opened in place under the card's "Vaata juhiseid" (spec 2.1 rule 5): receiver, IBAN, bank,
  * the amount (the card sentence's own, as nextStep formatted it) and the explanation `{referencePrefix}{registrationId}`,
- * then "Pärast makset kinnitab Maria su koha." A field the admin left empty is left out. IBAN and explanation have
+ * then "Pärast makset kinnitab Maria su koha." A field the admin left empty is left out. The IBAN reads in groups of four
+ * ("EE38 2200 2210 2014 5685") and is copied without spaces. IBAN and explanation have
  * "Kopeeri": copied, the pressed button itself says "Kopeeritud ✓" for a moment (both words share one cell, so it keeps
  * its width); where the browser gives no clipboard, the text is selected and a line says to copy it. A hidden live
  * region tells a screen reader either way.
@@ -40,7 +42,7 @@ export function PrepaymentInfo({
 
   const rows: Row[] = [
     { key: "receiver", label: t.receiver, value: pay.receiver },
-    { key: "iban", label: t.iban, value: pay.iban, copy: true },
+    { key: "iban", label: t.iban, value: compactIban(pay.iban), shown: groupIban(pay.iban), copy: true },
     { key: "bank", label: t.bank, value: pay.bank },
     { key: "amount", label: t.amount, value: amount ?? "" },
     { key: "reference", label: t.reference, value: paymentReference(pay, registrationId), copy: true },
@@ -78,7 +80,7 @@ export function PrepaymentInfo({
             <dt>{row.label}</dt>
             <dd>
               <span className={row.key === "amount" ? styles.amount : styles.value} data-pay-value="">
-                {row.value}
+                {row.shown ?? row.value}
               </span>
               {row.copy && (
                 <button

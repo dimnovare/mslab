@@ -233,6 +233,12 @@ export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? "";
 }
 
+/** An IBAN without spaces, in capitals: what is stored (Seaded) and what "Kopeeri" copies. */
+export const compactIban = (iban: string): string => iban.replace(/\s+/g, "").toUpperCase();
+
+/** An IBAN as people read it, in groups of four: "EE38 2200 2210 2014 5685". */
+export const groupIban = (iban: string): string => compactIban(iban).replace(/(.{4})(?=.)/g, "$1 ");
+
 /** The payment's explanation on the prepayment instructions: the admin's prefix and the registration number ("MSLAB-" + 42). */
 export function paymentReference(pay: PrepaymentInfo, registrationId: number): string {
   return `${pay.referencePrefix.trim()}${registrationId}`;

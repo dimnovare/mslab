@@ -13,7 +13,8 @@ import { adminEt } from "@/i18n/dict/admin";
 import { pick, type I18n } from "@/i18n/field";
 import { fill, formatDate, formatTime } from "@/i18n/format";
 import { parsePage } from "@/domain/paging";
-import { registrationHeading } from "@/server/admin-clients";
+import { registrationHeading } from "@/domain/registration-card";
+import { getDict } from "@/i18n/locales";
 import { requireAdmin } from "@/server/auth";
 import styles from "./requests.module.css";
 
@@ -215,7 +216,7 @@ export default async function RequestsPage({ searchParams }: Props) {
  */
 function ChangeRequest({ r, registrationId, registration }: { r: RequestRow; registrationId: number | null; registration: RegistrationRow | null }) {
   const t = adminEt.requests;
-  const heading = registration ? registrationHeading(registration) : null;
+  const heading = registration ? registrationHeading(registration, getDict("et").account.dashboard.untitled) : null;
   const title = heading ? [heading.title, heading.time].filter(Boolean).join(" — ") : fill(t.unknownRegistration, { id: String(registrationId ?? "?") });
   const wish = r.payload.kind === "cancel" || r.payload.kind === "change" ? t.wish[r.payload.kind] : null;
   const address = typeof r.payload.email === "string" ? r.payload.email : null;

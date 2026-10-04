@@ -121,7 +121,8 @@ test("every card says what to do next, with at most one button; the prepayment i
     // the drawn pill is the button itself: at least 44 px tall
     expect((await copyRef.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await panel.getByRole("button", { name: "Kopeeri: IBAN" }).click();
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(TEST_PREPAYMENT.iban);
+    // read in groups of four, copied without spaces
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(TEST_PREPAYMENT.iban.replace(/ /g, ""));
     await awaiting.getByRole("button", { name: "Peida juhised" }).click();
     await expect(panel).toHaveCount(0);
 
