@@ -14,6 +14,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:demo": "tsx src/db/demo.ts",
     "db:copy-kv": "tsx src/db/copy-kv.ts",
+    "db:ensure-terms": "tsx src/db/ensure-terms.ts",
     "visual": "playwright test -c playwright.visual.config.ts"
   },
   "dependencies": {
