@@ -61,7 +61,7 @@ function FavouritesSkeleton() {
  * The list. ♡ sends POST /api/konto/lemmikud `{ slug, on: false }`; the card leaves the list in place (no reload), the focus moves to
  * the next card's ♡ (the one before when it was the last, the heading when none is left), and a screen reader hears what was taken
  * off. A failure keeps the card and says so under it; a session that has ended (401) loads the page again, which then says so.
- * The list follows the account: when this tab's copy holds a favourite the list does not show — the browser's own favourites, merged in
+ * The list follows the account: when this browser's copy holds a favourite the list does not show — the browser's own favourites, merged in
  * just after this page loaded (lib/favourites.ts) — it is loaded again, quietly. Checked when an answer is shown and after a merge (not on
  * every change of the copy: an answer writes the copy just before the page shows it, and would ask again for nothing).
  */

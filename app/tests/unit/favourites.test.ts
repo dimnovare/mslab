@@ -40,8 +40,10 @@ function io(opts: { local?: Record<string, string>; answer?: (url: string, init?
   const local = memory(opts.local);
   const fetch = vi.fn(opts.answer ?? (async () => json(200, { ok: true, favourites: [] })));
   const emit = vi.fn();
-  const value: FavouriteIo = { local, fetch: fetch as unknown as typeof globalThis.fetch, emit };
-  return { io: value, local, fetch, emit };
+  /** The hint cookie: signed in unless a test signs out ("Logi välja" while an answer is on its way). */
+  const hint = { signedIn: true };
+  const value: FavouriteIo = { local, fetch: fetch as unknown as typeof globalThis.fetch, emit, signedIn: () => hint.signedIn };
+  return { io: value, local, fetch, emit, hint };
 }
 
 const bodyOf = (init?: RequestInit) => JSON.parse(String(init?.body));
@@ -107,6 +109,14 @@ describe("the lists", () => {
     expect(() => rememberAccountFavourites(["a"], none)).not.toThrow();
     expect(readAccountFavourites({ ...t.io, local: null })).toBeNull();
   });
+
+  test("no copy is written while signed out (the hint cookie gone)", () => {
+    const t = io();
+    t.hint.signedIn = false;
+    rememberAccountFavourites(["a"], t.io);
+    expect(t.local.map.has(ACCOUNT_FAVOURITES_KEY)).toBe(false);
+    expect(t.emit).not.toHaveBeenCalled();
+  });
 });
 
 describe("mergeBrowserFavourites: once, after the first account load", () => {
@@ -149,8 +159,26 @@ describe("mergeBrowserFavourites: once, after the first account load", () => {
     expect(t.fetch).toHaveBeenCalledTimes(1);
   });
 
+  test("a 401 (the session has ended): the copy goes with it, the browser's list stays for the next login", async () => {
+    const t = io({ local: { [FAVOURITES_KEY]: '["lami"]', [ACCOUNT_FAVOURITES_KEY]: '["botox"]' }, answer: async () => json(401, { ok: false, reason: "replaced" }) });
+    expect(await mergeBrowserFavourites(t.io)).toBeNull();
+    expect(t.local.map.has(ACCOUNT_FAVOURITES_KEY)).toBe(false);
+    expect(t.local.map.get(FAVOURITES_KEY)).toBe('["lami"]');
+  });
+
+  test("a 200 that arrives after Logi välja: the browser's list is in the account now (cleared here), but no copy is written", async () => {
+    let answer: (r: Response) => void = () => {};
+    const t = io({ local: { [FAVOURITES_KEY]: '["lami"]' }, answer: () => new Promise<Response>((r) => (answer = r)) });
+    const merging = mergeBrowserFavourites(t.io);
+    await vi.waitFor(() => expect(t.fetch).toHaveBeenCalledTimes(1));
+    t.hint.signedIn = false; // logged out while the merge was on its way (logout forgot the copy)
+    answer(json(200, { ok: true, favourites: ["lami"] }));
+    expect(await merging).toEqual(["lami"]);
+    expect(t.local.map.has(FAVOURITES_KEY)).toBe(false);
+    expect(t.local.map.has(ACCOUNT_FAVOURITES_KEY)).toBe(false);
+  });
+
   test.each([
-    ["401 (signed out meanwhile)", async () => json(401, { ok: false, reason: "none" })],
     ["500", async () => json(500, { ok: false, error: "server" })],
     ["400 that is not the API's (a proxy's page)", async () => new Response("<html>Bad Request</html>", { status: 400 })],
     ["200 without a list", async () => json(200, { ok: true })],
@@ -320,6 +348,21 @@ describe("setAccountFavourite: the course page's ♡ while signed in", () => {
     expect(await second).toBe("failed");
     expect(await first).toBe("failed");
     expect(copyOf(t)).toBe('["lami","botox"]');
+  });
+
+  test("an answer that arrives after Logi välja writes no copy: neither the server's list nor a put-back", async () => {
+    for (const status of [200, 500]) {
+      const h = held();
+      const t = io({ local: { [ACCOUNT_FAVOURITES_KEY]: '["botox"]' }, answer: h.answer });
+      const press = setAccountFavourite("lami", true, t.io);
+      await vi.waitFor(() => expect(h.waiting).toHaveLength(1));
+      // Logi välja meanwhile: the copy is forgotten and the hint cookie is gone
+      forgetAccountFavourites(t.io);
+      t.hint.signedIn = false;
+      h.waiting[0].answer(status === 200 ? json(200, { ok: true, favourites: ["lami", "botox"] }) : json(500, { ok: false }));
+      expect(await press).toBe(status === 200 ? "saved" : "failed");
+      expect(t.local.map.has(ACCOUNT_FAVOURITES_KEY), String(status)).toBe(false);
+    }
   });
 
   test("courses are independent: a press on another course is not held back", async () => {

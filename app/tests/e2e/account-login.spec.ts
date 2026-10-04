@@ -104,6 +104,27 @@ test("a code by e-mail signs in and opens Minu konto; the header follows, and Lo
   await expectAccountButton(page, isMobile, false);
 });
 
+test("a login with the code forgets the favourites copy a previous session left on this device, also when the first account load fails", async ({ page }, info) => {
+  submitsForms();
+  const email = clientEmail("code-copy", info.project.name);
+  await removeClientRows(email);
+  try {
+    await openLogin(page);
+    // the previous person's hearts, left in this browser (as if they had never logged out)
+    await page.evaluate(() => localStorage.setItem("mslab-account-fav", JSON.stringify(["kulmude-lami"])));
+    await askForCode(page, email);
+    // Minu koolitused cannot load this time (every load until it says so: the dev server's strict mode asks twice)
+    await page.route("**/api/konto", (route) => route.fulfill({ status: 500, contentType: "application/json", body: '{"ok":false,"error":"server"}' }));
+    await codeField(page).pressSequentially(await knownLoginCode(email));
+    await expect(page).toHaveURL(/\/konto$/);
+    await expect(page.locator("[data-account-state='error']")).toBeVisible();
+    await page.unroute("**/api/konto");
+    expect(await page.evaluate(() => localStorage.getItem("mslab-account-fav"))).toBeNull();
+  } finally {
+    await removeClientRows(email);
+  }
+});
+
 test("a wrong code says so, empties the field and keeps the focus there; the right code still signs in", async ({ page }, info) => {
   submitsForms();
   const email = clientEmail("wrong", info.project.name);

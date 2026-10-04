@@ -1,3 +1,4 @@
+import { hintIn } from "./account-cookies";
 import { isDone, sendJson, type JsonAnswer } from "./json-request";
 import { storable } from "./storable";
 
@@ -11,8 +12,9 @@ import { storable } from "./storable";
 //   page is a cached public page that must not ask the server for anything when it loads, so it reads the account's list as
 //   this browser last heard it: localStorage "mslab-account-fav", written by every account answer that carries the list (the
 //   dashboard, Lemmikud, a merge, a ♡), so a new tab or a visit days later shows the hearts too (and the "storage" event keeps
-//   other tabs in step). It is forgotten on logout, on any 401, on account deletion and on every login, so the previous
-//   person's hearts never show on a shared device. A ♡ shows its change at once and sends it (POST /api/konto/lemmikud), one
+//   other tabs in step). It is written only while the hint cookie says signed in (an answer that arrives after "Logi välja"
+//   writes nothing), and forgotten on logout, on any 401, on account deletion and on every login, so the previous person's
+//   hearts never show on a shared device. A ♡ shows its change at once and sends it (POST /api/konto/lemmikud), one
 //   request per course at a time; a failure puts back what the server has, and when the session has ended (401) the press
 //   goes to this browser's own list, quietly.
 // Storage and fetch come in as `io` (browserIo() in the browser), so the tests can run them without one.
@@ -82,8 +84,11 @@ export function answerFavourites(body: unknown): string[] | null {
 
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-/** What the account side of the favourites uses: this browser's storage (null when blocked), fetch, and a way to tell the page. */
-export type FavouriteIo = { local: StorageLike | null; fetch: typeof fetch; emit(event: string): void };
+/**
+ * What the account side of the favourites uses: this browser's storage (null when blocked), fetch, a way to tell the page, and whether
+ * the browser is signed in as far as the hint cookie says (the copy is written only then).
+ */
+export type FavouriteIo = { local: StorageLike | null; fetch: typeof fetch; emit(event: string): void; signedIn(): boolean };
 
 /** localStorage, or null when the browser refuses it (private mode, blocked site data: even reading the property can throw). */
 function browserStorage(): StorageLike | null {
@@ -94,9 +99,14 @@ function browserStorage(): StorageLike | null {
   }
 }
 
-/** The browser's own: localStorage, fetch, window events. */
+/** The browser's own: localStorage, fetch, window events, the hint cookie (read as components/account/useAccount.ts hasAccountHint does). */
 export function browserIo(): FavouriteIo {
-  return { local: browserStorage(), fetch: (input, init) => fetch(input, init), emit: (event) => window.dispatchEvent(new Event(event)) };
+  return {
+    local: browserStorage(),
+    fetch: (input, init) => fetch(input, init),
+    emit: (event) => window.dispatchEvent(new Event(event)),
+    signedIn: () => typeof document !== "undefined" && hintIn(document.cookie),
+  };
 }
 
 const get = (store: StorageLike | null, key: string): string | null => {
@@ -122,8 +132,13 @@ const put = (store: StorageLike | null, key: string, value: string | null): bool
 /** The account's favourites as this browser last heard them, or null (none heard since the last login, or storage blocked). */
 export const readAccountFavourites = (io: FavouriteIo = browserIo()): string[] | null => parseAccountFavourites(get(io.local, ACCOUNT_FAVOURITES_KEY));
 
-/** Keeps the account's list in this browser and tells the page's ♡ buttons (other tabs hear it through the "storage" event). */
+/**
+ * Keeps the account's list in this browser and tells the page's ♡ buttons (other tabs hear it through the "storage" event). Only
+ * while the hint cookie says signed in: an answer (a merge, a ♡, a heart taken off in Lemmikud) that arrives after "Logi välja"
+ * writes nothing, so the copy that logout forgot does not come back.
+ */
 export function rememberAccountFavourites(list: string[], io: FavouriteIo = browserIo()): void {
+  if (!io.signedIn()) return;
   put(io.local, ACCOUNT_FAVOURITES_KEY, JSON.stringify(list));
   io.emit(FAVOURITES_EVENT);
 }
@@ -144,6 +159,11 @@ async function runMerge(io: FavouriteIo): Promise<string[] | null> {
   const slugs = mergeSlugs(get(io.local, FAVOURITES_KEY));
   if (!slugs) return null;
   const answer = await sendJson("/api/konto/lemmikud/merge", { slugs }, { fetch: io.fetch });
+  if (answer.status === 401) {
+    // the session has ended: the copy belongs to it and goes; the browser's list stays for the next login
+    forgetAccountFavourites(io);
+    return null;
+  }
   if (answer.status === 400 && answer.data.ok === false) {
     // the API refuses this list and always will: dropped, so it is not sent again on every account load
     put(io.local, FAVOURITES_KEY, null);
@@ -151,7 +171,7 @@ async function runMerge(io: FavouriteIo): Promise<string[] | null> {
     return null;
   }
   const merged = savedList(answer);
-  if (!merged) return null; // no answer, signed out, a server failure: the list stays for the next account load
+  if (!merged) return null; // no answer or a server failure: the list stays for the next account load
   put(io.local, FAVOURITES_KEY, null);
   rememberAccountFavourites(merged, io);
   io.emit(FAVOURITES_MERGED_EVENT);
