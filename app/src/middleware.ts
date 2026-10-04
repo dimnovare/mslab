@@ -45,7 +45,9 @@ function noindex(res: NextResponse): NextResponse {
  * An account shell asked for with a query (any method: a scanner's HEAD, a stray POST): 303 to the same path with the parameters the
  * page knows in the fragment, which only the browser sees (LoginForm reads them there). Next.js keeps the address of the request that
  * renders a page, query included, in the page it caches for every later visitor, and nothing the middleware does to a request
- * (a rewrite) changes that address; so no request with a query may ever reach a shell. The answer is never kept (no-store). The
+ * (a rewrite) changes that address; so no request with a query may ever reach a shell. One exception the middleware cannot see:
+ * Next.js strips `_rsc` before it runs, so `?_rsc=<text>` without an RSC header still renders a shell; the stored text is
+ * percent-encoded, the router uses the real address, and no app link or browser makes such a request (checked live in Task 11). The answer is never kept (no-store). The
  * Location is made of the matched shell path and the fragment only, a path that starts with one slash (so it keeps the request's own
  * origin, whatever the request says); Next.js's adapter, which cannot take a relative Location from a middleware, wants it absolute
  * and sends it on as a relative path (the same host as the request).

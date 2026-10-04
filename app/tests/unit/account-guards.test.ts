@@ -76,6 +76,13 @@ const sourceFiles = (dir: string): string[] =>
 describe("the app never builds an address of an account page with a query", () => {
   // a string that starts at an account page ("/konto…", "/ru/konto…", also after a ${…} or a template quote) and goes on to a "?"
   const SHELL_WITH_QUERY = /(?:["'`]|\}|href\([^,)]*,\s*["'`])(?:\/ru)?\/konto(?:\/[a-z0-9${}._-]+)*\?/;
+  // a login parameter put after an interpolated address (`${login}?viga=link`, the form the verify redirect once had)
+  const PARAM_AFTER_ADDRESS = /\}\?(?:viga|korda|email)=/;
+
+  test("a login parameter after an interpolated address is seen too", () => {
+    expect("`${login}?viga=link`").toMatch(PARAM_AFTER_ADDRESS);
+    expect("`${base}#korda=1`").not.toMatch(PARAM_AFTER_ADDRESS);
+  });
 
   test("the pattern sees the addresses it is meant for, and not the API's", () => {
     for (const bad of ['"/konto/sisene?korda=1"', "`/ru/konto?x=1`", 'href(locale, "/konto/kursus/x?a=b")', "`${base}/konto/sisene?viga=link`", "'/konto?x'"]) expect(bad, bad).toMatch(SHELL_WITH_QUERY);
@@ -88,7 +95,7 @@ describe("the app never builds an address of an account page with a query", () =
         .replace(/\r\n/g, "\n")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-      return SHELL_WITH_QUERY.test(code) ? [file.slice(SRC.length + 1)] : [];
+      return SHELL_WITH_QUERY.test(code) || PARAM_AFTER_ADDRESS.test(code) ? [file.slice(SRC.length + 1)] : [];
     });
     expect(offenders).toEqual([]);
   });
