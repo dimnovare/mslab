@@ -384,8 +384,6 @@ export const ru: Dict = {
         subjectRequest: "Запрос принят — {title}",
         subjectWaitlist: "Вы в списке ожидания — {title}",
         registration: "Регистрация принята.",
-        request: "Запрос принят.",
-        contact: "Мария свяжется с вами.",
         open: "Открыть мой кабинет",
         codeHere: "Если кнопка не работает, введите код здесь:",
         codeLink: "Открыть страницу входа",

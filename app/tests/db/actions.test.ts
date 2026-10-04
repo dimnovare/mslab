@@ -738,7 +738,7 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
     expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
   });
 
-  test("individual request: the short confirmation, 'Maria võtab sinuga ühendust.' and the button; the account box adds a code", async () => {
+  test("individual request: the short confirmation with the card's sentence and the button; the account box adds a code", async () => {
     const { mails } = outbox();
     const { deps, flush } = setup({ secrets: true });
     const fields = { course: "kulmud", name: "Test", email: "test@example.com", phone: "+372 5555 5555", period: "Detsembri teine pool", terms: "on" };
@@ -746,7 +746,8 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
     await flush();
     const [plain] = to(mails(), "test@example.com");
     expect(plain.subject).toBe("Päring on vastu võetud — Kulmude baaskoolitus");
-    expect(plain.text.split("\n")).toEqual(expect.arrayContaining(["Päring on vastu võetud.", "Kulmude baaskoolitus", "Maria võtab sinuga ühendust.", "Ava minu konto:", "https://mslab.example/konto/sisene#email=test%40example.com"]));
+    expect(plain.text.split("\n")).toEqual(expect.arrayContaining(["Päring on saadetud. Maria vastab peagi.", "Kulmude baaskoolitus", "Ava minu konto:", "https://mslab.example/konto/sisene#email=test%40example.com"]));
+    expect(plain.text).not.toContain("Maria võtab sinuga ühendust.");
     expect(buttons(plain.html)).toBe(1);
     expect(await db.select().from(clientLoginTokens)).toHaveLength(0);
 
@@ -769,7 +770,7 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
     await flush();
     const [practice, waitlist] = to(mails(), "test@example.com");
     expect(practice.subject).toBe("Запрос принят — MINI");
-    expect(practice.text.split("\n")).toEqual(expect.arrayContaining(["Здравствуйте, Test!", "Запрос принят.", "MINI", "Мария свяжется с вами.", "Открыть мой кабинет:", "https://mslab.example/ru/konto/sisene#email=test%40example.com"]));
+    expect(practice.text.split("\n")).toEqual(expect.arrayContaining(["Здравствуйте, Test!", "Запрос отправлен. Мария скоро ответит.", "MINI", "Открыть мой кабинет:", "https://mslab.example/ru/konto/sisene#email=test%40example.com"]));
     expect(waitlist.subject).toBe("Oled ootenimekirjas — Kulmude baaskoolitus");
     expect(waitlist.text.split("\n")).toEqual(expect.arrayContaining(["Oled ootenimekirjas. Anname teada, kui koht vabaneb.", "12.12.2026 · 10:00", "Pärnu, MS LAB stuudio", "Ava minu konto:"]));
     expect(waitlist.text).not.toContain("Maria võtab sinuga ühendust.");

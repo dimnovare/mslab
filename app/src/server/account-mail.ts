@@ -346,9 +346,9 @@ export type RequestConfirmationInput = {
 };
 
 /**
- * The short confirmation of an individual, practice or waitlist request: what was received, the course (the package), "Maria
- * võtab sinuga ühendust." and one button. A waitlist entry says what its dashboard card says (`account.next.waitlist`: "Oled
- * ootenimekirjas. Anname teada, kui koht vabaneb.") in place of both lines, and shows its date.
+ * The short confirmation of an individual, practice or waitlist request: the sentence its dashboard card says, the course (the
+ * package) and one button. A request says `account.next.requestNew` ("Päring on saadetud. Maria vastab peagi."), a waitlist entry
+ * `account.next.waitlist` ("Oled ootenimekirjas. Anname teada, kui koht vabaneb.") and its date.
  */
 export function requestConfirmationMail(input: RequestConfirmationInput): Mail {
   const dict = getDict(input.locale).account;
@@ -361,9 +361,9 @@ export function requestConfirmationMail(input: RequestConfirmationInput): Mail {
     locale: input.locale,
     siteUrl: input.siteUrl,
     subject: oneLine(fill(waitlist ? mail.confirm.subjectWaitlist : mail.confirm.subjectRequest, { title })),
-    lead: waitlist ? dict.next.waitlist : mail.confirm.request,
+    lead: waitlist ? dict.next.waitlist : dict.next.requestNew,
     box: { title, lines: input.session ? sessionLines(input.session, input.locale) : [] },
-    sections: waitlist ? [] : [{ text: mail.confirm.contact }],
+    sections: [],
     login: input.login ?? null,
   });
 }

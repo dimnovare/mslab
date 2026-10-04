@@ -249,21 +249,23 @@ describe("with a login code (the visitor ticked 'Loo mulle kohe konto')", () => 
 });
 
 describe("request confirmations", () => {
-  test("individual request, Estonian: the course, 'Maria võtab sinuga ühendust.' and the button", () => {
+  test("individual request, Estonian: the dashboard card's sentence (account.next.requestNew), the course and the button", () => {
     const mail = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati Tamm", locale: "et", kind: "individual", title: { et: "Kulmude baaskoolitus" } });
     expect(mail.to).toBe(EMAIL);
     expect(mail.subject).toBe("Päring on vastu võetud — Kulmude baaskoolitus");
     expect(lines(mail.text)).toEqual([
       "Tere, Kati!", "",
-      "Päring on vastu võetud.", "",
+      "Päring on saadetud. Maria vastab peagi.", "",
       "Kulmude baaskoolitus", "",
-      "Maria võtab sinuga ühendust.", "",
       "Ava minu konto:",
       `${BASE}/konto/sisene#email=kati%2Btest%40example.test`, "",
       "MS LAB Koolituskeskus",
     ]);
     expect(buttons(mail.html!)).toBe(1);
     expect(mail.html).toContain(">Ava minu konto</a>");
+    expect(mail.html).toContain("Päring on saadetud. Maria vastab peagi.");
+    expect(mail.text).toContain(getDict("et").account.next.requestNew); // what the card says (final review M6)
+    expect(mail.text).not.toContain("Maria võtab sinuga ühendust.");
   });
 
   test("practice request, Russian: the package, the same short form", () => {
@@ -271,9 +273,8 @@ describe("request confirmations", () => {
     expect(mail.subject).toBe("Запрос принят — МИНИ");
     expect(lines(mail.text)).toEqual([
       "Здравствуйте, Мария!", "",
-      "Запрос принят.", "",
+      getDict("ru").account.next.requestNew, "",
       "МИНИ", "",
-      "Мария свяжется с вами.", "",
       "Открыть мой кабинет:",
       `${BASE}/ru/konto/sisene#email=kati%2Btest%40example.test`, "",
       "MS LAB Учебный центр",
@@ -302,7 +303,7 @@ describe("request confirmations", () => {
 
   test("an individual request that ticked the account box can carry a login code and then has ONE button, 'Logi sisse'", () => {
     const mail = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "et", kind: "individual", title: { et: "Kulmud" }, login: { token: TOKEN, code: "000123" } });
-    expect(lines(mail.text)).toEqual(expect.arrayContaining(["000123", "Logi sisse:", `${BASE}/api/konto/verify?t=${TOKEN}`, "Kood ja link kehtivad 30 minutit.", "Maria võtab sinuga ühendust."]));
+    expect(lines(mail.text)).toEqual(expect.arrayContaining(["000123", "Logi sisse:", `${BASE}/api/konto/verify?t=${TOKEN}`, "Kood ja link kehtivad 30 minutit.", "Päring on saadetud. Maria vastab peagi."]));
     expect(mail.text).not.toContain("Ava minu konto");
     expect(buttons(mail.html!)).toBe(1);
   });
