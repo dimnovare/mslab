@@ -643,7 +643,20 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
       expect(to(mails(), "test@example.com")).toHaveLength(3);
     });
 
-    test("the confirmation cap (50 a day) stops mails without a code; Maria is still told, the submission is stored, one line is logged", async () => {
+    test("the day's caps: 60 for mails with a login code, 30 for confirmations without one (each is paired with Maria's notification, which is not counted; Resend Free sends 100)", async () => {
+      expect(LOGIN_MAIL_DAILY_CAP).toBe(60);
+      expect(CONFIRMATION_MAIL_DAILY_CAP).toBe(30);
+      // the 30th of the day is the last confirmation without a code
+      const { mails } = outbox();
+      await db.insert(mailQuota).values({ day: "2026-10-01", sent: 30 });
+      const { deps, flush } = setup({ secrets: true });
+      await handleWaitlist(deps, form({ session: String(ids.full), name: "T", email: "test@example.com" }));
+      await flush();
+      expect(to(mails(), "test@example.com")).toHaveLength(0);
+      expect(await quota()).toEqual([30]);
+    });
+
+    test("the confirmation cap (30 a day) stops mails without a code; Maria is still told, the submission is stored, one line is logged", async () => {
       const { mails } = outbox();
       const [error] = logs();
       await db.insert(mailQuota).values({ day: "2026-10-01", sent: CONFIRMATION_MAIL_DAILY_CAP });
@@ -670,7 +683,7 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
       expect(await quota()).toEqual([CONFIRMATION_MAIL_DAILY_CAP]);
     });
 
-    test("a mail with a login code uses the login cap (60), not the confirmation cap: it goes out at 50..59 and stops at 60", async () => {
+    test("a mail with a login code uses the login cap (60), not the confirmation cap: it goes out at 30..59 and stops at 60", async () => {
       const { mails } = outbox();
       const [error] = logs();
       await db.insert(mailQuota).values({ day: "2026-10-01", sent: CONFIRMATION_MAIL_DAILY_CAP });

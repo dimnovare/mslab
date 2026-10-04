@@ -169,7 +169,7 @@ async function liveLogin(deps: Deps, form: FormName, email: string): Promise<Log
  * 3. the mail's content is read (the prepayment setting), so a database failure here costs no login and no quota;
  * 4. "Loo mulle kohe konto" ticked: a live login (none when the address has its 3, or on a database failure: no code then);
  * 5. one unit of the day's counter, the `mail_quota` row, which never fails open: the login cap (60) for a mail with a code, the
- *    confirmation cap (50) without one; over the cap, or with the database failing, there is no mail;
+ *    confirmation cap (30) without one; over the cap, or with the database failing, there is no mail;
  * 6. sent (sendMail).
  * Never throws: the submission is stored, and a failure is logged without addresses or texts.
  */
