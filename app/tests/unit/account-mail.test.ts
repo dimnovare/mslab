@@ -1,0 +1,336 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { nextStep, type ContactCard } from "@/domain/account-cards";
+import { getDict } from "@/i18n/locales";
+import { fill } from "@/i18n/format";
+import { accountLink, esc, registrationConfirmationMail, requestConfirmationMail, verifyLink, type RegistrationConfirmationInput } from "@/server/account-mail";
+
+// The confirmation e-mails to a visitor who registered or sent a request (phase 2a Task 10): the texts in Estonian and
+// Russian, with and without the prepayment instructions, with and without a login code, escaping, the "Ava minu konto"
+// link and the colours. The sending (sample addresses, the login caps, the form handlers) is tests/db/actions.test.ts.
+
+const BASE = "https://mslab.example";
+const EMAIL = "kati+test@example.test";
+const TOKEN = "tok-en_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const PAY = { receiver: "MS LAB Koolituskeskus OÜ", iban: "ee382200221020145685", bank: "Swedbank", referencePrefix: "MSLAB-" };
+// 14.11.2026 10:00 in Estonia (UTC+2 in November)
+const SESSION = { startsAt: new Date("2026-11-14T08:00:00Z"), city: "Pärnu", venue: "MS LAB stuudio" };
+
+const registration = (over: Partial<RegistrationConfirmationInput> = {}): RegistrationConfirmationInput => ({
+  siteUrl: BASE,
+  email: EMAIL,
+  name: "Kati Tamm",
+  locale: "et",
+  registrationId: 42,
+  course: { et: "Kulmude baaskoolitus", ru: "Базовый курс по бровям" },
+  session: SESSION,
+  paymentChoice: "half",
+  priceCents: 39000,
+  prepayment: PAY,
+  login: null,
+  ...over,
+});
+
+const lines = (text: string) => text.split("\n");
+const count = (haystack: string, needle: RegExp) => (haystack.match(needle) ?? []).length;
+/** The buttons of an HTML e-mail: the 48 px ink pills. */
+const buttons = (html: string) => count(html, /mso-padding-alt/g);
+
+describe("accountLink: Ava minu konto", () => {
+  test("the login page with the address in the FRAGMENT (never a query), Russian under /ru", () => {
+    expect(accountLink(BASE, "kati@example.test")).toBe(`${BASE}/konto/sisene#email=kati%40example.test`);
+    expect(accountLink(`${BASE}/`, "kati@example.test", "ru")).toBe(`${BASE}/ru/konto/sisene#email=kati%40example.test`);
+  });
+
+  test("a '+' is %2B: a raw plus in a fragment would be read back as a space", () => {
+    const link = accountLink(BASE, EMAIL);
+    expect(link).toBe(`${BASE}/konto/sisene#email=kati%2Btest%40example.test`);
+    expect(link).not.toContain("+");
+    expect(link).not.toContain("?");
+    expect(decodeURIComponent(link.split("#email=")[1])).toBe(EMAIL);
+  });
+});
+
+describe("registration confirmation, Estonian", () => {
+  const mail = registrationConfirmationMail(registration());
+
+  test("subject, recipient, greeting by first name, what was received, the course, when and where", () => {
+    expect(mail.to).toBe(EMAIL);
+    expect(mail.subject).toBe("Registreering on vastu võetud — Kulmude baaskoolitus");
+    const text = lines(mail.text);
+    expect(text[0]).toBe("Tere, Kati!");
+    expect(text).toContain("Registreering on vastu võetud.");
+    expect(text).toContain("Kulmude baaskoolitus");
+    expect(text).toContain("14.11.2026 · 10:00");
+    expect(text).toContain("Pärnu, MS LAB stuudio");
+    expect(text.at(-1)).toBe("MS LAB Koolituskeskus");
+  });
+
+  test("the next step: the prepayment (half of 390 € = 195 €) with the account's own sentence, and the payment rows", () => {
+    const text = lines(mail.text);
+    expect(text).toContain("Koha kinnitamiseks tasu ettemaks 195 €.");
+    expect(text).toContain("Saaja: MS LAB Koolituskeskus OÜ");
+    expect(text).toContain("IBAN: EE38 2200 2210 2014 5685");
+    expect(text).toContain("Pank: Swedbank");
+    expect(text).toContain("Summa: 195 €");
+    expect(text).toContain("Selgitus: MSLAB-42");
+    expect(text).toContain("Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.");
+  });
+
+  test("full payment asks for the whole price", () => {
+    const full = registrationConfirmationMail(registration({ paymentChoice: "full" }));
+    expect(lines(full.text)).toContain("Koha kinnitamiseks tasu ettemaks 390 €.");
+    expect(lines(full.text)).toContain("Summa: 390 €");
+  });
+
+  test("the same sentence the dashboard card says (domain/account-cards.ts nextStep)", () => {
+    const card: ContactCard = {
+      kind: "contact", registrationId: 42, course: { slug: "kulmud", title: { et: "Kulmude baaskoolitus" } },
+      session: { startsAt: SESSION.startsAt.toISOString(), city: "Pärnu", venue: "MS LAB stuudio", cancelled: false },
+      status: "awaiting_prepayment", paymentChoice: "half", priceCents: 39000, paidCents: 0, createdAt: "2026-10-01T10:00:00Z",
+    };
+    for (const [locale, pay] of [["et", PAY], ["ru", PAY], ["et", null], ["ru", null]] as const) {
+      const step = nextStep(card, new Date("2026-10-01T10:00:00Z"), pay, locale);
+      const sentence = fill(getDict(locale).account.next[step.key as "pay" | "invoice"], step.vars);
+      const sent = registrationConfirmationMail(registration({ locale, prepayment: pay }));
+      expect(lines(sent.text), `${locale} ${pay ? "with" : "without"} instructions`).toContain(sentence);
+    }
+  });
+
+  test("the button 'Ava minu konto' with the address pre-filled, and no login in it", () => {
+    expect(lines(mail.text)).toContain("Ava minu konto:");
+    expect(lines(mail.text)).toContain(`${BASE}/konto/sisene#email=kati%2Btest%40example.test`);
+    expect(mail.text).not.toContain("/api/konto/verify");
+    expect(buttons(mail.html!)).toBe(1);
+    expect(mail.html).toContain(`href="${BASE}/konto/sisene#email=kati%2Btest%40example.test"`);
+    expect(mail.html).toContain(">Ava minu konto</a>");
+    expect(mail.html).not.toContain("Logi sisse");
+    expect(mail.html).not.toContain("30 minutit");
+  });
+
+  test("HTML: the greeting, the course box, the payment rows and the 'place' note, all there", () => {
+    const html = mail.html!;
+    expect(html.startsWith('<!doctype html><html lang="et">')).toBe(true);
+    expect(html).toContain("<title>Registreering on vastu võetud — Kulmude baaskoolitus</title>");
+    for (const part of ["Tere, Kati!", "Kulmude baaskoolitus", "14.11.2026 · 10:00", "Pärnu, MS LAB stuudio", "Koha kinnitamiseks tasu ettemaks 195 €.", "EE38 2200 2210 2014 5685", "MSLAB-42", "Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist."])
+      expect(html, part).toContain(part);
+  });
+});
+
+describe("registration confirmation, Russian", () => {
+  const mail = registrationConfirmationMail(registration({ locale: "ru", name: "Мария Иванова" }));
+
+  test("the texts, the course title, the date and the euros in Russian; the button goes to the Russian login page", () => {
+    expect(mail.subject).toBe("Регистрация принята — Базовый курс по бровям");
+    const text = lines(mail.text);
+    expect(text[0]).toBe("Здравствуйте, Мария!");
+    expect(text).toContain("Регистрация принята.");
+    expect(text).toContain("Базовый курс по бровям");
+    expect(text).toContain("14.11.2026 · 10:00");
+    expect(text).toContain("Чтобы подтвердить место, оплатите предоплату 195 €.");
+    expect(text).toContain("Получатель: MS LAB Koolituskeskus OÜ");
+    expect(text).toContain("Назначение платежа: MSLAB-42");
+    expect(text).toContain("Место подтверждается после поступления предоплаты не менее 50%.");
+    expect(text.at(-1)).toBe("MS LAB Учебный центр");
+    expect(text).toContain("Открыть мой кабинет:");
+    expect(text).toContain(`${BASE}/ru/konto/sisene#email=kati%2Btest%40example.test`);
+    expect(mail.html).toContain('lang="ru"');
+    expect(mail.html).toContain(">Открыть мой кабинет</a>");
+  });
+
+  test("a course without a Russian title is named in Estonian", () => {
+    expect(registrationConfirmationMail(registration({ locale: "ru", course: { et: "Ainult eesti" } })).subject).toBe("Регистрация принята — Ainult eesti");
+  });
+});
+
+describe("registration confirmation without payment instructions", () => {
+  test("no prepayment setting, or without a receiver or an IBAN: Maria sends an invoice, and there are no payment rows", () => {
+    for (const prepayment of [null, { ...PAY, iban: "" }, { ...PAY, receiver: " " }]) {
+      const mail = registrationConfirmationMail(registration({ prepayment }));
+      const text = lines(mail.text);
+      expect(text).toContain("Maria saadab sulle arve ettemaksu tasumiseks.");
+      expect(mail.text).not.toMatch(/Saaja|IBAN|Pank|Summa|Selgitus|tasu ettemaks/);
+      expect(text).toContain("Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.");
+      expect(buttons(mail.html!)).toBe(1);
+    }
+    const ru = registrationConfirmationMail(registration({ locale: "ru", prepayment: null }));
+    expect(lines(ru.text)).toContain("Мария пришлёт вам счёт для оплаты предоплаты.");
+  });
+
+  test("a course without a price cannot name an amount: the invoice sentence", () => {
+    const mail = registrationConfirmationMail(registration({ priceCents: null }));
+    expect(lines(mail.text)).toContain("Maria saadab sulle arve ettemaksu tasumiseks.");
+    expect(mail.text).not.toContain("Summa");
+  });
+
+  test("the bank is optional: its row is left out, the others stay", () => {
+    const mail = registrationConfirmationMail(registration({ prepayment: { ...PAY, bank: "" } }));
+    expect(mail.text).not.toContain("Pank");
+    expect(lines(mail.text)).toContain("Selgitus: MSLAB-42");
+  });
+
+  test("an empty reference prefix is the registration number alone", () => {
+    expect(lines(registrationConfirmationMail(registration({ prepayment: { ...PAY, referencePrefix: "" } })).text)).toContain("Selgitus: 42");
+  });
+});
+
+describe("with a login code (the visitor ticked 'Loo mulle kohe konto')", () => {
+  const login = { token: TOKEN, code: "042917" };
+
+  test.each([["et", "Sinu sisselogimiskood:", "Logi sisse", "Kood ja link kehtivad 30 minutit.", `${BASE}/api/konto/verify?t=${TOKEN}`], ["ru", "Ваш код для входа:", "Войти", "Код и ссылка действуют 30 минут.", `${BASE}/api/konto/verify?t=${TOKEN}&l=ru`]] as const)(
+    "%s: the code large, ONE button 'Logi sisse' to the login link in place of 'Ava minu konto', and the 30 minutes",
+    (locale, intro, button, valid, link) => {
+      const mail = registrationConfirmationMail(registration({ locale, login }));
+      expect(link).toBe(verifyLink(BASE, TOKEN, locale));
+      const text = lines(mail.text);
+      expect(text).toContain(intro);
+      expect(text).toContain("042917");
+      expect(text).toContain(`${button}:`);
+      expect(text).toContain(link);
+      expect(text).toContain(valid);
+      expect(mail.text).not.toContain("#email=");
+      expect(mail.text).not.toMatch(/Ava minu konto|Открыть мой кабинет/);
+      // the registration part is still all there
+      expect(mail.text).toContain("14.11.2026 · 10:00");
+      expect(mail.text).toContain("MSLAB-42");
+
+      const html = mail.html!;
+      expect(buttons(html)).toBe(1);
+      expect(html).toContain(`href="${esc(link)}"`);
+      expect(html).toContain(`>${button}</a>`);
+      expect(html).toContain("font:600 32px"); // the code, large
+      expect(html).toContain(">042917</div>");
+      expect(html).toContain(valid);
+      expect(html).not.toContain("#email=");
+      expect(html).not.toMatch(/Ava minu konto|Открыть мой кабинет/);
+    },
+  );
+
+  test("the subject is the registration's, not the login e-mail's: the code is not shown in a notification", () => {
+    expect(registrationConfirmationMail(registration({ login })).subject).toBe("Registreering on vastu võetud — Kulmude baaskoolitus");
+  });
+});
+
+describe("request confirmations", () => {
+  test("individual request, Estonian: the course, 'Maria võtab sinuga ühendust.' and the button", () => {
+    const mail = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati Tamm", locale: "et", kind: "individual", title: { et: "Kulmude baaskoolitus" } });
+    expect(mail.to).toBe(EMAIL);
+    expect(mail.subject).toBe("Päring on vastu võetud — Kulmude baaskoolitus");
+    expect(lines(mail.text)).toEqual([
+      "Tere, Kati!", "",
+      "Päring on vastu võetud.", "",
+      "Kulmude baaskoolitus", "",
+      "Maria võtab sinuga ühendust.", "",
+      "Ava minu konto:",
+      `${BASE}/konto/sisene#email=kati%2Btest%40example.test`, "",
+      "MS LAB Koolituskeskus",
+    ]);
+    expect(buttons(mail.html!)).toBe(1);
+    expect(mail.html).toContain(">Ava minu konto</a>");
+  });
+
+  test("practice request, Russian: the package, the same short form", () => {
+    const mail = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Мария", locale: "ru", kind: "practice", title: { et: "MINI", ru: "МИНИ" } });
+    expect(mail.subject).toBe("Запрос принят — МИНИ");
+    expect(lines(mail.text)).toEqual([
+      "Здравствуйте, Мария!", "",
+      "Запрос принят.", "",
+      "МИНИ", "",
+      "Мария свяжется с вами.", "",
+      "Открыть мой кабинет:",
+      `${BASE}/ru/konto/sisene#email=kati%2Btest%40example.test`, "",
+      "MS LAB Учебный центр",
+    ]);
+  });
+
+  test("waitlist, Estonian and Russian: 'Oled ootenimekirjas.', the date and place, and the same line and button", () => {
+    const et = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "et", kind: "waitlist", title: { et: "Kulmud" }, session: SESSION });
+    expect(et.subject).toBe("Oled ootenimekirjas — Kulmud");
+    expect(lines(et.text)).toEqual(expect.arrayContaining(["Oled ootenimekirjas.", "Kulmud", "14.11.2026 · 10:00", "Pärnu, MS LAB stuudio", "Maria võtab sinuga ühendust.", "Ava minu konto:"]));
+    const ru = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "ru", kind: "waitlist", title: { et: "Kulmud", ru: "Брови" }, session: SESSION });
+    expect(ru.subject).toBe("Вы в списке ожидания — Брови");
+    expect(lines(ru.text)).toEqual(expect.arrayContaining(["Вы в списке ожидания.", "Брови", "14.11.2026 · 10:00", "Мария свяжется с вами.", "Открыть мой кабинет:"]));
+  });
+
+  test("an individual request that ticked the account box can carry a login code and then has ONE button, 'Logi sisse'", () => {
+    const mail = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "et", kind: "individual", title: { et: "Kulmud" }, login: { token: TOKEN, code: "000123" } });
+    expect(lines(mail.text)).toEqual(expect.arrayContaining(["000123", "Logi sisse:", `${BASE}/api/konto/verify?t=${TOKEN}`, "Kood ja link kehtivad 30 minutit.", "Maria võtab sinuga ühendust."]));
+    expect(mail.text).not.toContain("Ava minu konto");
+    expect(buttons(mail.html!)).toBe(1);
+  });
+
+  test("the time is Estonian time wherever the server runs (summer: UTC+3, here already past midnight)", () => {
+    const mail = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "et", kind: "waitlist", title: { et: "Kulmud" }, session: { startsAt: new Date("2026-06-20T21:30:00Z"), city: "Tallinn", venue: "" } });
+    expect(lines(mail.text)).toContain("21.06.2026 · 00:30"); // after midnight in Tallinn
+    expect(lines(mail.text)).toContain("Tallinn"); // no venue: no trailing comma
+  });
+});
+
+describe("HTML safety and design", () => {
+  const hostile = '<img src=x onerror=alert(1)>"\'&<script>alert(2)</script>';
+  const mails = (login: { token: string; code: string } | null) => [
+    registrationConfirmationMail(
+      registration({
+        name: `"><b>x</b> Tamm`,
+        course: { et: hostile, ru: hostile },
+        session: { startsAt: SESSION.startsAt, city: hostile, venue: hostile },
+        prepayment: { receiver: hostile, iban: "<i>EE38</i>", bank: hostile, referencePrefix: "<u>" },
+        login,
+      }),
+    ),
+    requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "<i>Kati</i>", locale: "ru", kind: "waitlist", title: { et: hostile }, session: { startsAt: SESSION.startsAt, city: hostile, venue: "" }, login }),
+  ];
+
+  test.each([["without a code", null], ["with a code", { token: TOKEN, code: "042917" }]])("%s: a hostile course title, name, place or payment value never opens a tag or ends an attribute", (_name, login) => {
+    for (const mail of mails(login)) {
+      const html = mail.html!;
+      expect(html).not.toMatch(/<(img|script|b|i|u)\b/i);
+      expect(html).not.toContain("onerror=alert(1)>");
+      expect(html).not.toContain('"><b>');
+      expect(html).toContain("&lt;");
+      // the text body is plain text: nothing to escape, but the title stays one line in the subject
+      expect(mail.subject).not.toMatch(/\n/);
+    }
+    expect(mails(login)[0].html).toContain("&lt;img src=x onerror=alert(1)&gt;&quot;&#39;&amp;&lt;script&gt;alert(2)&lt;/script&gt;");
+    expect(mails(login)[0].html).toContain("Tere, &quot;&gt;&lt;b&gt;x&lt;/b&gt;!");
+  });
+
+  test("a site address with quotes and angle brackets cannot break the button's href", () => {
+    const mail = registrationConfirmationMail(registration({ siteUrl: `https://x.example/a"><i>` }));
+    expect(mail.html).not.toContain("<i>");
+    expect(mail.html).toContain("https://x.example/a&quot;&gt;&lt;i&gt;/konto/sisene#email=");
+  });
+
+  test("a subject is one line: line breaks in a course title are folded into spaces", () => {
+    expect(registrationConfirmationMail(registration({ course: { et: "Kulmud\r\nBcc: x\n  kaks" } })).subject).toBe("Registreering on vastu võetud — Kulmud Bcc: x kaks");
+  });
+
+  test("tables and inline styles only: no images, scripts, external CSS, web fonts or addresses but the one link", () => {
+    for (const login of [null, { token: TOKEN, code: "042917" }])
+      for (const locale of ["et", "ru"] as const) {
+        const html = registrationConfirmationMail(registration({ locale, login })).html!;
+        expect(html).not.toMatch(/<(img|script|link|style|iframe|video|svg)\b/i);
+        expect(html).not.toMatch(/@import|@font-face|url\(|src=/i);
+        const links = new Set(html.match(/https?:\/\/[^"'<\s]+/g));
+        expect([...links].every((u) => u.startsWith(`${BASE}/`)), [...links].join(" ")).toBe(true);
+        expect(html).toContain("Jost, Manrope, Arial, sans-serif");
+        // the button is as tall as the site's (48 px), a link a thumb can hit
+        expect(html).toContain("height:48px");
+      }
+  });
+
+  test("every colour is one of the site's tokens (src/styles/tokens.css)", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles/tokens.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const tokens = new Set(css.match(/#[0-9a-f]{6}\b/gi)!.map((c) => c.toLowerCase()));
+    for (const mail of [...mails(null), ...mails({ token: TOKEN, code: "042917" })]) {
+      const used = new Set(mail.html!.match(/#[0-9a-f]{3,8}\b/gi)!.map((c) => c.toLowerCase()));
+      expect(used.size).toBeGreaterThan(3);
+      for (const colour of used) expect(tokens.has(colour), colour).toBe(true);
+    }
+    // the registration e-mail with its boxes uses the canvas and line tokens too
+    const plain = registrationConfirmationMail(registration()).html!;
+    expect(plain).toContain("#f6f4f5");
+    expect(plain).toContain("#e6e1e3");
+  });
+});

@@ -379,6 +379,16 @@ export const ru: Dict = {
       valid: "Код и ссылка действуют 30 минут.",
       ignore: "Если вы не запрашивали вход, просто удалите это письмо.",
       signature: "MS LAB Учебный центр",
+      confirm: {
+        subjectRegistration: "Регистрация принята — {title}",
+        subjectRequest: "Запрос принят — {title}",
+        subjectWaitlist: "Вы в списке ожидания — {title}",
+        registration: "Регистрация принята.",
+        request: "Запрос принят.",
+        waitlist: "Вы в списке ожидания.",
+        contact: "Мария свяжется с вами.",
+        open: "Открыть мой кабинет",
+      },
     },
     deleted: {
       subject: "Личный кабинет MS LAB удалён",

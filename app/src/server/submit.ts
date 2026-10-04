@@ -1,7 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
+import { readSetting } from "@/db/queries/public";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
 import type { Course, CourseSession, Registration, Subscriber } from "@/db/schema";
+import { isSampleAddress } from "@/domain/email";
+import { registrationPrice } from "@/domain/registration";
 import { seatState } from "@/domain/sessions";
 import { pick } from "@/i18n/field";
 import { fill } from "@/i18n/format";
@@ -27,6 +30,9 @@ import {
   waitlistSummary,
   type Summary,
 } from "./messages";
+import { registrationConfirmationMail, requestConfirmationMail, type LoginCode } from "./account-mail";
+import { issueClientLogin, reserveLoginMail } from "./client-auth";
+import { PREPAYMENT_KEY, parsePrepayment } from "./client-data";
 import { logFailure } from "./log";
 import { adminUrl, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
@@ -68,7 +74,14 @@ const fail = (errors: Record<string, string>): ActionResult => ({ ok: false, err
 /** Confirmation e-mails per address and day (signing up again resends the link; this stops mail-bombing an address). */
 const CONFIRM_MAILS_PER_DAY = 3;
 
-type Stored = { result: ActionResult; notify?: Summary & { replyTo?: string }; mail?: Mail };
+/**
+ * The confirmation to the visitor of a stored registration or request. `mail` builds it once the deferred work has decided
+ * whether it carries a login code (`login`: a live login for the address, or null) and may read what it needs from the
+ * database then, so nothing here can fail the stored submission.
+ */
+type Confirmation = { email: string; wantsAccount: boolean; mail: (login: LoginCode | null) => Mail | Promise<Mail> };
+
+type Stored = { result: ActionResult; notify?: Summary & { replyTo?: string }; mail?: Mail; confirm?: Confirmation };
 
 /** A rate limit that fails open: when KV is unavailable (or over its daily write quota) the submission goes through. */
 async function allowed(env: Env, key: string, limit: number, windowSec: number): Promise<boolean> {
@@ -113,7 +126,7 @@ async function submission<T>(
     return fail({ form: "rate" });
   }
   const out = await store(parsed.data);
-  const { notify, mail } = out;
+  const { notify, mail, confirm } = out;
   if (notify) {
     deps.later(async () => {
       const r = await notifyMaria(deps.env, notify.subject, notify.text, { short: notify.short, replyTo: notify.replyTo, siteUrl: deps.siteUrl });
@@ -126,7 +139,52 @@ async function submission<T>(
       console.info(`[forms] ${form}: stored; confirmation e-mail sent: ${sent}`);
     });
   }
+  if (confirm) deps.later(() => sendConfirmation(deps, form, confirm));
   return out.result;
+}
+
+/**
+ * A live login for the confirmation of a visitor who ticked "Loo mulle kohe konto", or null: the address already has its 3
+ * live logins (client-auth.ts CLIENT_LOGIN_CAP), the day's login-mail cap is reached (the Postgres row, which never fails
+ * open) or the database failed. Then the confirmation goes out without a code. The cap is reserved here, once, and only for
+ * a mail that carries a code: a confirmation without one never counts against it.
+ */
+async function liveLogin(deps: Deps, form: FormName, email: string): Promise<LoginCode | null> {
+  try {
+    const issued = await issueClientLogin(deps.db, email, deps.now);
+    if (!issued) {
+      console.info(`[forms] ${form}: this address has its live logins already: confirmation without a code`);
+      return null;
+    }
+    if (!(await reserveLoginMail(deps.db, deps.now))) {
+      console.info(`[forms] ${form}: daily login mail cap reached: confirmation without a code`);
+      return null;
+    }
+    return issued;
+  } catch (e) {
+    logFailure(`[forms] ${form}: login code unavailable, confirmation without it`, e);
+    return null;
+  }
+}
+
+/**
+ * Mails the visitor the confirmation of what was stored, after the response (queued like Maria's notification; either may fail
+ * without the other). Sample addresses (`@example.test`) are skipped before any login or quota is used. Like every e-mail
+ * here it is only sent when Resend is configured (sendMail), so local development and the e2e run mail nothing. Never throws:
+ * the submission is stored, and a failure is logged without addresses or texts.
+ */
+async function sendConfirmation(deps: Deps, form: FormName, confirm: Confirmation): Promise<void> {
+  if (isSampleAddress(confirm.email)) {
+    console.info(`[forms] ${form}: stored; confirmation e-mail skipped (sample address)`);
+    return;
+  }
+  try {
+    const login = confirm.wantsAccount ? await liveLogin(deps, form, confirm.email) : null;
+    const sent = await sendMail(deps.env, await confirm.mail(login));
+    console.info(`[forms] ${form}: stored; confirmation e-mail to the visitor sent: ${sent}`);
+  } catch (e) {
+    logFailure(`[forms] ${form}: confirmation e-mail failed`, e);
+  }
 }
 
 const admin = (deps: Deps) => adminUrl(deps.siteUrl);
@@ -211,13 +269,31 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
       return { result: fail({ session: "unavailable" }) };
     if (seatState(session, session.confirmed) === "full") return { result: fail({ session: "full" }) };
 
-    await createRegistration(deps.db, { ...data, courseId: course.id, courseSessionId: session.id, kind: "group", preferredPeriod: "", message: "" });
+    const registration = await createRegistration(deps.db, { ...data, courseId: course.id, courseSessionId: session.id, kind: "group", preferredPeriod: "", message: "" });
     await deps.changed?.({ kind: "seats", course: course.slug });
     const summary = registrationSummary(
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
       admin(deps),
     );
-    return { result: OK, notify: { ...summary, replyTo: data.email } };
+    const confirm: Confirmation = {
+      email: data.email,
+      wantsAccount: data.wantsAccount,
+      mail: async (login) =>
+        registrationConfirmationMail({
+          siteUrl: deps.siteUrl,
+          email: registration.email,
+          name: registration.name,
+          locale: data.locale,
+          registrationId: registration.id,
+          course: course.title,
+          session: { startsAt: session.startsAt, city: session.city ?? "", venue: session.venue ?? "" },
+          paymentChoice: data.paymentChoice,
+          priceCents: registrationPrice(course, "group"),
+          prepayment: parsePrepayment(await readSetting(deps.db, PREPAYMENT_KEY)),
+          login,
+        }),
+    };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
   });
 }
 
@@ -238,7 +314,12 @@ export function handleIndividual(deps: Deps, formData: FormData): Promise<Action
     if (!course || course.priceIndividual == null) return { result: fail({ form: "invalid" }) };
     await storeRequest(deps.db, "individual", { course: slug, courseId: course.id, ...data });
     const summary = individualSummary({ ...data, course: pick(course.title, "et") }, admin(deps));
-    return { result: OK, notify: { ...summary, replyTo: data.email } };
+    const confirm: Confirmation = {
+      email: data.email,
+      wantsAccount: data.wantsAccount,
+      mail: (login) => requestConfirmationMail({ siteUrl: deps.siteUrl, email: data.email, name: data.name, locale: data.locale, kind: "individual", title: course.title, login }),
+    };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
   });
 }
 
@@ -271,7 +352,13 @@ export function handlePractice(deps: Deps, formData: FormData): Promise<ActionRe
     if (!pkg) return { result: fail({ package: "required" }) };
     await storeRequest(deps.db, "practice", { ...data, package: pkg.code });
     const summary = practiceSummary({ ...data, package: `${pick(pkg.name, "et")} (${pkg.code})` }, admin(deps));
-    return { result: OK, notify: { ...summary, replyTo: data.email } };
+    // the practice form has no "Loo mulle kohe konto": its confirmation never carries a login code
+    const confirm: Confirmation = {
+      email: data.email,
+      wantsAccount: false,
+      mail: () => requestConfirmationMail({ siteUrl: deps.siteUrl, email: data.email, name: data.name, locale: data.locale, kind: "practice", title: pkg.name }),
+    };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
   });
 }
 
@@ -294,7 +381,22 @@ export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionRe
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
       admin(deps),
     );
-    return { result: OK, notify: { ...summary, replyTo: data.email } };
+    // the waitlist form has no "Loo mulle kohe konto" either
+    const confirm: Confirmation = {
+      email: data.email,
+      wantsAccount: false,
+      mail: () =>
+        requestConfirmationMail({
+          siteUrl: deps.siteUrl,
+          email: data.email,
+          name: data.name,
+          locale: data.locale,
+          kind: "waitlist",
+          title: course.title,
+          session: { startsAt: session.startsAt, city: session.city ?? "", venue: session.venue ?? "" },
+        }),
+    };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
   });
 }
 

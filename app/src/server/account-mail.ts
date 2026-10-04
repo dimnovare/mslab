@@ -1,4 +1,9 @@
-import { fill } from "@/i18n/format";
+import { firstName, groupIban, hasPrepayment, paymentReference, type PrepaymentInfo } from "@/domain/account-cards";
+import { formatEUR } from "@/domain/money";
+import { prepaymentDue } from "@/domain/registration";
+import { pick, type I18n } from "@/i18n/field";
+import { fill, formatDate, formatTime } from "@/i18n/format";
+import { href } from "@/i18n/href";
 import { getDict, type Locale } from "@/i18n/locales";
 import type { Mail } from "./notify";
 
@@ -7,6 +12,9 @@ import type { Mail } from "./notify";
 // from the same parts: HTML (the code large, the button) and, as the fallback for clients that show no HTML, plain text.
 // The subject carries the code, so a phone shows it in the notification.
 // The deletion e-mail (deletionMail) is the same card with two lines of text and no button.
+// The confirmation e-mails to a visitor who registered or sent a request (registrationConfirmationMail,
+// requestConfirmationMail) are the same card again: what was received, the next step and one button, "Ava minu konto" or,
+// when the visitor ticked "Loo mulle kohe konto", the live login code with "Logi sisse" in its place.
 
 /**
  * The link in the login e-mail: it signs in the device that opens it (api/konto verify). `pageLocale` is the language of
@@ -15,6 +23,14 @@ import type { Mail } from "./notify";
  */
 export const verifyLink = (siteUrl: string, token: string, pageLocale: Locale = "et"): string =>
   `${siteUrl.replace(/\/+$/, "")}/api/konto/verify?t=${encodeURIComponent(token)}${pageLocale === "ru" ? "&l=ru" : ""}`;
+
+/**
+ * "Ava minu konto": the login page of `locale` with the address filled in (components/account/login-address.ts reads it once).
+ * The address is in the FRAGMENT, never a query: a fragment does not reach any server or cache, and an account page with a
+ * query is refused by the middleware. encodeURIComponent is needed: a raw "+" in a fragment would be read back as a space.
+ */
+export const accountLink = (siteUrl: string, email: string, locale: Locale = "et"): string =>
+  `${siteUrl.replace(/\/+$/, "")}${href(locale, "/konto/sisene")}#email=${encodeURIComponent(email)}`;
 
 const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -49,8 +65,28 @@ function loginText(mail: MailTexts, code: string, link: string): string {
 
 const textStyle = (size: number, extra = "") => `font:400 ${size}px/1.5 ${FONT};color:${INK};${extra}`;
 const row = (style: string, content: string) => `<tr><td style="${style}">${content}</td></tr>`;
-const greetingRow = (mail: MailTexts) => row(`padding:32px 28px 0;font:600 22px/1.3 ${FONT};color:${INK};`, esc(mail.greeting));
+const greetingRow = (greeting: string) => row(`padding:32px 28px 0;font:600 22px/1.3 ${FONT};color:${INK};`, esc(greeting));
 const signatureRow = (mail: MailTexts) => row(`padding:24px 28px 32px;${textStyle(14)}`, esc(mail.signature));
+
+/** A paragraph of 16 px text. */
+const paragraphRow = (text: string, top = 16) => row(`padding:${top}px 28px 0;${textStyle(16)}`, esc(text));
+
+/** The code large on its own line, in the lilac box of the site's newsletter surface; the whole code is selected by one tap. */
+const codeRow = (code: string) =>
+  row("padding:12px 28px 0;", `<div style="background:${LILAC};border-radius:12px;padding:16px 0 16px 8px;text-align:center;font:600 32px/1.2 ${FONT};letter-spacing:8px;color:${INK};-webkit-user-select:all;user-select:all;">${esc(code)}</div>`);
+
+/** The one button of an e-mail: an ink pill (the site's primary button), 48 px tall, with Outlook's own padding. */
+const buttonRow = (link: string, label: string) =>
+  row(
+    "padding:16px 28px 0;",
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td align="center" height="48" bgcolor="${INK}" style="background:${INK};border-radius:99px;mso-padding-alt:0 32px;">` +
+      `<a href="${esc(link)}" style="display:inline-block;padding:0 32px;height:48px;line-height:48px;font:600 16px/48px ${FONT};color:${PAPER};text-decoration:none;border-radius:99px;">${esc(label)}</a>` +
+      "</td></tr></table>",
+  );
+
+/** The link written out small below the button, for clients that do not show buttons. */
+const linkRow = (link: string) =>
+  row(`padding:12px 28px 0;text-align:center;${textStyle(12, "word-break:break-all;")}`, `<a href="${esc(link)}" style="color:${INK};text-decoration:underline;">${esc(link)}</a>`);
 
 /**
  * The HTML document of an e-mail: a centred card (a 480 px table on the site's canvas colour) holding `rows`. Tables and inline
@@ -74,18 +110,13 @@ function mailCard(subject: string, locale: Locale, rows: string[]): string {
  */
 function loginHtml(mail: MailTexts, subject: string, locale: Locale, code: string, link: string): string {
   return mailCard(subject, locale, [
-    greetingRow(mail),
-    row(`padding:16px 28px 0;${textStyle(16)}`, esc(mail.codeIntro)),
-    row("padding:12px 28px 0;", `<div style="background:${LILAC};border-radius:12px;padding:16px 0 16px 8px;text-align:center;font:600 32px/1.2 ${FONT};letter-spacing:8px;color:${INK};-webkit-user-select:all;user-select:all;">${esc(code)}</div>`),
-    row(`padding:16px 28px 0;${textStyle(16)}`, esc(mail.useCode)),
-    row(`padding:12px 28px 0;${textStyle(16)}`, esc(mail.orLink)),
-    row(
-      "padding:16px 28px 0;",
-      `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td align="center" height="48" bgcolor="${INK}" style="background:${INK};border-radius:99px;mso-padding-alt:0 32px;">` +
-        `<a href="${esc(link)}" style="display:inline-block;padding:0 32px;height:48px;line-height:48px;font:600 16px/48px ${FONT};color:${PAPER};text-decoration:none;border-radius:99px;">${esc(mail.button)}</a>` +
-        "</td></tr></table>",
-    ),
-    row(`padding:12px 28px 0;text-align:center;${textStyle(12, "word-break:break-all;")}`, `<a href="${esc(link)}" style="color:${INK};text-decoration:underline;">${esc(link)}</a>`),
+    greetingRow(mail.greeting),
+    paragraphRow(mail.codeIntro),
+    codeRow(code),
+    paragraphRow(mail.useCode),
+    paragraphRow(mail.orLink, 12),
+    buttonRow(link, mail.button),
+    linkRow(link),
     row(`padding:24px 28px 0;${textStyle(14)}`, esc(mail.valid)),
     row(`padding:4px 28px 0;${textStyle(14)}`, esc(mail.ignore)),
     signatureRow(mail),
@@ -113,10 +144,208 @@ export function deletionMail(email: string, locale: Locale): Mail {
   const subject = dict.deleted.subject;
   const text = [dict.mail.greeting, "", dict.deleted.line, dict.deleted.kept, "", dict.mail.signature].join("\n");
   const html = mailCard(subject, locale, [
-    greetingRow(dict.mail),
-    row(`padding:16px 28px 0;${textStyle(16)}`, esc(dict.deleted.line)),
-    row(`padding:8px 28px 0;${textStyle(16)}`, esc(dict.deleted.kept)),
+    greetingRow(dict.mail.greeting),
+    paragraphRow(dict.deleted.line),
+    paragraphRow(dict.deleted.kept, 8),
     signatureRow(dict.mail),
   ]);
   return { to: email, subject, text, html };
+}
+
+// ---------- confirmation e-mails to a visitor ----------
+
+/** A live login (server/client-auth.ts issueClientLogin) a confirmation e-mail may carry: the link token and the 6-digit code. */
+export type LoginCode = { token: string; code: string };
+
+/** A session of a course: when and where (the time is Estonian time, whatever the server's own). */
+export type SessionInfo = { startsAt: Date; city: string; venue: string };
+
+/** What the layout shows, in the order of the page: the lead, the course box, then paragraphs and rows of fields. */
+type Section = { text: string } | { fields: [label: string, value: string][] };
+type Confirmation = {
+  email: string;
+  name: string;
+  locale: Locale;
+  siteUrl: string;
+  subject: string;
+  /** "Registreering on vastu võetud." */
+  lead: string;
+  /** The course (or the practice package) in bold, and under it when and where. */
+  box: { title: string; lines: string[] };
+  sections: Section[];
+  login: LoginCode | null;
+};
+
+/** The first line of the e-mail: "Tere, Kati!", or just "Tere!" when the name has no word. */
+function hello(dict: ReturnType<typeof getDict>["account"]["dashboard"], name: string): string {
+  const first = firstName(name);
+  return first ? fill(dict.hello, { name: first }) : dict.helloNoName;
+}
+
+/** The date, time and place of a session as the account's cards say them: "14.11.2026 · 10:00" and "Pärnu, MS LAB stuudio". */
+function sessionLines(s: SessionInfo, locale: Locale): string[] {
+  return [`${formatDate(s.startsAt, locale)} · ${formatTime(s.startsAt, locale)}`, [s.city, s.venue].filter(Boolean).join(", ")].filter(Boolean);
+}
+
+/** A subject is one line, whatever the course's title holds (a non-breaking space stays one). */
+const oneLine = (s: string): string => s.replace(/[^\S ]+/g, " ").trim();
+
+/** The plain-text body: the same parts as the HTML, one block each. */
+function confirmationText(c: Confirmation, greeting: string, mail: MailTexts, link: string): string {
+  const lines = [greeting, "", c.lead, "", c.box.title, ...c.box.lines, ""];
+  for (const section of c.sections) {
+    if ("text" in section) lines.push(section.text, "");
+    else lines.push(...section.fields.map(([label, value]) => `${label}: ${value}`), "");
+  }
+  if (c.login) lines.push(mail.codeIntro, "", c.login.code, "", `${mail.button}:`, link, "", mail.valid, "");
+  else lines.push(`${mail.confirm.open}:`, link, "");
+  lines.push(mail.signature);
+  return lines.join("\n");
+}
+
+/** A soft box on the card (the site's canvas colour, a thin line), as the code's box but quieter. */
+const boxRow = (inner: string, top: number) =>
+  row(`padding:${top}px 28px 0;`, `<div style="background:${CANVAS};border:1px solid ${LINE};border-radius:12px;padding:14px 16px;${textStyle(16)}">${inner}</div>`);
+
+function confirmationHtml(c: Confirmation, greeting: string, mail: MailTexts, link: string): string {
+  const rows = [
+    greetingRow(greeting),
+    paragraphRow(c.lead),
+    boxRow(
+      `<div style="font:600 18px/1.4 ${FONT};color:${INK};">${esc(c.box.title)}</div>` + c.box.lines.map((line) => `<div>${esc(line)}</div>`).join(""),
+      12,
+    ),
+  ];
+  for (const section of c.sections) {
+    if ("text" in section) rows.push(paragraphRow(section.text));
+    else
+      rows.push(
+        boxRow(
+          section.fields
+            .map(
+              ([label, value], i) =>
+                `<div style="${textStyle(13, i ? "padding-top:8px;" : "")}">${esc(label)}</div><div style="font:600 16px/1.4 ${FONT};color:${INK};word-break:break-word;">${esc(value)}</div>`,
+            )
+            .join(""),
+          12,
+        ),
+      );
+  }
+  // One button: "Ava minu konto", or with a live login the code and "Logi sisse" (and the link written out, as in the login e-mail).
+  if (c.login) rows.push(paragraphRow(mail.codeIntro, 24), codeRow(c.login.code), buttonRow(link, mail.button), linkRow(link), row(`padding:24px 28px 0;${textStyle(14)}`, esc(mail.valid)));
+  else rows.push(buttonRow(link, mail.confirm.open));
+  rows.push(signatureRow(mail));
+  return mailCard(c.subject, c.locale, rows);
+}
+
+/** The e-mail of a confirmation: HTML with the plain-text fallback. The button's link is the login (with a code) or the login page. */
+function confirmationMail(c: Confirmation): Mail {
+  const dict = getDict(c.locale).account;
+  const greeting = hello(dict.dashboard, c.name);
+  const link = c.login ? verifyLink(c.siteUrl, c.login.token, c.locale) : accountLink(c.siteUrl, c.email, c.locale);
+  return {
+    to: c.email,
+    subject: c.subject,
+    text: confirmationText(c, greeting, dict.mail, link),
+    html: confirmationHtml(c, greeting, dict.mail, link),
+  };
+}
+
+export type RegistrationConfirmationInput = {
+  siteUrl: string;
+  /** The visitor's address, as stored (trimmed, lower case). */
+  email: string;
+  name: string;
+  locale: Locale;
+  registrationId: number;
+  course: I18n;
+  session: SessionInfo;
+  paymentChoice: "full" | "half";
+  /** What the registration is measured against (domain/registration.ts registrationPrice), cents; null when the course has no such price. */
+  priceCents: number | null;
+  /** The admin's prepayment setting (client-data.ts parsePrepayment); without a receiver and an IBAN Maria sends an invoice. */
+  prepayment: PrepaymentInfo | null;
+  /** A live login for the address, when the visitor ticked "Loo mulle kohe konto" and one could be issued. */
+  login: LoginCode | null;
+};
+
+/**
+ * The confirmation of a group registration: what was received, the course and its date and place, the next step (the
+ * prepayment amount and where to pay it, or "Maria saadab sulle arve …") and one button. The next-step sentence is the
+ * dashboard card's (`account.next.pay` / `invoice`, domain/account-cards.ts nextStep), the payment rows are the card's own
+ * (components/account/PrepaymentInfo.tsx), and "Koht kinnitatakse …" is the registration form's.
+ */
+export function registrationConfirmationMail(input: RegistrationConfirmationInput): Mail {
+  const dict = getDict(input.locale);
+  const mail = dict.account.mail;
+  const title = pick(input.course, input.locale);
+  const due = input.priceCents === null ? 0 : prepaymentDue(input.priceCents, input.paymentChoice);
+  const pay = hasPrepayment(input.prepayment) && due > 0 ? input.prepayment : null;
+  const sections: Section[] = [];
+  if (pay) {
+    const labels = dict.account.dashboard.payment;
+    const amount = formatEUR(due, input.locale);
+    sections.push(
+      { text: fill(dict.account.next.pay, { amount }) },
+      {
+        fields: ([
+          [labels.receiver, pay.receiver],
+          [labels.iban, groupIban(pay.iban)],
+          [labels.bank, pay.bank],
+          [labels.amount, amount],
+          [labels.reference, paymentReference(pay, input.registrationId)],
+        ] as [string, string][]).filter(([, value]) => value.trim() !== ""),
+      },
+    );
+  } else {
+    sections.push({ text: dict.account.next.invoice });
+  }
+  sections.push({ text: dict.course.confirmAfterPrepayment });
+  return confirmationMail({
+    email: input.email,
+    name: input.name,
+    locale: input.locale,
+    siteUrl: input.siteUrl,
+    subject: oneLine(fill(mail.confirm.subjectRegistration, { title })),
+    lead: mail.confirm.registration,
+    box: { title, lines: sessionLines(input.session, input.locale) },
+    sections,
+    login: input.login,
+  });
+}
+
+export type RequestConfirmationInput = {
+  siteUrl: string;
+  email: string;
+  name: string;
+  locale: Locale;
+  /** An individual-course request, a practice request or a waitlist entry. */
+  kind: "individual" | "practice" | "waitlist";
+  /** The course, or the practice package. */
+  title: I18n;
+  /** The date a waitlist entry is for. */
+  session?: SessionInfo;
+  /** A live login for the address (only a form with "Loo mulle kohe konto" can ask for one: the individual request). */
+  login?: LoginCode | null;
+};
+
+/**
+ * The short confirmation of an individual, practice or waitlist request: what was received, the course (the package) and,
+ * for a waitlist entry, its date, "Maria võtab sinuga ühendust." and one button.
+ */
+export function requestConfirmationMail(input: RequestConfirmationInput): Mail {
+  const mail = getDict(input.locale).account.mail;
+  const title = pick(input.title, input.locale);
+  const subject = input.kind === "waitlist" ? mail.confirm.subjectWaitlist : mail.confirm.subjectRequest;
+  return confirmationMail({
+    email: input.email,
+    name: input.name,
+    locale: input.locale,
+    siteUrl: input.siteUrl,
+    subject: oneLine(fill(subject, { title })),
+    lead: input.kind === "waitlist" ? mail.confirm.waitlist : mail.confirm.request,
+    box: { title, lines: input.session ? sessionLines(input.session, input.locale) : [] },
+    sections: [{ text: mail.confirm.contact }],
+    login: input.login ?? null,
+  });
 }

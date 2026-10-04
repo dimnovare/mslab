@@ -410,6 +410,21 @@ export const et = {
       valid: "Kood ja link kehtivad 30 minutit.",
       ignore: "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.",
       signature: "MS LAB Koolituskeskus",
+      // The e-mail to a visitor who registered or sent a request (account-mail.ts registrationConfirmationMail,
+      // requestConfirmationMail). {title} is the course or the practice package. The next-step sentence, the payment
+      // rows and "Koht kinnitatakse …" are the account's own (`next`, `dashboard.payment`, `course.confirmAfterPrepayment`),
+      // so the e-mail and the dashboard say the same. With a login code the e-mail has the code and "Logi sisse" (`button`)
+      // instead of `open`: one button only.
+      confirm: {
+        subjectRegistration: "Registreering on vastu võetud — {title}",
+        subjectRequest: "Päring on vastu võetud — {title}",
+        subjectWaitlist: "Oled ootenimekirjas — {title}",
+        registration: "Registreering on vastu võetud.",
+        request: "Päring on vastu võetud.",
+        waitlist: "Oled ootenimekirjas.",
+        contact: "Maria võtab sinuga ühendust.",
+        open: "Ava minu konto",
+      },
     },
     // The e-mail that confirms an account deletion (account-mail.ts deletionMail): the greeting and signature are `mail`'s.
     deleted: {

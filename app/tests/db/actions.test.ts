@@ -2,9 +2,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 import { eq, sql } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
-import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
+import { clientLoginTokens, courses, courseSessions, mailQuota, practicePackages, registrations, requests, settings, subscribers } from "@/db/schema";
 import type { PublicChange } from "@/server/cache-targets";
+import { LOGIN_MAIL_DAILY_CAP, issueClientLogin, redeemClientCode } from "@/server/client-auth";
 import type { Env } from "@/server/notify";
+import { sha256 } from "@/server/token";
 import {
   confirmSubscriber,
   createRegistration,
@@ -71,6 +73,9 @@ beforeEach(async () => {
   await db.delete(requests);
   await db.delete(subscribers);
   await db.delete(registrations).where(eq(registrations.email, "test@example.com"));
+  await db.delete(clientLoginTokens);
+  await db.delete(mailQuota);
+  await db.delete(settings).where(eq(settings.key, "prepayment"));
 });
 
 afterEach(() => {
@@ -94,7 +99,7 @@ function setup(opts: { secrets?: boolean; ip?: string; kv?: ReturnType<typeof fa
 function outbox() {
   vi.spyOn(console, "info").mockImplementation(() => {});
   const f = stubFetch((url) => (url.includes("resend") ? Response.json({ id: "email_1" }) : Response.json({ ok: true })));
-  const mails = () => f.calls.filter((x) => x.url.includes("resend")).map((x) => x.body as { to: string; subject: string; text: string; reply_to?: string });
+  const mails = () => f.calls.filter((x) => x.url.includes("resend")).map((x) => x.body as { to: string; subject: string; text: string; html?: string; reply_to?: string });
   const pings = () => f.calls.filter((x: FetchCall) => x.url.includes("telegram")).map((x) => (x.body as { text: string }).text);
   return { mails, pings };
 }
@@ -475,5 +480,261 @@ describe("newsletter double opt-in", () => {
     expect(await confirmSubscriber(db, "x".repeat(43), NOW)).toBeNull();
     expect(await confirmSubscriber(db, "", NOW)).toBeNull();
     expect(await confirmSubscriber(db, "' or 1=1 --", NOW)).toBeNull();
+  });
+});
+
+describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
+  const PAY = { receiver: "MS LAB Koolituskeskus OÜ", iban: "ee382200221020145685", bank: "Swedbank", referencePrefix: "MSLAB-" };
+  const to = <T extends { to: string }>(mails: T[], address: string): T[] => mails.filter((m) => m.to === address);
+  const codeOf = (text: string) => /^\d{6}$/m.exec(text)?.[0];
+  const tokenOf = (text: string) => /\/api\/konto\/verify\?t=([A-Za-z0-9_-]+)/.exec(text)?.[1];
+  const buttons = (html: string | undefined) => (html?.match(/mso-padding-alt/g) ?? []).length;
+  const quota = async () => (await db.select().from(mailQuota)).map((r) => r.sent);
+  const logs = () => (["error", "warn", "info", "log"] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+
+  afterEach(async () => {
+    await db.delete(registrations).where(sql`${registrations.email} like '%@example.test'`);
+  });
+
+  test("a registration queues the confirmation with Maria's notification: after the response, in the visitor's language, 'Ava minu konto' with the address pre-filled", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    expect(await handleRegistration(deps, group({ locale: "et" }))).toEqual({ ok: true });
+    expect(mails()).toHaveLength(0); // after the response
+    await flush();
+    expect(mails()).toHaveLength(2);
+    expect(mails()[0].to).toBe("maria@example.com"); // Maria's notification is the first of the two
+    const [mail] = to(mails(), "test@example.com");
+    expect(mail.subject).toBe("Registreering on vastu võetud — Kulmude baaskoolitus");
+    expect(mail.reply_to).toBeUndefined();
+    for (const line of ["Tere, Test!", "Registreering on vastu võetud.", "Kulmude baaskoolitus", "14.11.2026 · 10:00", "Pärnu, MS LAB stuudio", "Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.", "Ava minu konto:", "https://mslab.example/konto/sisene#email=test%40example.com"])
+      expect(mail.text.split("\n"), line).toContain(line);
+    // no prepayment setting: Maria sends an invoice
+    expect(mail.text).toContain("Maria saadab sulle arve ettemaksu tasumiseks.");
+    // one button, to the login page; no login was issued and no login mail counted
+    expect(buttons(mail.html)).toBe(1);
+    expect(mail.html).toContain(">Ava minu konto</a>");
+    expect(mail.text).not.toContain("/api/konto/verify");
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(0);
+    expect(await quota()).toEqual([]);
+  });
+
+  test("with the prepayment instructions: the amount for the choice, the IBAN in groups of four, the reference with the registration's number", async () => {
+    const { mails } = outbox();
+    await db.insert(settings).values({ key: "prepayment", value: PAY });
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group({ locale: "et" })); // half of 390 €
+    await flush();
+    await handleRegistration(deps, group({ locale: "et", payment: "full", session: String(ids.other) }));
+    await flush();
+    const rows = (await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).sort((a, b) => a.id - b.id);
+    const [half, full] = to(mails(), "test@example.com");
+    for (const line of ["Koha kinnitamiseks tasu ettemaks 195 €.", "Saaja: MS LAB Koolituskeskus OÜ", "IBAN: EE38 2200 2210 2014 5685", "Pank: Swedbank", "Summa: 195 €", `Selgitus: MSLAB-${rows[0].id}`])
+      expect(half.text.split("\n"), line).toContain(line);
+    expect(full.text.split("\n")).toEqual(expect.arrayContaining(["Koha kinnitamiseks tasu ettemaks 390 €.", "Summa: 390 €", `Selgitus: MSLAB-${rows[1].id}`, "Tartu"]));
+    expect(half.text).not.toContain("Maria saadab sulle arve");
+  });
+
+  test("Russian registration: the Russian texts and the Russian login page", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group()); // the form's locale is ru
+    await flush();
+    const [mail] = to(mails(), "test@example.com");
+    expect(mail.subject).toBe("Регистрация принята — Kulmude baaskoolitus"); // the course has no Russian title yet
+    expect(mail.text).toContain("Мария пришлёт вам счёт для оплаты предоплаты.");
+    expect(mail.text).toContain("https://mslab.example/ru/konto/sisene#email=test%40example.com");
+    expect(mail.html).toContain('lang="ru"');
+  });
+
+  test("'Loo mulle kohe konto' ticked: a login is issued, its code and link are in the e-mail (one button, 'Logi sisse'), and it counts once", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group({ locale: "et", account: "on" }));
+    await flush();
+    const [mail] = to(mails(), "test@example.com");
+    const code = codeOf(mail.text)!;
+    const token = tokenOf(mail.text)!;
+    expect(code).toMatch(/^\d{6}$/);
+    const [row] = await db.select().from(clientLoginTokens);
+    expect(row.email).toBe("test@example.com");
+    expect(row.hash).toBe(await sha256(token));
+    expect(row.expiresAt).toEqual(new Date(NOW.getTime() + 30 * 60_000));
+    expect(mail.text).toContain("Kood ja link kehtivad 30 minutit.");
+    expect(mail.text).not.toContain("Ava minu konto");
+    expect(buttons(mail.html)).toBe(1);
+    expect(mail.html).toContain(">Logi sisse</a>");
+    expect(mail.html).not.toContain("Ava minu konto");
+    // it is a real login: the code in the mail signs the visitor in, and the registration part is in the mail as well
+    expect(mail.text).toContain("Registreering on vastu võetud.");
+    expect(await redeemClientCode(db, "test@example.com", code, NOW)).toMatchObject({ isNew: true });
+    expect(await quota()).toEqual([1]);
+    // Maria's notification still says whether she ticked it
+    expect(to(mails(), "maria@example.com")[0].text).toContain("Loo konto: jah");
+  });
+
+  test("a Russian registration's login link opens the Russian login page on a failure (&l=ru)", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group({ account: "on" }));
+    await flush();
+    expect(to(mails(), "test@example.com")[0].text).toMatch(/\/api\/konto\/verify\?t=[A-Za-z0-9_-]+&l=ru/);
+  });
+
+  test("the address has its 3 live logins already: the confirmation goes out without a code and uses no quota", async () => {
+    const { mails } = outbox();
+    for (let i = 0; i < 3; i++) expect(await issueClientLogin(db, "test@example.com", NOW)).not.toBeNull();
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group({ locale: "et", account: "on" }));
+    await flush();
+    const [mail] = to(mails(), "test@example.com");
+    expect(mail.text).toContain("Ava minu konto:");
+    expect(mail.text).not.toContain("/api/konto/verify");
+    expect(codeOf(mail.text)).toBeUndefined();
+    expect(buttons(mail.html)).toBe(1);
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(3);
+    expect(await quota()).toEqual([]);
+  });
+
+  test("the day's login-mail cap is reached: the confirmation goes out without a code, and the count stays at the cap", async () => {
+    const { mails } = outbox();
+    await db.insert(mailQuota).values({ day: "2026-10-01", sent: LOGIN_MAIL_DAILY_CAP });
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group({ locale: "et", account: "on" }));
+    await handleRegistration(deps, group({ locale: "et", session: String(ids.other) })); // no account box: needs no code, counts nothing
+    await flush();
+    const visitor = to(mails(), "test@example.com");
+    expect(visitor).toHaveLength(2);
+    for (const mail of visitor) {
+      expect(mail.text).toContain("Ava minu konto:");
+      expect(mail.text).not.toContain("/api/konto/verify");
+      expect(buttons(mail.html)).toBe(1);
+    }
+    expect(await quota()).toEqual([LOGIN_MAIL_DAILY_CAP]);
+  });
+
+  test("a sample address (@example.test) is never mailed: no confirmation, no login, no quota; Maria is still told", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, group({ email: "Kati+Test@Example.test", account: "on" }));
+    await handleIndividual(deps, form({ course: "kulmud", name: "Kati", email: "kati@example.test", phone: "+372 5555 5555", period: "Detsember", account: "on", terms: "on" }));
+    await handlePractice(deps, form({ package: "MINI", name: "Kati", email: "kati@example.test", phone: "+372 5555 5555", times: "õhtuti" }));
+    await handleWaitlist(deps, form({ session: String(ids.full), name: "Kati", email: "kati@example.test" }));
+    await flush();
+    expect(mails().map((m) => m.to)).toEqual(["maria@example.com", "maria@example.com", "maria@example.com", "maria@example.com"]);
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(0);
+    expect(await quota()).toEqual([]);
+    expect(await db.select().from(registrations).where(eq(registrations.email, "kati+test@example.test"))).toHaveLength(1); // stored all the same
+  });
+
+  test("without Resend (local development): stored, nothing sent, nothing to fetch", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = stubFetch();
+    const { deps, flush } = setup();
+    expect(await handleRegistration(deps, group({ account: "on", session: String(ids.other) }))).toEqual({ ok: true });
+    await flush();
+    expect(f.calls).toHaveLength(0);
+    expect(info.mock.calls.flat().filter((m) => m === "[notify] RESEND_API_KEY is not set: e-mail skipped")).toHaveLength(2); // Maria's and the visitor's
+  });
+
+  test("individual request: the short confirmation, 'Maria võtab sinuga ühendust.' and the button; the account box adds a code", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    const fields = { course: "kulmud", name: "Test", email: "test@example.com", phone: "+372 5555 5555", period: "Detsembri teine pool", terms: "on" };
+    await handleIndividual(deps, form(fields));
+    await flush();
+    const [plain] = to(mails(), "test@example.com");
+    expect(plain.subject).toBe("Päring on vastu võetud — Kulmude baaskoolitus");
+    expect(plain.text.split("\n")).toEqual(expect.arrayContaining(["Päring on vastu võetud.", "Kulmude baaskoolitus", "Maria võtab sinuga ühendust.", "Ava minu konto:", "https://mslab.example/konto/sisene#email=test%40example.com"]));
+    expect(buttons(plain.html)).toBe(1);
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(0);
+
+    await handleIndividual(deps, form({ ...fields, account: "on", locale: "ru" }));
+    await flush();
+    const withCode = to(mails(), "test@example.com")[1];
+    expect(withCode.subject).toBe("Запрос принят — Kulmude baaskoolitus");
+    expect(codeOf(withCode.text)).toMatch(/^\d{6}$/);
+    expect(withCode.text).not.toContain("#email=");
+    expect(buttons(withCode.html)).toBe(1);
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(1);
+    expect(await quota()).toEqual([1]);
+  });
+
+  test("practice request and waitlist entry: the short confirmation each, never a code", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    await handlePractice(deps, form({ package: "MINI", name: "Test Õpilane", email: "test@example.com", phone: "+372 5555 5555", times: "Tööpäeva õhtud", locale: "ru" }));
+    await handleWaitlist(deps, form({ session: String(ids.full), name: "Test", email: "test@example.com" }));
+    await flush();
+    const [practice, waitlist] = to(mails(), "test@example.com");
+    expect(practice.subject).toBe("Запрос принят — MINI");
+    expect(practice.text.split("\n")).toEqual(expect.arrayContaining(["Здравствуйте, Test!", "Запрос принят.", "MINI", "Мария свяжется с вами.", "Открыть мой кабинет:", "https://mslab.example/ru/konto/sisene#email=test%40example.com"]));
+    expect(waitlist.subject).toBe("Oled ootenimekirjas — Kulmude baaskoolitus");
+    expect(waitlist.text.split("\n")).toEqual(expect.arrayContaining(["Oled ootenimekirjas.", "12.12.2026 · 10:00", "Pärnu, MS LAB stuudio", "Maria võtab sinuga ühendust.", "Ava minu konto:"]));
+    for (const mail of [practice, waitlist]) expect(buttons(mail.html)).toBe(1);
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(0);
+    expect(await quota()).toEqual([]);
+  });
+
+  test("a refused or spam submission sends no confirmation and issues no login", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true, ip: "198.51.100.77" });
+    expect(await handleRegistration(deps, group({ account: "on", session: String(ids.full) }))).toEqual({ ok: false, errors: { session: "full" } });
+    expect(await handleRegistration(deps, group({ account: "on", website: "bot" }))).toEqual({ ok: true }); // honeypot: pretends
+    await flush();
+    expect(mails()).toHaveLength(0);
+    expect(await db.select().from(clientLoginTokens)).toHaveLength(0);
+  });
+
+  test("a failing visitor e-mail never fails the submission or Maria's notification; the log holds no address, name or text", async () => {
+    const [error, warn, info, log] = logs();
+    const f = stubFetch((url, init) =>
+      url.includes("resend") && !String(init?.body).includes("maria@example.com") ? new Response("{}", { status: 500 }) : Response.json({ id: "email_1" }),
+    );
+    const { deps, flush } = setup({ secrets: true });
+    expect(await handleRegistration(deps, group({ locale: "et", account: "on" }))).toEqual({ ok: true });
+    await expect(flush()).resolves.toBeDefined();
+    expect(f.calls.filter((c) => c.url.includes("resend"))).toHaveLength(2); // Maria's went out, the visitor's was refused
+    expect(error.mock.calls.flat().map(String).join("\n")).toContain("[notify] Resend rejected the e-mail");
+    expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
+    const logged = [error, warn, info, log].flatMap((spy) => spy.mock.calls.flat()).map(String).join("\n");
+    for (const value of ["test@example.com", "Test Õpilane", "Kulmude", "Koolituskeskus"]) expect(logged).not.toContain(value);
+  });
+
+  test("a database failure while issuing the login still sends the confirmation, without the code (and logs only the error class)", async () => {
+    const { mails } = outbox();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await db.execute(sql`alter table client_login_tokens rename to client_login_tokens_away`);
+    try {
+      const { deps, flush } = setup({ secrets: true });
+      expect(await handleRegistration(deps, group({ locale: "et", account: "on" }))).toEqual({ ok: true });
+      await flush();
+      const [mail] = to(mails(), "test@example.com");
+      expect(mail.text).toContain("Ava minu konto:");
+      expect(mail.text).not.toContain("/api/konto/verify");
+      const logged = error.mock.calls.flat().map(String).join("\n");
+      expect(logged).toContain("[forms] register: login code unavailable, confirmation without it: DrizzleQueryError (code 42P01)");
+      expect(logged).not.toContain("test@example.com");
+    } finally {
+      await db.execute(sql`alter table client_login_tokens_away rename to client_login_tokens`);
+    }
+    expect(await quota()).toEqual([]);
+  });
+
+  test("the confirmation is built after the response: a failure building it (the settings table gone) is logged, Maria is still told, the submission stays stored", async () => {
+    const { mails } = outbox();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await db.execute(sql`alter table settings rename to settings_away`);
+    try {
+      const { deps, flush } = setup({ secrets: true });
+      expect(await handleRegistration(deps, group({ locale: "et" }))).toEqual({ ok: true });
+      await expect(flush()).resolves.toBeDefined();
+      expect(to(mails(), "maria@example.com")).toHaveLength(1);
+      expect(to(mails(), "test@example.com")).toHaveLength(0);
+      expect(error.mock.calls.flat().map(String).join("\n")).toContain("[forms] register: confirmation e-mail failed: DrizzleQueryError (code 42P01)");
+    } finally {
+      await db.execute(sql`alter table settings_away rename to settings`);
+    }
+    expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
   });
 });
