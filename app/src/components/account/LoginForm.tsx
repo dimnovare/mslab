@@ -7,6 +7,8 @@ import { isEmail, normalizeEmail, typoSuggestion } from "@/domain/email";
 import type { Dict } from "@/i18n/dict/et";
 import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
+import { forgetAccountFavourites } from "@/lib/favourites";
+import { sendJson } from "@/lib/json-request";
 import { readLoginAddress } from "./login-address";
 import { PENDING_KEY, rememberEmail, rememberedEmail } from "./useAccount";
 import styles from "./LoginForm.module.css";
@@ -26,22 +28,6 @@ type SendError = "email" | "rate" | "server";
 type CodeError = "short" | "code" | "expired" | "rate" | "server";
 type FocusTarget = "email" | "code" | "resend" | "typo";
 type Pending = { sentTo: string; sentAt: number };
-
-/** A same-origin JSON POST: its status (0 when there was no answer) and its body ({} when it is not JSON). */
-async function post(path: string, body: object): Promise<{ status: number; data: Record<string, unknown> }> {
-  try {
-    const res = await fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data: unknown = await res.json().catch(() => null);
-    return { status: res.status, data: typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {} };
-  } catch {
-    return { status: 0, data: {} };
-  }
-}
 
 /**
  * The code step this tab is in, when a code went out less than 30 minutes ago: a phone that dropped the tab (or a reload)
@@ -159,7 +145,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     if (busy.current) return;
     busy.current = true;
     setSending(true);
-    const { status, data } = await post("/api/konto/login", { email: address, locale });
+    const { status, data } = await sendJson("/api/konto/login", { email: address, locale });
     busy.current = false;
     setSending(false);
     if (status === 200 && data.ok === true) {
@@ -189,9 +175,10 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     setCodeError(null);
     setResent(false);
     // the page's language: an account this login creates speaks it (an existing one keeps its own)
-    const { status, data } = await post("/api/konto/code", { email: sentTo, code: digits, locale });
+    const { status, data } = await sendJson("/api/konto/code", { email: sentTo, code: digits, locale });
     if (status === 200 && data.ok === true) {
       keepPendingCode(null);
+      forgetAccountFavourites(); // a previous session's copy of the favourites must not show for this account
       // The field stays as it is while the page opens. replace, not assign: Back from "Minu konto" goes to the page before
       // the login, never to a code that is used up (nor to this form as it was left, from the browser's page cache).
       window.location.replace(locale === "ru" ? "/ru/konto" : "/konto");

@@ -410,9 +410,9 @@ describe("deletion e-mail", () => {
   test("Russian: the same lines in Russian", () => {
     const mail = deletionMail("kati@example.test", "ru");
     expect(mail.subject).toBe("Личный кабинет MS LAB удалён");
-    expect(mail.text).toBe(["Здравствуйте!", "", "Ваш личный кабинет MS LAB удалён.", "Ваши регистрации остаются у Марии.", "", "MS LAB Учебный центр"].join("\n"));
+    expect(mail.text).toBe(["Здравствуйте!", "", "Ваш личный кабинет MS LAB удалён.", "Ваши регистрации остаются у\u00a0Марии.", "", "MS LAB Учебный центр"].join("\n"));
     expect(mail.html).toContain('lang="ru"');
-    expect(mail.html).toContain("Ваши регистрации остаются у Марии.");
+    expect(mail.html).toContain("Ваши регистрации остаются у\u00a0Марии.");
   });
 
   test("the HTML has no button and no link, no resources, and only the site's colours", () => {

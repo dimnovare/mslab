@@ -232,7 +232,7 @@ describe("Kustuta konto", () => {
     localStorage.setItem("mslab-email", "kati@example.test");
     localStorage.setItem("mslab-fav", '["x"]'); // the browser's own list (not the account's) stays
     sessionStorage.setItem("mslab-login-code", JSON.stringify({ sentTo: "kati@example.test", sentAt: Date.now() }));
-    sessionStorage.setItem("mslab-account-fav", '["kulmude-lami"]');
+    localStorage.setItem("mslab-account-fav", '["kulmude-lami"]');
     sessionStorage.setItem("mslab-change-sent", JSON.stringify([{ id: 1, startsAt: "2026-12-01T08:00:00.000Z", at: Date.now() }]));
     const told = vi.fn();
     window.addEventListener(ACCOUNT_EVENT, told);
@@ -242,7 +242,7 @@ describe("Kustuta konto", () => {
     expect(sent("/api/konto/kustuta")).toEqual([{ confirm: true }]);
     expect(localStorage.getItem("mslab-email")).toBeNull();
     expect(sessionStorage.getItem("mslab-login-code")).toBeNull();
-    expect(sessionStorage.getItem("mslab-account-fav")).toBeNull();
+    expect(localStorage.getItem("mslab-account-fav")).toBeNull();
     expect(sessionStorage.getItem("mslab-change-sent")).toBeNull();
     expect(localStorage.getItem("mslab-fav")).toBe('["x"]');
     expect(told).toHaveBeenCalled();
@@ -253,7 +253,7 @@ describe("Kustuta konto", () => {
     api({ locale: "ru" });
     await mount("ru");
     await click($("[data-delete-account]"));
-    expect($("[data-delete-confirm]")?.textContent).toContain("Удалить ваш личный кабинет? Ваши регистрации останутся у Марии.");
+    expect($("[data-delete-confirm]")?.textContent).toContain("Удалить ваш личный кабинет? Ваши регистрации останутся у\u00a0Марии.");
     await click($("[data-delete-yes]"));
     expect(assign).toHaveBeenCalledWith("/ru#konto-kustutatud");
   });

@@ -6,6 +6,9 @@ import styles from "./FlashNotice.module.css";
 
 export type FlashMessage = { tone: "ok" | "warn"; title: string; text?: string };
 
+/** No fragment notices: one object for every render, so the effect below runs once, not on every render. */
+const NO_FRAGMENTS: Record<string, FlashMessage> = {};
+
 /**
  * A short notice after a redirect, fixed at the bottom of the screen until closed: the newsletter confirmation link →
  * /?uudiskiri=kinnitatud, and an account page that sends the visitor here with a fragment (/#konto-kustutatud after the
@@ -18,7 +21,7 @@ export type FlashMessage = { tone: "ok" | "warn"; title: string; text?: string }
 export function FlashNotice({
   param,
   notices,
-  fragments = {},
+  fragments = NO_FRAGMENTS,
   closeLabel,
 }: {
   param: string;

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import { HINT_COOKIE } from "@/lib/account-cookies";
+import { LOGIN_MARK } from "@/lib/account-marks";
 import { afterAccountLoad, forgetAccountFavourites } from "@/lib/favourites";
 import { forgetChangeRequests } from "./sent-requests";
 
@@ -78,6 +79,17 @@ export function forgetAccountMemory(): void {
   forgetChangeRequests();
 }
 
+/**
+ * Minu koolitused opened by the login link (/konto#sisse, server/account-api.ts verify): this browser forgets the copy of the
+ * favourites a previous session left here before the new account's own list is loaded, and the mark leaves the address (a reload
+ * must not repeat it). A login with the code does the same in the login form.
+ */
+function takeLoginMark(): void {
+  if (window.location.hash !== `#${LOGIN_MARK}`) return;
+  forgetAccountFavourites();
+  window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+}
+
 /** The login page of a locale: "/konto/sisene" or "/ru/konto/sisene" (without one, the locale of the address shown). */
 export const loginPath = (locale?: Locale): string =>
   href(locale ?? (/^\/ru(\/|$)/.test(window.location.pathname) ? "ru" : "et"), "/konto/sisene");
@@ -89,7 +101,8 @@ type Loaded<T> = { state: AccountState; data: T | null };
 /**
  * Loads one account endpoint (`path`, e.g. "/api/konto/me") with the session cookie.
  * - 200: "ready" with the JSON as `data`; an `email` in it (or `client.email`, the dashboard's) is remembered for the next login in this browser.
- *   Every 200 also goes through lib/favourites.ts afterAccountLoad: a `favourites` list in it (the dashboard's, Lemmikud's) becomes this
+ *   Every 200 also goes through lib/favourites.ts afterAccountLoad (while the hint cookie still says signed in: an answer that arrives
+ *   after "Logi välja" keeps nothing): a `favourites` list in it (the dashboard's, Lemmikud's) becomes this
  *   tab's copy for the course pages' ♡, and the favourites this browser kept before signing in are merged into the account, once per
  *   browser, whichever account page loads first.
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
@@ -130,6 +143,7 @@ export function useAccount<T>(
   }, []);
 
   useEffect(() => {
+    takeLoginMark();
     const abort = new AbortController();
     const quiet = round.quiet;
     const n = round.n;
@@ -158,7 +172,8 @@ export function useAccount<T>(
         if (typeof email === "string" && email) rememberEmail(email);
         setLoaded({ state: "ready", data: body as T });
         settle(n, true);
-        void afterAccountLoad(body);
+        // signed out meanwhile ("Logi välja" while this answer was on its way, which cleared the hint cookie): nothing is kept
+        if (hasAccountHint()) void afterAccountLoad(body);
         return;
       }
       if (res.status === 401) {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { storable } from "@/lib/storable"; // Postgres rejects a NUL in text and a lone surrogate in jsonb: both would be a 500
 
 // The bodies of the client account's data endpoints (account-api.ts), parsed without trusting anything: a wrong type, a value
 // that is too long or text the database cannot store gives `{ ok: false, error: "<field>" }` (the endpoint's 400), never an
@@ -8,11 +9,6 @@ import { z } from "zod";
 export type Input<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100, version: 64 } as const;
-
-/** Postgres rejects a NUL character in text, and a lone surrogate in a jsonb value (the change request's message): both would be a 500. */
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
-const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-const storable = (s: string): boolean => !CONTROL.test(s) && !LONE_SURROGATE.test(s);
 
 /** One line: inner whitespace (newlines too) becomes single spaces, the ends are trimmed. May be empty. */
 const line = (max: number) =>

@@ -155,7 +155,7 @@ describe("the dashboard with its data", () => {
     expect(et).toMatch(/<a [^>]*href="\/koolitused"[^>]*>Vaata koolitusi/);
     expect(et).not.toContain("data-account-filters");
     const ru = render("ru", { data: dashboard({ cards: [] }) });
-    expect(ru).toContain("У вас пока нет курсов.");
+    expect(ru).toContain("У\u00a0вас пока нет курсов.");
     expect(ru).not.toContain("Здесь ваши курсы.");
     expect(ru).toMatch(/<a [^>]*href="\/ru\/koolitused"[^>]*>Посмотреть курсы/);
   });

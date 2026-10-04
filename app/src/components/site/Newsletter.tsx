@@ -60,7 +60,7 @@ export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }
   const describe = (f: Field) => (error?.field === f ? { "aria-invalid": true, "aria-describedby": `${id}-error` } : {});
 
   return (
-    <section className={styles.newsletter} aria-labelledby={`${id}-title`}>
+    <section className={styles.newsletter} aria-labelledby={`${id}-title`} data-footer-newsletter="">
       <div>
         <p className={styles.eyebrow}>{t.eyebrow}</p>
         <h2 id={`${id}-title`} className={styles.title}>

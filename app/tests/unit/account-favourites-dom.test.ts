@@ -58,6 +58,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   localStorage.clear();
   sessionStorage.clear();
+  document.cookie = "mslab_in=1; path=/"; // signed in, as the page's answers say (the copy is kept only then)
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -66,6 +67,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  document.cookie = "mslab_in=; path=/; max-age=0";
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -88,7 +90,7 @@ describe("the list", () => {
     expect($("[data-favourite-card='kulmude-lami'] [data-course-card]")?.getAttribute("href")).toBe("/koolitused/kulmude-lami");
     expect(removeButton("kulmude-lami")?.getAttribute("aria-label")).toBe("Eemalda lemmikutest: Kulmude LAMI");
     expect(removeButton("kulmude-lami")?.textContent).toBe("Eemalda lemmikutest");
-    expect(sessionStorage.getItem("mslab-account-fav")).toBe('["kulmude-lami","lash-lift-botox"]');
+    expect(localStorage.getItem("mslab-account-fav")).toBe('["kulmude-lami","lash-lift-botox"]');
     expect(posts()).toEqual([]);
   });
 
@@ -97,7 +99,7 @@ describe("the list", () => {
     await mount("ru");
     expect(gets()[0][0]).toBe("/api/konto/lemmikud?l=ru");
     expect($("h1")?.textContent).toBe("Ваше избранное");
-    expect($("[data-favourites-empty]")?.textContent).toContain("Добавляйте курсы в избранное ♡ на странице курса.");
+    expect($("[data-favourites-empty]")?.textContent).toContain("Добавляйте курсы в\u00a0избранное ♡ на странице курса.");
     expect($("[data-favourites-empty] a")?.getAttribute("href")).toBe("/ru/koolitused");
   });
 
@@ -115,7 +117,7 @@ describe("the list", () => {
     expect($("[data-account-favourites]")).toBe(list); // the same page: no reload, no skeleton
     expect(document.activeElement).toBe(removeButton("lash-lift-botox"));
     expect($("[data-favourites-status]")?.textContent).toBe("Eemaldatud lemmikutest: Kulmude LAMI");
-    expect(sessionStorage.getItem("mslab-account-fav")).toBe('["lash-lift-botox"]');
+    expect(localStorage.getItem("mslab-account-fav")).toBe('["lash-lift-botox"]');
     expect(gets()).toHaveLength(1);
 
     await click(removeButton("lash-lift-botox"));
@@ -144,7 +146,7 @@ describe("the list", () => {
     expect($$("[data-favourite-card]")).toHaveLength(2);
     expect($("[data-favourite-card='kulmude-lami']")?.textContent).toContain("Ei õnnestunud eemaldada. Proovi uuesti.");
     expect($("[data-favourite-card='lash-lift-botox']")?.textContent).not.toContain("Ei õnnestunud");
-    expect(sessionStorage.getItem("mslab-account-fav")).toBe('["kulmude-lami","lash-lift-botox"]');
+    expect(localStorage.getItem("mslab-account-fav")).toBe('["kulmude-lami","lash-lift-botox"]');
   });
 
   test("a session that has ended (401) loads the page again, which then says so", async () => {

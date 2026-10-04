@@ -34,7 +34,7 @@ const kept = (page: Page) =>
   page.evaluate(() => ({
     email: localStorage.getItem("mslab-email"),
     code: sessionStorage.getItem("mslab-login-code"),
-    favourites: sessionStorage.getItem("mslab-account-fav"),
+    favourites: localStorage.getItem("mslab-account-fav"),
     sent: sessionStorage.getItem("mslab-change-sent"),
   }));
 
@@ -162,6 +162,9 @@ test("Kustuta konto: quiet, at the very bottom; an inline step (Tühista gives t
   });
   await expect.poll(() => kept(page)).toMatchObject({ email, favourites: "[]" });
   await page.goto("/konto/andmed");
+  // the newsletter on: a subscriber row the deletion must take away
+  await page.getByRole("switch", { name: "Saada mulle uudiskirja" }).click();
+  await expect.poll(() => storedNewsletter(email)).toMatchObject({ email, confirmed: true });
 
   // quiet text at the very bottom: the last control of the page's content
   const del = page.getByRole("button", { name: "Kustuta konto" });
@@ -177,6 +180,21 @@ test("Kustuta konto: quiet, at the very bottom; an inline step (Tühista gives t
   await expect(step.getByRole("button")).toHaveText(["Jah, kustuta", "Tühista"]);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   for (const button of await step.getByRole("button").all()) expect(await height(button)).toBeGreaterThanOrEqual(44);
+  // on a phone the step opens in full view: never under the tab bar at the bottom of the screen. Asked for with "Kustuta konto" just
+  // above the bar, where the step would otherwise open behind it.
+  await step.getByRole("button", { name: "Tühista" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const bar = page.locator('[data-account-tabs="bottom"]');
+  await page.evaluate(() => {
+    window.scrollTo(0, 0); // the frame's end below the screen: the bar is held at the bottom of the screen, over the page
+    const link = document.querySelector("[data-delete-account]")!.getBoundingClientRect();
+    const barTop = document.querySelector('[data-account-tabs="bottom"]')!.getBoundingClientRect().top;
+    window.scrollBy(0, link.bottom - (barTop - 4));
+  });
+  await del.click();
+  await expect(step).toBeFocused();
+  await expect.poll(async () => (await step.boundingBox())!.y + (await step.boundingBox())!.height, "the step's bottom is above the bar").toBeLessThanOrEqual((await bar.boundingBox())!.y);
+  expect((await step.boundingBox())!.y, "…and below the header").toBeGreaterThanOrEqual((await page.locator("header").first().boundingBox())!.height);
   for (const width of [390, 834, 1440, 2560]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await noOverflow(page), `no horizontal overflow at ${width}`).toBe(true);
@@ -205,6 +223,8 @@ test("Kustuta konto: quiet, at the very bottom; an inline step (Tühista gives t
   await expect.poll(() => pathOf(page)).toBe("/");
   await expect(page.locator("[data-flash-notice]")).toContainText("Konto on kustutatud.");
   await expect.poll(() => new URL(page.url()).hash).toBe("");
+  // the newsletter row went with the account
+  expect(await storedNewsletter(email)).toBeNull();
   // signed out: no cookie, the header says Logi sisse
   const cookies = (await context.cookies()).map((c) => c.name);
   expect(cookies).not.toContain("__Host-mslab_client");
@@ -250,4 +270,22 @@ test("Russian: the step and the home page's notice in Russian", async ({ page },
   await expect.poll(() => pathOf(page)).toBe("/ru");
   await expect(page.locator("[data-flash-notice]")).toContainText("Личный кабинет удалён.");
   expect(await storedClient(email)).toBeNull();
+});
+
+test("the footer's newsletter form is not under the account's pages (Minu andmed has the switch); the public pages keep it", async ({ page }, info) => {
+  submitsForms();
+  const email = address("footer", info.project.name);
+  await removeClientRows(email);
+  await insertClient(email);
+  await signInAsClient(page, email);
+  for (const path of ["/konto/andmed", "/konto", "/ru/konto/lemmikud"]) {
+    await page.goto(path);
+    await expect(page.locator("[data-account-shell]")).toBeAttached();
+    await expect(page.locator("[data-footer-newsletter]"), path).toBeHidden();
+    await expect(page.locator("footer"), path).toBeVisible();
+  }
+  for (const path of ["/", "/koolitused"]) {
+    await page.goto(path);
+    await expect(page.locator("[data-footer-newsletter]"), path).toBeVisible();
+  }
 });

@@ -5,6 +5,7 @@ import ui from "@/components/site/ui.module.css";
 import { href } from "@/i18n/href";
 import { LOCALES, type Locale } from "@/i18n/locales";
 import { DELETED_MARK, SAVED_MARK } from "@/lib/account-marks";
+import { isDone, sendJson } from "@/lib/json-request";
 import type { ClientProfile, Dashboard } from "@/server/client-data";
 import { AccountLoader, type Reload } from "./AccountLoader";
 import { ACCOUNT_EVENT, forgetAccountMemory } from "./useAccount";
@@ -21,22 +22,6 @@ const PHONE_MAX = 40;
 
 /** A text field as the API stores it (account-input.ts `line`): inner whitespace one space, the ends trimmed. */
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
-
-/** A same-origin JSON request: its status (0 when there was no answer) and whether the body said `ok: true`. */
-async function send(path: string, method: "POST" | "PATCH", body: object): Promise<{ status: number; ok: boolean }> {
-  try {
-    const res = await fetch(path, {
-      method,
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data: unknown = await res.json().catch(() => null);
-    return { status: res.status, ok: res.ok && (data as { ok?: unknown } | null)?.ok === true };
-  } catch {
-    return { status: 0, ok: false };
-  }
-}
 
 /**
  * "Minu andmed" (/konto/andmed): the e-mail (the login's, not editable), name and phone (both optional) and the account's language
@@ -104,10 +89,13 @@ function DetailsView({ client, locale, t, reload }: { client: ClientProfile; loc
     setSaved({ text: t.saved, error: false });
   }, [t.saved]);
 
-  // The confirmation step takes the focus when it opens (a screen reader reads its question); "Tühista" gives it back.
+  // The confirmation step takes the focus when it opens (a screen reader reads its question) and is scrolled into full view: on a
+  // phone never under the sticky tab bar, nor under the header (its scroll margins, DetailsTab.module.css). "Tühista" gives the focus back.
   useEffect(() => {
-    if (confirming) step.current?.focus();
-    else if (backToDelete.current) {
+    if (confirming) {
+      step.current?.focus({ preventScroll: true });
+      step.current?.scrollIntoView?.({ block: "nearest" });
+    } else if (backToDelete.current) {
       backToDelete.current = false;
       deleteButton.current?.focus();
     }
@@ -119,8 +107,9 @@ function DetailsView({ client, locale, t, reload }: { client: ClientProfile; loc
     const profile = { name: oneLine(name), phone: oneLine(phone), locale: language };
     setSaving(true);
     setSaved(null);
-    const answer = await send("/api/konto/andmed", "PATCH", profile);
-    if (answer.ok && profile.locale !== savedLanguage && profile.locale !== locale) {
+    const answer = await sendJson("/api/konto/andmed", profile, { method: "PATCH" });
+    const done = isDone(answer);
+    if (done && profile.locale !== savedLanguage && profile.locale !== locale) {
       // the same tab in the language just chosen, a full page load (the page's language, <html lang>, the header); "Salvestatud." is
       // said there, and the button stays busy until it opens
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a full load on purpose: another language's page
@@ -129,7 +118,7 @@ function DetailsView({ client, locale, t, reload }: { client: ClientProfile; loc
     }
     setSaving(false);
     if (answer.status === 401) return void reload({ quiet: true }); // signed out meanwhile: the page shows what is true now
-    if (!answer.ok) return setSaved({ text: t.saveFailed, error: true });
+    if (!done) return setSaved({ text: t.saveFailed, error: true });
     setName(profile.name);
     setPhone(profile.phone);
     setSavedLanguage(profile.locale);
@@ -141,9 +130,9 @@ function DetailsView({ client, locale, t, reload }: { client: ClientProfile; loc
     newsletterBusy.current = true;
     setNewsletter(on);
     setNewsletterStatus(null);
-    const answer = await send("/api/konto/uudiskiri", "POST", { on });
+    const answer = await sendJson("/api/konto/uudiskiri", { on });
     newsletterBusy.current = false;
-    if (answer.ok) return setNewsletterStatus({ text: t.saved, error: false });
+    if (isDone(answer)) return setNewsletterStatus({ text: t.saved, error: false });
     setNewsletter(!on);
     if (answer.status === 401) return void reload({ quiet: true });
     setNewsletterStatus({ text: t.saveFailed, error: true });
@@ -160,8 +149,8 @@ function DetailsView({ client, locale, t, reload }: { client: ClientProfile; loc
     if (deleting) return;
     setDeleting(true);
     setDeleteFailed(false);
-    const answer = await send("/api/konto/kustuta", "POST", { confirm: true });
-    if (answer.ok) {
+    const answer = await sendJson("/api/konto/kustuta", { confirm: true });
+    if (isDone(answer)) {
       // The answer cleared both cookies. This browser forgets the account too; the header says "Logi sisse"; the home page says it is done.
       forgetAccountMemory();
       window.dispatchEvent(new Event(ACCOUNT_EVENT));

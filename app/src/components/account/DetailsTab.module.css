@@ -1,8 +1,9 @@
 /* "Minu andmed" in the site's own parts: the page and heading of "Minu koolitused" (CoursesTab.module.css), B .field inputs
    (LoginForm.module.css), the language as the change request's big choices (ChangeRequestDialog.module.css), ui.btn "Salvesta".
    One narrow column (the login page's 440 px, a little wider). Two parts of its own: the newsletter switch (a checkbox drawn as
-   a switch: ink when on, rose when off, a paper knob) and, at the very bottom, "Kustuta konto" as quiet text in the error colour
-   that opens a B .notice step (rule in the error colour) with "Jah, kustuta" and "Tühista". Targets ≥ 44 px. Tokens only. */
+   a switch: off a light neutral track with an outline and a small grey knob, on an ink track with a paper knob) and, at the very
+   bottom, "Kustuta konto" as quiet text in the error colour that opens a B .notice step (rule in the error colour) with "Jah,
+   kustuta" and "Tühista". Targets ≥ 44 px. Tokens only. */
 
 .column {
   max-width: 520px;
@@ -48,17 +49,19 @@
   cursor: pointer;
 }
 
+/* off: a neutral track, its outline and knob in the muted text colour (5.2 : 1 on paper, so the control is seen); on: ink, paper knob */
 .switch {
   flex: none;
   width: 52px;
   height: 32px;
   margin: 0;
   border-radius: 99px;
-  background-color: var(--rose);
-  background-image: radial-gradient(circle closest-side, var(--paper) 90%, transparent);
+  background-color: var(--line);
+  background-image: radial-gradient(circle closest-side, var(--muted-2) 66%, transparent 72%);
   background-position: 2px 50%;
   background-repeat: no-repeat;
   background-size: 28px 28px;
+  box-shadow: inset 0 0 0 1.5px var(--muted-2);
   appearance: none;
   cursor: pointer;
   transition:
@@ -68,7 +71,9 @@
 
 .switch:checked {
   background-color: var(--ink);
+  background-image: radial-gradient(circle closest-side, var(--paper) 90%, transparent);
   background-position: 22px 50%;
+  box-shadow: none;
 }
 
 .switch:focus-visible {
@@ -94,8 +99,10 @@
   cursor: pointer;
 }
 
-/* B .notice */
+/* B .notice. Scrolled into full view when it opens: clear of the sticky header, and on a phone of the tab bar at the bottom. */
 .confirm {
+  scroll-margin-top: calc(var(--header-h) + 16px);
+  scroll-margin-bottom: 24px;
   padding: 20px 22px;
   border-left: 2px solid var(--bad);
   border-radius: 0 10px 10px 0;
@@ -127,4 +134,11 @@
 .answers .yes:hover {
   border-color: color-mix(in srgb, var(--bad) 80%, var(--ink));
   background: color-mix(in srgb, var(--bad) 80%, var(--ink));
+}
+
+@media (max-width: 640px) {
+  /* the account's tab bar (AccountShell.module.css .bar: 62 px and the safe area) stays over the bottom of the screen */
+  .confirm {
+    scroll-margin-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
 }

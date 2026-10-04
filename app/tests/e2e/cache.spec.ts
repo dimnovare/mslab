@@ -203,8 +203,9 @@ test("an account shell asked for with a query is answered with a 303 to the frag
     const payload = await settledText(request, path, { headers: { RSC: "1" } });
     expect(leak(page), `${path}: the cached page after the requests with a query`).toBe("");
     expect(leak(payload), `${path}: the cached payload after the requests with a query`).toBe("");
-    // and the clean address was answered from the cache, by a request without a query
-    expect((await request.get(path, { failOnStatusCode: false })).headers()["x-nextjs-cache"], path).toBe("HIT");
+    // and the clean address is answered from the cache, by a request without a query (asked again, as everywhere here, when another
+    // test's fixture has just marked every page stale: the first request then renders it, cleanly, and the next is a HIT)
+    expect((await fromCache(request, path)).headers()["x-nextjs-cache"], path).toBe("HIT");
   }
 });
 

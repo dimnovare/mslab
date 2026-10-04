@@ -10,7 +10,8 @@ import ui from "@/components/site/ui.module.css";
 import { fill } from "@/i18n/format";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
-import { answerFavourites, FAVOURITES_MERGED_EVENT, readAccountFavourites, rememberAccountFavourites } from "@/lib/favourites";
+import { FAVOURITES_MERGED_EVENT, readAccountFavourites, rememberAccountFavourites, savedList } from "@/lib/favourites";
+import { sendJson } from "@/lib/json-request";
 import type { FavouriteCard, FavouriteCards } from "@/server/client-data";
 import { AccountLoader, type Reload } from "./AccountLoader";
 import type { FavouritesTexts } from "./texts";
@@ -99,28 +100,15 @@ function FavouritesView({ data, locale, t, reload }: { data: FavouriteCards; loc
     setBusy(item.slug);
     setFailed(null);
     setAnnounce("");
-    let status = 0; // 0: no answer
-    let left: string[] | null = null;
-    try {
-      const res = await fetch("/api/konto/lemmikud", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ slug: item.slug, on: false }),
-      });
-      status = res.status;
-      const body: unknown = await res.json().catch(() => null);
-      left = res.ok && (body as { ok?: unknown } | null)?.ok === true ? answerFavourites(body) : null;
-    } catch {
-      // no answer: said under the card
-    }
+    const answer = await sendJson("/api/konto/lemmikud", { slug: item.slug, on: false });
     setBusy(null);
-    if (status === 401) return void reload({ quiet: true }); // signed out meanwhile: the page shows what is true now
-    if (!left) return setFailed(item.slug);
+    if (answer.status === 401) return void reload({ quiet: true }); // signed out meanwhile: the page shows what is true now
+    const left = savedList(answer);
+    if (!left) return setFailed(item.slug); // no answer or a failure: said under the card
     focusAt.current = index;
     setGone((before) => new Set(before).add(item.slug));
     setAnnounce(fill(t.removed, { title: item.card.title }));
-    rememberAccountFavourites(left); // the course pages' ♡ in this tab follows
+    rememberAccountFavourites(left); // the course pages' ♡ follows
   };
 
   return (

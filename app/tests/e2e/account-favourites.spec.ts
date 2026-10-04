@@ -27,9 +27,9 @@ async function newClient(label: string, project: string): Promise<{ email: strin
   return { email, clientId: await insertClient(email) };
 }
 
-/** This browser's own list (null when there is none), and this tab's copy of the account's. */
+/** This browser's own list (null when there is none), and its copy of the account's (localStorage too). */
 const browserList = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("mslab-fav") ?? "null") as string[] | null);
-const accountCopy = (page: Page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("mslab-account-fav") ?? "null") as string[] | null);
+const accountCopy = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("mslab-account-fav") ?? "null") as string[] | null);
 
 /** Counts this page's requests to the account API, as "METHOD /path". */
 function accountRequests(page: Page): string[] {
@@ -163,7 +163,7 @@ test("Lemmikud in Russian: the Russian cards, links and words", async ({ page },
 test("signed in, the course page's ♡ is the account's: nothing is asked when the page loads, one POST per press, a failure is put back, and Lemmikud follows", async ({ page }, info) => {
   submitsForms();
   const { email, clientId } = await newClient("heart", info.project.name);
-  await signInAsClient(page, email); // the dashboard's load keeps this tab's copy of the account's favourites: none
+  await signInAsClient(page, email); // the dashboard's load keeps this browser's copy of the account's favourites: none
   await expect.poll(() => accountCopy(page)).toEqual([]);
 
   const seen = accountRequests(page);
@@ -181,7 +181,7 @@ test("signed in, the course page's ♡ is the account's: nothing is asked when t
   expect(seen).toEqual(["POST /api/konto/lemmikud"]);
   expect(await browserList(page), "the browser's own list is not used").toBeNull();
 
-  // Lemmikud lists it; back on the course page it is pressed from this tab's copy, again with no request
+  // Lemmikud lists it; back on the course page it is pressed from the copy, again with no request
   await page.goto("/konto/lemmikud");
   await expect(page.locator(`[data-favourite-card="${LAMI.slug}"]`)).toBeVisible();
   seen.length = 0;
@@ -190,7 +190,10 @@ test("signed in, the course page's ♡ is the account's: nothing is asked when t
   await page.waitForLoadState("networkidle");
   expect(seen).toEqual([]);
 
-  // a press shows at once (the answer is held back here); a failure puts it back
+  // a press shows at once (the answer is held back here); a failure puts it back and says so next to the button
+  const failed = page.locator("[data-favourite-failed]");
+  await expect(failed).toHaveText("");
+  await expect(failed).toHaveAttribute("role", "status");
   const held: { answer?: () => Promise<void> } = {};
   await page.route(
     "**/api/konto/lemmikud",
@@ -204,10 +207,14 @@ test("signed in, the course page's ♡ is the account's: nothing is asked when t
   await expect(fav).toHaveAttribute("aria-pressed", "false");
   await held.answer!();
   await expect(fav).toHaveAttribute("aria-pressed", "true");
+  await expect(failed).toHaveText("Ei õnnestunud. Proovi uuesti.");
+  const [line, button] = [(await failed.boundingBox())!, (await fav.boundingBox())!];
+  expect(line.y, "the line is under the actions").toBeGreaterThanOrEqual(button.y + button.height - 1);
   expect(await storedFavourites(clientId)).toEqual([LAMI.slug]);
 
-  // and off again
+  // and off again: the next press takes the line away
   await fav.click();
+  await expect(failed).toHaveText("");
   await expect(fav).toHaveAttribute("aria-pressed", "false");
   await expect(fav).toHaveText("Lisa lemmikutesse");
   await expect.poll(() => storedFavourites(clientId)).toEqual([]);
@@ -240,4 +247,57 @@ test("signed out elsewhere meanwhile (401): the press goes to this browser's own
   expect(await browserList(page)).toEqual([]);
   await page.reload();
   await expect(fav).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the copy is this browser's: a new tab (or a visit days later) shows the account's hearts with no request, and Logi välja forgets it", async ({ page, context }, info) => {
+  submitsForms();
+  const { email, clientId } = await newClient("newtab", info.project.name);
+  await signInAsClient(page, email);
+  await page.goto(`/koolitused/${LAMI.slug}`);
+  await page.locator("[data-favourite]").click();
+  await expect.poll(() => storedFavourites(clientId)).toEqual([LAMI.slug]);
+
+  // a new tab of the same browser: pressed from the copy, nothing asked
+  const other = await context.newPage();
+  const seen = accountRequests(other);
+  await other.goto(`/koolitused/${LAMI.slug}`);
+  await other.locator("html[data-site-ready]").waitFor({ state: "attached" });
+  await expect(other.locator("[data-favourite]")).toHaveAttribute("aria-pressed", "true");
+  await other.waitForLoadState("networkidle");
+  expect(seen, "no account request when the page loads").toEqual([]);
+  // a change in one tab shows in the other (the storage event), still with no request there
+  await page.locator("[data-favourite]").click();
+  await expect.poll(() => storedFavourites(clientId)).toEqual([]);
+  await expect(other.locator("[data-favourite]")).toHaveAttribute("aria-pressed", "false");
+  expect(seen).toEqual([]);
+  await other.close();
+
+  // Logi välja: the copy is gone, so the course page shows this browser's own list (empty) again
+  await page.locator("[data-favourite]").click();
+  await expect.poll(() => accountCopy(page)).toEqual([LAMI.slug]);
+  await page.goto("/konto");
+  await page.locator("[data-account-menu]").filter({ visible: true }).click();
+  await page.locator("[data-account-logout]").filter({ visible: true }).click();
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/");
+  expect(await accountCopy(page)).toBeNull();
+  await page.goto(`/koolitused/${LAMI.slug}`);
+  await expect(page.locator("[data-favourite]")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("signing in forgets the copy a previous session left on this device, also when the first account load fails", async ({ page }, info) => {
+  submitsForms();
+  const { email } = await newClient("login", info.project.name);
+  // the previous person's hearts, left here (as if they had never logged out)
+  await page.goto("/");
+  await page.evaluate((slug) => localStorage.setItem("mslab-account-fav", JSON.stringify([slug])), LAMI.slug);
+  // the login link opens Minu koolitused, whose load fails this time
+  // (every load until it says so: the dev server's strict mode asks twice)
+  await page.route("**/api/konto", (route) => route.fulfill({ status: 500, contentType: "application/json", body: '{"ok":false,"error":"server"}' }));
+  await signInAsClient(page, email);
+  await expect(page.locator("[data-account-state='error']")).toBeVisible();
+  await page.unroute("**/api/konto");
+  expect(await accountCopy(page)).toBeNull();
+  expect(new URL(page.url()).hash, "the login mark leaves the address").toBe("");
+  await page.goto(`/koolitused/${LAMI.slug}`);
+  await expect(page.locator("[data-favourite]")).toHaveAttribute("aria-pressed", "false");
 });

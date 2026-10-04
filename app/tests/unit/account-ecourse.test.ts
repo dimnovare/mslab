@@ -91,7 +91,7 @@ describe("without access (the API's 404)", () => {
     fetchMock.mockResolvedValue(json(404, { ok: false }));
     await mount("ru");
     const state = $("[data-account-state='noAccess']")!;
-    expect(state.querySelector("h1")?.textContent).toBe("У вас нет доступа к этому курсу.");
+    expect(state.querySelector("h1")?.textContent).toBe("У\u00a0вас нет доступа к\u00a0этому курсу.");
     expect(state.querySelector("a")?.textContent).toBe("Посмотреть курс");
     expect(state.querySelector("a")?.getAttribute("href")).toBe("/ru/koolitused/veebikursus");
   });

@@ -192,6 +192,8 @@ export const et = {
     favourite: "Lisa lemmikutesse",
     favourited: "Lemmikutes",
     unfavourite: "Eemalda lemmikutest",
+    // under the ♡ when a signed-in press could not be saved (the heart is put back)
+    favouriteFailed: "Ei õnnestunud. Proovi uuesti.",
     recommendations: "Sulle võiksid huvi pakkuda",
     galleryLabel: "Koolituse pildid",
   },

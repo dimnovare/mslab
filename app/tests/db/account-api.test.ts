@@ -203,7 +203,7 @@ describe("login outside development", () => {
     const link = new URL(mail.text.match(/https:\/\/\S+/)![0]);
     const signedIn = await call(deps, `${link.pathname.slice("/api/konto".length)}${link.search}`);
     expect(signedIn.status).toBe(303);
-    expect(signedIn.headers.get("location")).toBe(`${SITE}/konto`);
+    expect(signedIn.headers.get("location")).toBe(`${SITE}/konto#sisse`);
     expect((await call(deps, "/code", { body: { email: MAILED, code } })).status).toBe(400); // the token is used
   });
 
@@ -446,7 +446,7 @@ describe("verify", () => {
 
     const res = await call(deps, `/verify?t=${t}`);
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(`${SITE}/konto`);
+    expect(res.headers.get("location")).toBe(`${SITE}/konto#sisse`);
     expect(res.headers.getSetCookie()).toEqual(sessionCookies(rawOf(sessionCookie(res)!)));
     expect((await call(deps, "/me", { cookie: sessionCookie(res)! })).status).toBe(200);
 
@@ -459,7 +459,7 @@ describe("verify", () => {
     await db.insert(clients).values({ email: EMAIL, locale: "ru" });
     const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
     const res = await call(deps, `/verify?t=${tokenOf(devLink)}`);
-    expect(res.headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect(res.headers.get("location")).toBe(`${SITE}/ru/konto#sisse`);
     const code = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
     expect(await (await call(deps, "/code", { body: { email: EMAIL, code: code.devCode } })).json()).toEqual({ ok: true, locale: "ru" });
   });
@@ -471,7 +471,7 @@ describe("verify", () => {
     expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}`)).headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
 
     const b = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
-    expect((await call(deps, `/verify?t=${tokenOf(b.devLink)}`)).headers.get("location")).toBe(`${SITE}/konto`);
+    expect((await call(deps, `/verify?t=${tokenOf(b.devLink)}`)).headers.get("location")).toBe(`${SITE}/konto#sisse`);
     expect((await call(deps, "/code", { body: { email: EMAIL, code: b.devCode } })).status).toBe(400);
   });
 
@@ -500,7 +500,7 @@ describe("the login page's language (fix round 1)", () => {
     const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
     expect(devLink).toBe(`${SITE}/api/konto/verify?t=${tokenOf(devLink)}&l=ru`);
     const res = await call(deps, pathOf(devLink));
-    expect(res.headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect(res.headers.get("location")).toBe(`${SITE}/ru/konto#sisse`);
     expect(await localeOf(EMAIL)).toBe("ru");
   });
 
@@ -515,7 +515,7 @@ describe("the login page's language (fix round 1)", () => {
     const { deps } = setup();
     await db.insert(clients).values({ email: EMAIL, locale: "et" });
     const a = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
-    expect((await call(deps, pathOf(a.devLink))).headers.get("location")).toBe(`${SITE}/konto`);
+    expect((await call(deps, pathOf(a.devLink))).headers.get("location")).toBe(`${SITE}/konto#sisse`);
     const b = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
     expect(await (await call(deps, "/code", { body: { email: EMAIL, code: b.devCode, locale: "ru" } })).json()).toEqual({ ok: true, locale: "et" });
     expect(await localeOf(EMAIL)).toBe("et");
@@ -525,7 +525,7 @@ describe("the login page's language (fix round 1)", () => {
     const { deps } = setup();
     expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=ru`)).headers.get("location")).toBe(`${SITE}/ru/konto/sisene#viga=link`);
     const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
-    expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto#sisse`);
     expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene#viga=link`); // used
     const old = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
     const later = setup({ now: new Date(NOW.getTime() + 30 * 60_000 + 1) }).deps;
@@ -537,7 +537,7 @@ describe("the login page's language (fix round 1)", () => {
     expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=fr`)).headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
     const a = await (await call(deps, "/login", { body: { email: EMAIL, locale: "fr" } })).json();
     expect(a.devLink).toBe(`${SITE}/api/konto/verify?t=${tokenOf(a.devLink)}`); // no l
-    expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}&l=xx`)).headers.get("location")).toBe(`${SITE}/konto`);
+    expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}&l=xx`)).headers.get("location")).toBe(`${SITE}/konto#sisse`);
     expect(await localeOf(EMAIL)).toBe("et");
     const other = "mari@example.test";
     const b = await (await call(deps, "/login", { body: { email: other } })).json();
@@ -559,7 +559,7 @@ describe("the login page's language (fix round 1)", () => {
     expect(olga.subject).toMatch(/код входа/);
     expect(linkOf(olga)).toMatch(/\/api\/konto\/verify\?t=[\w-]+$/);
     // the newcomer's link makes a Russian account
-    expect((await call(deps, pathOf(linkOf(newcomer)))).headers.get("location")).toBe(`${SITE}/ru/konto`);
+    expect((await call(deps, pathOf(linkOf(newcomer)))).headers.get("location")).toBe(`${SITE}/ru/konto#sisse`);
     expect(await localeOf(MAILED)).toBe("ru");
   });
 });
@@ -1196,8 +1196,8 @@ describe("POST /kustuta: deleting the account", () => {
     await live.flush();
     const [mail] = f.mails();
     expect(mail).toMatchObject({ to: MAILED, subject: "Личный кабинет MS LAB удалён" });
-    expect(mail.text).toContain("Ваши регистрации остаются у Марии.");
-    expect(mail.html).toContain("Ваши регистрации остаются у Марии.");
+    expect(mail.text).toContain("Ваши регистрации остаются у\u00a0Марии.");
+    expect(mail.html).toContain("Ваши регистрации остаются у\u00a0Марии.");
   });
 
   test("no e-mail to a sample address, and none in development", async () => {
