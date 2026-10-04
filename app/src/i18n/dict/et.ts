@@ -531,6 +531,9 @@ export const et = {
       // instead of "Saada uus kood" during the first 60 s after a code was sent
       resendIn: "Uue koodi saad saata {s} s pärast.",
       resent: "Saatsime uue koodi.",
+      // under "Saada uus kood" once a new code was asked for: the server answers the same whether or not a mail went out (no
+      // account enumeration), and an address with 3 logins in 30 minutes gets none for a while (server/client-auth.ts CLIENT_LOGIN_CAP)
+      noMail: "Kui kirja ei tule, proovi poole tunni pärast uuesti.",
       changeEmail: "Muuda e-posti",
       wrongCode: "Kood ei sobi. Proovi uuesti.",
       expired: "Kood on aegunud. Saada uus kood.",

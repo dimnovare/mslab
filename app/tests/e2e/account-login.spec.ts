@@ -45,6 +45,8 @@ async function expectAccountButton(page: Page, isMobile: boolean, signedIn: bool
 }
 
 const WAIT = /^Uue koodi saad saata (\d+) s pärast\.$/;
+/** Under "Saada uus kood" once a new code was asked for (final review M10: the lockout says what to do, the same for every address). */
+const NO_MAIL = "Kui kirja ei tule, proovi poole tunni pärast uuesti.";
 
 /** Counts this page's POSTs to /api/konto/login and /api/konto/code. */
 function countPosts(page: Page): { login: number; code: number } {
@@ -155,11 +157,14 @@ test("an expired code asks for a new one, with Saada uus kood ready and focused;
   const resend = page.getByRole("button", { name: "Saada uus kood", exact: true });
   await expect(resend).toBeEnabled();
   await expect(resend).toBeFocused();
+  await expect(page.getByText(NO_MAIL)).toHaveCount(0);
   await resend.click();
   await expect(page.getByText("Saatsime uue koodi.")).toBeVisible();
   await expect(codeField(page)).toBeFocused();
   await expect(page.locator("[data-login-wait]")).toHaveText(WAIT); // the next one in 60 s
   await expect(resend).toHaveCount(0);
+  // the same answer whether or not a mail went out: what to do if none comes (an address with its logins used up waits)
+  await expect(page.getByText(NO_MAIL)).toBeVisible();
 
   // "123 456" pasted from the e-mail
   const code = await knownLoginCode(email);
@@ -187,10 +192,18 @@ test("Saada uus kood waits 60 seconds, counted down as quiet text, then sends a 
   await page.clock.fastForward("00:31");
   await expect(wait).toHaveCount(0);
   await expect(resend).toBeEnabled();
+  await expect(page.getByText(NO_MAIL)).toHaveCount(0); // not before a new code was asked for
   await resend.click();
   await expect(page.getByText("Saatsime uue koodi.")).toBeVisible();
   await expect(wait).toHaveText("Uue koodi saad saata 60 s pärast.");
   await expect(resend).toHaveCount(0);
+  await expect(page.getByText(NO_MAIL)).toBeVisible();
+  // typing the code takes "Saatsime uue koodi." away; the line stays, until Muuda e-posti
+  await codeField(page).pressSequentially("1");
+  await expect(page.getByText("Saatsime uue koodi.")).toHaveCount(0);
+  await expect(page.getByText(NO_MAIL)).toBeVisible();
+  await page.getByRole("button", { name: "Muuda e-posti" }).click();
+  await expect(page.getByText(NO_MAIL)).toHaveCount(0);
 });
 
 test("the code step's one button: Logi sisse works at six digits; Enter before that asks for all six; the sixth digit and Enter sign in once", async ({ page }, info) => {

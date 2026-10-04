@@ -78,7 +78,8 @@ function withBold(template: string, name: string, value: string): React.ReactNod
  * - The code step says where the code went and has one primary button, "Logi sisse", enabled at six digits; the sixth digit
  *   also signs in by itself. Enter with fewer digits says "Sisesta kõik 6 numbrit.". Below: the spam-folder hint (the answer
  *   is the same whether or not a mail went out), then two quiet text buttons, "Saada uus kood" (after 60 s; until then
- *   the seconds left, as text) and "Muuda e-posti".
+ *   the seconds left, as text) and "Muuda e-posti". Once a new code was asked for, one more quiet line says to try again in half
+ *   an hour if no mail comes: the answer is the same for every address, and one with 3 logins in 30 minutes gets no new mail.
  * - The code step is kept in this tab (sessionStorage) for the code's 30 minutes: a phone that drops the tab while the
  *   student reads the e-mail comes back to the code field, with the rest of the 60 s.
  * - The page is static and the same for every visitor; the browser reads the parameters in the address's fragment, which never
@@ -112,6 +113,8 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   const [checking, setChecking] = useState(false);
   const [codeError, setCodeError] = useState<CodeError | null>(null);
   const [resent, setResent] = useState(false);
+  // a new code was asked for in this code step: the line on what to do when no mail comes shows from then on
+  const [askedAgain, setAskedAgain] = useState(false);
   const [resendAt, setResendAt] = useState(0);
   const [now, setNow] = useState(0);
 
@@ -161,6 +164,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
       keepPendingCode({ sentTo: address, sentAt });
       showCodeStep(address, sentAt);
       setResent(again);
+      setAskedAgain(again);
       return;
     }
     const error: SendError = status === 400 && data.error === "email" ? "email" : status === 429 ? "rate" : "server";
@@ -304,6 +308,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     setCode("");
     setCodeError(null);
     setResent(false);
+    setAskedAgain(false);
     focusAfterRender.current = "email";
   };
 
@@ -448,6 +453,11 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
                 {t.changeEmail}
               </button>
             </div>
+            {askedAgain && (
+              <p className={styles.hint} data-login-no-mail="">
+                {t.noMail}
+              </p>
+            )}
           </form>
         )}
       </div>
