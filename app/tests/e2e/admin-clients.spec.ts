@@ -257,7 +257,7 @@ test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the numb
   await expect(mine).toHaveCount(2);
   await expect(mine.filter({ hasText: eStudent }).locator("[data-client-courses]")).toHaveText("1");
   await expect(mine.filter({ hasText: kStudent }).locator("[data-client-courses]")).toHaveText("1"); // the cancelled one does not count
-  await expect(page.locator("[data-courses-hint]")).toHaveText("Koolitusi: tema registreerimised (tühistatuid arvestamata) ja e-koolitused (lõpetatuid arvestamata).");
+  await expect(page.locator("[data-courses-hint]")).toHaveText("Koolitusi: tema registreerimised (tühistatuid arvestamata) ja e-koolitused (lõpetatud ligipääse arvestamata, aegunuid arvestatakse).");
   await expect(mine.filter({ hasText: kStudent }).getByRole("link")).toHaveText(`Kai E2E ${info.project.name}`); // the registration's name
 
   const filters = page.locator("[data-type-filter]");

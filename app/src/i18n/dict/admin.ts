@@ -286,7 +286,7 @@ export const adminEt = {
     emptyFiltered: "Selle valikuga õpilasi pole.",
     col: { name: "Nimi ja e-post", created: "Lisatud", courses: "Koolitusi" },
     // what "Koolitusi" counts (shown above the list)
-    coursesHint: "Koolitusi: tema registreerimised (tühistatuid arvestamata) ja e-koolitused (lõpetatuid arvestamata).",
+    coursesHint: "Koolitusi: tema registreerimised (tühistatuid arvestamata) ja e-koolitused (lõpetatud ligipääse arvestamata, aegunuid arvestatakse).",
     open: "Ava {name}",
     add: {
       label: "Lisa õpilane e-posti järgi",

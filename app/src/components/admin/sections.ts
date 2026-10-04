@@ -22,7 +22,7 @@ export const SECTIONS: readonly { key: Section; href: string; icon: AdminIconNam
   { key: "courses", href: "/admin/koolitused", icon: "book" },
   { key: "calendar", href: "/admin/kalender", icon: "calendar" },
   { key: "registrations", href: "/admin/registreerimised", icon: "clipboard" },
-  { key: "clients", href: "/admin/opilased", icon: "user" },
+  { key: "clients", href: "/admin/opilased", icon: "users" },
   { key: "requests", href: "/admin/paringud", icon: "inbox" },
   { key: "practice", href: "/admin/praktika", icon: "flower" },
   { key: "home", href: "/admin/avaleht", icon: "home" },

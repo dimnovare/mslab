@@ -133,9 +133,11 @@ export default async function ClientsPage({ searchParams }: Props) {
 
         <section className={`${ui.card} ${listTable.card}`} aria-label={t.title}>
           <p className={`${ui.muted} ${ui.small} ${styles.count}`}>{fill(t.count, { n: list.total })}</p>
-          <p className={`${ui.muted} ${ui.small} ${styles.count}`} data-courses-hint="">
-            {t.coursesHint}
-          </p>
+          {list.rows.length > 0 && (
+            <p className={`${ui.muted} ${ui.small} ${styles.count}`} data-courses-hint="">
+              {t.coursesHint}
+            </p>
+          )}
           {list.rows.length === 0 ? (
             <p className={ui.empty}>{filtered ? t.emptyFiltered : t.empty}</p>
           ) : (
