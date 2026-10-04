@@ -2,12 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
-import { kvEntries } from "@/db/schema";
+import { clientLoginTokens, clients, clientSessions, kvEntries, mailQuota } from "@/db/schema";
+import { sweepClientRows } from "@/server/client-auth";
 import { PgKv, sweepExpired } from "@/server/kv";
 import { makeTestDb } from "./helpers";
 
-// The daily cron (vercel.json → GET /api/cron/sweep): deletes the expired kv_entries rows, only when Vercel calls it with
-// the project's CRON_SECRET.
+// The daily cron (vercel.json → GET /api/cron/sweep): deletes the expired kv_entries rows, and the client accounts' old rows (login
+// codes past their 30 minutes, sessions over for 30 days, the mail counters of days more than a week ago), only when Vercel calls it
+// with the project's CRON_SECRET.
 
 const state = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("@/db/client", () => ({ getDb: () => state.db }));
@@ -46,10 +48,18 @@ describe("GET /api/cron/sweep", () => {
     const res = await call(`Bearer ${SECRET}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ ok: true, deleted: 1 });
+    expect(await res.json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0 });
     expect(await keys(db)).toEqual(["rl:contact:203.0.113.8", "tg:chat"]);
     // nothing left to delete: 0
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0 });
+  });
+
+  test("the same call sweeps the client accounts' old rows and answers their counts (one invocation a day)", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    await accountRows(db, new Date());
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 1, sessions: 2, mailDays: 1 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0 });
   });
 
   test("401 and nothing deleted without the header, with a wrong secret, or another scheme", async () => {
@@ -91,6 +101,44 @@ describe("sweepExpired", () => {
     await new PgKv(db).put("rl:x:1", "1", { expirationTtl: 60 });
     await new PgKv(db, () => new Date(Date.now() + 120_000)).sweep();
     expect(await keys(db)).toEqual(["tg:chat"]);
+  });
+});
+
+const DAY = 86_400_000;
+
+/**
+ * Client account rows around `now`: a login code past its 30 minutes and a live one; sessions ended 31 and 29 days ago, one whose
+ * 180 days ran out 31 days ago, one that ran out yesterday and a live one; the mail counters of 8, 7 and 0 days ago.
+ */
+async function accountRows(db: Db, now: Date): Promise<void> {
+  const t = (ms: number) => new Date(now.getTime() + ms);
+  const [c] = await db.insert(clients).values({ email: "kati@example.test" }).returning();
+  await db.insert(clientLoginTokens).values([
+    { hash: "old", codeHash: "x", email: "kati@example.test", expiresAt: t(-60_000) },
+    { hash: "live", codeHash: "x", email: "kati@example.test", expiresAt: t(20 * 60_000) },
+  ]);
+  await db.insert(clientSessions).values([
+    { idHash: "ended-31", clientId: c.id, expiresAt: t(100 * DAY), endedAt: t(-31 * DAY), endReason: "replaced" },
+    { idHash: "ended-29", clientId: c.id, expiresAt: t(100 * DAY), endedAt: t(-29 * DAY), endReason: "replaced" },
+    { idHash: "expired-31", clientId: c.id, expiresAt: t(-31 * DAY) },
+    { idHash: "expired-1", clientId: c.id, expiresAt: t(-DAY) },
+    { idHash: "live", clientId: c.id, expiresAt: t(170 * DAY) },
+  ]);
+  const day = (offset: number) => t(offset * DAY).toISOString().slice(0, 10);
+  await db.insert(mailQuota).values([{ day: day(-8), sent: 9 }, { day: day(-7), sent: 7 }, { day: day(0), sent: 1 }]);
+}
+
+describe("sweepClientRows", () => {
+  test("deletes login codes past their time (they hold the address in plain text), sessions over for more than 30 days, mail counters older than 7 days; says how many", async () => {
+    const now = new Date("2026-10-10T03:00:00Z");
+    await accountRows(db, now);
+    expect(await sweepClientRows(db, now)).toEqual({ logins: 1, sessions: 2, mailDays: 1 });
+    expect((await db.select().from(clientLoginTokens)).map((r) => r.hash)).toEqual(["live"]);
+    // a session ended (replaced) 29 days ago still tells its device "Sinu konto avati teises seadmes"
+    expect((await db.select().from(clientSessions)).map((r) => r.idHash).sort()).toEqual(["ended-29", "expired-1", "live"]);
+    expect((await db.select().from(mailQuota)).map((r) => r.day).sort()).toEqual(["2026-10-03", "2026-10-10"]);
+    expect(await db.select().from(clients)).toHaveLength(1); // the account itself stays
+    expect(await sweepClientRows(db, now)).toEqual({ logins: 0, sessions: 0, mailDays: 0 });
   });
 });
 

@@ -1,4 +1,4 @@
-import { and, count, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Db, Q } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -156,6 +156,33 @@ export async function endClientSession(db: Db, raw: string | undefined, now = ne
   if (!isTokenShape(raw)) return;
   await db.update(clientSessions).set({ endedAt: now, endReason: "logout" })
     .where(and(eq(clientSessions.idHash, await sha256(raw)), isNull(clientSessions.endedAt)));
+}
+
+/** An ended or run-out session is kept this long: its device is told "Sinu konto avati teises seadmes" (`replaced`) meanwhile. */
+const ENDED_SESSION_KEEP_MS = 30 * 86_400_000;
+/** The day's mail counter is kept this many days (a week of history to look at; the counter only ever reads today's). */
+const MAIL_QUOTA_KEEP_DAYS = 7;
+
+/**
+ * The daily sweep's part for the client accounts (app/api/cron/sweep), counts only (a constant per row: nothing leaves the database):
+ * - `logins`: login codes and links past their 30 minutes. They hold the address in plain text; issueClientLogin deletes them too,
+ *   but only when somebody asks for a login;
+ * - `sessions`: sessions ended (logout, replaced) or run out more than 30 days ago;
+ * - `mailDays`: the `mail_quota` rows of days more than a week before today (UTC, as the counter's own day).
+ * A failing database throws.
+ */
+export async function sweepClientRows(db: Db, now: Date = new Date()): Promise<{ logins: number; sessions: number; mailDays: number }> {
+  // (The cast: on the Db union, returning(fields) has no common overload.)
+  const q = db as PostgresJsDatabase<typeof schema>;
+  const one = { one: sql<number>`1` };
+  const before = new Date(now.getTime() - ENDED_SESSION_KEEP_MS);
+  const oldestDay = new Date(now.getTime() - MAIL_QUOTA_KEEP_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const [logins, sessions, mailDays] = await Promise.all([
+    q.delete(clientLoginTokens).where(lte(clientLoginTokens.expiresAt, now)).returning(one),
+    q.delete(clientSessions).where(or(lt(clientSessions.endedAt, before), lt(clientSessions.expiresAt, before))).returning(one),
+    q.delete(mailQuota).where(lt(mailQuota.day, oldestDay)).returning(one),
+  ]);
+  return { logins: logins.length, sessions: sessions.length, mailDays: mailDays.length };
 }
 
 /** One more login e-mail today, unless `cap` is reached (the row cannot fail open like the rate limits). */
