@@ -1,19 +1,32 @@
 // Read-only smoke test of the deployed site on Vercel. GET and HEAD requests only: nothing is written, no form is sent.
 //
-//   node tools/cache-smoke.mjs [base]            (default https://mslab.diipsolutions.eu)
+//   node tools/cache-smoke.mjs [base] [--only=A,B,C]   (default https://mslab.diipsolutions.eu, all three parts)
 //
 // A. 60 requests one after another, about one per second, across the main pages (ET and RU) and the hub;
 // B. 30 requests at the same time, over the same pages.
 // A request fails when it ends with anything but 2xx or 3xx (redirects are not followed: /guide -> /guide/ is fine) or
 // does not answer within 20 s. Every fifth request is a HEAD, the others GET. The script also counts how Vercel served
-// each answer (the x-vercel-cache header: HIT, MISS, STALE, PRERENDER, BYPASS, or "-" when the header is missing) and exits
-// with 1 when anything failed.
+// each answer (the x-vercel-cache header: HIT, MISS, STALE, PRERENDER, BYPASS, or "-" when the header is missing).
+// C. The client account (phase 2a), 17 GETs, every miss an error:
+//    - each /konto… shell twice: 200, no set-cookie, and the second answer from the cache (HIT, PRERENDER or STALE);
+//    - /api/konto/me twice without a cookie: 401, cache-control "private, no-store", never answered from the cache (HIT, STALE);
+//    - /konto/sisene?viga=link: a 303 to the same path with the parameter moved into the fragment (#viga=link: nothing left in the
+//      query, no other host), cache-control no-store.
+//    Against a local `next start` (no Vercel CDN in front) the cache is read from x-nextjs-cache when x-vercel-cache is missing.
+// The script exits with 1 when anything failed.
 //
-// It is a check to run once after a deployment, not a load test: 90 requests in all.
+// It is a check to run once after a deployment, not a load test: 107 requests in all.
 
-const base = (process.argv[2] ?? "https://mslab.diipsolutions.eu").replace(/\/+$/, "");
+const args = process.argv.slice(2);
+const only = args.find((a) => a.startsWith("--only="));
+const parts = new Set((only ? only.slice("--only=".length) : "A,B,C").split(",").map((p) => p.trim().toUpperCase()));
+const base = (args.find((a) => !a.startsWith("--")) ?? "https://mslab.diipsolutions.eu").replace(/\/+$/, "");
 if (!/^https?:\/\/[^/\s]+$/.test(base)) {
   console.error(`not a site address: ${base} (expected https://host, without a path)`);
+  process.exit(2);
+}
+if ([...parts].some((p) => !["A", "B", "C"].includes(p))) {
+  console.error(`--only takes A, B and C, comma separated (got ${only})`);
   process.exit(2);
 }
 
@@ -69,19 +82,93 @@ function report(title, rows) {
   return errors.length;
 }
 
-console.log(`cache smoke test against ${base} (${new Date().toISOString()})`);
+// ---------- C. the client account (phase 2a) ----------
 
-const sequential = [];
-for (let i = 0; i < 60; i++) {
-  const r = await hit(PAGES[i % PAGES.length], methodOf(i));
-  sequential.push(r);
-  console.log(`${String(i + 1).padStart(2)} ${r.method.padEnd(4)} ${r.status} ${String(r.ms).padStart(5)} ms ${r.how.padEnd(9)} ${r.path}`);
-  await sleep(Math.max(0, 1000 - r.ms));
+/** The account's static shells (Estonian and Russian): served by the CDN, the same for every visitor. */
+const SHELLS = [
+  "/konto",
+  "/ru/konto",
+  "/konto/sisene",
+  "/ru/konto/sisene",
+  "/konto/lemmikud",
+  "/konto/andmed",
+  // the seed's e-course (any slug-shaped address renders the same shell; a real one adds no cache entry of its own)
+  "/konto/kursus/kulmumeistri-e-koolitus",
+];
+const FROM_CACHE = new Set(["HIT", "PRERENDER", "STALE"]);
+
+/** How an answer was served: Vercel's CDN header, else (a local `next start`) Next's own. */
+const cacheOf = (res) => (res.headers.get("x-vercel-cache") ?? res.headers.get("x-nextjs-cache") ?? "-").toUpperCase();
+
+/** One GET of part C, never followed: the status and the headers that matter, or the error. */
+async function probe(path) {
+  try {
+    const res = await fetch(base + path, { method: "GET", redirect: "manual", headers: { "user-agent": "mslab-cache-smoke" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    await res.arrayBuffer();
+    return { status: res.status, how: cacheOf(res), cookie: res.headers.get("set-cookie"), control: res.headers.get("cache-control") ?? "", location: res.headers.get("location") };
+  } catch (e) {
+    return { status: 0, how: "-", cookie: null, control: "", location: null, error: e instanceof Error ? e.name : "error" };
+  }
 }
 
-const parallel = await Promise.all(Array.from({ length: 30 }, (_, i) => hit(PAGES[(i * 5) % PAGES.length], methodOf(i))));
+/** Part C: every problem found, one line each. */
+async function account() {
+  const problems = [];
+  const show = (path, r) => console.log(`C  GET  ${r.status} ${r.how.padEnd(9)} ${path}`);
+  for (const path of SHELLS) {
+    const first = await probe(path);
+    show(path, first);
+    const second = await probe(path);
+    show(path, second);
+    for (const [n, r] of [["1st", first], ["2nd", second]]) {
+      if (r.status !== 200) problems.push(`${path} (${n}): status ${r.status}${r.error ? ` ${r.error}` : ""}`);
+      if (r.cookie) problems.push(`${path} (${n}): set-cookie on a shared page`);
+    }
+    if (!FROM_CACHE.has(second.how)) problems.push(`${path}: the second answer is not from the cache (${second.how})`);
+  }
+  for (const n of ["1st", "2nd"]) {
+    const r = await probe("/api/konto/me");
+    show("/api/konto/me", r);
+    if (r.status !== 401) problems.push(`/api/konto/me (${n}): status ${r.status}, expected 401`);
+    if (r.control.replace(/\s+/g, "") !== "private,no-store") problems.push(`/api/konto/me (${n}): cache-control "${r.control}", expected "private, no-store"`);
+    if (r.how === "HIT" || r.how === "STALE") problems.push(`/api/konto/me (${n}): answered from the cache (${r.how})`);
+  }
+  const moved = await probe("/konto/sisene?viga=link");
+  show("/konto/sisene?viga=link", moved);
+  const to = moved.location ? new URL(moved.location, base) : null;
+  if (moved.status !== 303) problems.push(`/konto/sisene?viga=link: status ${moved.status}, expected 303`);
+  else if (!to || to.origin !== new URL(base).origin || to.pathname !== "/konto/sisene" || to.search !== "" || to.hash !== "#viga=link")
+    problems.push(`/konto/sisene?viga=link: Location ${moved.location}, expected /konto/sisene#viga=link`);
+  if (!/(^|,)\s*no-store\s*(,|$)/.test(moved.control)) problems.push(`/konto/sisene?viga=link: cache-control "${moved.control}", expected no-store`);
+  return problems;
+}
 
-const failed = report("A. 60 one after another, about 1/s", sequential) + report("B. 30 at the same time", parallel);
-console.log(`\nx-vercel-cache over all ${sequential.length + parallel.length} requests: ${JSON.stringify(count([...sequential, ...parallel]))}`);
+console.log(`cache smoke test against ${base} (${new Date().toISOString()}), parts ${[...parts].sort().join(", ")}`);
+
+let failed = 0;
+const ab = [];
+if (parts.has("A")) {
+  const sequential = [];
+  for (let i = 0; i < 60; i++) {
+    const r = await hit(PAGES[i % PAGES.length], methodOf(i));
+    sequential.push(r);
+    console.log(`${String(i + 1).padStart(2)} ${r.method.padEnd(4)} ${r.status} ${String(r.ms).padStart(5)} ms ${r.how.padEnd(9)} ${r.path}`);
+    await sleep(Math.max(0, 1000 - r.ms));
+  }
+  failed += report("A. 60 one after another, about 1/s", sequential);
+  ab.push(...sequential);
+}
+if (parts.has("B")) {
+  const parallel = await Promise.all(Array.from({ length: 30 }, (_, i) => hit(PAGES[(i * 5) % PAGES.length], methodOf(i))));
+  failed += report("B. 30 at the same time", parallel);
+  ab.push(...parallel);
+}
+if (ab.length) console.log(`\nx-vercel-cache over the ${ab.length} requests of A and B: ${JSON.stringify(count(ab))}`);
+if (parts.has("C")) {
+  const problems = await account();
+  console.log(`\nC. the client account: 17 requests, ${problems.length} errors`);
+  for (const p of problems) console.log(`  ERROR ${p}`);
+  failed += problems.length;
+}
 console.log(failed === 0 ? "PASS: 0 errors" : `FAIL: ${failed} errors`);
 process.exit(failed === 0 ? 0 : 1);

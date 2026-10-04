@@ -74,7 +74,7 @@ cd <scratch> && vercel deploy --prod
 
 `.vercel/project.json` links the folder to the project (it is git-ignored; `vercel link` makes it). The CLI prints the deployment URL; the production alias moves to it when it is ready. `vercel rollback` or the dashboard (Deployments → a good one → Promote to Production) goes back to an earlier deployment.
 
-After a deployment, check it read-only: `node tools/cache-smoke.mjs [base]` (90 GET/HEAD requests over the main pages, the hub and a prototype; exit 1 on any answer that is not 2xx or 3xx; prints the `x-vercel-cache` counts), and `E2E_BASE_URL=<site> E2E_ALLOW_REMOTE=1 npx playwright test headers --project=chromium` (from `app/`) for the headers. A run against a deployment is read-only: the form tests skip themselves and every POST is blocked.
+After a deployment, check it read-only: `node tools/cache-smoke.mjs [base] [--only=A,B,C]` (A and B: 90 GET/HEAD requests over the main pages, the hub and a prototype, exit 1 on any answer that is not 2xx or 3xx, the `x-vercel-cache` counts printed; C: the client account's shells come from the cache without `set-cookie`, `/api/konto/me` answers 401 `private, no-store` and is never cached, a query on a shell gets a 303 into the fragment), and `E2E_BASE_URL=<site> E2E_ALLOW_REMOTE=1 npx playwright test headers --project=chromium` (from `app/`) for the headers. A run against a deployment is read-only: the form tests skip themselves and every POST is blocked.
 
 ## 4. DNS
 
