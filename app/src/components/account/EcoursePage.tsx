@@ -51,7 +51,7 @@ export function EcoursePage({ slug, locale, t }: { slug: string; locale: Locale;
 /**
  * What the loaded e-course shows. The version the student accepted here is kept, so the course opens at once without asking the
  * server again (everything the view needs is already loaded); a newer version (a quiet reload after the admin saved new terms)
- * puts the notice up again. `reshown`: the notice came back after a refresh, so it takes the focus.
+ * puts the notice up again. `reshown`: the notice came back after a refresh that worked, so its title takes the focus.
  */
 function EcourseBody({ data, locale, t, reload }: { data: EcourseData; locale: Locale; t: EcourseTexts; reload: Reload }) {
   const [acceptedVersion, setAcceptedVersion] = useState<string | null>(null);
@@ -69,9 +69,10 @@ function EcourseBody({ data, locale, t, reload }: { data: EcourseData; locale: L
         t={t}
         focusTitle={reshown}
         onAccepted={() => setAcceptedVersion(version)}
-        onRefresh={() => {
-          setReshown(true);
-          return reload({ quiet: true });
+        onRefresh={async () => {
+          const answered = await reload({ quiet: true });
+          if (answered) setReshown(true); // a failure keeps the focus where the failure sentence is
+          return answered;
         }}
       />
     );

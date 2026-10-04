@@ -515,7 +515,7 @@ export const et = {
       changeEmail: "Muuda e-posti",
       wrongCode: "Kood ei sobi. Proovi uuesti.",
       expired: "Kood on aegunud. Saada uus kood.",
-      // ?viga=link: the e-mail's button was used already, or is older than 30 minutes
+      // #viga=link: the e-mail's button was used already, or is older than 30 minutes
       linkExpired: "Link on aegunud või juba kasutatud. Saada uus kood.",
       rate: "Liiga palju katseid. Proovi mõne minuti pärast uuesti.",
       server: "Midagi läks valesti. Proovi uuesti.",

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
@@ -62,5 +62,34 @@ describe("the data endpoints of the account API", () => {
       "POST /muutmine changeRequest", "POST /tingimused terms", "POST /kustuta deleteAccount",
     ]);
     expect(router).toContain('request.method === "GET" ? COURSE_PATH.exec(path) : null');
+  });
+});
+
+// The account's pages (/konto…, /ru/konto…) are static shells: Next.js keeps the address of the request that renders a page, query
+// included, in the page it caches, so no address with a query may reach them. The middleware answers one with a 303 (the parameters
+// it knows move into the fragment); the app itself never makes such an address: its links and redirects carry their parameters in the
+// fragment (`/konto/sisene#viga=link`, `#korda=1`, `#email=…`).
+const SRC = join(process.cwd(), "src");
+const sourceFiles = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sourceFiles(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : []));
+
+describe("the app never builds an address of an account page with a query", () => {
+  // a string that starts at an account page ("/konto…", "/ru/konto…", also after a ${…} or a template quote) and goes on to a "?"
+  const SHELL_WITH_QUERY = /(?:["'`]|\}|href\([^,)]*,\s*["'`])(?:\/ru)?\/konto(?:\/[a-z0-9${}._-]+)*\?/;
+
+  test("the pattern sees the addresses it is meant for, and not the API's", () => {
+    for (const bad of ['"/konto/sisene?korda=1"', "`/ru/konto?x=1`", 'href(locale, "/konto/kursus/x?a=b")', "`${base}/konto/sisene?viga=link`", "'/konto?x'"]) expect(bad, bad).toMatch(SHELL_WITH_QUERY);
+    for (const fine of ['"/api/konto/verify?t="', '"/konto/sisene#korda=1"', '"/konto/sisene"', '"/koolitused/x?sessioon=1"', '"/kontakt?x=1"', 'const login = "/konto/sisene";']) expect(fine, fine).not.toMatch(SHELL_WITH_QUERY);
+  });
+
+  test("no file of src/ has one (the comments that name the old query form are not strings)", () => {
+    const offenders = sourceFiles(SRC).flatMap((file) => {
+      const code = readFileSync(file, "utf8")
+        .replace(/\r\n/g, "\n")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      return SHELL_WITH_QUERY.test(code) ? [file.slice(SRC.length + 1)] : [];
+    });
+    expect(offenders).toEqual([]);
   });
 });

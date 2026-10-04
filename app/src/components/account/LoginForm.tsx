@@ -7,6 +7,7 @@ import { isEmail, normalizeEmail, typoSuggestion } from "@/domain/email";
 import type { Dict } from "@/i18n/dict/et";
 import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
+import { readLoginAddress } from "./login-address";
 import { rememberEmail, rememberedEmail } from "./useAccount";
 import styles from "./LoginForm.module.css";
 
@@ -96,10 +97,11 @@ function withBold(template: string, name: string, value: string): React.ReactNod
  *   the seconds left, as text) and "Muuda e-posti".
  * - The code step is kept in this tab (sessionStorage) for the code's 30 minutes: a phone that drops the tab while the
  *   student reads the e-mail comes back to the code field, with the rest of the 60 s.
- * - The page is static and the same for every visitor; the browser reads its query: `?viga=link` (the e-mail's button was
- *   used or too old) and `?viga=server` show a notice above the form, `?korda=1` (from "Saada uus kood" on an account page)
- *   sends a code to the remembered e-mail at once. The parameters are then removed from the address, so a reload does
- *   not repeat them.
+ * - The page is static and the same for every visitor; the browser reads the parameters in the address's fragment, which never
+ *   reaches a server or a cache (login-address.ts; the query too, for links already out there; the middleware moves a query into
+ *   the fragment): `#viga=link` (the e-mail's button was used or too old) and `#viga=server` show a notice above the form,
+ *   `#korda=1` (from "Saada uus kood" on an account page) sends a code to the remembered e-mail at once, `#email=…` fills the
+ *   field once (before the remembered address). The parameters are then removed from the address, so a reload does not repeat them.
  * - The page's language goes with the login (the account a first login creates speaks it); signed in, the browser opens
  *   "Minu konto" in that language, in place of the login page in the history.
  */
@@ -228,16 +230,11 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     if (arrived.current) return;
     arrived.current = true;
     const saved = rememberedEmail();
-    const url = new URL(window.location.href);
-    const problem = url.searchParams.get("viga");
-    const again = url.searchParams.get("korda") === "1";
-    if (url.searchParams.has("viga") || url.searchParams.has("korda")) {
-      url.searchParams.delete("viga");
-      url.searchParams.delete("korda");
-      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    }
-    if (saved) setEmail((typed) => typed || saved);
-    if (problem === "link" || problem === "server") {
+    const { problem, again, email: given, cleaned } = readLoginAddress(window.location.href);
+    if (cleaned !== null) window.history.replaceState(window.history.state, "", cleaned);
+    const prefill = given || saved;
+    if (prefill) setEmail((typed) => typed || prefill);
+    if (problem) {
       keepPendingCode(null); // a code step kept in this tab belongs to a send the notice says to replace
       setBanner(problem); // the notice belongs to the e-mail step: a new code is what it asks for
       return;

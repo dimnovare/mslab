@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { formatDate, formatTime } from "../../src/i18n/format";
 import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, storedChangeRequests, TEST_PREPAYMENT, type AccountCardKind } from "./account";
 import { signInAsAdmin, type CreatedRows } from "./admin-login";
-import { holdLocalLock, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
+import { holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
 import { submitsForms, test, expect } from "./test";
 import { scrollLeft, swipe } from "./touch";
 
@@ -41,6 +41,7 @@ async function signedInWith(page: Page, label: string, project: string, opts: { 
 test("every card says what to do next, with at most one button; the prepayment instructions open in place; without them Maria sends an invoice", async ({ page, context }, info) => {
   submitsForms();
   // The prepayment instructions are one shared setting: the desktop and phone runs of this test take turns.
+  info.setTimeout(info.timeout + LOCK_WAIT_MS); // the wait for the shared setting is not taken from the test's own time
   const release = await holdLocalLock("e2e-prepayment-setting");
   const restore = await snapshotRows("settings", { column: "key", value: "prepayment" });
   try {
@@ -137,6 +138,7 @@ test("every card says what to do next, with at most one button; the prepayment i
 
 test("without the clipboard, Kopeeri selects the text and says so", async ({ page }, info) => {
   submitsForms();
+  info.setTimeout(info.timeout + LOCK_WAIT_MS); // the wait for the shared setting is not taken from the test's own time
   const release = await holdLocalLock("e2e-prepayment-setting");
   const restore = await snapshotRows("settings", { column: "key", value: "prepayment" });
   try {

@@ -278,6 +278,8 @@ describe("accepting", () => {
     expect(button().disabled).toBe(false);
     expect(button().getAttribute("aria-disabled")).toBeNull();
     expect($("[data-terms-gate]")?.getAttribute("data-terms-version")).toBe(V1);
+    // the focus is not taken to the title of a notice that never came
+    expect(document.activeElement).not.toBe($("[data-terms-gate] h1"));
 
     // pressed again once the server answers: the new notice, the box empty, no sentence
     fetchMock.mockImplementation((_input, init) => Promise.resolve(init?.method === "POST" ? json(409, { ok: false, error: "version" }) : json(200, view({ version: V2, text: { et: "Uus tekst." } }))));
@@ -285,6 +287,22 @@ describe("accepting", () => {
     expect($("[data-terms-gate]")?.getAttribute("data-terms-version")).toBe(V2);
     expect(($("input[name='terms']") as HTMLInputElement).checked).toBe(false);
     expect($("[data-terms-failed]")?.textContent).toBe("");
+  });
+
+  test.each([
+    ["a platform's 404 page", () => new Response("<html>404</html>", { status: 404, headers: { "content-type": "text/html" } })],
+    ["a proxy's 409 page", () => new Response("<html>conflict</html>", { status: 409, headers: { "content-type": "text/html" } })],
+    ["a sign-in page's 401", () => new Response("<html>sign in</html>", { status: 401, headers: { "content-type": "text/html" } })],
+    ["JSON that is not the API's 404", () => json(404, { message: "not found" })],
+  ])("%s on accepting is a failure, not a changed version: the sentence, the box ticked, no page load", async (_name, answer) => {
+    fetchMock.mockImplementation(async (_input, init) => (init?.method === "POST" ? answer() : json(200, view())));
+    await mount();
+    await tick();
+    await click(button());
+    expect(fetchMock).toHaveBeenCalledTimes(2); // the page and the acceptance: nothing loaded again
+    expect($("[data-terms-failed]")?.textContent).toBe("Ei õnnestunud salvestada. Proovi uuesti.");
+    expect(($("input[name='terms']") as HTMLInputElement).checked).toBe(true);
+    expect(button().disabled).toBe(false);
   });
 
   test("a 409 whose reload finds the new version already accepted goes to the course", async () => {

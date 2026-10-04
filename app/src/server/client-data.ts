@@ -210,8 +210,18 @@ async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
   return row ?? null;
 }
 
-/** The terms text as stored, or null when there is none to accept: no page row, or a page whose Estonian text is empty (the Estonian text is the one the others fall back to). */
-const termsText = (body: I18n | null | undefined): I18n | null => (body && body.et.trim() ? body : null);
+/**
+ * The terms text as stored, or null when there is none to accept: no page row, a page whose Estonian text is empty (the Estonian text is
+ * the one the others fall back to), or a stored body that is not an { et, ru? } of strings (the column is jsonb, so a row written by hand
+ * or an old one can hold anything): never an error for the student, who then has nothing to accept.
+ */
+export function termsText(body: unknown): I18n | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+  const { et, ru } = body as { et?: unknown; ru?: unknown };
+  if (typeof et !== "string" || !et.trim()) return null;
+  if (ru !== undefined && ru !== null && typeof ru !== "string") return null;
+  return ru === undefined || ru === null ? { et } : { et, ru };
+}
 
 /**
  * The e-course page's data: null without active access (none, revoked or expired). The terms notice shows while `terms.accepted` is false;

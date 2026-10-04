@@ -94,12 +94,12 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
   // from the same entry. If a fixture of another test marks the pages stale in between, the request with the query renders the page
   // itself, and Next.js stores that request's address in it: not a failure of this test, so it starts again (three times at most).
   let plain = "";
-  let notice = await fromCache(request, "/?uudiskiri=kinnitatud");
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let notice: Awaited<ReturnType<APIRequestContext["get"]>>;
+  let attempt = 0;
+  do {
     plain = await settledText(request, "/");
     notice = await request.get("/?uudiskiri=kinnitatud", { failOnStatusCode: false });
-    if (notice.headers()["x-nextjs-cache"] === "HIT") break;
-  }
+  } while (notice.headers()["x-nextjs-cache"] !== "HIT" && ++attempt < 3);
   expect(notice.headers()["x-nextjs-cache"]).toBe("HIT");
   const html = await notice.text();
   expect(html, "the same cached page").toBe(plain);
@@ -151,14 +151,6 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
     expect(prefetch.headers()["x-nextjs-cache"], `prefetch ${label}`).toBe("HIT");
     expect(prefetch.headers()["set-cookie"], `prefetch ${label}`).toBeUndefined();
   }
-  // the query is read by the browser, never by the server: the same page
-  const login = await settledText(request, "/konto/sisene");
-  for (const query of ["?viga=link", "?viga=server", "?korda=1"]) {
-    const res = await request.get(`/konto/sisene${query}`, { failOnStatusCode: false });
-    expect(res.headers()["x-nextjs-cache"], query).toBe("HIT");
-    expect(await res.text(), query).toBe(login);
-  }
-
   const me = await request.get("/api/konto/me", { failOnStatusCode: false });
   expect(me.status()).toBe(401);
   expect(await me.json()).toEqual({ ok: false, reason: "none" });
@@ -167,10 +159,11 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
 });
 
 // Next.js stores the address of the request that renders a page (path and query) in the page it caches, and the next visitor is sent
-// that copy. The account's pages take queries (?viga=link, ?viga=server, ?korda=1, and an e-mail address later): a render started by a
-// request with one must not leave it in the shell. Checked by marking every page stale, as the fixtures do, so that the request with
-// the query is the one that renders the shell (its answer says MISS), once as a page and once as the navigation payload; then the
-// address without a query is asked until two answers in a row come from the cache. Neither the page nor the payload may name it.
+// that copy; no rewrite changes it. The account's pages take parameters (viga, korda, an e-mail address): they travel in the fragment,
+// which no server sees, and the middleware answers a request that has a query, whatever its method (a mail scanner's HEAD, a stray
+// POST), with a 303 to the same path with the known parameters in the fragment. Checked by marking every page stale, as the fixtures
+// do, then asking with a query by GET, HEAD and POST: each must answer 303 and not be kept; then the address without a query is asked
+// until two answers in a row come from the cache, as a page and as the navigation payload (RSC: 1), and neither may name the query.
 const PROBE_QUERY = "viga=link&korda=1&email=probe%40example.test";
 const LEAKS = /probe|viga|korda/;
 /** The first mention of the probe's query with the text around it ("" when there is none), for the failure message. */
@@ -179,29 +172,35 @@ const leak = (text: string): string => {
   return at < 0 ? "" : text.slice(Math.max(0, at - 80), at + 80);
 };
 
-test("an account shell rendered by a request with a query never keeps the query for the next visitor", async ({ request }) => {
+test("an account shell asked for with a query is answered with a 303 to the fragment, by every method, and the cached shell never holds the query", async ({ request }) => {
   test.setTimeout(180_000);
   for (const path of ACCOUNT_SHELLS) {
-    for (const asPayload of [false, true]) {
-      const how = asPayload ? "payload" : "page";
-      // the request with the query must be the one that renders the shell (another test may render it first: then again)
-      let rendered = false;
-      for (let attempt = 0; attempt < 5 && !rendered; attempt++) {
-        revalidateLocalPages();
-        const probe = await request.get(asPayload ? `${path}?${PROBE_QUERY}&_rsc=q1` : `${path}?${PROBE_QUERY}`, {
-          headers: asPayload ? { RSC: "1" } : {},
-          failOnStatusCode: false,
-        });
-        expect(probe.status(), `${path} with the query (${how})`).toBe(200);
-        rendered = probe.headers()["x-nextjs-cache"] === "MISS";
-      }
-      expect(rendered, `${path}: the request with the query rendered the shell (${how})`).toBe(true);
-
-      const page = await settledText(request, path);
-      const payload = await settledText(request, `${path}?_rsc=c1`, { headers: { RSC: "1" } });
-      expect(leak(page), `${path}: the cached page after a ${how} render with the query`).toBe("");
-      expect(leak(payload), `${path}: the cached payload after a ${how} render with the query`).toBe("");
+    revalidateLocalPages(); // the first request that reaches a shell now renders it: it must not be one with a query
+    for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {
+      const probe = await request.fetch(`${path}?${PROBE_QUERY}`, {
+        method,
+        ...(method === "POST" || method === "PUT" ? { data: "email=probe%40example.test", headers: { "content-type": "application/x-www-form-urlencoded" } } : {}),
+        maxRedirects: 0,
+        failOnStatusCode: false,
+      });
+      const what = `${method} ${path}?…`;
+      expect(probe.status(), what).toBe(303);
+      expect(probe.headers()["location"], what).toBe(`${path}#${PROBE_QUERY}`);
+      expect(probe.headers()["cache-control"], what).toBe("no-store");
+      expect(probe.headers()["x-nextjs-cache"], what).toBeUndefined();
+      expect(probe.headers()["set-cookie"], what).toBeUndefined();
     }
+    // an unknown parameter is dropped, and so is everything when none of ours is there
+    const other = await request.get(`${path}?utm_source=probe&fbclid=probe`, { maxRedirects: 0, failOnStatusCode: false });
+    expect(other.status(), path).toBe(303);
+    expect(other.headers()["location"], path).toBe(path);
+
+    const page = await settledText(request, path);
+    const payload = await settledText(request, path, { headers: { RSC: "1" } });
+    expect(leak(page), `${path}: the cached page after the requests with a query`).toBe("");
+    expect(leak(payload), `${path}: the cached payload after the requests with a query`).toBe("");
+    // and the clean address was answered from the cache, by a request without a query
+    expect((await request.get(path, { failOnStatusCode: false })).headers()["x-nextjs-cache"], path).toBe("HIT");
   }
 });
 

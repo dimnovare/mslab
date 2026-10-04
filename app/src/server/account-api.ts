@@ -208,7 +208,7 @@ function redirect(url: URL, target: string, cookies: string[] = []): Response {
  * client's own page (/konto, /ru/konto, by the client's language). `l` is the language of the page the login was asked from
  * (absent: Estonian; anything but "et" / "ru" is ignored): an account this link creates gets it, and the login page of that
  * language is where the link goes when it fails. A token that is unknown, used, expired or dead goes to
- * /konto/sisene?viga=link (/ru/konto/sisene?viga=link); a database failure to ?viga=server (the link is still usable then,
+ * /konto/sisene#viga=link (/ru/konto/sisene#viga=link); a database failure to #viga=server (the link is still usable then,
  * as for the admin). A prefetch or prerender goes to the login page without touching the token.
  */
 async function verify(request: Request, url: URL, deps: AccountDeps): Promise<Response> {
@@ -217,11 +217,11 @@ async function verify(request: Request, url: URL, deps: AccountDeps): Promise<Re
   if (isPrefetch(request.headers)) return redirect(url, login);
   try {
     const session = await redeemClientLink(deps.db, url.searchParams.get("t") ?? "", deps.now, page);
-    if (!session) return redirect(url, `${login}?viga=link`);
+    if (!session) return redirect(url, `${login}#viga=link`);
     return redirect(url, session.locale === "ru" ? "/ru/konto" : "/konto", sessionCookies(session.sessionRaw));
   } catch (e) {
     logFailure("[account] verify failed", e); // never the message: it holds the token hash and the e-mail
-    return redirect(url, `${login}?viga=server`);
+    return redirect(url, `${login}#viga=server`);
   }
 }
 

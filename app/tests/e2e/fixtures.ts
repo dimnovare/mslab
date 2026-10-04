@@ -39,7 +39,7 @@ export const FIXTURES = {
  */
 const connect = (marksPages = true) => {
   if (!isLocalDbUrl(DB_URL)) assertLocalDatabases([{ source: "E2E_DATABASE_URL", url: DB_URL }]);
-  const sql = postgres(DB_URL, { max: 1, connect_timeout: 5, onnotice: () => {} });
+  const sql = postgres(DB_URL, { max: 1, connect_timeout: 20, onnotice: () => {} });
   if (!PROD_BUILD || !marksPages) return sql;
   const end = sql.end.bind(sql);
   return Object.assign(sql, { end: async (...args: Parameters<typeof end>) => { await end(...args); revalidateLocalPages(); } });

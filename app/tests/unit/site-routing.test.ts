@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { isKnownPage, routeSitePath } from "@/lib/site-routing";
+import { accountShellTarget, isKnownPage, routeSitePath } from "@/lib/site-routing";
 
 // lib/site-routing.ts: the middleware's decisions as plain functions. The middleware applies them to each request
 // (tests/unit/middleware.test.ts checks the middleware's answers themselves).
@@ -48,16 +48,28 @@ describe("routeSitePath", () => {
         expect(isKnownPage(`/${locale}${p}`), `/${locale}${p}`).toBe(true);
     for (const p of ["/et/konto/x/y", "/et/konto/x", "/et/konto/kursus", "/et/konto/kursus/A", "/et/konto/kursus/x/y", "/ru/konto/sisene/x", "/et/konto/lemmikud/x"])
       expect(isKnownPage(p), p).toBe(false);
-    // the account's shells render without the visitor's query (the browser reads it from its own address); no other page does
-    expect(route("/konto/sisene?viga=link")).toEqual({ kind: "page", page: "/et/konto/sisene", rewritten: true, queryFree: true });
-    expect(route("/ru/konto/sisene?korda=1")).toEqual({ kind: "page", page: "/ru/konto/sisene", rewritten: false, queryFree: true });
-    expect(route("/konto/kursus/kulmude-lami")).toEqual({ kind: "page", page: "/et/konto/kursus/kulmude-lami", rewritten: true, queryFree: true });
+    // a shell asked for with a query is not rendered: a redirect to the same path with the known parameters in the fragment
+    expect(route("/konto/sisene?viga=link")).toEqual({ kind: "shellRedirect", location: "/konto/sisene#viga=link" });
+    expect(route("/ru/konto/sisene?korda=1")).toEqual({ kind: "shellRedirect", location: "/ru/konto/sisene#korda=1" });
+    expect(route("/konto/kursus/kulmude-lami?x=1")).toEqual({ kind: "shellRedirect", location: "/konto/kursus/kulmude-lami" });
+    expect(route("/konto/kursus/kulmude-lami")).toEqual({ kind: "page", page: "/et/konto/kursus/kulmude-lami", rewritten: true });
+    expect(route("/ru/konto/sisene")).toEqual({ kind: "page", page: "/ru/konto/sisene", rewritten: false });
   });
 
-  test("only the account's shells are query free: not the public pages, not an unknown address under /konto", () => {
-    for (const p of ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/x", "/ru/konto/kursus/x"]) expect(route(p), p).toHaveProperty("queryFree", true);
+  test("only the account's shells answer a query with a redirect: not the public pages, the cart, an unknown address under /konto", () => {
+    for (const p of ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/x", "/ru/konto/kursus/x"]) expect(route(p + "?a=1"), p).toMatchObject({ kind: "shellRedirect" });
     for (const p of ["/", "/ru", "/koolitused", "/koolitused/x?sessioon=1", "/kontakt", "/ru/kontakt", "/ostukorv?kursus=x", "/konto/x/y", "/konto/kursus", "/kontoo"])
-      expect(route(p), p).not.toHaveProperty("queryFree");
+      expect(route(p.includes("?") ? p : p + "?a=1"), p).not.toMatchObject({ kind: "shellRedirect" });
+  });
+
+  test("accountShellTarget: the parameters the page knows move into the fragment, in a fixed order, URL-encoded; the rest is dropped", () => {
+    const target = (path: string, query: string) => accountShellTarget(path, new URLSearchParams(query));
+    expect(target("/konto/sisene", "email=a%40example.test&viga=link&korda=1")).toBe("/konto/sisene#viga=link&korda=1&email=a%40example.test");
+    expect(target("/ru/konto", "")).toBe("/ru/konto");
+    expect(target("/ru/konto", "utm=1&_rsc=x")).toBe("/ru/konto");
+    expect(target("/konto/sisene", "viga=link&viga=server")).toBe("/konto/sisene#viga=link");
+    expect(target("/konto/sisene", "email=" + "a".repeat(255))).toBe("/konto/sisene");
+    expect(target("/konto/sisene", "viga=%23%26%3D x")).toBe("/konto/sisene#viga=%23%26%3D+x");
   });
 
   test("redirects, the hub, the API and everything served as it is", () => {

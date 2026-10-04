@@ -228,15 +228,15 @@ describe("failures", () => {
     expect(logged).not.toMatch(/kati|example\.test|insert failed/);
   });
 
-  test("verify with a failing database goes to the login page with ?viga=server, not a JSON page", async () => {
+  test("verify with a failing database goes to the login page with #viga=server, not a JSON page", async () => {
     const token = "A".repeat(43);
     const res = (await handleAccountApi(req(`/verify?t=${token}`), deps({ db: failingDb(`update failed for token ${token}`) })))!;
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene?viga=server`);
+    expect(res.headers.get("location")).toBe(`${BASE}/konto/sisene#viga=server`);
     expect(res.headers.getSetCookie()).toEqual([]);
     // a link from the Russian page fails to the Russian login page (fix round 1)
     const ru = (await handleAccountApi(req(`/verify?t=${token}&l=ru`), deps({ db: failingDb("update failed") })))!;
-    expect(ru.headers.get("location")).toBe(`${BASE}/ru/konto/sisene?viga=server`);
+    expect(ru.headers.get("location")).toBe(`${BASE}/ru/konto/sisene#viga=server`);
     const logged = vi.mocked(console.error).mock.calls.flat().join("\n"); // the error's message holds the token; only the class is logged
     expect(logged).toContain("[account] verify failed");
     expect(logged).not.toContain(token);

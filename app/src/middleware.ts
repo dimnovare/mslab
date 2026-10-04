@@ -27,9 +27,8 @@ function hub(req: NextRequest, pathname: string): NextResponse {
   return NextResponse.next(); // a file of the hub (image, script, style)
 }
 
-export function middleware(req: NextRequest): NextResponse | Promise<NextResponse> {
-  const answer = route(req);
-  return answer instanceof Promise ? answer.then(noindex) : noindex(answer);
+export function middleware(req: NextRequest) {
+  return noindex(route(req));
 }
 
 /**
@@ -42,64 +41,22 @@ function noindex(res: NextResponse): NextResponse {
   return res;
 }
 
-/** Set on the request the relay makes, so that a relay never relays again. */
-export const RELAY_HEADER = "x-account-relay";
-
-/** What the relay passes on of the visitor's request: what makes it a page, a navigation or a prefetch request. No cookies. */
-const RELAYED_REQUEST_HEADERS = ["accept", "accept-language", "user-agent", "rsc", "next-router-prefetch", "next-router-segment-prefetch", "next-router-state-tree", "next-url"];
 /**
- * What it does not pass back: the body is decoded by fetch; the other layers add their own X-Robots-Tag; and the headers of the
- * middleware itself (x-middleware-rewrite and the like, which the answer to the relayed request carries) are for the request they
- * answered: here they would be taken for this middleware's own and break it.
+ * An account shell asked for with a query (any method: a scanner's HEAD, a stray POST): 303 to the same path with the parameters the
+ * page knows in the fragment, which only the browser sees (LoginForm reads them there). Next.js keeps the address of the request that
+ * renders a page, query included, in the page it caches for every later visitor, and nothing the middleware does to a request
+ * (a rewrite) changes that address; so no request with a query may ever reach a shell. The answer is never kept (no-store). The
+ * Location is made of the matched shell path and the fragment only, a path that starts with one slash (so it keeps the request's own
+ * origin, whatever the request says); Next.js's adapter, which cannot take a relative Location from a middleware, wants it absolute
+ * and sends it on as a relative path (the same host as the request).
  */
-const DROPPED_RESPONSE_HEADERS = ["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive", "set-cookie", "x-robots-tag"];
-const MIDDLEWARE_HEADER = /^x-middleware-/i;
-
-/** The page `page` ("/et/konto/sisene") as the browser's own request would get it. */
-function rewriteToPage(req: NextRequest, page: string): NextResponse {
-  const url = req.nextUrl.clone();
-  url.pathname = page;
-  return NextResponse.rewrite(url);
+function shellRedirect(req: NextRequest, location: string): NextResponse {
+  const res = NextResponse.redirect(new URL(location, req.url), 303);
+  res.headers.set("cache-control", "no-store");
+  return res;
 }
 
-/**
- * An account shell asked for with a query of its own (?viga=link, ?korda=1, an e-mail address): the answer is the shell as the
- * address without the query gives it, which is the page the cache holds. Next.js keeps the address of the request that renders a
- * page (path and query) in the page it stores and hands that copy to every later visitor, and a rewrite cannot change it; so a
- * request with a query must never be the one that renders a shell. This asks for the address without the query (the cache
- * answers, or renders it, once, with no query in it) and passes the answer on. The browser keeps its own address and reads the
- * query from it (LoginForm). Only the visitor's page headers go along, no cookies; the answer is not kept by anyone on the way.
- */
-async function relayWithoutQuery(req: NextRequest, page: string): Promise<NextResponse> {
-  const rsc = req.nextUrl.searchParams.get("_rsc");
-  const clean = new URL(req.url);
-  clean.pathname = req.nextUrl.pathname;
-  clean.search = rsc === null ? "" : `?_rsc=${encodeURIComponent(rsc)}`;
-  const headers = new Headers({ [RELAY_HEADER]: "1" });
-  for (const name of RELAYED_REQUEST_HEADERS) {
-    const value = req.headers.get(name);
-    if (value !== null) headers.set(name, value);
-  }
-  let res: Response;
-  try {
-    res = await fetch(clean, { method: "GET", headers, redirect: "manual", cache: "no-store" });
-  } catch {
-    // the shell could not be fetched: the page is rendered as for any other request
-    return rewriteToPage(req, page);
-  }
-  // A shell answers 200 (or a redirect of Next.js's own, which goes on as it is). Anything else is no shell (a platform's page
-  // that wants a sign-in, an error): the page is rendered as for any other request, never that answer shown in its place.
-  if (res.status >= 400) {
-    await res.body?.cancel();
-    return rewriteToPage(req, page);
-  }
-  const out = new Headers(res.headers);
-  for (const name of [...out.keys()]) if (DROPPED_RESPONSE_HEADERS.includes(name) || MIDDLEWARE_HEADER.test(name)) out.delete(name);
-  out.set("cache-control", "private, no-store");
-  return new NextResponse(res.body, { status: res.status, statusText: res.statusText, headers: out });
-}
-
-function route(req: NextRequest): NextResponse | Promise<NextResponse> {
+function route(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const to = routeSitePath(pathname, req.nextUrl.searchParams);
   switch (to.kind) {
@@ -107,12 +64,13 @@ function route(req: NextRequest): NextResponse | Promise<NextResponse> {
       return hub(req, pathname);
     case "redirect":
       return NextResponse.redirect(withPath(req, to.path), 308);
+    case "shellRedirect":
+      return shellRedirect(req, to.location);
     case "page": {
-      // an account shell asked for with a query of its own: answered from the address without it (relayWithoutQuery)
-      const ownQuery = to.queryFree === true && [...req.nextUrl.searchParams.keys()].some((name) => name !== "_rsc");
-      if (ownQuery && req.method === "GET" && !req.headers.has(RELAY_HEADER)) return relayWithoutQuery(req, to.page);
       if (!to.rewritten) return NextResponse.next(); // /ru/* renders app/[locale]=ru directly
-      return rewriteToPage(req, to.page);
+      const url = req.nextUrl.clone();
+      url.pathname = to.page;
+      return NextResponse.rewrite(url);
     }
     default:
       return NextResponse.next(); // API, admin, media and static files untouched

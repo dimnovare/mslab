@@ -15,13 +15,13 @@ export type Reload = (options?: { quiet?: boolean }) => Promise<boolean>;
 
 /**
  * "Sinu konto avati teises seadmes" and its one button, "Saada uus kood", which opens the login page with the code already
- * sent to the remembered e-mail (?korda=1).
+ * sent to the remembered e-mail (#korda=1: in the fragment, which no server or cache ever holds).
  */
 export function ReplacedNotice({ locale, t }: { locale: Locale; t: { replaced: string; sendCode: string } }) {
   return (
     <div data-account-state="replaced">
       <Notice title={t.replaced}>
-        <Link className={ui.btn} href={href(locale, "/konto/sisene?korda=1")}>
+        <Link className={ui.btn} href={href(locale, "/konto/sisene#korda=1")}>
           {t.sendCode}
           <Icon name="arrow" />
         </Link>

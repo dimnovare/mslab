@@ -321,8 +321,8 @@ test("the e-mail is remembered; a used or old link and a server failure show a n
   submitsForms();
   const email = clientEmail("again", info.project.name);
   await removeClientRows(email);
-  // "Saada uus kood" without a remembered e-mail: just the empty form
-  await openLogin(page, `${LOGIN}?korda=1`);
+  // "Saada uus kood" without a remembered e-mail: just the empty form (its parameter is in the fragment, which no server or cache sees)
+  await openLogin(page, `${LOGIN}#korda=1`);
   await expect(page).toHaveURL(/\/konto\/sisene$/);
   await expect(page.locator("[data-login-step='email']")).toBeVisible();
   await expect(emailField(page)).toHaveValue("");
@@ -336,17 +336,63 @@ test("the e-mail is remembered; a used or old link and a server failure show a n
   await expect(emailField(next)).toHaveValue(email);
   await next.close();
 
-  // the e-mail's button, used already or too old: the API sends the visitor here with ?viga=link
+  // the e-mail's button, used already or too old: the API sends the visitor here with #viga=link
+  const verify = await page.request.get(`/api/konto/verify?t=${"e2e".repeat(15)}`, { maxRedirects: 0 });
+  expect(verify.status()).toBe(303);
+  expect(new URL(verify.headers()["location"]).pathname + new URL(verify.headers()["location"]).hash).toBe("/konto/sisene#viga=link");
   await page.goto(`/api/konto/verify?t=${"e2e".repeat(15)}`);
   await expect(page).toHaveURL(/\/konto\/sisene$/); // the parameter is read and removed: a reload does not repeat it
   await expect(page.locator("[data-login-banner='link']")).toHaveText("Link on aegunud või juba kasutatud. Saada uus kood.");
   await expect(emailField(page)).toHaveValue(email);
 
-  await page.goto(`${LOGIN}?viga=server`);
+  await page.goto("/"); // (a visit that differs from the open page by its fragment only would not load it again)
+  await page.goto(`${LOGIN}#viga=server`);
   await expect(page.locator("[data-login-banner='server']")).toHaveText("Midagi läks valesti. Proovi uuesti.");
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
   await expect(emailField(page)).toHaveValue(email);
   await page.reload();
   await expect(page.locator("[data-login-banner]")).toHaveCount(0);
+});
+
+test("a link that is already out there, with its parameter in the query, lands on the clean page with its notice: the server answers 303 to the fragment, the query is never rendered", async ({ page }) => {
+  // asked directly: a 303 with no body to the same path, the parameter in the fragment, never kept
+  const asked = await page.request.get(`${LOGIN}?viga=link`, { maxRedirects: 0 });
+  expect(asked.status()).toBe(303);
+  expect(asked.headers()["location"]).toBe("/konto/sisene#viga=link");
+  expect(asked.headers()["cache-control"]).toBe("no-store");
+  // a browser follows it: the clean address, the notice
+  await page.goto(`${LOGIN}?viga=link`);
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+  await expect(page.locator("[data-login-banner='link']")).toHaveText("Link on aegunud või juba kasutatud. Saada uus kood.");
+  await page.reload();
+  await expect(page.locator("[data-login-banner]")).toHaveCount(0);
+  // Russian, with a parameter we do not know: dropped
+  await page.goto(`/ru/konto/sisene?viga=server&utm_source=x`);
+  await expect(page).toHaveURL(/\/ru\/konto\/sisene$/);
+  await expect(page.locator("[data-login-banner='server']")).toHaveText("Что-то пошло не так. Попробуйте ещё раз.");
+});
+
+test("an address in the fragment (#email=, the account button of an e-mail) fills the field once, before the remembered one, and is removed", async ({ page }) => {
+  const remembered = "e2e-client-remembered@example.test";
+  const given = "E2E-Client-Given@Example.test";
+  await page.addInitScript((address) => localStorage.setItem("mslab-email", address), remembered);
+  await openLogin(page, `${LOGIN}#email=${encodeURIComponent(given)}`);
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+  await expect(emailField(page)).toHaveValue(given.toLowerCase());
+  await page.reload();
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(emailField(page)).toHaveValue(remembered); // once: the parameter is gone, the remembered address is back
+  // something that is no address is ignored
+  await page.goto("/");
+  await openLogin(page, `${LOGIN}#email=nope`);
+  await expect(emailField(page)).toHaveValue(remembered);
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+  // and with a query, the old way (the server moves it into the fragment)
+  await page.goto("/");
+  await openLogin(page, `${LOGIN}?email=${encodeURIComponent(given)}`);
+  await expect(emailField(page)).toHaveValue(given.toLowerCase());
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
 });
 
 test("signed in on another device: one message and one button, which sends a new code and opens the code field", async ({ page, browser, isMobile }, info) => {
@@ -368,6 +414,7 @@ test("signed in on another device: one message and one button, which sends a new
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sinu konto avati teises seadmes");
   const again = page.getByRole("link", { name: "Saada uus kood" });
   await expect(again).toBeVisible();
+  await expect(again).toHaveAttribute("href", "/konto/sisene#korda=1"); // the parameter travels in the fragment
   await expect(page.locator("main").getByRole("link")).toHaveCount(1); // one button, nothing else to choose
   await expectAccountButton(page, isMobile, false); // the answer cleared the hint cookie
 

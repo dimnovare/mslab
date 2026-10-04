@@ -417,12 +417,12 @@ describe("one device", () => {
 });
 
 describe("verify", () => {
-  test("a bad token goes to /konto/sisene?viga=link: absolute address, no cookies, no Referer sent on", async () => {
+  test("a bad token goes to /konto/sisene#viga=link: absolute address, no cookies, no Referer sent on", async () => {
     const { deps } = setup();
     for (const path of ["/verify?t=" + "A".repeat(43), "/verify?t=nope", "/verify?t=", "/verify"]) {
       const res = await call(deps, path);
       expect(res.status, path).toBe(303);
-      expect(res.headers.get("location"), path).toBe(`${SITE}/konto/sisene?viga=link`);
+      expect(res.headers.get("location"), path).toBe(`${SITE}/konto/sisene#viga=link`);
       expect(res.headers.getSetCookie(), path).toEqual([]);
       expect(res.headers.get("referrer-policy")).toBe("no-referrer");
       expect(res.headers.get("cache-control")).toBe("private, no-store");
@@ -449,7 +449,7 @@ describe("verify", () => {
     expect((await call(deps, "/me", { cookie: sessionCookie(res)! })).status).toBe(200);
 
     const again = await call(deps, `/verify?t=${t}`);
-    expect(again.headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    expect(again.headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
   });
 
   test("a client who uses Russian lands on /ru/konto", async () => {
@@ -466,20 +466,20 @@ describe("verify", () => {
     const { deps } = setup();
     const a = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
     expect((await call(deps, "/code", { body: { email: EMAIL, code: a.devCode } })).status).toBe(200);
-    expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}`)).headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}`)).headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
 
     const b = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
     expect((await call(deps, `/verify?t=${tokenOf(b.devLink)}`)).headers.get("location")).toBe(`${SITE}/konto`);
     expect((await call(deps, "/code", { body: { email: EMAIL, code: b.devCode } })).status).toBe(400);
   });
 
-  test("an expired link goes to ?viga=link; a HEAD request does not use the token", async () => {
+  test("an expired link goes to #viga=link; a HEAD request does not use the token", async () => {
     const { deps } = setup();
     const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL } })).json();
     expect((await call(deps, `/verify?t=${tokenOf(devLink)}`, { method: "HEAD" })).status).toBe(404);
     expect((await tokens())[0].usedAt).toBeNull();
     const later = setup({ now: new Date(NOW.getTime() + 30 * 60_000 + 1) }).deps;
-    expect((await call(later, `/verify?t=${tokenOf(devLink)}`)).headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    expect((await call(later, `/verify?t=${tokenOf(devLink)}`)).headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
   });
 
   test("a first login creates the client once", async () => {
@@ -521,18 +521,18 @@ describe("the login page's language (fix round 1)", () => {
 
   test("a used, unknown or expired link from the Russian page opens the Russian login page", async () => {
     const { deps } = setup();
-    expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=ru`)).headers.get("location")).toBe(`${SITE}/ru/konto/sisene?viga=link`);
+    expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=ru`)).headers.get("location")).toBe(`${SITE}/ru/konto/sisene#viga=link`);
     const { devLink } = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
     expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto`);
-    expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene?viga=link`); // used
+    expect((await call(deps, pathOf(devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene#viga=link`); // used
     const old = await (await call(deps, "/login", { body: { email: EMAIL, locale: "ru" } })).json();
     const later = setup({ now: new Date(NOW.getTime() + 30 * 60_000 + 1) }).deps;
-    expect((await call(later, pathOf(old.devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene?viga=link`); // expired
+    expect((await call(later, pathOf(old.devLink))).headers.get("location")).toBe(`${SITE}/ru/konto/sisene#viga=link`); // expired
   });
 
   test("anything but et or ru is no language: Estonian pages and an Estonian account, as before", async () => {
     const { deps } = setup();
-    expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=fr`)).headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    expect((await call(deps, `/verify?t=${"A".repeat(43)}&l=fr`)).headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
     const a = await (await call(deps, "/login", { body: { email: EMAIL, locale: "fr" } })).json();
     expect(a.devLink).toBe(`${SITE}/api/konto/verify?t=${tokenOf(a.devLink)}`); // no l
     expect((await call(deps, `/verify?t=${tokenOf(a.devLink)}&l=xx`)).headers.get("location")).toBe(`${SITE}/konto`);
@@ -1134,7 +1134,7 @@ describe("POST /kustuta: deleting the account", () => {
     expect(code.headers.getSetCookie()).toEqual([]);
     const link = await call(deps, `/verify?t=${tokenOf(third.devLink)}`);
     expect(link.status).toBe(303);
-    expect(link.headers.get("location")).toBe(`${SITE}/konto/sisene?viga=link`);
+    expect(link.headers.get("location")).toBe(`${SITE}/konto/sisene#viga=link`);
     expect(link.headers.getSetCookie()).toEqual([]);
     expect(await db.select().from(clients)).toEqual([]);
   });

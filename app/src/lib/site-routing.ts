@@ -81,13 +81,38 @@ export type SiteRoute =
   /** a permanent redirect to the canonical path (same query) */
   | { kind: "redirect"; path: string }
   /** a public page of app/[locale]: `page` is the path it renders ("/et/koolitused"); `rewritten` when it is not the
-   *  visitor's own path (the ET rewrite, the cart); `queryFree` for the account's shells: they render without the visitor's query
-   *  (see known()), which the browser reads from its own address */
-  | { kind: "page"; page: string; rewritten: boolean; queryFree?: true }
+   *  visitor's own path (the ET rewrite, the cart) */
+  | { kind: "page"; page: string; rewritten: boolean }
+  /** an account shell asked for with a query: answered with a 303 to `location`, the same path with the parameters it knows in the fragment (accountShellTarget) */
+  | { kind: "shellRedirect"; location: string }
   /** admin, /media, Next.js files and static files: served as they are */
   | { kind: "other" };
 
-/** What the middleware does with `pathname` (and its query, for the cart). */
+/** The parameters of the account's pages that travel in the fragment: the browser reads them there (LoginForm), and a fragment never reaches a server, a log or a cache. */
+const FRAGMENT_PARAMS = ["viga", "korda", "email"] as const;
+/** A longer value is no e-mail address or flag of ours: dropped. */
+const FRAGMENT_VALUE_MAX = 254;
+
+/**
+ * Where a request for the account shell `path` (a clean, known path such as "/konto/sisene" or "/ru/konto/kursus/x") that carries a
+ * query is sent instead: the same path, with the parameters the page knows (viga, korda, email; the first of each, URL-encoded) moved
+ * into the fragment, and everything else dropped. Next.js keeps the address of the request that renders a page (path and query) in
+ * the page it caches, for every later visitor; so no request with a query may reach a shell. Built from `path` and the query only.
+ */
+export function accountShellTarget(path: string, search: URLSearchParams): string {
+  const kept = new URLSearchParams();
+  for (const name of FRAGMENT_PARAMS) {
+    const value = search.get(name);
+    if (value !== null && value.length <= FRAGMENT_VALUE_MAX) kept.set(name, value);
+  }
+  const fragment = kept.toString();
+  return fragment ? `${path}#${fragment}` : path;
+}
+
+/** Does `search` carry a query at all (a bare "?" does not)? */
+const hasQuery = (search: URLSearchParams): boolean => search.keys().next().done !== true;
+
+/** What the middleware does with `pathname` (and its query, for the cart and the account's shells). */
 export function routeSitePath(pathname: string, search: URLSearchParams): SiteRoute {
   if (HUB.test(pathname)) return { kind: "hub" };
   if (API.test(pathname)) return { kind: "api" };
@@ -96,19 +121,18 @@ export function routeSitePath(pathname: string, search: URLSearchParams): SiteRo
   if (path !== pathname) return { kind: "redirect", path };
   const cart = cartPage(pathname, search);
   if (cart) return { kind: "page", page: cart, rewritten: true };
-  if (/^\/ru(\/|$)/.test(pathname)) return known(pathname, false); // app/[locale]=ru directly
+  if (/^\/ru(\/|$)/.test(pathname)) return known(pathname, false, pathname, search); // app/[locale]=ru directly
   if (PASS.test(pathname)) return { kind: "other" };
-  return known("/et" + (pathname === "/" ? "" : pathname), true);
+  return known("/et" + (pathname === "/" ? "" : pathname), true, pathname, search);
 }
 
 /**
- * A page of the site as it is, or else its locale's 404 page (the address bar keeps the visitor's URL).
- *
- * The account's shells are `queryFree`: Next.js stores the address (path and query) of the request that renders a page in the page
- * it caches, and sends that copy to every later visitor. These pages take queries (?viga=link, ?korda=1, an e-mail address) that are
- * read by the browser only, so the middleware renders them without the visitor's query and no one's can end up in the cache.
+ * A page of the site as it is, or else its locale's 404 page (the address bar keeps the visitor's URL). A known account shell asked
+ * for with a query is not rendered at all, whatever the method: it is a shellRedirect to the same path (`path`, the visitor's own,
+ * already checked to be this very page) with the parameters in the fragment.
  */
-function known(page: string, rewritten: boolean): SiteRoute {
+function known(page: string, rewritten: boolean, path: string, search: URLSearchParams): SiteRoute {
   if (!isKnownPage(page)) return { kind: "page", page: notFoundPage(page), rewritten: true };
-  return ACCOUNT_SHELL.test(page) ? { kind: "page", page, rewritten, queryFree: true } : { kind: "page", page, rewritten };
+  if (ACCOUNT_SHELL.test(page) && hasQuery(search)) return { kind: "shellRedirect", location: accountShellTarget(path, search) };
+  return { kind: "page", page, rewritten };
 }

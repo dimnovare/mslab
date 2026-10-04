@@ -63,6 +63,7 @@ export function TermsGate({
     setFailed(false);
     let status = 0; // 0: no answer
     let ok = false;
+    let fromApi = false; // the answer is the API's own ({ ok: false, … }), not a page of the platform or a proxy
     try {
       const res = await fetch("/api/konto/tingimused", {
         method: "POST",
@@ -71,11 +72,13 @@ export function TermsGate({
         body: JSON.stringify({ slug, version }),
       });
       status = res.status;
-      ok = res.ok && ((await res.json().catch(() => null)) as { ok?: unknown } | null)?.ok === true;
+      const body = (await res.json().catch(() => null)) as { ok?: unknown } | null;
+      ok = res.ok && body?.ok === true;
+      fromApi = typeof body === "object" && body !== null && !Array.isArray(body) && body.ok === false;
     } catch {
       // no answer at all: the sentence below
     }
-    const outdated = !ok && (status === 409 || status === 401 || status === 404);
+    const outdated = !ok && fromApi && (status === 409 || status === 401 || status === 404);
     const answered = outdated ? await onRefresh() : true;
     sending.current = false;
     setBusy(false);

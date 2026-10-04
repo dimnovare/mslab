@@ -90,17 +90,23 @@ export function useAccount<T>(
   const wantsNotFound = options.notFound === true;
   const [loaded, setLoaded] = useState<Loaded<T>>({ state: "loading", data: null });
   const [round, setRound] = useState({ n: 0, quiet: false });
-  /** What the latest reload() waits for (an effect that is dropped, as the dev server's second run is, never settles it). */
-  const waiting = useRef<((answered: boolean) => void) | null>(null);
-  const settle = useCallback((answered: boolean) => {
-    const done = waiting.current;
+  /**
+   * What the latest reload() waits for, with the round it asked in: only that round's answer settles it (an older round that is still
+   * on its way cannot answer a newer reload; an effect that is dropped, as the dev server's second run is, never settles it).
+   */
+  const waiting = useRef<{ n: number; resolve: (answered: boolean) => void } | null>(null);
+  const rounds = useRef(0);
+  const settle = useCallback((n: number, answered: boolean) => {
+    const pending = waiting.current;
+    if (pending?.n !== n) return;
     waiting.current = null;
-    done?.(answered);
+    pending.resolve(answered);
   }, []);
 
   useEffect(() => {
     const abort = new AbortController();
     const quiet = round.quiet;
+    const n = round.n;
     (async () => {
       let res: Response;
       let body: unknown;
@@ -110,14 +116,14 @@ export function useAccount<T>(
       } catch {
         if (abort.signal.aborted) return;
         if (!quiet) setLoaded({ state: "error", data: null });
-        return settle(false);
+        return settle(n, false);
       }
       if (abort.signal.aborted) return;
       const isObject = body !== null && typeof body === "object" && !Array.isArray(body);
       // A 200 without a JSON object (an empty or broken answer) is no data: an error, or for a quiet reload nothing.
       if (res.ok && !isObject) {
         if (!quiet) setLoaded({ state: "error", data: null });
-        return settle(false);
+        return settle(n, false);
       }
       if (res.ok) {
         // /me answers { email }, the dashboard { client: { email } }
@@ -125,7 +131,7 @@ export function useAccount<T>(
         const email = answer?.email ?? answer?.client?.email;
         if (typeof email === "string" && email) rememberEmail(email);
         setLoaded({ state: "ready", data: body as T });
-        return settle(true);
+        return settle(n, true);
       }
       if (res.status === 401) {
         window.dispatchEvent(new Event(ACCOUNT_EVENT));
@@ -133,26 +139,27 @@ export function useAccount<T>(
         // signed out: the page keeps its waiting look while the login page loads
         if (!replaced && redirect) window.location.replace(loginPath(locale));
         setLoaded({ state: replaced ? "replaced" : "signedOut", data: null });
-        return settle(true);
+        return settle(n, true);
       }
       if (res.status === 404 && wantsNotFound && isObject && (body as { ok?: unknown }).ok === false) {
         setLoaded({ state: "notFound", data: null });
-        return settle(true);
+        return settle(n, true);
       }
       if (!quiet) setLoaded({ state: "error", data: null });
-      settle(false);
+      settle(n, false);
     })();
     return () => abort.abort();
   }, [path, redirect, locale, wantsNotFound, round, settle]);
 
   const reload = useCallback((opts: { quiet?: boolean } = {}): Promise<boolean> => {
     const quiet = opts.quiet === true;
-    waiting.current?.(false); // an earlier reload that has not been answered is overtaken
+    waiting.current?.resolve(false); // an earlier reload that has not been answered is overtaken
+    const n = ++rounds.current;
     const answered = new Promise<boolean>((resolve) => {
-      waiting.current = resolve;
+      waiting.current = { n, resolve };
     });
     if (!quiet) setLoaded({ state: "loading", data: null });
-    setRound((r) => ({ n: r.n + 1, quiet }));
+    setRound({ n, quiet });
     return answered;
   }, []);
 

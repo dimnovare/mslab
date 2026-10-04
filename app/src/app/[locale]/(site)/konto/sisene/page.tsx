@@ -14,8 +14,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 /**
  * The client login page: a static shell like every /konto… page, the same for every visitor. No cookies, headers or
- * query are read here (the CDN serves it without a render, and nothing personal can enter its cache): `?viga` and
- * `?korda` are read by the form in the browser.
+ * query are read here (the CDN serves it without a render, and nothing personal can enter its cache): the form reads `#viga`,
+ * `#korda` and `#email` in the browser, from the fragment (a request with a query never reaches the page: middleware.ts).
  */
 export default async function LoginPage({ params }: Props) {
   const { locale } = await params;

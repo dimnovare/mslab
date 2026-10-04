@@ -470,6 +470,23 @@ describe("e-course and terms", () => {
     }
   });
 
+  test("a stored body that is not an { et, ru? } of strings is no text: the course opens, nothing is asked, nothing throws", async () => {
+    const kati = await client();
+    await grant(kati.id, f.online.id);
+    for (const body of [{ et: 5 }, { et: "Tekst", ru: 5 }, { et: "Tekst", ru: ["x"] }, {}, [], "Ligipääs on isiklik.", 7, true, { ru: "Только русский" }, { et: null }]) {
+      await db.delete(pages);
+      await db.insert(pages).values({ key: "course_terms", title: { et: "x" }, body } as never);
+      const view = await loadEcourse(db, kati.id, "veebikursus", NOW);
+      expect(view!.terms, JSON.stringify(body)).toEqual({ version: "1", accepted: true, text: null });
+      expect(await acceptTerms(db, kati.id, "veebikursus", "1", NOW), JSON.stringify(body)).toBe("stale");
+    }
+    expect(await db.select().from(termsAcceptances)).toEqual([]);
+    // a null Russian text is as good as none; the Estonian one is shown
+    await db.delete(pages);
+    await db.insert(pages).values({ key: "course_terms", title: { et: "x" }, body: { et: "Tekst.", ru: null } } as never);
+    expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms).toEqual({ version: "1", accepted: false, text: { et: "Tekst." } });
+  });
+
   test("a text added later brings the notice: the version moves with the admin's save, and accepting then stores it", async () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
