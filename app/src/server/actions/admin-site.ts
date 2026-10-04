@@ -45,7 +45,7 @@ export const saveTrainer = adminAction(async (_admin, _prev: EditResult | null, 
 /** Kampaania "Salvesta": field data ({ parts: campaign }). */
 export const saveCampaign = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("campaign save", () => ({ kind: "campaign" }), (db) => saveCampaignForm(db, formData)));
 
-/** Seaded "Salvesta": field data ({ parts: contact | newsletter | privacy | terms | course_terms }). */
+/** Seaded "Salvesta": field data ({ parts: contact | newsletter | prepayment | privacy | terms | course_terms }). */
 export const saveSettings = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("settings save", (r) => ({ kind: "settings", parts: savedParts(r) }), (db) => saveSettingsForm(db, formData)));
 
 /** Post editor "Salvesta": field data ({ parts: post }). A new post continues at its own address. */

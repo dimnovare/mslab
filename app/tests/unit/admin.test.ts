@@ -129,6 +129,7 @@ describe("admin menu (prototype B sidebar, A1)", () => {
       "Koolitused",
       "Kalender",
       "Registreerimised",
+      "Õpilased",
       "Päringud",
       "Praktika",
       "Avaleht",

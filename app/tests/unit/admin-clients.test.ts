@@ -1,0 +1,95 @@
+import { describe, expect, test } from "vitest";
+import { accessState, addMonths, defaultExpiryDate, endOfDayTallinn, grantExpiry, tallinnToday } from "@/domain/client-access";
+import { containsPattern, parseSearch } from "@/domain/paging";
+import { isIban, normalizeIban, prepaymentDraft } from "@/domain/site-editor";
+import { adminEt } from "@/i18n/dict/admin";
+import { fill } from "@/i18n/format";
+
+// Phase 2a Task 9: the pure parts of the admin's Õpilased (expiry dates, the search) and of Seaded "Ettemaksu juhised".
+
+describe("e-course access dates (Estonian calendar days)", () => {
+  test("addMonths keeps the day, or the month's last one", () => {
+    expect(addMonths("2026-10-04", 6)).toBe("2027-04-04");
+    expect(addMonths("2026-08-31", 6)).toBe("2027-02-28");
+    expect(addMonths("2027-08-31", 6)).toBe("2028-02-29");
+    expect(addMonths("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonths("2026-12-15", 12)).toBe("2027-12-15");
+    expect(addMonths("2026-10-04", 0)).toBe("2026-10-04");
+    expect(addMonths("2026-02-30", 1)).toBeNull();
+    expect(addMonths("4.10.2026", 1)).toBeNull();
+  });
+
+  test("today is the Estonian date: just after midnight in Tallinn it is already the next day", () => {
+    expect(tallinnToday(new Date("2026-10-04T20:59:00Z"))).toBe("2026-10-04");
+    expect(tallinnToday(new Date("2026-10-04T21:01:00Z"))).toBe("2026-10-05");
+  });
+
+  test("the form's default: today + the course's access months; 12 when it has none", () => {
+    const now = new Date("2026-10-04T09:00:00Z");
+    expect(defaultExpiryDate(now, 6)).toBe("2027-04-04");
+    expect(defaultExpiryDate(now, null)).toBe("2027-10-04");
+    expect(defaultExpiryDate(now, 0)).toBe("2027-10-04");
+    expect(defaultExpiryDate(new Date("2026-10-04T21:30:00Z"), 1)).toBe("2026-11-05");
+  });
+
+  test("stored as the end of that day in Tallinn (summer and winter time)", () => {
+    expect(endOfDayTallinn("2027-04-04")?.toISOString()).toBe("2027-04-04T20:59:59.999Z");
+    expect(endOfDayTallinn("2027-01-31")?.toISOString()).toBe("2027-01-31T21:59:59.999Z");
+    expect(endOfDayTallinn("2027-02-29")).toBeNull();
+  });
+
+  test("a typed date: today up to 10 years ahead", () => {
+    const now = new Date("2026-10-04T09:00:00Z");
+    expect(grantExpiry("2026-10-04", now)?.toISOString()).toBe("2026-10-04T20:59:59.999Z");
+    expect(grantExpiry("2036-10-04", now)).not.toBeNull();
+    for (const bad of ["2026-10-03", "2036-10-05", "", "2026-13-01", "2026-10-4", " 2026-10-05"]) expect(grantExpiry(bad, now), bad).toBeNull();
+  });
+
+  test("an access is open until its last moment, then run out; ended by an admin wins", () => {
+    const row = { expiresAt: new Date("2027-04-04T20:59:59.999Z"), revokedAt: null };
+    expect(accessState(row, new Date("2027-04-04T20:59:59.998Z"))).toBe("active");
+    expect(accessState(row, new Date("2027-04-04T20:59:59.999Z"))).toBe("expired");
+    expect(accessState({ ...row, revokedAt: new Date("2026-10-04T09:00:00Z") }, new Date("2026-10-05T00:00:00Z"))).toBe("revoked");
+  });
+});
+
+describe("the list's search", () => {
+  test("?otsi= is one trimmed line of at most 100 characters", () => {
+    expect(parseSearch("  Kati   Kask \n")).toBe("Kati Kask");
+    expect(parseSearch(undefined)).toBe("");
+    expect(parseSearch(["a", "b"])).toBe("");
+    expect(parseSearch("x".repeat(150))).toHaveLength(100);
+  });
+
+  test("taken literally: LIKE's wildcards and escape character are escaped", () => {
+    expect(containsPattern("kati")).toBe("%kati%");
+    expect(containsPattern("100%")).toBe("%100\\%%");
+    expect(containsPattern("a_b")).toBe("%a\\_b%");
+    expect(containsPattern("a\\b")).toBe("%a\\\\b%");
+  });
+});
+
+describe("Ettemaksu juhised", () => {
+  test("an IBAN as typed: spaces out (also non-breaking), capitals; the shape checked", () => {
+    expect(normalizeIban(" ee38 2200 2210 2014 5685 ")).toBe("EE382200221020145685");
+    expect(isIban("EE382200221020145685")).toBe(true);
+    expect(isIban("GB82WEST12345698765432")).toBe(true);
+    for (const bad of ["", "EE38", "EE38220022102", "E382200221020145685", "EEX82200221020145685", "EE38220022102014568-", `EE38${"1".repeat(31)}`]) expect(isIban(bad), bad).toBe(false);
+  });
+
+  test("the draft: the four fields as strings, empty for a missing or odd setting", () => {
+    expect(prepaymentDraft(null)).toEqual({ receiver: "", iban: "", bank: "", referencePrefix: "" });
+    expect(prepaymentDraft({ receiver: "MS LAB OÜ", iban: 5, extra: "x" })).toEqual({ receiver: "MS LAB OÜ", iban: "", bank: "", referencePrefix: "" });
+  });
+});
+
+describe("the texts the brief fixes", () => {
+  test("the view-as banner and the change request words", () => {
+    expect(fill(adminEt.viewAs.banner, { nimi: "Kati Kask" })).toBe("Vaatad kliendi Kati Kask vaadet — muuta ei saa");
+    expect(adminEt.requests.wish).toEqual({ cancel: "Soovib tühistada", change: "Soovib muuta aega" });
+    expect(adminEt.clients.grant.button).toBe("Ava ligipääs");
+    expect(adminEt.clients.revoke.button).toBe("Lõpeta ligipääs");
+    expect(adminEt.clients.drawer.viewAs).toBe("Vaata tema vaadet");
+    expect(adminEt.clients.type).toEqual({ all: "Kõik", e: "E-õpe", k: "Kontaktõpe" });
+  });
+});

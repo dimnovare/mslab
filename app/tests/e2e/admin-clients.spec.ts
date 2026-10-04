@@ -1,0 +1,429 @@
+import type { Browser, Locator, Page } from "@playwright/test";
+import { addMonths, defaultExpiryDate, tallinnToday } from "../../src/domain/client-access";
+import { formatDate, formatTime } from "../../src/i18n/format";
+import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, TEST_PREPAYMENT, type AccountCardKind } from "./account";
+import { ADMIN, adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
+import { holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
+import { LOCAL_URL, TARGET } from "./target";
+import { submitsForms, test, expect } from "./test";
+
+// Phase 2a Task 9: the admin's Õpilased — "Lisa õpilane", e-course access granted and ended (the student then sees it), the
+// read-only "Vaata tema vaadet" (her session untouched), a change request in Päringud in words with a working link, and the
+// prepayment instructions in Seaded reaching the student's card. The admin signs in as Dim through the devLink (dev server
+// only, admin-login.ts); every student is a sample address (`e2e-client-adm-…@example.test`, never mailed) removed after each
+// test. The student uses a browser of her own (another context), as she would.
+
+/** The addresses this worker's tests made rows for: removed after each test. */
+const made = new Set<string>();
+const created: CreatedRows = { tokens: new Set(), sessions: new Set() };
+
+test.beforeEach(() => submitsForms());
+
+test.afterEach(async () => {
+  for (const email of made) await removeClientRows(email);
+  made.clear();
+  await removeAdminRows(created).catch(() => {});
+  created.tokens.clear();
+  created.sessions.clear();
+});
+
+/** A fresh address for this test (its leftovers removed first). */
+async function fresh(label: string, project: string): Promise<string> {
+  const email = clientEmail(`adm-${label}`, project);
+  made.add(email);
+  await removeClientRows(email);
+  return email;
+}
+
+/** A student's own browser, signed in, on her dashboard. */
+async function studentBrowser(browser: Browser, email: string, ip: string): Promise<{ page: Page; close: () => Promise<void> }> {
+  const context = await browser.newContext({ baseURL: TARGET || LOCAL_URL, extraHTTPHeaders: { "x-forwarded-for": `${ip}-student` } });
+  const page = await context.newPage();
+  await signInAsClient(page, email);
+  await expect(page.locator("[data-account-dashboard]")).toBeVisible();
+  return { page, close: () => context.close() };
+}
+
+const clientId = async (email: string): Promise<number> => (await onLocalDb((sql) => sql<{ id: number }[]>`select id from clients where email = ${email}`, { marksPages: false }))[0].id;
+const sessions = (id: number) =>
+  onLocalDb((sql) => sql<{ idHash: string; endedAt: Date | null; expiresAt: Date }[]>`select id_hash as "idHash", ended_at as "endedAt", expires_at as "expiresAt" from client_sessions where client_id = ${id} order by id_hash`, { marksPages: false });
+const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+const drawer = (page: Page) => page.locator("dialog[data-drawer]");
+/** The controls in `scope` less than 44 px tall (the touch target rule). */
+const smallTargets = (scope: Locator) =>
+  scope
+    .locator("a:visible, button:visible, input:visible, select:visible")
+    .evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height < 44).map((e) => e.outerHTML.slice(0, 120)));
+const card = (page: Page, key: string) => page.locator(`[data-card="${key}"]`);
+
+/** Opens a student's drawer from the list by searching her address. */
+async function openStudent(page: Page, email: string): Promise<Locator> {
+  await page.goto("/admin/opilased");
+  await adminReady(page);
+  await page.getByRole("searchbox", { name: "Otsi nime või e-posti järgi" }).fill(email);
+  await page.getByRole("button", { name: "Otsi", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]otsi=/);
+  const rows = page.locator("tr[data-client]");
+  await expect(rows).toHaveCount(1);
+  await rows.getByRole("link").first().click();
+  await expect(drawer(page)).toBeVisible();
+  return drawer(page);
+}
+
+test("guard: Õpilased and the student's view need an admin session", async ({ request }) => {
+  for (const path of ["/admin/opilased", "/admin/opilased?id=1", "/admin/opilased/1/vaade"]) {
+    const res = await request.get(path, { maxRedirects: 0 });
+    expect([303, 307, 308], path).toContain(res.status());
+    expect(res.headers().location, path).toMatch(/\/admin\/login$/);
+  }
+});
+
+test("Lisa õpilane by e-mail, Ava ligipääs → she logs in and sees the e-course; Lõpeta ligipääs → it is over", async ({ page, context, browser, visitorIp }, info) => {
+  const email = await fresh("add", info.project.name);
+  await signInAsAdmin(page, context, visitorIp, created);
+  await page.goto("/admin/opilased");
+  await adminReady(page);
+  await expect(page.locator("aside [data-nav='clients']")).toHaveAttribute("aria-current", "page"); // (a phone has it in the menu drawer)
+
+  // a bad address says what to do; a good one (as typed, any case) opens her drawer
+  const field = page.getByRole("textbox", { name: "Lisa õpilane e-posti järgi" });
+  await field.fill("mari@");
+  await page.getByRole("button", { name: "Lisa õpilane", exact: true }).click();
+  await expect(page.locator("[data-add-student] [role='status']")).toHaveText("Sisesta korrektne e-posti aadress.");
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+  await field.fill(`  ${email.toUpperCase()} `);
+  await page.getByRole("button", { name: "Lisa õpilane", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/opilased\?id=\d+$/);
+  const id = await clientId(email);
+  expect(page.url()).toMatch(new RegExp(`id=${id}$`));
+  const d = drawer(page);
+  await expect(d).toBeVisible();
+  await expect(d.getByRole("heading", { level: 2 })).toHaveText("Nimi puudub");
+  await expect(d.getByRole("link", { name: email })).toHaveAttribute("href", `mailto:${email}`);
+  await expect(d.locator("[data-client-access]")).toContainText("E-koolitusi pole avatud.");
+  await expect(field).toHaveValue(""); // the form starts again
+  expect(await sessions(id)).toEqual([]); // no session: she has never logged in
+
+  // Ava ligipääs: the course picked, the date filled in with today + its 6 months; one press
+  const grant = d.locator("[data-grant-form]");
+  await grant.getByLabel("E-koolitus").selectOption({ label: "Kulmumeistri e-koolitus" });
+  const until = defaultExpiryDate(new Date(), 6);
+  await expect(grant.getByLabel("Ligipääs kuni")).toHaveValue(until);
+  await expect(grant.getByLabel("Ligipääs kuni")).toHaveAttribute("min", tallinnToday(new Date()));
+  // a day already gone is refused in plain words; a changed day clears the answer about the old one
+  await grant.getByLabel("Ligipääs kuni").fill(addMonths(tallinnToday(new Date()), -1)!);
+  await grant.getByRole("button", { name: "Ava ligipääs" }).click();
+  await expect(grant.locator("[data-grant-status]")).toHaveText("Vali tänane või hilisem kuupäev.");
+  await expect(grant.getByLabel("Ligipääs kuni")).toHaveAttribute("aria-invalid", "true");
+  await grant.getByLabel("Ligipääs kuni").fill(until);
+  await expect(grant.locator("[data-grant-status]")).toHaveText("");
+  await grant.getByRole("button", { name: "Ava ligipääs" }).click();
+  await expect(grant.locator("[data-grant-status]")).toHaveText("Ligipääs on avatud.");
+  const shown = formatDate(new Date(`${until}T12:00:00Z`), "et");
+  const row = d.locator("[data-access]");
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute("data-access-state", "active");
+  await expect(row).toContainText("Kulmumeistri e-koolitus");
+  await expect(row).toContainText(`Avatud kuni ${shown}`);
+  await expect(row).toContainText(`Avas ${ADMIN}`);
+  const [stored] = await onLocalDb(
+    (sql) => sql<{ grantedBy: string; revokedAt: Date | null }[]>`select granted_by as "grantedBy", revoked_at as "revokedAt" from course_access where client_id = ${id}`,
+    { marksPages: false },
+  );
+  expect(stored).toEqual({ grantedBy: ADMIN, revokedAt: null });
+
+  // she logs in (her own browser) and finds the e-course with its date and "Ava koolitus"
+  const student = await studentBrowser(browser, email, visitorIp);
+  try {
+    const ecourse = card(student.page, "course-kulmumeistri-e-koolitus");
+    await expect(ecourse.locator("[data-next-step]")).toHaveText(`Ligipääs kuni ${shown}.`);
+    await expect(ecourse.getByRole("link", { name: "Ava koolitus" })).toBeVisible();
+    expect(await clientId(email)).toBe(id); // the login found the student the admin added
+
+    // Lõpeta ligipääs: one confirming step ("Ei" goes back), then it is over, here and for her
+    await row.getByRole("button", { name: "Lõpeta ligipääs" }).click();
+    const confirm = row.locator("[data-revoke-confirm]");
+    await expect(confirm.getByText("Kas lõpetan ligipääsu koolitusele „Kulmumeistri e-koolitus“? Õpilane ei saa seda enam avada.")).toBeFocused();
+    await confirm.getByRole("button", { name: "Ei" }).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Lõpeta ligipääs" })).toBeFocused();
+    await row.getByRole("button", { name: "Lõpeta ligipääs" }).click();
+    await row.getByRole("button", { name: "Jah, lõpeta" }).click();
+    await expect(row).toHaveAttribute("data-access-state", "revoked");
+    await expect(row).toContainText(`Lõpetatud ${formatDate(new Date(), "et")}`);
+    await expect(row.locator(`[id$="-state"]`)).toBeFocused();
+    await expect(row.getByRole("button")).toHaveCount(0);
+    await student.page.reload();
+    await expect(ecourse.locator("[data-next-step]")).toHaveText("Ligipääs on lõppenud.");
+    await expect(ecourse.getByRole("link")).toHaveCount(0);
+
+    // granted again: the same row, open again
+    await grant.getByRole("button", { name: "Ava ligipääs" }).click();
+    await expect(row).toHaveAttribute("data-access-state", "active");
+    await student.page.reload();
+    await expect(ecourse.getByRole("link", { name: "Ava koolitus" })).toBeVisible();
+    expect(await onLocalDb((sql) => sql`select 1 from course_access where client_id = ${id}`, { marksPages: false })).toHaveLength(1);
+  } finally {
+    await student.close();
+  }
+
+  // the same address again: her drawer, nothing new
+  await page.goto("/admin/opilased");
+  await adminReady(page);
+  await page.getByRole("textbox", { name: "Lisa õpilane e-posti järgi" }).fill(email);
+  await page.getByRole("button", { name: "Lisa õpilane", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/opilased\\?id=${id}$`));
+  expect(await onLocalDb((sql) => sql`select 1 from clients where email = ${email}`, { marksPages: false })).toHaveLength(1);
+  expect(await noOverflow(page)).toBe(true);
+});
+
+test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the number of courses; the drawer lists her courses", async ({ page, context, visitorIp }, info) => {
+  const eStudent = await fresh("list-e", info.project.name);
+  const kStudent = await fresh("list-k", info.project.name);
+  await insertAccountFixtures(eStudent, { name: `Eva E2E ${info.project.name}`, cards: ["ecourse"] });
+  const k = await insertAccountFixtures(kStudent, { name: `Kai E2E ${info.project.name}`, cards: ["confirmed", "cancelled"] });
+  await signInAsAdmin(page, context, visitorIp, created);
+  await page.goto("/admin/opilased");
+  await adminReady(page);
+
+  const search = page.getByRole("searchbox", { name: "Otsi nime või e-posti järgi" });
+  await search.fill(`e2e-client-adm-list-`);
+  await page.getByRole("button", { name: "Otsi", exact: true }).click();
+  await expect(page).toHaveURL(/\?otsi=e2e-client-adm-list-$/);
+  const rows = page.locator("tr[data-client]");
+  const mine = rows.filter({ hasText: info.project.name.toLowerCase() });
+  await expect(mine).toHaveCount(2);
+  await expect(mine.filter({ hasText: eStudent }).locator("[data-client-courses]")).toHaveText("1");
+  await expect(mine.filter({ hasText: kStudent }).locator("[data-client-courses]")).toHaveText("2"); // a cancelled one counts too
+  await expect(mine.filter({ hasText: kStudent }).getByRole("link")).toHaveText(`Kai E2E ${info.project.name}`); // the registration's name
+
+  const filters = page.locator("[data-type-filter]");
+  await filters.getByRole("link", { name: "E-õpe" }).click();
+  await expect(page).toHaveURL(/vorm=e/);
+  await expect(page).toHaveURL(/otsi=/); // the search stays
+  await expect(mine).toHaveCount(1);
+  await expect(mine).toContainText(eStudent);
+  await filters.getByRole("link", { name: "Kontaktõpe" }).click();
+  await expect(mine).toHaveCount(1);
+  await expect(mine).toContainText(kStudent);
+  await filters.getByRole("link", { name: "Kõik" }).click();
+  await expect(mine).toHaveCount(2);
+
+  // by name, any case; nothing found says so
+  await search.fill(`kai e2e ${info.project.name.toUpperCase()}`);
+  await page.getByRole("button", { name: "Otsi", exact: true }).click();
+  await expect(page).toHaveURL(/otsi=kai/);
+  await expect(rows).toHaveCount(1);
+  await search.fill("ei-ole-sellist-õpilast-%");
+  await page.getByRole("button", { name: "Otsi", exact: true }).click();
+  await expect(page).toHaveURL(/otsi=ei-ole/);
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByText("Selle valikuga õpilasi pole.")).toBeVisible();
+  await page.getByRole("link", { name: "Tühjenda otsing" }).click();
+  await expect(page).toHaveURL(/\/admin\/opilased$/);
+
+  // the drawer: her registrations (named as her cards name them), each opening its own drawer
+  const d = await openStudent(page, kStudent);
+  await expect(d.getByRole("heading", { level: 2 })).toHaveText(`Kai E2E ${info.project.name}`);
+  const regs = d.locator("[data-client-registration]");
+  await expect(regs).toHaveCount(2);
+  const start = k.session.startsAt;
+  await expect(regs.first()).toContainText(`Kulmude lamineerimine`);
+  await expect(regs.first()).toContainText(`${formatDate(start, "et")} · ${formatTime(start, "et")}, Pärnu, MS LAB stuudio`);
+  expect(await smallTargets(page.locator("main"))).toEqual([]);
+  expect(await smallTargets(d)).toEqual([]);
+  await d.locator(`[data-client-registration="${k.registrations.confirmed}"]`).getByRole("link", { name: "Ava registreerimine" }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/registreerimised\\?id=${k.registrations.confirmed}$`));
+  await expect(page.locator(`[data-registration-detail="${k.registrations.confirmed}"]`)).toBeVisible();
+  expect(await noOverflow(page)).toBe(true);
+});
+
+test("Vaata tema vaadet: her cards, every action disabled and doing nothing; her own session untouched and still working", async ({ page, context, browser, visitorIp }, info) => {
+  info.setTimeout(info.timeout + LOCK_WAIT_MS); // the wait for the shared prepayment setting is not taken from the test's own time
+  const release = await holdLocalLock("e2e-prepayment-setting");
+  const restore = await snapshotRows("settings", { column: "key", value: "prepayment" });
+  const email = await fresh("view", info.project.name);
+  const cards: AccountCardKind[] = ["awaiting", "confirmed", "practice", "ecourse"];
+  try {
+    await setPrepayment(TEST_PREPAYMENT); // so the unpaid card has its "Vaata juhiseid" to press
+    const f = await insertAccountFixtures(email, { name: "Kati Tamm", cards });
+    const student = await studentBrowser(browser, email, visitorIp);
+    try {
+      // what she sees
+      const keys = await student.page.locator("[data-card]").evaluateAll((els) => els.map((e) => e.getAttribute("data-card")));
+      const sentences = await student.page.locator("[data-next-step]").allTextContents();
+      expect(keys).toHaveLength(cards.length);
+      const before = await sessions(f.clientId);
+      expect(before).toHaveLength(1);
+      expect(before[0].endedAt).toBeNull();
+
+      // the admin's view of it
+      await signInAsAdmin(page, context, visitorIp, created);
+      const d = await openStudent(page, email);
+      const asked: string[] = [];
+      page.on("request", (r) => {
+        if (new URL(r.url()).pathname.startsWith("/api/konto")) asked.push(r.url());
+      });
+      await d.getByRole("link", { name: "Vaata tema vaadet" }).click();
+      await expect(page).toHaveURL(new RegExp(`/admin/opilased/${f.clientId}/vaade$`));
+      await adminReady(page);
+      const view = page.locator("[data-view-as]");
+      await expect(view.locator("[data-account-banner]")).toHaveText("Vaatad kliendi Kati Tamm vaadet — muuta ei saa");
+      await expect(view.getByRole("heading", { level: 1 })).toHaveText("Tere, Kati!");
+      expect(await view.locator("[data-card]").evaluateAll((els) => els.map((e) => e.getAttribute("data-card")))).toEqual(keys);
+      expect(await view.locator("[data-next-step]").allTextContents()).toEqual(sentences);
+
+      // every button and link of her page (the tabs, the menu, Vaata juhiseid, Tühista või muuda aega, Ava koolitus) is
+      // aria-disabled, and pressing them does nothing; only the filter chips (they only change what is shown) work
+      const actions = view.locator("[data-account-shell] a, [data-account-shell] button:not([data-filter])");
+      const n = await actions.count();
+      expect(n).toBeGreaterThanOrEqual(6);
+      for (let i = 0; i < n; i++) await expect(actions.nth(i)).toHaveAttribute("aria-disabled", "true");
+      await view.getByRole("button", { name: "Vaata juhiseid" }).click({ force: true });
+      await view.getByRole("button", { name: "Tühista või muuda aega" }).click({ force: true });
+      await view.locator("[data-card='course-kulmumeistri-e-koolitus']").getByRole("link", { name: "Ava koolitus" }).click({ force: true });
+      await view.getByRole("button", { name: "Konto menüü" }).first().click({ force: true });
+      await expect(page).toHaveURL(new RegExp(`/admin/opilased/${f.clientId}/vaade$`));
+      await expect(view.locator("[data-prepayment]")).toHaveCount(0);
+      await expect(page.locator("dialog[open]")).toHaveCount(0);
+      await expect(page.locator("[data-account-logout]")).toHaveCount(0);
+      expect(asked, "the view asks the account API nothing").toEqual([]);
+      expect(await noOverflow(page)).toBe(true);
+      // an admin page: never stored by a shared cache (next.config.ts sends no-store for /admin; `next dev` answers no-cache)
+      const answer = await page.request.get(`/admin/opilased/${f.clientId}/vaade`);
+      expect(answer.status()).toBe(200);
+      expect(answer.headers()["cache-control"]).toMatch(/no-store|no-cache/);
+      expect(answer.headers()["cache-control"]).not.toMatch(/public|s-maxage/);
+      expect(answer.headers()["set-cookie"] ?? "").not.toMatch(/mslab_client|mslab_in/);
+
+      // her session as it was, and it still works
+      expect(await sessions(f.clientId)).toEqual(before);
+      await student.page.reload();
+      await expect(student.page.locator("[data-account-dashboard]")).toBeVisible();
+      await expect(student.page.getByRole("heading", { level: 1 })).toHaveText("Tere, Kati!");
+      expect((await sessions(f.clientId)).map((s) => s.endedAt)).toEqual([null]);
+      expect(await onLocalDb((sql) => sql`select 1 from requests where kind = 'change_request' and client_id = ${f.clientId}`, { marksPages: false })).toHaveLength(0);
+    } finally {
+      await student.close();
+    }
+
+    // "Tagasi" goes back to her drawer
+    await page.getByRole("link", { name: "Tagasi õpilase juurde" }).click();
+    await expect(page).toHaveURL(new RegExp(`/admin/opilased\\?id=${f.clientId}$`));
+    await expect(drawer(page)).toBeVisible();
+
+    // a student who does not exist: 404 with the way back
+    const res = await page.goto("/admin/opilased/2147483646/vaade");
+    expect(res?.status()).toBe(404);
+    await expect(page.getByText("Seda õpilast ei leitud.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Õpilaste juurde" })).toHaveAttribute("href", "/admin/opilased");
+  } finally {
+    await restore();
+    await release();
+  }
+});
+
+test("a change request in Päringud: the course and its date as the heading, the wish in words, a link that opens the registration", async ({ page, context, visitorIp }, info) => {
+  const email = await fresh("change", info.project.name);
+  const f = await insertAccountFixtures(email, { name: "Mari Maasikas", cards: ["confirmed", "awaiting"] });
+  const [cancel] = await onLocalDb(
+    (sql) => sql<{ id: number }[]>`insert into requests (kind, payload, client_id)
+      values ('change_request', ${sql.json({ registrationId: f.registrations.confirmed!, kind: "cancel", message: "Jään haigeks.", email })}, ${f.clientId}) returning id`,
+    { marksPages: false },
+  );
+  const [change] = await onLocalDb(
+    (sql) => sql<{ id: number }[]>`insert into requests (kind, payload, client_id)
+      values ('change_request', ${sql.json({ registrationId: f.registrations.awaiting!, kind: "change", message: "", email })}, ${f.clientId}) returning id`,
+    { marksPages: false },
+  );
+  await signInAsAdmin(page, context, visitorIp, created);
+  await page.goto("/admin/paringud?liik=muutmine");
+  await adminReady(page);
+
+  const start = f.session.startsAt;
+  const heading = `Kulmude lamineerimine — ${formatDate(start, "et")} · ${formatTime(start, "et")}`;
+  const first = page.locator(`[data-request="${cancel.id}"]`);
+  await expect(first.getByRole("heading", { level: 3 })).toHaveText(heading);
+  // in words, no raw payload keys (registrationId, kind)
+  await expect(first.locator("dt")).toHaveText(["Soov", "Toimumine", "Nimi", "E-post", "Sõnum"]);
+  await expect(first.locator("dd")).toHaveText(["Soovib tühistada", "Pärnu, MS LAB stuudio", "Mari Maasikas", email, "Jään haigeks."]);
+  await expect(first.locator("dl").getByRole("link", { name: email })).toHaveAttribute("href", `mailto:${email}`);
+  const second = page.locator(`[data-request="${change.id}"]`);
+  await expect(second.getByRole("heading", { level: 3 })).toHaveText(heading);
+  await expect(second.locator("dt")).toHaveText(["Soov", "Toimumine", "Nimi", "E-post"]); // no message: no row
+  await expect(second.locator("dd").first()).toHaveText("Soovib muuta aega");
+
+  // handled / not handled as every request
+  await first.getByRole("button", { name: "Märgi tehtuks" }).click();
+  await expect(first.locator("[data-request-state]")).toHaveText("Tehtud");
+
+  // the link opens that registration's own drawer
+  await second.getByRole("link", { name: "Ava registreerimine" }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/registreerimised\\?id=${f.registrations.awaiting}$`));
+  const reg = page.locator(`[data-registration-detail="${f.registrations.awaiting}"]`);
+  await expect(reg).toBeVisible();
+  await expect(reg.getByRole("heading", { level: 2 })).toHaveText("Mari Maasikas");
+  expect(await noOverflow(page)).toBe(true);
+});
+
+test("Ettemaksu juhised in Seaded: saved, her unpaid card shows the IBAN (stored without spaces); cleared, Maria sends an invoice", async ({ page, context, browser, visitorIp }, info) => {
+  // The prepayment instructions are one shared setting (the dashboard tests use it too): the runs take turns.
+  info.setTimeout(info.timeout + LOCK_WAIT_MS);
+  const release = await holdLocalLock("e2e-prepayment-setting");
+  const restore = await snapshotRows("settings", { column: "key", value: "prepayment" });
+  try {
+    await setPrepayment(null);
+    const email = await fresh("pay", info.project.name);
+    const f = await insertAccountFixtures(email, { cards: ["awaiting"] });
+    const student = await studentBrowser(browser, email, visitorIp);
+    try {
+      const unpaid = card(student.page, `registration-${f.registrations.awaiting}`);
+      await expect(unpaid.locator("[data-next-step]")).toHaveText("Maria saadab sulle arve ettemaksu tasumiseks.");
+
+      await signInAsAdmin(page, context, visitorIp, created);
+      page.on("dialog", (dialog) => void dialog.accept());
+      await page.goto("/admin/seaded");
+      await adminReady(page);
+      const box = page.locator("[data-prepayment-editor]");
+      await expect(box.getByText("Juhised on õpilasele näha ainult siis, kui saaja ja IBAN on täidetud.", { exact: false })).toBeVisible();
+      const iban = box.getByRole("textbox", { name: "IBAN", exact: true });
+      await box.getByRole("textbox", { name: "Saaja", exact: true }).fill("MS LAB OÜ");
+      await iban.fill("EE38 12");
+      await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+      await expect(page.locator("[data-save-status]")).toHaveText("Kontrolli märgitud välju.");
+      await expect(iban).toHaveAttribute("aria-invalid", "true");
+      await expect(box.getByText("Kontrolli IBANi: kaks tähte, kaks numbrit ja konto number, nt EE38 2200 2210 2014 5685.")).toBeVisible();
+      await iban.fill("ee38 2200 2210 2014 5685");
+      await box.getByRole("textbox", { name: "Pank", exact: true }).fill("Swedbank");
+      await box.getByRole("textbox", { name: "Selgituse algus", exact: true }).fill("MSLAB-");
+      await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+      await expect(page.locator("[data-save-status]")).toHaveText("Salvestatud.");
+      await expect(iban).toHaveValue("EE382200221020145685");
+
+      await student.page.reload();
+      await expect(unpaid.locator("[data-next-step]")).toHaveText("Koha kinnitamiseks tasu ettemaks 175 €.");
+      await unpaid.getByRole("button", { name: "Vaata juhiseid" }).click();
+      const panel = unpaid.locator("[data-prepayment]");
+      await expect(panel.locator("[data-pay-row]")).toHaveText([
+        /^Saaja\s*MS LAB OÜ$/,
+        /^IBAN\s*EE382200221020145685\s*Kopeeri/,
+        /^Pank\s*Swedbank$/,
+        /^Summa\s*175 €$/,
+        new RegExp(`^Selgitus\\s*MSLAB-${f.registrations.awaiting}\\s*Kopeeri`),
+      ]);
+
+      // all four emptied: no instructions, the invoice sentence and nothing to press
+      for (const name of ["Saaja", "IBAN", "Pank", "Selgituse algus"]) await box.getByRole("textbox", { name, exact: true }).fill("");
+      await page.getByRole("button", { name: "Salvesta", exact: true }).click();
+      await expect(page.locator("[data-save-status]")).toHaveText("Salvestatud.");
+      await student.page.reload();
+      await expect(unpaid.locator("[data-next-step]")).toHaveText("Maria saadab sulle arve ettemaksu tasumiseks.");
+      await expect(unpaid.locator("button, a")).toHaveCount(0);
+    } finally {
+      await student.close();
+    }
+  } finally {
+    await restore();
+    await release();
+  }
+});

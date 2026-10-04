@@ -84,6 +84,10 @@ describe("admin guards are inherited by every admin entry point", () => {
         // Task 13B: the post editor and the site content editors' actions
         "app/admin/(panel)/uudised/[id]/page.tsx",
         "server/actions/admin-site.ts",
+        // phase 2a Task 9: Õpilased, the read-only "view as client", and their actions
+        "app/admin/(panel)/opilased/page.tsx",
+        "app/admin/(panel)/opilased/[id]/vaade/page.tsx",
+        "server/actions/admin-clients.ts",
       ]),
     );
     const broken = all.flatMap((f) => violations(f.path, f.source).map((v) => `${f.path}: ${v}`));
@@ -105,7 +109,7 @@ describe("admin guards are inherited by every admin entry point", () => {
 
   test("every admin page calls requireAdmin() itself and every admin action is wrapped", () => {
     const pages = files().filter((f) => /^app\/admin\/\(panel\)\/(.*\/)?page\.tsx$/.test(f.path));
-    expect(pages.length).toBeGreaterThanOrEqual(14);
+    expect(pages.length).toBeGreaterThanOrEqual(16);
     for (const p of pages) expect(strip(p.source), p.path).toMatch(/await requireAdmin\(\)/);
     const actions = files().find((f) => f.path === "server/actions/admin.ts")!;
     const exported = [...strip(actions.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
@@ -119,6 +123,12 @@ describe("admin guards are inherited by every admin entry point", () => {
     const siteExports = [...strip(site.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
     expect(siteExports).toEqual(["saveHome", "savePractice", "saveTrainer", "saveCampaign", "saveSettings", "savePost", "deletePost"]);
     expect(violations(site.path, site.source)).toEqual([]);
+    const clients = files().find((f) => f.path === "server/actions/admin-clients.ts")!;
+    const clientExports = [...strip(clients.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
+    expect(clientExports).toEqual(["addStudent", "grantCourseAccess", "revokeCourseAccess"]);
+    expect(violations(clients.path, clients.source)).toEqual([]);
+    // every export of the file is one of these (no unguarded helper next to them)
+    expect([...strip(clients.source).matchAll(/export\s+(?:const|let|var|async\s+function|function|class|default)\s*(\w*)/g)].map((m) => m[1])).toEqual(clientExports);
   });
 
   test("the image upload is an admin route; /media only reads (anyone may see a published image)", () => {

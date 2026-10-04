@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef } from "react";
-import { SITE_LIMITS, type ContactDraft, type PageDraft } from "@/domain/site-editor";
+import { SITE_LIMITS, type ContactDraft, type PageDraft, type PrepaymentDraft } from "@/domain/site-editor";
 import { adminEt } from "@/i18n/dict/admin";
 import { saveSettings } from "@/server/actions/admin-site";
 import type { SettingsValues } from "@/server/admin-site";
@@ -15,8 +15,10 @@ import styles from "./site-editor.module.css";
 
 /**
  * Seaded: the contact details and social links (footer, contact page; social links https only), the newsletter's
- * welcome discount (footer text), the legal pages (privacy, terms) in ET / RU, the e-course terms (the text a student accepts
- * before opening an e-course; account-only, so no link to a public page) and the admin addresses, read-only.
+ * welcome discount (footer text), the prepayment instructions (where students pay; shown on their unpaid contact-course
+ * cards only when the receiver and the IBAN are filled in), the legal pages (privacy, terms) in ET / RU, the e-course terms
+ * (the text a student accepts before opening an e-course; account-only, so no link to a public page) and the admin
+ * addresses, read-only.
  */
 export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsValues>; admins: string[] }) {
   const t = adminEt.settings;
@@ -26,6 +28,9 @@ export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsVa
   const contact = d.draft.contact;
   const setContact = (patch: Partial<ContactDraft>) => d.set("contact", { ...contact, ...patch });
   const cErr = (f: string) => d.err(`contact.${f}`);
+  const pay = d.draft.prepayment;
+  const setPay = (patch: Partial<PrepaymentDraft>) => d.set("prepayment", { ...pay, ...patch });
+  const pErr = (f: string) => d.err(`prepayment.${f}`);
 
   const legal = (key: "privacy" | "terms", title: string, href: string) => {
     const page: PageDraft = d.draft[key];
@@ -87,6 +92,28 @@ export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsVa
               hint={t.discountHint}
               error={d.err("newsletter.discountLabel")}
               name="newsletter.discountLabel"
+            />
+          </div>
+        </section>
+
+        <section className={ui.card} aria-labelledby={`${uid}-prepayment`} data-prepayment-editor="">
+          <h2 id={`${uid}-prepayment`} className={`${ui.h2} ${styles.cardTitle}`}>
+            {t.prepayment}
+          </h2>
+          <p className={`${ui.muted} ${styles.cardLead}`}>{t.prepaymentLead}</p>
+          <p className={ui.notice}>{t.prepaymentHint}</p>
+          <div className={ed.grid}>
+            <TextField label={t.receiver} value={pay.receiver} onChange={(receiver) => setPay({ receiver })} maxLength={SITE_LIMITS.receiver} error={pErr("receiver")} name="prepayment.receiver" />
+            <TextField label={t.iban} value={pay.iban} onChange={(iban) => setPay({ iban })} maxLength={SITE_LIMITS.iban} error={pErr("iban")} name="prepayment.iban" />
+            <TextField label={t.bank} value={pay.bank} onChange={(bank) => setPay({ bank })} maxLength={SITE_LIMITS.bank} error={pErr("bank")} name="prepayment.bank" />
+            <TextField
+              label={t.referencePrefix}
+              value={pay.referencePrefix}
+              onChange={(referencePrefix) => setPay({ referencePrefix })}
+              maxLength={SITE_LIMITS.referencePrefix}
+              hint={t.referenceHint}
+              error={pErr("referencePrefix")}
+              name="prepayment.referencePrefix"
             />
           </div>
         </section>

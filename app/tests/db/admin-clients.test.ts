@@ -1,0 +1,315 @@
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, test } from "vitest";
+import { makeTestDb } from "./helpers";
+import type { Db } from "@/db/client";
+import { listRegistrations } from "@/db/queries/admin";
+import { clients, clientSessions, courseAccess, courses, courseSessions, registrations, requests, subscribers, termsAcceptances } from "@/db/schema";
+import { PAGE_SIZE } from "@/domain/paging";
+import {
+  addClient,
+  addClientForm,
+  clientDetail,
+  clientLabel,
+  grantAccess,
+  grantAccessForm,
+  listClients,
+  listEcourses,
+  registrationHeading,
+  revokeAccess,
+  revokeAccessForm,
+} from "@/server/admin-clients";
+import { issueClientLogin, redeemClientCode } from "@/server/client-auth";
+import { loadDashboard } from "@/server/client-data";
+
+// Phase 2a Task 9: the admin's Õpilased on a real (PGlite) database — the list (filters, search, paging, the course count),
+// one student's drawer, "Lisa õpilane", and e-course access granted and ended by an admin.
+
+const NOW = new Date("2026-10-04T09:00:00Z"); // 12:00 in Tallinn (summer time)
+const ADMIN = "maria@example.test";
+const base = { level: "basic" as const, summary: { et: "" }, body: { et: "" } };
+const form = (fields: Record<string, string>) => {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+};
+
+let db: Db;
+let contact: { id: number };
+let ecourse: { id: number };
+let draftEcourse: { id: number };
+let session: { id: number };
+
+beforeEach(async () => {
+  db = await makeTestDb();
+  [contact] = await db.insert(courses).values({ ...base, slug: "kulm", type: "contact", title: { et: "Kulmude lamineerimine" }, priceGroup: 35000, published: true, sort: 1 }).returning();
+  [ecourse] = await db.insert(courses).values({ ...base, slug: "e-kulm", type: "e_learning", title: { et: "Kulmumeistri e-koolitus" }, price: 9500, accessMonths: 6, published: true, sort: 2 }).returning();
+  [draftEcourse] = await db.insert(courses).values({ ...base, slug: "e-ripsmed", type: "e_learning", title: { et: "Ripsmete e-koolitus" }, price: 9500, accessMonths: null, published: false, sort: 3 }).returning();
+  [session] = await db.insert(courseSessions).values({ courseId: contact.id, startsAt: new Date("2026-11-14T08:00:00Z"), city: "Pärnu", venue: "MS LAB stuudio" }).returning();
+});
+
+const client = async (email: string, over: Partial<typeof clients.$inferInsert> = {}) => (await db.insert(clients).values({ email, ...over }).returning())[0];
+const register = async (clientId: number | null, email: string, over: Partial<typeof registrations.$inferInsert> = {}) =>
+  (
+    await db
+      .insert(registrations)
+      .values({ courseId: contact.id, courseSessionId: session.id, kind: "group", name: "Liis Tamm", email, paymentChoice: "half", clientId, ...over })
+      .returning()
+  )[0];
+const access = async (clientId: number, over: Partial<typeof courseAccess.$inferInsert> = {}) =>
+  (await db.insert(courseAccess).values({ clientId, courseId: ecourse.id, grantedBy: "e2e", expiresAt: new Date("2027-04-04T20:59:59.999Z"), ...over }).returning())[0];
+
+describe("listClients", () => {
+  test("newest first, with the name (own, else the latest registration's) and the number of courses (registrations + accesses)", async () => {
+    const kati = await client("kati@example.test", { name: "Kati Kask", createdAt: new Date("2026-10-01T10:00:00Z") });
+    const liis = await client("liis@example.test", { createdAt: new Date("2026-10-02T10:00:00Z") });
+    const olga = await client("olga@example.test", { createdAt: new Date("2026-10-03T10:00:00Z") });
+    await register(liis.id, liis.email, { name: "Liis Vana", createdAt: new Date("2026-09-01T10:00:00Z") });
+    await register(liis.id, liis.email, { name: "Liis Tamm", status: "cancelled", createdAt: new Date("2026-09-20T10:00:00Z") });
+    await access(liis.id, { revokedAt: NOW });
+    await access(kati.id, { courseId: draftEcourse.id, expiresAt: new Date("2026-01-01T00:00:00Z") });
+    await register(null, "someone@example.test"); // not linked: counts for nobody
+
+    const list = await listClients(db, { filter: "all", q: "", page: 1 });
+    expect(list).toMatchObject({ page: 1, pages: 1, total: 3 });
+    expect(list.rows.map((r) => [r.email, r.name, r.courses])).toEqual([
+      ["olga@example.test", "", 0],
+      ["liis@example.test", "Liis Tamm", 3], // cancelled and ended ones count too
+      ["kati@example.test", "Kati Kask", 1],
+    ]);
+    expect(list.rows[0].createdAt).toEqual(olga.createdAt);
+  });
+
+  test("E-õpe: any e-course access (open, run out or ended); Kontaktõpe: a registration on a contact course", async () => {
+    const onlyE = await client("e@example.test");
+    const onlyK = await client("k@example.test");
+    const both = await client("both@example.test");
+    const eReg = await client("ereg@example.test"); // a registration on an e-course only: neither filter
+    await client("none@example.test");
+    await access(onlyE.id, { expiresAt: new Date("2026-01-01T00:00:00Z") });
+    await register(onlyK.id, onlyK.email, { status: "cancelled" });
+    await access(both.id, { revokedAt: NOW });
+    await register(both.id, both.email);
+    await register(eReg.id, eReg.email, { courseId: ecourse.id, courseSessionId: null });
+
+    const emails = async (filter: "all" | "e" | "k") => (await listClients(db, { filter, q: "", page: 1 })).rows.map((r) => r.email).sort();
+    expect(await emails("e")).toEqual(["both@example.test", "e@example.test"]);
+    expect(await emails("k")).toEqual(["both@example.test", "k@example.test"]);
+    expect(await emails("all")).toHaveLength(5);
+  });
+
+  test("search: a part of the name or the e-mail, any case; % and _ are taken literally; combined with a filter", async () => {
+    const kati = await client("kati.kask@example.test", { name: "Kati Kask" });
+    const liis = await client("liis_t@example.test");
+    await register(liis.id, liis.email, { name: "Liis Õunapuu" });
+    await client("x100%@example.test");
+    await access(kati.id);
+
+    const find = async (q: string, filter: "all" | "e" | "k" = "all") => (await listClients(db, { filter, q, page: 1 })).rows.map((r) => r.email);
+    expect(await find("KASK")).toEqual(["kati.kask@example.test"]);
+    expect(await find("õunapuu")).toEqual(["liis_t@example.test"]); // the registration's name
+    expect(await find("s_t")).toEqual(["liis_t@example.test"]); // "_" is an underscore, not any character
+    expect(await find("i_k")).toEqual([]);
+    expect(await find("100%")).toEqual(["x100%@example.test"]);
+    expect(await find("%")).toEqual(["x100%@example.test"]); // not "everything"
+    expect(await find("\\")).toEqual([]);
+    expect(await find("'; drop table clients; --")).toEqual([]);
+    expect(await find("example", "e")).toEqual(["kati.kask@example.test"]);
+    expect(await db.select().from(clients)).toHaveLength(3);
+  });
+
+  test("50 a page; a page beyond the end shows the last one", async () => {
+    await db.insert(clients).values(Array.from({ length: PAGE_SIZE + 3 }, (_, i) => ({ email: `s${i}@example.test`, createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)) })));
+    const first = await listClients(db, { filter: "all", q: "", page: 1 });
+    expect(first).toMatchObject({ page: 1, pages: 2, total: PAGE_SIZE + 3 });
+    expect(first.rows).toHaveLength(PAGE_SIZE);
+    expect(first.rows[0].email).toBe(`s${PAGE_SIZE + 2}@example.test`);
+    const second = await listClients(db, { filter: "all", q: "", page: 2 });
+    expect(second.rows.map((r) => r.email)).toEqual(["s2@example.test", "s1@example.test", "s0@example.test"]);
+    expect((await listClients(db, { filter: "all", q: "", page: 99 })).page).toBe(2);
+    expect((await listClients(db, { filter: "all", q: "nobody", page: 3 })).rows).toEqual([]);
+  });
+});
+
+describe("clientDetail", () => {
+  test("her registrations, requests (a change request with its wish), accesses with their state, terms; nothing of anybody else", async () => {
+    const kati = await client("kati@example.test", { phone: "+372 5555 0101", locale: "ru" });
+    const other = await client("other@example.test");
+    const reg = await register(kati.id, kati.email, { name: "Kati Kask" });
+    await register(other.id, other.email);
+    await db.insert(requests).values([
+      { kind: "change_request", payload: { registrationId: reg.id, kind: "cancel", message: "", email: kati.email }, clientId: kati.id, createdAt: new Date("2026-10-03T10:00:00Z") },
+      { kind: "individual", payload: { email: kati.email }, clientId: kati.id, handled: true, createdAt: new Date("2026-10-01T10:00:00Z") },
+      { kind: "practice", payload: { email: other.email }, clientId: other.id },
+    ]);
+    const open = await access(kati.id, { grantedBy: ADMIN, grantedAt: new Date("2026-10-01T10:00:00Z") });
+    await access(kati.id, { courseId: draftEcourse.id, expiresAt: new Date("2026-10-01T00:00:00Z"), grantedAt: new Date("2026-04-01T10:00:00Z") });
+    await db.insert(termsAcceptances).values({ clientId: kati.id, courseId: ecourse.id, termsVersion: "2026-10-02T10:00:00.000Z", acceptedAt: new Date("2026-10-02T11:00:00Z") });
+
+    const d = (await clientDetail(db, kati.id, NOW))!;
+    expect(d.client).toMatchObject({ id: kati.id, email: "kati@example.test", name: "Kati Kask", ownName: "", phone: "+372 5555 0101", locale: "ru" });
+    expect(d.registrations.map((r) => r.id)).toEqual([reg.id]);
+    expect(registrationHeading(d.registrations[0])).toEqual({ title: "Kulmude lamineerimine", time: "14.11.2026 · 10:00", place: "Pärnu, MS LAB stuudio" });
+    expect(d.requests.map((r) => [r.kind, r.wish, r.handled])).toEqual([
+      ["change_request", "cancel", false],
+      ["individual", null, true],
+    ]);
+    expect(d.access.map((a) => [a.courseId, a.state, a.grantedBy])).toEqual([
+      [ecourse.id, "active", ADMIN],
+      [draftEcourse.id, "expired", "e2e"],
+    ]);
+    expect(d.access[0]).toMatchObject({ id: open.id, slug: "e-kulm", title: { et: "Kulmumeistri e-koolitus" } });
+    expect(d.terms).toEqual([{ courseTitle: { et: "Kulmumeistri e-koolitus" }, version: "2026-10-02T10:00:00.000Z", acceptedAt: new Date("2026-10-02T11:00:00Z") }]);
+    await revokeAccess(db, { clientId: kati.id, accessId: open.id, now: NOW });
+    expect((await clientDetail(db, kati.id, NOW))!.access[0].state).toBe("revoked");
+    expect(await clientDetail(db, 999_999, NOW)).toBeNull();
+  });
+
+  test("the label: her name, else the latest registration's, else the e-mail", async () => {
+    const a = await client("a@example.test", { name: "Anu" });
+    const b = await client("b@example.test");
+    const c = await client("c@example.test");
+    await register(b.id, b.email, { name: "Berit Saar" });
+    expect([await clientLabel(db, a.id), await clientLabel(db, b.id), await clientLabel(db, c.id), await clientLabel(db, 999_999)]).toEqual(["Anu", "Berit Saar", "c@example.test", null]);
+  });
+
+  test("the e-courses to pick from: e-learning only, drafts too, in the public order, with today + their access months (12 without)", async () => {
+    expect(await listEcourses(db, NOW)).toEqual([
+      { id: ecourse.id, title: { et: "Kulmumeistri e-koolitus" }, published: true, accessMonths: 6, until: "2027-04-04" },
+      { id: draftEcourse.id, title: { et: "Ripsmete e-koolitus" }, published: false, accessMonths: null, until: "2027-10-04" },
+    ]);
+  });
+});
+
+describe("Lisa õpilane", () => {
+  test("creates the student of a new address (normalised, no session), with the language of her latest registration, and links her records", async () => {
+    await register(null, "Mari.Maasikas@Example.test", { locale: "et", createdAt: new Date("2026-09-01T10:00:00Z") });
+    const latest = await register(null, "mari.maasikas@example.test", { locale: "ru", createdAt: new Date("2026-09-20T10:00:00Z") });
+    await db.insert(requests).values({ kind: "individual", payload: { email: "MARI.maasikas@example.test" } });
+    await db.insert(subscribers).values({ email: "mari.maasikas@example.test", token: "t1" });
+
+    const r = await addClient(db, "  Mari.Maasikas@EXAMPLE.test ");
+    expect(r).toMatchObject({ ok: true, created: true });
+    const id = (r as { id: number }).id;
+    const [row] = await db.select().from(clients).where(eq(clients.id, id));
+    expect(row).toMatchObject({ email: "mari.maasikas@example.test", name: "", locale: "ru" });
+    expect((await db.select({ c: registrations.clientId }).from(registrations)).map((x) => x.c)).toEqual([id, id]);
+    expect((await db.select({ c: requests.clientId }).from(requests))[0].c).toBe(id);
+    expect((await db.select({ c: subscribers.clientId }).from(subscribers))[0].c).toBe(id);
+    expect(await db.select().from(clientSessions)).toHaveLength(0);
+    expect((await clientDetail(db, id, NOW))!.registrations.map((x) => x.id)).toContain(latest.id);
+  });
+
+  test("an address without registrations: Estonian; an existing student: the same one, nothing created", async () => {
+    const r = await addClient(db, "uus@example.test");
+    expect(r).toMatchObject({ ok: true, created: true });
+    expect((await db.select().from(clients))[0].locale).toBe("et");
+    const existing = await client("olemas@example.test", { name: "Olemas", locale: "ru" });
+    expect(await addClient(db, "OLEMAS@example.test")).toEqual({ ok: true, id: existing.id, created: false });
+    expect(await addClientForm(db, form({ email: "olemas@example.test" }))).toEqual({ ok: true, id: existing.id });
+    expect(await db.select().from(clients)).toHaveLength(2);
+    expect((await db.select().from(clients).where(eq(clients.id, existing.id)))[0]).toMatchObject({ name: "Olemas", locale: "ru" });
+  });
+
+  test("a bad address is refused, nothing is stored", async () => {
+    for (const bad of ["", "   ", "mari", "mari@", "mari@example", "@example.test", "ma ri@example.test", `${"x".repeat(250)}@example.test`])
+      expect(await addClientForm(db, form({ email: bad })), bad).toEqual({ ok: false, error: "email" });
+    expect(await addClientForm(db, new FormData())).toEqual({ ok: false, error: "email" });
+    expect(await db.select().from(clients)).toHaveLength(0);
+  });
+
+  test("her first login finds the student the admin added (not new), with the access already there", async () => {
+    const r = (await addClient(db, "kati@example.test")) as { id: number };
+    expect(await grantAccess(db, { clientId: r.id, courseId: ecourse.id, until: "2027-04-04", by: ADMIN, now: NOW })).toEqual({ ok: true });
+    const { code } = (await issueClientLogin(db, "kati@example.test", NOW))!;
+    const login = await redeemClientCode(db, "kati@example.test", code, NOW);
+    expect(login).toMatchObject({ clientId: r.id, isNew: false });
+    const dash = (await loadDashboard(db, r.id, NOW))!;
+    expect(dash.cards).toEqual([expect.objectContaining({ kind: "ecourse", course: { slug: "e-kulm", title: { et: "Kulmumeistri e-koolitus" } }, revoked: false })]);
+  });
+});
+
+describe("e-course access", () => {
+  test("Ava ligipääs: until the end of the chosen Estonian day, granted by the admin now; the student's card shows it", async () => {
+    const kati = await client("kati@example.test");
+    expect(await grantAccessForm(db, form({ clientId: String(kati.id), courseId: String(ecourse.id), until: "2027-04-04" }), ADMIN, NOW)).toEqual({ ok: true });
+    const [row] = await db.select().from(courseAccess);
+    expect(row).toMatchObject({ clientId: kati.id, courseId: ecourse.id, grantedBy: ADMIN, grantedAt: NOW, revokedAt: null });
+    expect(row.expiresAt.toISOString()).toBe("2027-04-04T20:59:59.999Z"); // 23:59:59.999 in Tallinn (summer time, UTC+3)
+    const summer = await client("suvi@example.test");
+    await grantAccess(db, { clientId: summer.id, courseId: ecourse.id, until: "2027-07-01", by: ADMIN, now: NOW });
+    expect((await db.select().from(courseAccess).where(eq(courseAccess.clientId, summer.id)))[0].expiresAt.toISOString()).toBe("2027-07-01T20:59:59.999Z"); // UTC+3
+    const dash = (await loadDashboard(db, kati.id, NOW))!;
+    expect(dash.cards).toEqual([{ kind: "ecourse", course: { slug: "e-kulm", title: { et: "Kulmumeistri e-koolitus" } }, grantedAt: NOW.toISOString(), expiresAt: "2027-04-04T20:59:59.999Z", revoked: false }]);
+    // a draft e-course can be granted (bought before it is published)
+    expect(await grantAccess(db, { clientId: kati.id, courseId: draftEcourse.id, until: "2026-10-04", by: ADMIN, now: NOW })).toEqual({ ok: true });
+  });
+
+  test("granting again (run out, or ended) is the same row: new expiry, end cleared, the new admin and time recorded", async () => {
+    const kati = await client("kati@example.test");
+    const old = await access(kati.id, { grantedBy: "dim@example.test", grantedAt: new Date("2026-01-01T10:00:00Z"), expiresAt: new Date("2026-07-01T00:00:00Z") });
+    const later = new Date("2026-10-05T08:00:00Z");
+    expect(await grantAccess(db, { clientId: kati.id, courseId: ecourse.id, until: "2027-01-31", by: ADMIN, now: later })).toEqual({ ok: true });
+    let rows = await db.select().from(courseAccess);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: old.id, grantedBy: ADMIN, grantedAt: later, revokedAt: null });
+    expect(rows[0].expiresAt.toISOString()).toBe("2027-01-31T21:59:59.999Z");
+
+    expect(await revokeAccess(db, { clientId: kati.id, accessId: old.id, now: later })).toEqual({ ok: true });
+    expect((await db.select().from(courseAccess))[0].revokedAt).toEqual(later);
+    expect(await grantAccess(db, { clientId: kati.id, courseId: ecourse.id, until: "2027-02-28", by: "dim@example.test", now: later })).toEqual({ ok: true });
+    rows = await db.select().from(courseAccess);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: old.id, grantedBy: "dim@example.test", revokedAt: null });
+    expect((await loadDashboard(db, kati.id, later))!.cards[0]).toMatchObject({ kind: "ecourse", revoked: false, expiresAt: "2027-02-28T21:59:59.999Z" });
+  });
+
+  test("refused: a day before today (Estonian), not a date, more than 10 years ahead, not an e-course, no such student, bad ids", async () => {
+    const kati = await client("kati@example.test");
+    const grant = (until: string, courseId = ecourse.id, clientId = kati.id) => grantAccess(db, { clientId, courseId, until, by: ADMIN, now: NOW });
+    expect(await grant("2026-10-03")).toEqual({ ok: false, error: "date" });
+    expect(await grant("2026-10-04")).toEqual({ ok: true }); // today is fine: open until tonight
+    expect(await grant("2027-02-30")).toEqual({ ok: false, error: "date" });
+    expect(await grant("04.04.2027")).toEqual({ ok: false, error: "date" });
+    expect(await grant("")).toEqual({ ok: false, error: "date" });
+    expect(await grant("2036-10-05")).toEqual({ ok: false, error: "date" });
+    expect(await grant("2027-04-04", contact.id)).toEqual({ ok: false, error: "course" });
+    expect(await grant("2027-04-04", 999_999)).toEqual({ ok: false, error: "course" });
+    expect(await grant("2027-04-04", ecourse.id, 999_999)).toEqual({ ok: false, error: "notFound" });
+    const f = (fields: Record<string, string>) => grantAccessForm(db, form(fields), ADMIN, NOW);
+    expect(await f({ clientId: "x", courseId: String(ecourse.id), until: "2027-04-04" })).toEqual({ ok: false, error: "invalid" });
+    expect(await f({ clientId: String(kati.id), courseId: "", until: "2027-04-04" })).toEqual({ ok: false, error: "course" });
+    // just after midnight in Tallinn (still the day before in UTC), "today" is already the Estonian date
+    expect(await grantAccess(db, { clientId: kati.id, courseId: ecourse.id, until: "2026-10-05", by: ADMIN, now: new Date("2026-10-04T21:30:00Z") })).toEqual({ ok: true });
+    expect(await grantAccess(db, { clientId: kati.id, courseId: ecourse.id, until: "2026-10-04", by: ADMIN, now: new Date("2026-10-04T21:30:00Z") })).toEqual({ ok: false, error: "date" });
+  });
+
+  test("Lõpeta ligipääs: ends it now (kept as ended, the card says so); only that student's row; again changes nothing", async () => {
+    const kati = await client("kati@example.test");
+    const other = await client("other@example.test");
+    const row = await access(kati.id);
+    const theirs = await access(other.id);
+    expect(await revokeAccessForm(db, form({ clientId: String(other.id), accessId: String(row.id) }), NOW)).toEqual({ ok: false, error: "notFound" });
+    expect((await db.select().from(courseAccess).where(eq(courseAccess.id, row.id)))[0].revokedAt).toBeNull();
+    expect(await revokeAccessForm(db, form({ clientId: String(kati.id), accessId: String(row.id) }), NOW)).toEqual({ ok: true });
+    expect((await db.select().from(courseAccess).where(eq(courseAccess.id, row.id)))[0].revokedAt).toEqual(NOW);
+    expect(await revokeAccess(db, { clientId: kati.id, accessId: row.id, now: new Date("2026-10-06T00:00:00Z") })).toEqual({ ok: true });
+    expect((await db.select().from(courseAccess).where(eq(courseAccess.id, row.id)))[0].revokedAt).toEqual(NOW);
+    expect((await db.select().from(courseAccess).where(eq(courseAccess.id, theirs.id)))[0].revokedAt).toBeNull();
+    expect((await loadDashboard(db, kati.id, NOW))!.cards[0]).toMatchObject({ kind: "ecourse", revoked: true });
+    expect(await revokeAccessForm(db, form({ clientId: String(kati.id), accessId: "abc" }), NOW)).toEqual({ ok: false, error: "invalid" });
+  });
+});
+
+describe("the change requests' registrations (Päringud, Muutmine)", () => {
+  test("listRegistrations by ids: those (with course and session), none for an empty list; named as the student's card names them", async () => {
+    const a = await register(null, "a@example.test");
+    const b = await register(null, "b@example.test", { courseSessionId: null, kind: "individual", preferredPeriod: "Jaanuaris" });
+    await register(null, "c@example.test");
+    const rows = await listRegistrations(db, { ids: [b.id, a.id, 999_999] });
+    expect(rows.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
+    expect(await listRegistrations(db, { ids: [] })).toEqual([]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(registrationHeading(byId.get(a.id)!)).toEqual({ title: "Kulmude lamineerimine", time: "14.11.2026 · 10:00", place: "Pärnu, MS LAB stuudio" });
+    expect(registrationHeading(byId.get(b.id)!)).toEqual({ title: "Kulmude lamineerimine", time: "Jaanuaris", place: "" });
+  });
+});

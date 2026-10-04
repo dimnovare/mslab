@@ -18,3 +18,19 @@ export function pageInfo(requested: number, total: number, size: number = PAGE_S
   const page = Math.min(Math.max(1, Math.floor(requested) || 1), pages);
   return { page, pages, size, offset: (page - 1) * size, total };
 }
+
+/** The longest search an admin list takes (?otsi=); longer text is cut. */
+export const SEARCH_MAX = 100;
+
+/** ?otsi= → the search text: one line, trimmed, at most SEARCH_MAX characters ("" for none). */
+export function parseSearch(value: string | string[] | undefined): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, SEARCH_MAX) : "";
+}
+
+/**
+ * An ILIKE pattern that finds `text` anywhere, taken literally: `%`, `_` and `\` (LIKE's wildcards and its default escape
+ * character) are escaped, so "50%" finds "50%" and "_" finds an underscore, never "anything". The text is bound as a parameter.
+ */
+export function containsPattern(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
+}

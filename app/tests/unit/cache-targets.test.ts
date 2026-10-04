@@ -53,6 +53,13 @@ describe("the revalidation map", () => {
     expect(paths({ kind: "settings", parts: ["course_terms", "contact"] })).toEqual([`${SITE} (layout)`]);
   });
 
+  test("settings: the prepayment instructions are account-only (the unpaid cards' JSON), so saving them revalidates no public page", () => {
+    expect(revalidationTargets({ kind: "settings", parts: ["prepayment"] })).toEqual([]);
+    expect(revalidationTargets({ kind: "settings", parts: ["prepayment", "course_terms"] })).toEqual([]);
+    expect(paths({ kind: "settings", parts: ["prepayment", "terms"] })).toEqual([`${SITE}/tingimused (page)`]);
+    expect(paths({ kind: "settings", parts: ["prepayment", "newsletter"] })).toEqual([`${SITE} (layout)`]);
+  });
+
   test("every route named is a real route of app/[locale]/(site)", () => {
     const all: PublicChange[] = [
       { kind: "courses" },
@@ -140,6 +147,8 @@ describe("revalidatePublic", () => {
     const { revalidatePublic } = await import("@/server/public-cache");
     const store = await inAction(() => revalidatePublic({ kind: "settings", parts: [] }));
     expect(store.pendingRevalidatedTags ?? []).toEqual([]);
+    const prepayment = await inAction(() => revalidatePublic({ kind: "settings", parts: ["prepayment"] }));
+    expect(prepayment.pendingRevalidatedTags ?? []).toEqual([]);
   });
 
   test("a failing revalidation is logged (route names only), never thrown at the person whose change is stored", async () => {

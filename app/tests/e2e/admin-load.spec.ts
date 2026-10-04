@@ -23,6 +23,7 @@ const ADMIN_PAGES = [
   "/admin/kampaania",
   "/admin/koolitaja",
   "/admin/koolitused",
+  "/admin/opilased",
   "/admin/paringud",
   "/admin/praktika",
   "/admin/registreerimised",

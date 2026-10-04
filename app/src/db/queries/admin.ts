@@ -22,7 +22,8 @@ export type PageInput = Insert<typeof pages>;
 export type CampaignInput = Omit<Insert<typeof campaign>, "id">;
 export type ImageInput = { key: string; alt?: I18n | null };
 export type RegistrationRow = Registration & { course: Course; courseSession: CourseSession | null };
-export type RegistrationFilter = { type?: "e_learning" | "contact"; status?: RegStatus };
+/** `ids`: only these registrations; `clientId`: only the ones linked to that client (the admin's Õpilased drawer). */
+export type RegistrationFilter = { type?: "e_learning" | "contact"; status?: RegStatus; ids?: number[]; clientId?: number };
 
 function required<T>(row: T | undefined, what: string, id: number): T {
   if (row === undefined) throw new Error(`${what} ${id} not found`);
@@ -251,7 +252,7 @@ export type Paged<T> = PageInfo & { rows: T[] };
  * Page `requested` (clamped to 1…last) of a list. The count and the rows are read together; only when the requested
  * page lies beyond the end (an old link, a typed ?leht=) are the rows of the last page read once more.
  */
-async function paged<T>(requested: number, size: number, total: () => Promise<number>, rows: (range: Range) => Promise<T[]>): Promise<Paged<T>> {
+export async function paged<T>(requested: number, size: number, total: () => Promise<number>, rows: (range: Range) => Promise<T[]>): Promise<Paged<T>> {
   const guess = pageInfo(requested, Number.POSITIVE_INFINITY, size);
   const [n, first] = await Promise.all([total(), rows({ limit: size, offset: guess.offset })]);
   const info = pageInfo(requested, n, size);
@@ -279,7 +280,12 @@ export async function setRegistrationStatus(
 }
 
 const registrationWhere = (filter: RegistrationFilter) =>
-  and(filter.type ? eq(courses.type, filter.type) : undefined, filter.status ? eq(registrations.status, filter.status) : undefined);
+  and(
+    filter.type ? eq(courses.type, filter.type) : undefined,
+    filter.status ? eq(registrations.status, filter.status) : undefined,
+    filter.ids ? (filter.ids.length ? inArray(registrations.id, filter.ids) : sql`false`) : undefined,
+    filter.clientId !== undefined ? eq(registrations.clientId, filter.clientId) : undefined,
+  );
 
 /** Registrations with their course and session, newest first. `type` filters by the course type. */
 export async function listRegistrations(db: Db, filter: RegistrationFilter = {}, range?: Range): Promise<RegistrationRow[]> {

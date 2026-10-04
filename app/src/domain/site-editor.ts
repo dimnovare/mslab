@@ -49,6 +49,11 @@ export const SITE_LIMITS = {
   discount: 20,
   legalTitle: 120,
   legal: 30_000,
+  receiver: 120,
+  /** as typed, spaces included (34 characters at most once they are taken out) */
+  iban: 60,
+  bank: 80,
+  referencePrefix: 30,
 };
 
 // ---------- links ----------
@@ -293,6 +298,19 @@ export function contactDraft(value: unknown): ContactDraft {
 
 export type NewsletterDraft = { discountLabel: string };
 export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountLabel: str(obj(value).discountLabel) });
+
+/** Seaded "Ettemaksu juhised" (settings key "prepayment"): where students pay, shown on their unpaid contact-course cards. */
+export type PrepaymentDraft = { receiver: string; iban: string; bank: string; referencePrefix: string };
+export function prepaymentDraft(value: unknown): PrepaymentDraft {
+  const p = obj(value);
+  return { receiver: str(p.receiver), iban: str(p.iban), bank: str(p.bank), referencePrefix: str(p.referencePrefix) };
+}
+
+/** An IBAN as typed → as stored: every space (also a non-breaking one, as copied from a bank page) taken out, upper case. */
+export const normalizeIban = (typed: string): string => typed.replace(/\s+/g, "").toUpperCase();
+
+/** The shape of a stored IBAN: country letters, two check digits, 10–30 letters and digits (no checksum test: a typo shows on the bank's side). */
+export const isIban = (iban: string): boolean => /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban);
 
 export type PostDraft = {
   id: number | null;

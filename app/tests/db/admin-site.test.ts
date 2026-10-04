@@ -23,6 +23,7 @@ import {
 } from "@/server/admin-site";
 import type { EditResult } from "@/server/edit-check";
 import { newPostDraft, type PostDraft } from "@/domain/site-editor";
+import { parsePrepayment } from "@/server/client-data";
 
 // Task 13B: the site content editors' form handling on a real (PGlite) database with the prototype seed.
 
@@ -465,6 +466,57 @@ describe("settings", () => {
       expect(s.values.course_terms.body).toEqual({ et: "" });
       expect(await save({ et: "Esimene." })).toMatchObject({ ok: true });
       expect((await stored()).page).toMatchObject({ title: { et: "E-koolituse tingimused" }, body: { et: "Esimene." } });
+    });
+  });
+
+  describe("Ettemaksu juhised (prepayment, phase 2a Task 9)", () => {
+    const savePay = async (value: Record<string, string>) => {
+      const s = await loadSettings(db);
+      return saveSettingsForm(db, form({ prepayment: { version: s.versions.prepayment, value } }));
+    };
+    const empty = { receiver: "", iban: "", bank: "", referencePrefix: "" };
+
+    test("loads empty when nothing is stored; saved trimmed, the IBAN without spaces in capitals; the cards read it", async () => {
+      const s = await loadSettings(db);
+      expect(s.values.prepayment).toEqual(empty);
+      expect(s.versions.prepayment).toMatch(/^[0-9a-f]{32}$/);
+      const r = await savePay({ receiver: " MS LAB OÜ ", iban: " ee38 2200 2210 2014 5685 ", bank: "Swedbank", referencePrefix: " MSLAB- " });
+      expect(r).toMatchObject({ ok: true });
+      const saved = (r as unknown as { saved: { values: { prepayment: unknown }; versions: Record<string, string> } }).saved;
+      expect(Object.keys(saved.versions)).toEqual(["prepayment"]);
+      const value = { receiver: "MS LAB OÜ", iban: "EE382200221020145685", bank: "Swedbank", referencePrefix: "MSLAB-" };
+      expect(saved.values.prepayment).toEqual(value);
+      expect((await getSettings(db)).prepayment).toEqual(value);
+      expect(parsePrepayment((await getSettings(db)).prepayment)).toEqual(value);
+    });
+
+    test("all empty is allowed and means no instructions (the cards then say Maria sends an invoice)", async () => {
+      expect(await savePay({ receiver: "MS LAB OÜ", iban: "EE382200221020145685", bank: "", referencePrefix: "" })).toMatchObject({ ok: true });
+      expect(await savePay({ receiver: " ", iban: "  ", bank: "", referencePrefix: "" })).toMatchObject({ ok: true });
+      expect((await getSettings(db)).prepayment).toEqual(empty);
+      expect(parsePrepayment((await getSettings(db)).prepayment)).toBeNull();
+    });
+
+    test("an IBAN that is not one is refused with its own message; too long fields too; nothing is stored", async () => {
+      for (const iban of ["EE38", "38EE2200221020145685", "EE3822002210201456850000000000000000", "EE38 2200-2210", "ЕЕ382200221020145685"])
+        expect(fieldsOf(await savePay({ ...empty, receiver: "MS LAB OÜ", iban })), iban).toEqual({ "prepayment.iban": "iban" });
+      expect(fieldsOf(await savePay({ ...empty, iban: "E".repeat(61) }))).toEqual({ "prepayment.iban": "tooLong" });
+      expect(fieldsOf(await savePay({ ...empty, receiver: "x".repeat(121), bank: "x".repeat(81), referencePrefix: "x".repeat(31) }))).toEqual({
+        "prepayment.receiver": "tooLong",
+        "prepayment.bank": "tooLong",
+        "prepayment.referencePrefix": "tooLong",
+      });
+      expect((await getSettings(db)).prepayment).toBeUndefined();
+      expect(await savePay({ ...empty, iban: "LT12 1000 0111 0100 1000" })).toMatchObject({ ok: true }); // another country
+      expect(((await getSettings(db)).prepayment as { iban: string }).iban).toBe("LT121000011101001000");
+    });
+
+    test("stale: saved elsewhere since the page was loaded is refused, the other save is kept", async () => {
+      const s = await loadSettings(db);
+      expect(await savePay({ ...empty, receiver: "Esimene" })).toMatchObject({ ok: true });
+      const late = await saveSettingsForm(db, form({ prepayment: { version: s.versions.prepayment, value: { ...empty, receiver: "Teine" } } }));
+      expect(late).toEqual({ ok: false, error: "stale" });
+      expect(((await getSettings(db)).prepayment as { receiver: string }).receiver).toBe("Esimene");
     });
   });
 });

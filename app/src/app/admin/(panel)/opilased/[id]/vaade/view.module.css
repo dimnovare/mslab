@@ -1,0 +1,18 @@
+/* "Vaata tema vaadet": the student's page as a white sheet in the admin's column (the site's paper, its own page side
+   padding a little narrower, so a phone shows the cards at nearly their own width). Colours from tokens.css only. */
+
+.preview {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--paper);
+  overflow: clip;
+}
+
+@media (max-width: 640px) {
+  .preview {
+    --page: 14px;
+    margin-inline: -6px;
+    border-radius: 16px;
+  }
+}

@@ -33,7 +33,8 @@ export type FieldError =
   | "focal"
   | "codeFormat"
   | "imageRequired"
-  | "localeHref";
+  | "localeHref"
+  | "iban";
 
 /** The parts of a site editor as stored after a save: their drafts and versions (the editor continues from these). */
 export type SavedParts = { values: Record<string, unknown>; versions: Record<string, string> };

@@ -33,7 +33,10 @@ import {
   copyI18n,
   faqDraft,
   newsletterDraft,
+  normalizeIban,
+  isIban,
   packageDraft,
+  prepaymentDraft,
   pageDraft,
   postDraft,
   SITE_LIMITS as L,
@@ -44,6 +47,7 @@ import {
   type FaqDraft,
   type NewsletterDraft,
   type PackageDraft,
+  type PrepaymentDraft,
   type PageDraft,
   type PostDraft,
   type SlideDraft,
@@ -53,6 +57,7 @@ import {
 import type { I18n } from "@/i18n/field";
 import { isSlug, SLUG_MAX, slugify } from "@/lib/slug";
 import { contentVersion } from "@/lib/version";
+import { PREPAYMENT_KEY } from "./client-data";
 import { Check, field, invalid, type EditResult, type SavedParts } from "./edit-check";
 
 // The site content editors' form handling (Task 13B): home page, practice packages, trainer page, campaign, settings
@@ -382,9 +387,16 @@ const campaignParts: Parts = {
 export const loadCampaign = async (q: Q) => (await loadParts(q, campaignParts)) as SavedParts & { values: { campaign: CampaignDraft } };
 export const saveCampaignForm = (db: Db, formData: FormData) => saveParts(db, campaignParts, formData);
 
-// ---------- Seaded: contact details, newsletter discount, legal pages, the e-course terms ----------
+// ---------- Seaded: contact details, newsletter discount, prepayment instructions, legal pages, the e-course terms ----------
 
-export type SettingsValues = { contact: ContactDraft; newsletter: NewsletterDraft; privacy: PageDraft; terms: PageDraft; course_terms: { body: I18n } };
+export type SettingsValues = {
+  contact: ContactDraft;
+  newsletter: NewsletterDraft;
+  prepayment: PrepaymentDraft;
+  privacy: PageDraft;
+  terms: PageDraft;
+  course_terms: { body: I18n };
+};
 
 const settingsParts: Parts = {
   contact: part<ContactDraft>({
@@ -413,6 +425,25 @@ const settingsParts: Parts = {
     check: (c, v, name) => {
       const discountLabel = c.plain(`${name}.discountLabel`, v.discountLabel, L.discount, { required: true });
       return (tx, stored) => setSetting(tx, "newsletter", { ...obj(stored), discountLabel });
+    },
+  }),
+  // "Ettemaksu juhised": where students pay the prepayment (account-only: the unpaid contact-course cards). Every field may
+  // be empty; all empty means no instructions (the cards say Maria sends an invoice), and so does one without the receiver
+  // or the IBAN (domain/account-cards.ts hasPrepayment). The IBAN is stored without spaces, in capitals.
+  prepayment: part<PrepaymentDraft>({
+    tables: ["settings"],
+    schema: z.object({ receiver: text(400), iban: text(400), bank: text(400), referencePrefix: text(400) }),
+    read: (q) => readSetting(q, PREPAYMENT_KEY),
+    draft: prepaymentDraft,
+    check: (c, v, name) => {
+      const p = `${name}.`;
+      const receiver = c.plain(`${p}receiver`, v.receiver, L.receiver);
+      const iban = normalizeIban(v.iban);
+      if (v.iban.length > L.iban) c.fail(`${p}iban`, "tooLong");
+      else if (iban && !isIban(iban)) c.fail(`${p}iban`, "iban");
+      const bank = c.plain(`${p}bank`, v.bank, L.bank);
+      const referencePrefix = c.plain(`${p}referencePrefix`, v.referencePrefix, L.referencePrefix);
+      return (tx) => setSetting(tx, PREPAYMENT_KEY, { receiver, iban, bank, referencePrefix });
     },
   }),
   privacy: pagePart("privacy", { titleMax: L.legalTitle, bodyMax: L.legal, required: true }),

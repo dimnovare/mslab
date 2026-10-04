@@ -7,12 +7,13 @@ import { Pager } from "@/components/admin/Pager";
 import { RequestToggle } from "@/components/admin/RequestToggle";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { listCourseNames, listSessionsByIds, pageRequests, type RequestKind } from "@/db/queries/admin";
+import { listCourseNames, listRegistrations, listSessionsByIds, pageRequests, type RegistrationRow, type RequestKind } from "@/db/queries/admin";
 import type { CourseSession, Request as RequestRow } from "@/db/schema";
 import { adminEt } from "@/i18n/dict/admin";
 import { pick, type I18n } from "@/i18n/field";
 import { fill, formatDate, formatTime } from "@/i18n/format";
 import { parsePage } from "@/domain/paging";
+import { registrationHeading } from "@/server/admin-clients";
 import { requireAdmin } from "@/server/auth";
 import styles from "./requests.module.css";
 
@@ -46,13 +47,20 @@ const FIELDS: Record<RequestKind | "interest", [string, Field][]> = {
   ],
   practice: [["package", "package"], ["name", "name"], ["email", "email"], ["phone", "phone"], ["course", "completedCourse"], ["times", "times"], ["locale", "locale"]],
   waitlist: [["name", "name"], ["email", "email"], ["course", "course"], ["session", "session"], ["locale", "locale"]],
-  // A client's cancel / change-date request from the account page (tab Muutmine). The registration link comes with the admin clients task.
+  // A client's cancel / change-date request from the account page (tab Muutmine): shown by ChangeRequest below (the wish in
+  // words, the registration's name, these fields, a link to the registration).
   change_request: [["email", "email"], ["message", "message"]],
 };
 /** Stored for the system, not for reading. */
 const HIDDEN = new Set(["courseId", "intent", "terms", "website"]);
 
 const isInterest = (r: RequestRow) => r.kind === "contact" && r.payload.intent === "purchase";
+
+/** The registration a change request is about (its payload's registrationId), when it is a plain positive number. */
+const changedRegistration = (r: RequestRow): number | null => {
+  const id = r.payload.registrationId;
+  return typeof id === "number" && Number.isInteger(id) && id > 0 && id <= 2_147_483_647 ? id : null;
+};
 
 type Lookup = { courses: Map<string, I18n>; sessions: Map<number, CourseSession> };
 
@@ -84,7 +92,12 @@ export default async function RequestsPage({ searchParams }: Props) {
   const [list, counts, courses] = await Promise.all([pageRequests(db, KIND[tab], parsePage(sp.leht)), getAdminCounts(), listCourseNames(db)]);
   const rows = list.rows;
   const sessionIds = tab === "ootenimekiri" ? rows.map((r) => Number(r.payload.session)).filter((n) => Number.isInteger(n) && n > 0) : [];
-  const sessions = await listSessionsByIds(db, [...new Set(sessionIds)]);
+  const changeIds = tab === "muutmine" ? rows.map(changedRegistration).filter((n): n is number => n !== null) : [];
+  const [sessions, changed] = await Promise.all([
+    listSessionsByIds(db, [...new Set(sessionIds)]),
+    changeIds.length ? listRegistrations(db, { ids: [...new Set(changeIds)] }) : [],
+  ]);
+  const registrationsById = new Map(changed.map((reg) => [reg.id, reg]));
   const lookup: Lookup = { courses: new Map(courses.map((c) => [c.slug, c.title])), sessions: new Map(sessions.map((s) => [s.id, s])) };
   const t = adminEt.requests;
 
@@ -124,6 +137,14 @@ export default async function RequestsPage({ searchParams }: Props) {
         ) : (
           <ul className={styles.list}>
             {rows.map((r) => {
+              if (r.kind === "change_request") {
+                const id = changedRegistration(r);
+                return (
+                  <li key={r.id}>
+                    <ChangeRequest r={r} registrationId={id} registration={id ? (registrationsById.get(id) ?? null) : null} />
+                  </li>
+                );
+              }
               const interest = isInterest(r);
               const fields = FIELDS[interest ? "interest" : r.kind];
               const shown = new Set(fields.map(([k]) => k));
@@ -184,5 +205,63 @@ export default async function RequestsPage({ searchParams }: Props) {
         <Pager info={list} href={(n) => `/admin/paringud?liik=${tab}${n > 1 ? `&leht=${n}` : ""}`} />
       </div>
     </Shell>
+  );
+}
+
+/**
+ * A student's wish about one of her registrations (Muutmine): the heading is the course and its date as her card names
+ * them; then the wish in words ("Soovib tühistada" / "Soovib muuta aega"), her name on the registration, her e-mail and
+ * message; "Märgi tehtuks", the registration's own drawer in Registreerimised, and a reply by e-mail.
+ */
+function ChangeRequest({ r, registrationId, registration }: { r: RequestRow; registrationId: number | null; registration: RegistrationRow | null }) {
+  const t = adminEt.requests;
+  const heading = registration ? registrationHeading(registration) : null;
+  const title = heading ? [heading.title, heading.time].filter(Boolean).join(" — ") : fill(t.unknownRegistration, { id: String(registrationId ?? "?") });
+  const wish = r.payload.kind === "cancel" || r.payload.kind === "change" ? t.wish[r.payload.kind] : null;
+  const address = typeof r.payload.email === "string" ? r.payload.email : null;
+  const message = typeof r.payload.message === "string" ? r.payload.message.trim() : "";
+  const rows: [string, React.ReactNode][] = [];
+  if (wish) rows.push([t.wishLabel, <strong key="w">{wish}</strong>]);
+  if (heading?.place) rows.push([t.fields.session, heading.place]);
+  if (registration?.name) rows.push([t.fields.name, registration.name]);
+  if (address) rows.push([t.fields.email, <a key="e" className={ui.contactLink} href={`mailto:${address}`}>{address}</a>]);
+  if (message) rows.push([t.fields.message, message]);
+  return (
+    <article className={`${ui.card} ${styles.request}`} data-request={r.id} data-handled={r.handled ? "1" : "0"} data-change-request="" aria-labelledby={`req-${r.id}`}>
+      <header className={styles.head}>
+        <div className={styles.title}>
+          <h3 id={`req-${r.id}`} className={ui.h3}>
+            {title}
+          </h3>
+          <p className={`${ui.muted} ${ui.small}`}>{fill(t.received, { date: `${formatDate(r.createdAt, "et")} ${formatTime(r.createdAt, "et")}` })}</p>
+        </div>
+        <div className={styles.tags}>
+          <span className={`${ui.tag} ${r.handled ? ui.ok : ui.warn}`} data-request-state="">
+            {r.handled ? t.handled : t.open}
+          </span>
+        </div>
+      </header>
+      <dl className={styles.dl}>
+        {rows.map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className={styles.actions}>
+        <RequestToggle id={r.id} handled={r.handled} t={{ markDone: t.markDone, markOpen: t.markOpen, saving: adminEt.common.saving, error: adminEt.common.saveError }} />
+        {registration && (
+          <Link className={ui.link} href={`/admin/registreerimised?id=${registration.id}`} data-change-registration={registration.id}>
+            {t.openRegistration}
+          </Link>
+        )}
+        {address && (
+          <a className={ui.link} href={`mailto:${address}`}>
+            {t.reply}
+          </a>
+        )}
+      </div>
+    </article>
   );
 }
