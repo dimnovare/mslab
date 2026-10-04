@@ -738,7 +738,7 @@ The shell page: `generateStaticParams()` returns `[]` (rendered on the first vis
 
 **Behaviour:**
 - After the first successful dashboard load in a browser that has `localStorage["mslab-fav"]`, POST `/api/konto/lemmikud/merge` once, then clear the local list (only after a 200).
-- `FavouriteButton`: when `hasAccountHint()` → reads the state from the dashboard data cached in `sessionStorage` (`mslab-account-fav`, refreshed on dashboard load) and toggles via POST `/api/konto/lemmikud`; on 401 falls back to the browser list. Label/`aria-pressed` behaviour unchanged.
+- `FavouriteButton`: when `hasAccountHint()` → reads the state from the account copy in `localStorage` (`mslab-account-fav`, refreshed on every account load; cleared on logout, a 401, deletion and every login, so a shared device never shows the previous person's hearts; other tabs follow through the `storage` event) and toggles via POST `/api/konto/lemmikud`; on 401 falls back to the browser list. Label/`aria-pressed` behaviour unchanged.
 - Lemmikud: course cards (public `CourseCard`) with ♡ to remove; empty state "Lisa koolitus lemmikuks ♡ koolituse lehel." + "Vaata koolitusi".
 - Minu andmed: name, phone (both optional), language (ET/RU radio; switching also navigates to the same tab in that language), "Saada mulle uudiskirja" switch, "Salvesta"; at the very bottom "Kustuta konto" → confirmation step "Kas kustutame su konto? Sinu registreeringud jäävad Mariale alles." with "Jah, kustuta" / "Tühista" → POST `/api/konto/kustuta` → home page with notice "Konto on kustutatud."
 
