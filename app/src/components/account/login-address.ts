@@ -2,12 +2,19 @@ import { isEmail, normalizeEmail } from "@/domain/email";
 
 // What the login page's address carries (pure: LoginForm reads it in the browser, tests/unit/login-address.test.ts).
 //
-// The parameters live in the FRAGMENT: `/konto/sisene#viga=link`, `#korda=1`, `#email=…`, `#email=…&kood=1`. A fragment is never sent to a server,
+// The parameters live in the FRAGMENT: `/konto/sisene#viga=link`, `#korda=1`, `#email=…`, `#email=…&kood=1`, `#valja=1`. A fragment is never sent to a server,
 // so no log, cache or scanner can hold it (Next.js keeps the address of the request that renders a page, query included, in the
 // page it caches for every later visitor; the middleware answers a query on an account page with a 303 that moves the known
 // parameters into the fragment). The query is still read, for links already out there (an e-mail with `?viga=link`, a bookmark).
 
-const KNOWN = ["viga", "korda", "email", "kood"] as const;
+const KNOWN = ["viga", "korda", "email", "kood", "valja"] as const;
+
+/**
+ * The fragment an account page adds when it sends a visitor here because the server found her signed out (useAccount): the login
+ * page then shows its form and never sends her on to "Minu konto" (forwardsSignedIn), so a hint cookie that was not cleared cannot
+ * send her back and forth between the two pages.
+ */
+export const SIGNED_OUT_MARK = "valja=1";
 
 export type LoginAddress = {
   /** `viga`: the e-mail's button was used already or is too old (`link`), or our database failed (`server`). */
@@ -60,4 +67,24 @@ export function readLoginAddress(href: string): LoginAddress {
     code,
     cleaned,
   };
+}
+
+/**
+ * Does the login page send this browser straight on to "Minu konto"? Yes when it is signed in (`signedIn`: the hint cookie) and its
+ * address asks the page for nothing (spec 2.1, the fewest steps: the "Ava minu konto" button of every confirmation e-mail opens
+ * this page, and a student who is signed in needs no code). No when the address (fragment or query) carries
+ * - `viga` (a notice to show), `korda` (a code to send) or `kood` (the code step to open), whatever their values;
+ * - `valja` (SIGNED_OUT_MARK): an account page has just found her signed out, so the hint is stale;
+ * - an `email` other than `remembered`, the address this browser signed in with: a shared device, where the other person needs the
+ *   form (something that is no address counts as none, as readLoginAddress reads it).
+ * A stale hint therefore costs one trip at most: "Minu konto" answers 401, which clears the hint and sends her back with the mark.
+ */
+export function forwardsSignedIn(href: string, signedIn: boolean, remembered: string): boolean {
+  if (!signedIn) return false;
+  const url = new URL(href);
+  const fromHash = fragmentParams(url.hash);
+  const has = (name: string) => fromHash.has(name) || url.searchParams.has(name);
+  if (["viga", "korda", "kood", "valja"].some(has)) return false;
+  const given = normalizeEmail(fromHash.get("email") ?? url.searchParams.get("email") ?? "");
+  return !isEmail(given) || given === normalizeEmail(remembered);
 }

@@ -265,6 +265,9 @@ test("the code step survives a reload (a phone that dropped the tab) with the re
   await codeField(page).pressSequentially(await knownLoginCode(email));
   await expect(page).toHaveURL(/\/konto$/);
   expect(await page.evaluate(() => sessionStorage.getItem("mslab-login-code"))).toBeNull();
+  // (signed in, the login page would open Minu konto: sign out first to see it, once the dashboard's own request is answered)
+  await expect(page.locator(DASHBOARD)).toBeVisible();
+  await page.evaluate(() => fetch("/api/konto/logout", { method: "POST" }));
   await openLogin(page);
   await expect(page.locator("[data-login-step='email']")).toBeVisible();
 });
@@ -605,4 +608,103 @@ test("no horizontal overflow on both login steps: this project's width, then 834
       await page.evaluate(() => sessionStorage.clear()); // the next path starts at the e-mail step, not the kept code step
     }
   }
+});
+
+// ---------- a browser that is signed in already (final review I2) ----------
+
+/** The pages this tab loads as documents (paths in order): a redirect loop would show as a growing list. */
+function documents(page: Page): string[] {
+  const paths: string[] = [];
+  page.on("request", (r) => {
+    if (r.isNavigationRequest() && r.frame() === page.mainFrame()) paths.push(new URL(r.url()).pathname);
+  });
+  return paths;
+}
+
+/** The readable hint cookie `mslab_in=1` alone, without a session: what a browser keeps when its session ended unseen. */
+const staleHint = () => ({ name: "mslab_in", value: "1", url: TARGET || LOCAL_URL });
+
+test("signed in, the login page and the account button of a confirmation e-mail (#email= her own address) open Minu konto at once, with no code asked for", async ({ page }, info) => {
+  submitsForms();
+  const email = clientEmail("forward", info.project.name);
+  await removeClientRows(email);
+  try {
+    await signInAsClient(page, email);
+    await expect(page.locator(DASHBOARD)).toBeVisible();
+    const posts = countPosts(page);
+    await page.goto("/");
+    await page.goto(`${LOGIN}#email=${encodeURIComponent(email)}`);
+    await expect(page).toHaveURL(/\/konto$/);
+    await expect(page.locator(DASHBOARD)).toBeVisible();
+    // in place of the login page in the history: Back goes to the page before it
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    // the plain login page, and the Russian one (Minu konto in the page's language)
+    await page.goto(LOGIN);
+    await expect(page).toHaveURL(/\/konto$/);
+    await page.goto(`/ru/konto/sisene#email=${encodeURIComponent(email)}`);
+    await expect(page).toHaveURL(/\/ru\/konto$/);
+    await expect(page.locator(DASHBOARD)).toBeVisible();
+    expect(posts, "no code was asked for or checked").toEqual({ login: 0, code: 0 });
+  } finally {
+    await removeClientRows(email);
+  }
+});
+
+test("signed in, the login page stays for another address (a shared device) and for an address that asks it for something (viga, kood, korda)", async ({ page }, info) => {
+  submitsForms();
+  const email = clientEmail("stay", info.project.name);
+  const other = clientEmail("stay-other", info.project.name);
+  await removeClientRows(email);
+  try {
+    await signInAsClient(page, email);
+    await expect(page.locator(DASHBOARD)).toBeVisible();
+    await openLogin(page, `${LOGIN}#email=${encodeURIComponent(other)}`);
+    await expect(page).toHaveURL(/\/konto\/sisene$/);
+    await expect(page.locator("[data-login-step='email']")).toBeVisible();
+    await expect(emailField(page)).toHaveValue(other);
+
+    await page.goto("/");
+    await openLogin(page, `${LOGIN}#viga=link`);
+    await expect(page.locator("[data-login-banner='link']")).toBeVisible();
+
+    await page.goto("/");
+    await openLogin(page, `${LOGIN}#email=${encodeURIComponent(email)}&kood=1`);
+    await expect(page.locator("[data-login-step='code']")).toBeVisible();
+
+    // korda=1 sends a code (answered here: this test spends none)
+    await page.route("**/api/konto/login", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
+    await page.goto("/");
+    await openLogin(page, `${LOGIN}#korda=1`);
+    await expect(page.locator("[data-login-step='code']")).toBeVisible();
+    await expect(page).toHaveURL(/\/konto\/sisene$/);
+  } finally {
+    await removeClientRows(email);
+  }
+});
+
+test("a hint cookie without a session (stale): the login page tries Minu konto once, which clears it and sends her back to the form; no loop", async ({ page, context }) => {
+  await context.addCookies([staleHint()]);
+  const loads = documents(page);
+  await page.goto(LOGIN);
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(page.locator("[data-login-step='email']")).toBeVisible();
+  expect((await context.cookies()).some((c) => c.name === "mslab_in"), "the 401 cleared the hint").toBe(false);
+  await page.waitForTimeout(1500); // nothing more happens
+  expect(loads).toEqual([LOGIN, "/konto", LOGIN]);
+});
+
+test("a hint the server could not clear still does not loop: the account page marks the way back (#valja=1) and the login page shows its form", async ({ page, context }) => {
+  await context.addCookies([staleHint()]);
+  // "signed out", answered here without the cookie that clears the hint
+  await page.route("**/api/konto", (route) => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ ok: false, reason: "none" }) }));
+  const loads = documents(page);
+  await page.goto(LOGIN);
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(page.locator("[data-login-step='email']")).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(page).toHaveURL(/\/konto\/sisene$/); // the mark is read and removed
+  expect((await context.cookies()).some((c) => c.name === "mslab_in"), "the hint is still there").toBe(true);
+  expect(loads).toEqual([LOGIN, "/konto", LOGIN]);
 });

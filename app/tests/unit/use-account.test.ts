@@ -166,7 +166,7 @@ describe("useAccount", () => {
     fetchMock.mockResolvedValueOnce(json(401, { ok: false, reason: "none" }));
     await mount();
     expect(hook().state).toBe("signedOut");
-    expect(replace).toHaveBeenCalledWith("/konto/sisene");
+    expect(replace).toHaveBeenCalledWith("/konto/sisene#valja=1"); // marked: the login page shows its form, never sends back here
 
     replace.mockClear();
     await act(async () => root.unmount());

@@ -159,7 +159,7 @@ describe("the list", () => {
     await mount();
     await click(removeButton("kulmude-lami"));
     expect(gets()).toHaveLength(2);
-    expect(replace).toHaveBeenCalledWith("/konto/sisene");
+    expect(replace).toHaveBeenCalledWith("/konto/sisene#valja=1"); // marked: the login page shows its form, never sends back here
   });
 
   test("the browser's own favourites, merged in after the page loaded, show without reloading the page", async () => {

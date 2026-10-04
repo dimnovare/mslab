@@ -6,6 +6,7 @@ import type { Locale } from "@/i18n/locales";
 import { hintIn } from "@/lib/account-cookies";
 import { LOGIN_MARK } from "@/lib/account-marks";
 import { afterAccountLoad, forgetAccountFavourites } from "@/lib/favourites";
+import { SIGNED_OUT_MARK } from "./login-address";
 import { forgetChangeRequests } from "./sent-requests";
 
 // The client account in the browser. The /konto… pages are static shells, the same for every visitor (served by the CDN
@@ -107,7 +108,8 @@ type Loaded<T> = { state: AccountState; data: T | null };
  *   browser, whichever account page loads first.
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
  * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
- *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
+ *   `locale` (the page's own; without it, the locale of the address), with `#valja=1` so it shows its form — `redirect: false`
+ *   keeps them here.
  * - 404 with the API's own JSON answer (`{ ok: false, … }`: there is nothing for this client, e.g. an e-course without access), when the
  *   page asked for it with `notFound: true`: "notFound", for the page to say so; a quiet reload that learns it moves the page there too
  *   (it is an answer, not a failure). Any other 404 (a page of the platform, no JSON) and every 404 for a page that did not ask are
@@ -180,8 +182,9 @@ export function useAccount<T>(
         forgetAccountFavourites();
         window.dispatchEvent(new Event(ACCOUNT_EVENT));
         const replaced = (body as { reason?: unknown } | null)?.reason === "replaced";
-        // signed out: the page keeps its waiting look while the login page loads
-        if (!replaced && redirect) window.location.replace(loginPath(locale));
+        // signed out: the page keeps its waiting look while the login page loads, marked so that it shows its form and does not
+        // send her back here even when the hint cookie is still there (login-address.ts forwardsSignedIn)
+        if (!replaced && redirect) window.location.replace(`${loginPath(locale)}#${SIGNED_OUT_MARK}`);
         setLoaded({ state: replaced ? "replaced" : "signedOut", data: null });
         return settle(n, true);
       }

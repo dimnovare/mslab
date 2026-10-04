@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { readLoginAddress } from "@/components/account/login-address";
+import { forwardsSignedIn, readLoginAddress, SIGNED_OUT_MARK } from "@/components/account/login-address";
 
 // What the login page reads from its address (components/account/login-address.ts): the parameters live in the fragment, and the
 // query is read too, for links already out there. Either way they are removed from the address afterwards.
@@ -69,5 +69,43 @@ describe("readLoginAddress", () => {
       expect(() => r.cleaned, hash).not.toThrow();
       expect(r.cleaned === null || r.cleaned.startsWith("/konto/sisene"), hash).toBe(true);
     }
+  });
+});
+
+describe("the signed-out mark (#valja=1, from an account page that found the session gone)", () => {
+  test("is read away like the others and leaves nothing else behind", () => {
+    expect(SIGNED_OUT_MARK).toBe("valja=1");
+    expect(read(`#${SIGNED_OUT_MARK}`)).toEqual({ problem: null, again: false, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(readLoginAddress(`http://localhost:3000/ru/konto/sisene#${SIGNED_OUT_MARK}`)).toMatchObject({ cleaned: "/ru/konto/sisene" });
+  });
+});
+
+describe("forwardsSignedIn: does the login page send a signed-in browser straight on to Minu konto?", () => {
+  const OWN = "kati@example.test";
+  const at = (suffix: string, path = "/konto/sisene") => `http://localhost:3000${path}${suffix}`;
+
+  test("signed in, an address that asks for nothing: yes (the plain page, the account button of an e-mail for her own address, Russian too)", () => {
+    expect(forwardsSignedIn(at(""), true, OWN)).toBe(true);
+    expect(forwardsSignedIn(at(`#email=${encodeURIComponent(OWN)}`), true, OWN)).toBe(true);
+    expect(forwardsSignedIn(at(`#email=${encodeURIComponent("Kati@Example.TEST")}`), true, " KATI@example.test ")).toBe(true); // compared normalised
+    expect(forwardsSignedIn(at(`#email=${encodeURIComponent(OWN)}`, "/ru/konto/sisene"), true, OWN)).toBe(true);
+    expect(forwardsSignedIn(at("#main"), true, "")).toBe(true); // an anchor is no parameter
+    expect(forwardsSignedIn(at("#email=nope"), true, OWN)).toBe(true); // no address is no other address
+    expect(forwardsSignedIn(at("?utm_source=x"), true, "")).toBe(true);
+  });
+
+  test("not signed in (no hint cookie): never", () => {
+    for (const suffix of ["", `#email=${encodeURIComponent(OWN)}`]) expect(forwardsSignedIn(at(suffix), false, OWN)).toBe(false);
+  });
+
+  test("an address that asks the page for something keeps it: viga, korda, kood (any value, fragment or query), and the signed-out mark", () => {
+    for (const suffix of ["#viga=link", "#viga=server", "#viga=nope", "#korda=1", "#korda=0", `#email=${encodeURIComponent(OWN)}&kood=1`, "#kood=1", `#${SIGNED_OUT_MARK}`, "?viga=link", "?korda=1", "?valja=1", `?kood=1&email=${encodeURIComponent(OWN)}`])
+      expect(forwardsSignedIn(at(suffix), true, OWN), suffix).toBe(false);
+  });
+
+  test("an e-mail for another address than the one this browser signed in with keeps the form (a shared device), also when none is remembered", () => {
+    expect(forwardsSignedIn(at(`#email=${encodeURIComponent("mari@example.test")}`), true, OWN)).toBe(false);
+    expect(forwardsSignedIn(at(`?email=${encodeURIComponent("mari@example.test")}`), true, OWN)).toBe(false);
+    expect(forwardsSignedIn(at(`#email=${encodeURIComponent(OWN)}`), true, "")).toBe(false); // storage blocked: the old way, the form
   });
 });

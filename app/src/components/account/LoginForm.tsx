@@ -9,8 +9,8 @@ import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
 import { forgetAccountFavourites } from "@/lib/favourites";
 import { sendJson } from "@/lib/json-request";
-import { readLoginAddress } from "./login-address";
-import { PENDING_KEY, rememberEmail, rememberedEmail } from "./useAccount";
+import { forwardsSignedIn, readLoginAddress } from "./login-address";
+import { PENDING_KEY, hasAccountHint, rememberEmail, rememberedEmail } from "./useAccount";
 import styles from "./LoginForm.module.css";
 
 export type LoginTexts = Dict["account"]["login"] & { title: string; badEmail: string };
@@ -92,6 +92,9 @@ function withBold(template: string, name: string, value: string): React.ReactNod
  *   the address, so a reload does not repeat them.
  * - The page's language goes with the login (the account a first login creates speaks it); signed in, the browser opens
  *   "Minu konto" in that language, in place of the login page in the history.
+ * - A browser that is signed in already (the hint cookie) is sent on to "Minu konto" at once, unless the address asks this page for
+ *   something (`viga`, `korda`, `kood`), names another address in `email` (a shared device), or carries `#valja=1`: an account page
+ *   found the session gone and sent her here (login-address.ts forwardsSignedIn), so a stale hint never loops.
  */
 export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   const id = useId();
@@ -220,6 +223,12 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     if (arrived.current) return;
     arrived.current = true;
     const saved = rememberedEmail();
+    if (forwardsSignedIn(window.location.href, hasAccountHint(), saved)) {
+      // Signed in already (the "Ava minu konto" button of a confirmation e-mail): "Minu konto" in this page's language, in place
+      // of this page in the history. A stale hint comes back here once, with the signed-out mark, and the form shows.
+      window.location.replace(locale === "ru" ? "/ru/konto" : "/konto");
+      return;
+    }
     const { problem, again, code: haveCode, email: given, cleaned } = readLoginAddress(window.location.href);
     if (cleaned !== null) window.history.replaceState(window.history.state, "", cleaned);
     const prefill = given || saved;
