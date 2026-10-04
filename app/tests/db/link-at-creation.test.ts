@@ -5,7 +5,7 @@ import type { Db } from "@/db/client";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
 import { clientDetail } from "@/server/admin-clients";
 import { issueClientLogin, redeemClientCode } from "@/server/client-auth";
-import { loadDashboard } from "@/server/client-data";
+import { loadDashboard, updateProfile } from "@/server/client-data";
 import type { Env } from "@/server/notify";
 import {
   createRegistration,
@@ -121,6 +121,22 @@ describe("records made for an address with an account link to it at once", () =>
     expect(await waitlist(" Kati@EXAMPLE.test ")).toEqual({ ok: true });
     expect((await db.select().from(requests))[0].clientId).toBe(id);
     expect((await loadDashboard(db, id, NOW))!.cards.map((c) => c.kind).sort()).toEqual(["contact", "waitlist"]);
+  });
+
+  test("the record linked at once fills the account's empty name and phone (spec 2.1 rule 4), never ones she has saved", async () => {
+    const id = await signedIn("kati@example.test");
+    const profile = async () => (await loadDashboard(db, id, NOW))!.client;
+    expect(await profile()).toMatchObject({ name: "", phone: "" });
+    // a waitlist entry has a name but no phone
+    expect(await waitlist("kati@example.test", { name: "Kati Kask" })).toEqual({ ok: true });
+    expect(await profile()).toMatchObject({ name: "Kati Kask", phone: "" });
+    // the registration brings the phone; the name she has stays
+    expect(await register("kati@example.test", { name: "Katrin Kask", phone: "+372 5555 1234" })).toEqual({ ok: true });
+    expect(await profile()).toMatchObject({ name: "Kati Kask", phone: "+372 5555 1234" });
+    // saved in Minu andmed: a later request changes neither
+    await updateProfile(db, id, { name: "Kati K.", phone: "+372 5000 0000", locale: "et" });
+    expect(await individual("kati@example.test", { name: "Katrin", phone: "+372 5555 9999" })).toEqual({ ok: true });
+    expect(await profile()).toMatchObject({ name: "Kati K.", phone: "+372 5000 0000" });
   });
 
   test("an address without an account stays unlinked, and nobody else's account gets it", async () => {

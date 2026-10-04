@@ -6,6 +6,7 @@ import { clients, clientSessions, courses, mailQuota, registrations, requests, s
 import {
   issueClientLogin, redeemClientLink, redeemClientCode, getClientSession, endClientSession, reserveLoginMail, CODE_ATTEMPTS,
 } from "@/server/client-auth";
+import { loadDashboard, updateProfile } from "@/server/client-data";
 
 const T0 = new Date("2026-10-02T10:00:00Z");
 const later = (ms: number) => new Date(T0.getTime() + ms);
@@ -113,10 +114,40 @@ test("a login links requests and the newsletter row by e-mail, and only those of
   expect((await db.select().from(subscribers)).filter((r) => r.clientId === null).map((r) => r.email)).toEqual(["mari@example.test"]);
 });
 
+test("the first login takes the name and phone from the newest registration or request of the address that has each (spec 2.1 rule 4)", async () => {
+  const db = await makeTestDb();
+  await insertRegistration(db, "Mari@Example.test", { name: "Mari Maasikas", phone: "+372 5555 0001", createdAt: new Date("2026-09-01T10:00:00Z") });
+  // newer: a waitlist entry (a name, no phone) and somebody else's request
+  await db.insert(requests).values([
+    { kind: "waitlist", payload: { email: "mari@example.test", name: "Mari M." }, createdAt: new Date("2026-09-10T10:00:00Z") },
+    { kind: "individual", payload: { email: "kati@example.test", name: "Kati", phone: "+372 5555 0009" }, createdAt: new Date("2026-09-20T10:00:00Z") },
+  ]);
+  const login = await redeemClientLink(db, (await issueClientLogin(db, "mari@example.test", T0))!.token, T0);
+  expect(login).toMatchObject({ isNew: true });
+  const [client] = await db.select().from(clients);
+  expect(client).toMatchObject({ name: "Mari M.", phone: "+372 5555 0001" });
+  expect((await loadDashboard(db, client.id, T0))!.client).toMatchObject({ name: "Mari M.", phone: "+372 5555 0001" }); // "Tere, Mari!"
+});
+
+test("a later login fills only empty fields from the records it links now: what she saved stays, and a field she emptied is not filled again", async () => {
+  const db = await makeTestDb();
+  const first = (await redeemClientLink(db, (await issueClientLogin(db, "mari@example.test", T0))!.token, T0))!;
+  await updateProfile(db, first.clientId, { name: "Mari", phone: "", locale: "et" });
+  // a registration nobody linked (made before the account existed elsewhere, or by hand)
+  await insertRegistration(db, "mari@example.test", { name: "Maria Maasikas", phone: "+372 5555 0002" });
+  await redeemClientLink(db, (await issueClientLogin(db, "mari@example.test", T0))!.token, later(1000));
+  const profile = async () => (await db.select().from(clients))[0];
+  expect(await profile()).toMatchObject({ name: "Mari", phone: "+372 5555 0002" });
+  // she empties the phone in Minu andmed: the next login links nothing new, so nothing comes back
+  await updateProfile(db, first.clientId, { name: "Mari", phone: "", locale: "et" });
+  await redeemClientLink(db, (await issueClientLogin(db, "mari@example.test", T0))!.token, later(2000));
+  expect(await profile()).toMatchObject({ name: "Mari", phone: "" });
+});
+
 /** makeTestDb() migrates but does not seed: a contact course of its own, then a group registration on it. */
-async function insertRegistration(db: Db, email: string) {
+async function insertRegistration(db: Db, email: string, over: Partial<typeof registrations.$inferInsert> = {}) {
   const [course] = await db.insert(courses)
-    .values({ slug: "auth-contact", type: "contact", level: "basic", title: { et: "A" }, summary: { et: "" }, body: { et: "" } })
+    .values({ slug: `auth-contact-${Math.random().toString(36).slice(2)}`, type: "contact", level: "basic", title: { et: "A" }, summary: { et: "" }, body: { et: "" } })
     .returning();
-  await db.insert(registrations).values({ courseId: course.id, kind: "group", name: "Kati", email, paymentChoice: "half" });
+  await db.insert(registrations).values({ courseId: course.id, kind: "group", name: "Kati", email, paymentChoice: "half", ...over });
 }

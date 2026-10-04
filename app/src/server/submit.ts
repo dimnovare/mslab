@@ -32,7 +32,7 @@ import {
   type Summary,
 } from "./messages";
 import { registrationConfirmationMail, requestConfirmationMail, type LoginCode } from "./account-mail";
-import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, issueClientLogin, reserveLoginMail } from "./client-auth";
+import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { adminUrl, mailConfigured, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
@@ -223,30 +223,33 @@ export async function runSubmission(
 
 /** Stores a contact-course registration. The status is always `awaiting_prepayment` (a place is confirmed only
  *  after at least 50% prepayment, P15) and nothing has been paid. An address with an account is linked to it at once
- *  (client-auth.ts accountOf). */
+ *  (client-auth.ts accountOf), and the account's empty name and phone are filled from it, in the same transaction. */
 export async function createRegistration(db: Db, input: RegistrationInput): Promise<Registration> {
   const email = normalizeEmail(input.email);
-  const [row] = await db
-    .insert(registrations)
-    .values({
-      courseId: input.courseId,
-      courseSessionId: input.courseSessionId ?? null,
-      kind: input.kind,
-      name: input.name.trim(),
-      email,
-      clientId: accountOf(email),
-      phone: input.phone.trim(),
-      paymentChoice: input.paymentChoice,
-      wantsModelHelp: input.wantsModelHelp,
-      wantsAccount: input.wantsAccount,
-      preferredPeriod: input.preferredPeriod.trim(),
-      message: input.message.trim(),
-      locale: input.locale,
-      status: "awaiting_prepayment",
-      paidCents: 0,
-    })
-    .returning();
-  return row;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(registrations)
+      .values({
+        courseId: input.courseId,
+        courseSessionId: input.courseSessionId ?? null,
+        kind: input.kind,
+        name: input.name.trim(),
+        email,
+        clientId: accountOf(email),
+        phone: input.phone.trim(),
+        paymentChoice: input.paymentChoice,
+        wantsModelHelp: input.wantsModelHelp,
+        wantsAccount: input.wantsAccount,
+        preferredPeriod: input.preferredPeriod.trim(),
+        message: input.message.trim(),
+        locale: input.locale,
+        status: "awaiting_prepayment",
+        paidCents: 0,
+      })
+      .returning();
+    if (row.clientId !== null) await fillClientContact(tx, row.clientId, [{ name: row.name, phone: row.phone, at: row.createdAt }]);
+    return row;
+  });
 }
 
 /** A published contact course by slug. */
@@ -319,9 +322,17 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
 type RequestKind = (typeof requests.$inferInsert)["kind"];
 type Payload = Record<string, string | number | boolean>;
 
-/** Stores a request; an address with an account is linked to it at once (client-auth.ts accountOf). */
+const textOf = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+/**
+ * Stores a request. An address with an account is linked to it at once (client-auth.ts accountOf), and the account's empty name
+ * and phone are filled from the request's, in the same transaction.
+ */
 async function storeRequest(db: Db, kind: RequestKind, payload: Payload & { email: string }): Promise<void> {
-  await db.insert(requests).values({ kind, payload, clientId: accountOf(normalizeEmail(payload.email)) });
+  await db.transaction(async (tx) => {
+    const [row] = await tx.insert(requests).values({ kind, payload, clientId: accountOf(normalizeEmail(payload.email)) }).returning();
+    if (row.clientId !== null) await fillClientContact(tx, row.clientId, [{ name: textOf(payload.name), phone: textOf(payload.phone), at: row.createdAt }]);
+  });
 }
 
 /** Individual contact course: a request to Maria with the preferred period; no payment choice (P12). */

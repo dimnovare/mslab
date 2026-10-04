@@ -1,4 +1,4 @@
-import { and, count, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { Db, Q } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -177,10 +177,53 @@ export async function reserveLoginMail(db: Q, now = new Date(), cap = LOGIN_MAIL
 export const accountOf = (address: string) =>
   sql<number | null>`(select ${clients.id} from ${clients} where ${clients.email} = ${address} for key share)`;
 
-/** Links registrations, requests (payload e-mail) and the newsletter row of `email` to the client. */
+/** The name and phone a linked record gives (a request's are in its payload: the waitlist form has no phone, the cart neither). */
+export type ContactSource = { name: string | null; phone: string | null; at: Date };
+
+/** The longest name and phone a client keeps (the forms' and Minu andmed's limits). */
+const NAME_MAX = 120;
+const PHONE_MAX = 40;
+
+/**
+ * Fills the client's name and phone where they are still empty, each from the newest of `records` that has one (spec 2.1 rule 4:
+ * no set-up, the name and phone come from the registration). A name or phone the client has, saved in Minu andmed or filled
+ * before, is never replaced.
+ */
+export async function fillClientContact(db: Q, clientId: number, records: ContactSource[]): Promise<void> {
+  const newestFirst = [...records].sort((a, b) => b.at.getTime() - a.at.getTime());
+  const newest = (of: (r: ContactSource) => string | null, max: number): string =>
+    newestFirst.map((r) => (of(r) ?? "").trim()).find((v) => v !== "")?.slice(0, max) ?? "";
+  const name = newest((r) => r.name, NAME_MAX);
+  const phone = newest((r) => r.phone, PHONE_MAX);
+  if (!name && !phone) return;
+  await db
+    .update(clients)
+    .set({
+      name: sql`case when ${clients.name} = '' then ${name} else ${clients.name} end`,
+      phone: sql`case when ${clients.phone} = '' then ${phone} else ${clients.phone} end`,
+    })
+    .where(and(eq(clients.id, clientId), or(eq(clients.name, ""), eq(clients.phone, ""))));
+}
+
+/**
+ * Links registrations, requests (payload e-mail) and the newsletter row of `email` to the client, and fills the client's empty
+ * name and phone from the records linked NOW (fillClientContact): a new client gets them from her newest registration or request,
+ * and a field she emptied in Minu andmed is not filled again from records that were linked before.
+ */
 export async function linkClientRecords(db: Q, clientId: number, email: string): Promise<void> {
   const address = normalizeEmail(email);
-  await db.update(registrations).set({ clientId }).where(and(isNull(registrations.clientId), sql`lower(${registrations.email}) = ${address}`));
-  await db.update(requests).set({ clientId }).where(and(isNull(requests.clientId), sql`lower(${requests.payload}->>'email') = ${address}`));
+  // (The cast: on the Db union, returning(fields) has no common overload.)
+  const q = db as unknown as PostgresJsDatabase<typeof schema>;
+  const regs = await q
+    .update(registrations)
+    .set({ clientId })
+    .where(and(isNull(registrations.clientId), sql`lower(${registrations.email}) = ${address}`))
+    .returning({ name: registrations.name, phone: registrations.phone, at: registrations.createdAt });
+  const reqs = await q
+    .update(requests)
+    .set({ clientId })
+    .where(and(isNull(requests.clientId), sql`lower(${requests.payload}->>'email') = ${address}`))
+    .returning({ name: sql<string | null>`${requests.payload}->>'name'`, phone: sql<string | null>`${requests.payload}->>'phone'`, at: requests.createdAt });
   await db.update(subscribers).set({ clientId }).where(and(isNull(subscribers.clientId), sql`lower(${subscribers.email}) = ${address}`));
+  await fillClientContact(db, clientId, [...regs, ...reqs]);
 }

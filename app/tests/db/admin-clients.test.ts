@@ -205,7 +205,7 @@ describe("Lisa õpilane", () => {
     expect(r).toMatchObject({ ok: true, created: true });
     const id = (r as { id: number }).id;
     const [row] = await db.select().from(clients).where(eq(clients.id, id));
-    expect(row).toMatchObject({ email: "mari.maasikas@example.test", name: "", locale: "ru" });
+    expect(row).toMatchObject({ email: "mari.maasikas@example.test", name: "Liis Tamm", locale: "ru" }); // the newest registration's name
     expect((await db.select({ c: registrations.clientId }).from(registrations)).map((x) => x.c)).toEqual([id, id]);
     expect((await db.select({ c: requests.clientId }).from(requests))[0].c).toBe(id);
     expect((await db.select({ c: subscribers.clientId }).from(subscribers))[0].c).toBe(id);
@@ -236,6 +236,19 @@ describe("Lisa õpilane", () => {
     await register(null, "mari@example.test", { locale: "ru", createdAt: new Date("2026-09-01T10:00:00Z") });
     const mari = (await addClient(db, "mari@example.test")) as { id: number };
     expect((await db.select().from(clients).where(eq(clients.id, mari.id)))[0].locale).toBe("ru");
+  });
+
+  test("a new student gets the name and phone of her newest registration or request that has each (spec 2.1 rule 4); an existing one keeps hers", async () => {
+    await register(null, "kati@example.test", { name: "Kati Kask", phone: "+372 5555 0001", createdAt: new Date("2026-09-01T10:00:00Z") });
+    await db.insert(requests).values({ kind: "individual", payload: { course: "kulm", email: "KATI@example.test", name: "Katrin Kask", phone: "" }, createdAt: new Date("2026-09-10T10:00:00Z") });
+    const kati = (await addClient(db, "kati@example.test")) as { id: number };
+    expect((await db.select().from(clients).where(eq(clients.id, kati.id)))[0]).toMatchObject({ name: "Katrin Kask", phone: "+372 5555 0001" });
+    expect((await clientDetail(db, kati.id, NOW))!.client).toMatchObject({ name: "Katrin Kask", ownName: "Katrin Kask", phone: "+372 5555 0001" });
+
+    const existing = await client("olemas@example.test", { name: "Olemas", phone: "" });
+    await register(null, "olemas@example.test", { name: "Teine Nimi", phone: "+372 5555 0002" });
+    expect(await addClient(db, "olemas@example.test")).toEqual({ ok: true, id: existing.id, created: false });
+    expect((await db.select().from(clients).where(eq(clients.id, existing.id)))[0]).toMatchObject({ name: "Olemas", phone: "" });
   });
 
   test("an address without registrations: Estonian; an existing student: the same one, nothing created", async () => {
