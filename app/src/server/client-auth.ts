@@ -165,6 +165,18 @@ export async function reserveLoginMail(db: Q, now = new Date(), cap = LOGIN_MAIL
   return rows.length > 0;
 }
 
+/**
+ * The id of the account of `address` (normalised already), or null: the value of `client_id` in the INSERT of a new registration,
+ * request or newsletter row (server/submit.ts), so the record belongs to the account from the start (spec §2 "new ones link at
+ * creation time": a signed-in student sees what she has just booked without logging in again). A read needs no address lock.
+ * FOR KEY SHARE settles a race with the account's deletion (client-data.ts deleteClient): a deletion that has not reached the
+ * client row yet waits until the insert commits and then unlinks the new row as it unlinks the others (ON DELETE SET NULL); a
+ * deletion that has removed the row already makes this read skip it once that deletion commits, so the record is stored unlinked.
+ * Without the lock the insert's foreign key check would meet the deleted row and fail the submission (23503).
+ */
+export const accountOf = (address: string) =>
+  sql<number | null>`(select ${clients.id} from ${clients} where ${clients.email} = ${address} for key share)`;
+
 /** Links registrations, requests (payload e-mail) and the newsletter row of `email` to the client. */
 export async function linkClientRecords(db: Q, clientId: number, email: string): Promise<void> {
   const address = normalizeEmail(email);

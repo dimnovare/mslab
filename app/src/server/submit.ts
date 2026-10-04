@@ -32,7 +32,7 @@ import {
   type Summary,
 } from "./messages";
 import { registrationConfirmationMail, requestConfirmationMail, type LoginCode } from "./account-mail";
-import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, issueClientLogin, reserveLoginMail } from "./client-auth";
+import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, issueClientLogin, reserveLoginMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { adminUrl, mailConfigured, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
@@ -222,8 +222,10 @@ export async function runSubmission(
 // ---------- registrations ----------
 
 /** Stores a contact-course registration. The status is always `awaiting_prepayment` (a place is confirmed only
- *  after at least 50% prepayment, P15) and nothing has been paid. */
+ *  after at least 50% prepayment, P15) and nothing has been paid. An address with an account is linked to it at once
+ *  (client-auth.ts accountOf). */
 export async function createRegistration(db: Db, input: RegistrationInput): Promise<Registration> {
+  const email = normalizeEmail(input.email);
   const [row] = await db
     .insert(registrations)
     .values({
@@ -231,7 +233,8 @@ export async function createRegistration(db: Db, input: RegistrationInput): Prom
       courseSessionId: input.courseSessionId ?? null,
       kind: input.kind,
       name: input.name.trim(),
-      email: input.email.trim().toLowerCase(),
+      email,
+      clientId: accountOf(email),
       phone: input.phone.trim(),
       paymentChoice: input.paymentChoice,
       wantsModelHelp: input.wantsModelHelp,
@@ -316,8 +319,9 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
 type RequestKind = (typeof requests.$inferInsert)["kind"];
 type Payload = Record<string, string | number | boolean>;
 
-async function storeRequest(db: Db, kind: RequestKind, payload: Payload): Promise<void> {
-  await db.insert(requests).values({ kind, payload });
+/** Stores a request; an address with an account is linked to it at once (client-auth.ts accountOf). */
+async function storeRequest(db: Db, kind: RequestKind, payload: Payload & { email: string }): Promise<void> {
+  await db.insert(requests).values({ kind, payload, clientId: accountOf(normalizeEmail(payload.email)) });
 }
 
 /** Individual contact course: a request to Maria with the preferred period; no payment choice (P12). */
@@ -433,7 +437,7 @@ export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionR
   return submission(deps, "subscribe", formData, parseSubscribe, async ({ email, locale }) => {
     const [created] = await deps.db
       .insert(subscribers)
-      .values({ email, locale, token: newToken(), consentAt: deps.now })
+      .values({ email, locale, token: newToken(), consentAt: deps.now, clientId: accountOf(normalizeEmail(email)) })
       .onConflictDoNothing({ target: subscribers.email })
       .returning();
     let sub: Subscriber | undefined = created;
