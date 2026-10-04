@@ -28,9 +28,11 @@ export const verifyLink = (siteUrl: string, token: string, pageLocale: Locale = 
  * "Ava minu konto": the login page of `locale` with the address filled in (components/account/login-address.ts reads it once).
  * The address is in the FRAGMENT, never a query: a fragment does not reach any server or cache, and an account page with a
  * query is refused by the middleware. encodeURIComponent is needed: a raw "+" in a fragment would be read back as a space.
+ * `enterCode` adds `&kood=1`: the page then opens at the code step for that address, without sending a code (the confirmation
+ * e-mail that carries a code links there).
  */
-export const accountLink = (siteUrl: string, email: string, locale: Locale = "et"): string =>
-  `${siteUrl.replace(/\/+$/, "")}${href(locale, "/konto/sisene")}#email=${encodeURIComponent(email)}`;
+export const accountLink = (siteUrl: string, email: string, locale: Locale = "et", enterCode = false): string =>
+  `${siteUrl.replace(/\/+$/, "")}${href(locale, "/konto/sisene")}#email=${encodeURIComponent(email)}${enterCode ? "&kood=1" : ""}`;
 
 const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -188,17 +190,23 @@ function sessionLines(s: SessionInfo, locale: Locale): string[] {
 }
 
 /** A subject is one line, whatever the course's title holds (a non-breaking space stays one). */
-const oneLine = (s: string): string => s.replace(/[^\S ]+/g, " ").trim();
+const oneLine = (s: string): string => s.replace(/[^\S\u00a0]+/g, " ").trim();
+
+/**
+ * The two addresses a confirmation can link to: `main` is what the one button opens (the login with a code, else the login page
+ * with the address filled in), `code` the login page at its code step (only with a code: the small link under the 30 minutes).
+ */
+type Links = { main: string; code: string };
 
 /** The plain-text body: the same parts as the HTML, one block each. */
-function confirmationText(c: Confirmation, greeting: string, mail: MailTexts, link: string): string {
+function confirmationText(c: Confirmation, greeting: string, mail: MailTexts, links: Links): string {
   const lines = [greeting, "", c.lead, "", c.box.title, ...c.box.lines, ""];
   for (const section of c.sections) {
     if ("text" in section) lines.push(section.text, "");
     else lines.push(...section.fields.map(([label, value]) => `${label}: ${value}`), "");
   }
-  if (c.login) lines.push(mail.codeIntro, "", c.login.code, "", `${mail.button}:`, link, "", mail.valid, "");
-  else lines.push(`${mail.confirm.open}:`, link, "");
+  if (c.login) lines.push(mail.codeIntro, "", c.login.code, "", `${mail.button}:`, links.main, "", mail.valid, mail.ignore, "", mail.confirm.codeHere, links.code, "");
+  else lines.push(`${mail.confirm.open}:`, links.main, "");
   lines.push(mail.signature);
   return lines.join("\n");
 }
@@ -207,7 +215,7 @@ function confirmationText(c: Confirmation, greeting: string, mail: MailTexts, li
 const boxRow = (inner: string, top: number) =>
   row(`padding:${top}px 28px 0;`, `<div style="background:${CANVAS};border:1px solid ${LINE};border-radius:12px;padding:14px 16px;${textStyle(16)}">${inner}</div>`);
 
-function confirmationHtml(c: Confirmation, greeting: string, mail: MailTexts, link: string): string {
+function confirmationHtml(c: Confirmation, greeting: string, mail: MailTexts, links: Links): string {
   const rows = [
     greetingRow(greeting),
     paragraphRow(c.lead),
@@ -231,9 +239,19 @@ function confirmationHtml(c: Confirmation, greeting: string, mail: MailTexts, li
         ),
       );
   }
-  // One button: "Ava minu konto", or with a live login the code and "Logi sisse" (and the link written out, as in the login e-mail).
-  if (c.login) rows.push(paragraphRow(mail.codeIntro, 24), codeRow(c.login.code), buttonRow(link, mail.button), linkRow(link), row(`padding:24px 28px 0;${textStyle(14)}`, esc(mail.valid)));
-  else rows.push(buttonRow(link, mail.confirm.open));
+  // One button: "Ava minu konto", or with a live login the code and "Logi sisse" (and the link written out, as in the login e-mail),
+  // the 30 minutes, the ignore line, and a small text link (no button) to type the code on the login page if the button fails.
+  if (c.login)
+    rows.push(
+      paragraphRow(mail.codeIntro, 24),
+      codeRow(c.login.code),
+      buttonRow(links.main, mail.button),
+      linkRow(links.main),
+      row(`padding:24px 28px 0;${textStyle(14)}`, esc(mail.valid)),
+      row(`padding:4px 28px 0;${textStyle(14)}`, esc(mail.ignore)),
+      row(`padding:12px 28px 0;${textStyle(14)}`, `${esc(mail.confirm.codeHere)} <a href="${esc(links.code)}" style="color:${INK};text-decoration:underline;">${esc(mail.confirm.codeLink)}</a>`),
+    );
+  else rows.push(buttonRow(links.main, mail.confirm.open));
   rows.push(signatureRow(mail));
   return mailCard(c.subject, c.locale, rows);
 }
@@ -242,13 +260,11 @@ function confirmationHtml(c: Confirmation, greeting: string, mail: MailTexts, li
 function confirmationMail(c: Confirmation): Mail {
   const dict = getDict(c.locale).account;
   const greeting = hello(dict.dashboard, c.name);
-  const link = c.login ? verifyLink(c.siteUrl, c.login.token, c.locale) : accountLink(c.siteUrl, c.email, c.locale);
-  return {
-    to: c.email,
-    subject: c.subject,
-    text: confirmationText(c, greeting, dict.mail, link),
-    html: confirmationHtml(c, greeting, dict.mail, link),
+  const links: Links = {
+    main: c.login ? verifyLink(c.siteUrl, c.login.token, c.locale) : accountLink(c.siteUrl, c.email, c.locale),
+    code: accountLink(c.siteUrl, c.email, c.locale, true),
   };
+  return { to: c.email, subject: c.subject, text: confirmationText(c, greeting, dict.mail, links), html: confirmationHtml(c, greeting, dict.mail, links) };
 }
 
 export type RegistrationConfirmationInput = {
@@ -330,22 +346,24 @@ export type RequestConfirmationInput = {
 };
 
 /**
- * The short confirmation of an individual, practice or waitlist request: what was received, the course (the package) and,
- * for a waitlist entry, its date, "Maria võtab sinuga ühendust." and one button.
+ * The short confirmation of an individual, practice or waitlist request: what was received, the course (the package), "Maria
+ * võtab sinuga ühendust." and one button. A waitlist entry says what its dashboard card says (`account.next.waitlist`: "Oled
+ * ootenimekirjas. Anname teada, kui koht vabaneb.") in place of both lines, and shows its date.
  */
 export function requestConfirmationMail(input: RequestConfirmationInput): Mail {
-  const mail = getDict(input.locale).account.mail;
+  const dict = getDict(input.locale).account;
+  const mail = dict.mail;
   const title = pick(input.title, input.locale);
-  const subject = input.kind === "waitlist" ? mail.confirm.subjectWaitlist : mail.confirm.subjectRequest;
+  const waitlist = input.kind === "waitlist";
   return confirmationMail({
     email: input.email,
     name: input.name,
     locale: input.locale,
     siteUrl: input.siteUrl,
-    subject: oneLine(fill(subject, { title })),
-    lead: input.kind === "waitlist" ? mail.confirm.waitlist : mail.confirm.request,
+    subject: oneLine(fill(waitlist ? mail.confirm.subjectWaitlist : mail.confirm.subjectRequest, { title })),
+    lead: waitlist ? dict.next.waitlist : mail.confirm.request,
     box: { title, lines: input.session ? sessionLines(input.session, input.locale) : [] },
-    sections: [{ text: mail.confirm.contact }],
+    sections: waitlist ? [] : [{ text: mail.confirm.contact }],
     login: input.login ?? null,
   });
 }

@@ -2,12 +2,12 @@ import { isEmail, normalizeEmail } from "@/domain/email";
 
 // What the login page's address carries (pure: LoginForm reads it in the browser, tests/unit/login-address.test.ts).
 //
-// The parameters live in the FRAGMENT: `/konto/sisene#viga=link`, `#korda=1`, `#email=…`. A fragment is never sent to a server,
+// The parameters live in the FRAGMENT: `/konto/sisene#viga=link`, `#korda=1`, `#email=…`, `#email=…&kood=1`. A fragment is never sent to a server,
 // so no log, cache or scanner can hold it (Next.js keeps the address of the request that renders a page, query included, in the
 // page it caches for every later visitor; the middleware answers a query on an account page with a 303 that moves the known
 // parameters into the fragment). The query is still read, for links already out there (an e-mail with `?viga=link`, a bookmark).
 
-const KNOWN = ["viga", "korda", "email"] as const;
+const KNOWN = ["viga", "korda", "email", "kood"] as const;
 
 export type LoginAddress = {
   /** `viga`: the e-mail's button was used already or is too old (`link`), or our database failed (`server`). */
@@ -16,6 +16,11 @@ export type LoginAddress = {
   again: boolean;
   /** `email`: an address to put in the field (trimmed, lower-cased; "" when absent or not an address). */
   email: string;
+  /**
+   * `kood=1`: open at the code step for `email` without sending anything, because the code is already in the visitor's mailbox (the
+   * confirmation e-mail of a registration that asked for an account). false without `email`: there is no address to type the code for.
+   */
+  code: boolean;
   /** The address without the parameters, for history.replaceState (a reload must not repeat them); null when it carried none. */
   cleaned: string | null;
 };
@@ -34,6 +39,8 @@ export function readLoginAddress(href: string): LoginAddress {
   const problem = get("viga");
   const again = get("korda") === "1";
   const email = normalizeEmail(get("email") ?? "");
+  const validEmail = isEmail(email) ? email : "";
+  const code = get("kood") === "1" && validEmail !== ""; // read before the parameters are removed below
 
   const present = KNOWN.some((name) => fromHash.has(name) || url.searchParams.has(name));
   let cleaned: string | null = null;
@@ -49,7 +56,8 @@ export function readLoginAddress(href: string): LoginAddress {
   return {
     problem: problem === "link" || problem === "server" ? problem : null,
     again,
-    email: isEmail(email) ? email : "",
+    email: validEmail,
+    code,
     cleaned,
   };
 }

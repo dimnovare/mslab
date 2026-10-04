@@ -416,6 +416,106 @@ test("an address in the fragment (#email=, the account button of an e-mail) fill
   await expect(page).toHaveURL(/\/konto\/sisene$/);
 });
 
+/** The login page's address from the link under the code in a confirmation e-mail: the address and `kood=1` in the fragment. */
+const codeStepLink = (email: string, path = LOGIN) => `${path}#email=${encodeURIComponent(email)}&kood=1`;
+
+test("the link under the code in a confirmation e-mail (#email=…&kood=1) opens the code step for that address and sends nothing; the code from the e-mail signs in", async ({ page }, info) => {
+  submitsForms();
+  const email = clientEmail("kood", info.project.name);
+  await removeClientRows(email);
+  try {
+    const code = await knownLoginCode(email); // the live login the e-mail carried
+    const posts = countPosts(page);
+    await openLogin(page, codeStepLink(email));
+    await expect(page.locator("[data-login-step='code']")).toBeVisible();
+    await expect(page.getByText(`Saatsime 6-kohalise koodi aadressile ${email}.`)).toBeVisible();
+    await expect(codeField(page)).toBeFocused();
+    await expect(page).toHaveURL(/\/konto\/sisene$/); // the parameters are removed from the address
+    // a new code can be asked for at once (the code may be old): no 60 s wait
+    await expect(page.getByRole("button", { name: "Saada uus kood", exact: true })).toBeEnabled();
+    await expect(page.locator("[data-login-wait]")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Logi sisse", exact: true })).toBeDisabled();
+    // nothing was sent from this tab, so no code step is kept for a reload
+    expect(await page.evaluate(() => sessionStorage.getItem("mslab-login-code"))).toBeNull();
+
+    await codeField(page).pressSequentially(code);
+    await expect(page).toHaveURL(/\/konto$/);
+    await expect(page.locator(DASHBOARD)).toBeVisible();
+    expect(posts, "the page sent no code request: only the typed code was checked").toEqual({ login: 0, code: 1 });
+  } finally {
+    await removeClientRows(email);
+  }
+});
+
+test("#kood=1 with a code that has expired: Kood on aegunud, and Saada uus kood, ready at once, sends a new one that signs in", async ({ page }, info) => {
+  submitsForms();
+  const email = clientEmail("kood-old", info.project.name);
+  await removeClientRows(email);
+  try {
+    const old = await knownLoginCode(email);
+    await expireLogins(email);
+    const posts = countPosts(page);
+    await openLogin(page, codeStepLink(email));
+    await expect(page.locator("[data-login-step='code']")).toBeVisible();
+    await codeField(page).pressSequentially(old);
+    await expect(page.getByText("Kood on aegunud. Saada uus kood.")).toBeVisible();
+    const resend = page.getByRole("button", { name: "Saada uus kood", exact: true });
+    await expect(resend).toBeEnabled();
+    await expect(resend).toBeFocused();
+    expect(posts.login).toBe(0);
+    await resend.click();
+    await expect(page.getByText("Saatsime uue koodi.")).toBeVisible();
+    expect(posts.login).toBe(1);
+    await expect(page.locator("[data-login-wait]")).toHaveText(WAIT); // from now on the 60 s count
+    await codeField(page).pressSequentially(await knownLoginCode(email));
+    await expect(page).toHaveURL(/\/konto$/);
+  } finally {
+    await removeClientRows(email);
+  }
+});
+
+test("#kood=1 without an address is ignored, #viga beats it, and the code step it opens is not kept for a reload", async ({ page }, info) => {
+  const email = clientEmail("kood-rules", info.project.name);
+  await openLogin(page, `${LOGIN}#kood=1`);
+  await expect(page.locator("[data-login-step='email']")).toBeVisible();
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+  await page.goto("/");
+  await openLogin(page, `${LOGIN}#email=nope&kood=1`);
+  await expect(page.locator("[data-login-step='email']")).toBeVisible();
+
+  await page.goto("/");
+  await openLogin(page, `${LOGIN}#viga=link&email=${encodeURIComponent(email)}&kood=1`);
+  await expect(page.locator("[data-login-step='email']")).toBeVisible();
+  await expect(page.locator("[data-login-banner='link']")).toBeVisible();
+  await expect(emailField(page)).toHaveValue(email);
+
+  await page.goto("/");
+  await openLogin(page, codeStepLink(email));
+  await expect(page.locator("[data-login-step='code']")).toBeVisible();
+  await page.reload();
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(page.locator("[data-login-step='email']")).toBeVisible(); // nothing was sent from this tab: nothing to come back to
+});
+
+test("an old or mangled link with ?kood=1 in the query is moved into the fragment by the server and works the same (Estonian and Russian)", async ({ page }, info) => {
+  const email = clientEmail("kood-query", info.project.name);
+  const query = `kood=1&email=${encodeURIComponent(email)}`;
+  const asked = await page.request.get(`${LOGIN}?${query}`, { maxRedirects: 0 });
+  expect(asked.status()).toBe(303);
+  expect(asked.headers()["location"]).toBe(`/konto/sisene#email=${encodeURIComponent(email)}&kood=1`);
+  await page.goto(`${LOGIN}?${query}`);
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(page.locator("[data-login-step='code']")).toBeVisible();
+  await expect(page).toHaveURL(/\/konto\/sisene$/);
+
+  await page.goto("/");
+  await page.goto(`/ru/konto/sisene?${query}`);
+  await expect(page.locator("[data-login-ready]")).toBeAttached();
+  await expect(page.locator("[data-login-step='code']")).toBeVisible();
+  await expect(page.getByText(`Мы отправили 6-значный код на адрес ${email}.`)).toBeVisible();
+  await expect(page).toHaveURL(/\/ru\/konto\/sisene$/);
+});
+
 test("signed in on another device: one message and one button, which sends a new code and opens the code field", async ({ page, browser, isMobile }, info) => {
   submitsForms();
   const email = clientEmail("replaced", info.project.name);

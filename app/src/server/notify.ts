@@ -38,12 +38,19 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * Is e-mail configured (RESEND_API_KEY)? When it is not (local `next dev`, the e2e run), says so in the log, as sendMail does for
+ * a mail it skips: a caller that would otherwise spend something on a mail first (a login, a quota) asks before.
+ */
+export function mailConfigured(env: Env): boolean {
+  if (env.RESEND_API_KEY) return true;
+  console.info("[notify] RESEND_API_KEY is not set: e-mail skipped");
+  return false;
+}
+
 /** Sends one e-mail: plain text, plus HTML when `mail.html` is set. true = Resend accepted it. */
 export async function sendMail(env: Env, mail: Mail): Promise<boolean> {
-  if (!env.RESEND_API_KEY) {
-    console.info("[notify] RESEND_API_KEY is not set: e-mail skipped");
-    return false;
-  }
+  if (!mailConfigured(env)) return false;
   try {
     const { data, error } = await withTimeout(
       new Resend(env.RESEND_API_KEY).emails.send({

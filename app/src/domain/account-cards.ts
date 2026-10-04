@@ -13,6 +13,18 @@ import type { Locale } from "@/i18n/locales";
 /** Where students pay the prepayment (settings key "prepayment", the admin's "Ettemaksu juhised"). */
 export type PrepaymentInfo = { receiver: string; iban: string; bank: string; referencePrefix: string };
 
+/** The settings key of the prepayment instructions (admin "Ettemaksu juhised"). */
+export const PREPAYMENT_KEY = "prepayment";
+
+/** The prepayment setting as the cards and e-mails use it: strings only; null when it is missing, not an object or every field is empty. */
+export function parsePrepayment(value: unknown): PrepaymentInfo | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const field = (key: string) => (typeof v[key] === "string" ? (v[key] as string).trim() : "");
+  const info = { receiver: field("receiver"), iban: field("iban"), bank: field("bank"), referencePrefix: field("referencePrefix") };
+  return Object.values(info).some(Boolean) ? info : null;
+}
+
 export type CourseRef = { slug: string; title: I18n };
 export type SessionRef = { startsAt: string; city: string; venue: string };
 /** A date on the calendar; `cancelled` is true when Maria called the training off. */

@@ -85,7 +85,11 @@ function withBold(template: string, name: string, value: string): React.ReactNod
  *   reaches a server or a cache (login-address.ts; the query too, for links already out there; the middleware moves a query into
  *   the fragment): `#viga=link` (the e-mail's button was used or too old) and `#viga=server` show a notice above the form,
  *   `#korda=1` (from "Saada uus kood" on an account page) sends a code to the remembered e-mail at once, `#email=…` fills the
- *   field once (before the remembered address). The parameters are then removed from the address, so a reload does not repeat them.
+ *   field once (before the remembered address), and `#email=…&kood=1` (the link under the code in a registration's confirmation
+ *   e-mail) opens the code step for that address at once, sending nothing (the code is in the mailbox already; "Saada uus kood"
+ *   works without the 60 s wait, as the code may be old; `viga` beats it, `korda` still sends, `kood` without an address is
+ *   ignored, and the step is not kept in sessionStorage: nothing was sent from this tab). The parameters are then removed from
+ *   the address, so a reload does not repeat them.
  * - The page's language goes with the login (the account a first login creates speaks it); signed in, the browser opens
  *   "Minu konto" in that language, in place of the login page in the history.
  */
@@ -125,10 +129,10 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     element.focus();
   });
 
-  /** Opens the code step for `address`, the code sent at `sentAt`. */
-  function showCodeStep(address: string, sentAt: number): void {
+  /** Opens the code step for `address`, the code sent at `sentAt` (null: nothing was sent from this tab, a new code can be asked for at once). */
+  function showCodeStep(address: string, sentAt: number | null): void {
     setNow(Date.now());
-    setResendAt(sentAt + RESEND_AFTER_MS);
+    setResendAt(sentAt === null ? 0 : sentAt + RESEND_AFTER_MS);
     setSentTo(address);
     setEmail(address);
     setStep("code");
@@ -178,6 +182,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     const { status, data } = await sendJson("/api/konto/code", { email: sentTo, code: digits, locale });
     if (status === 200 && data.ok === true) {
       keepPendingCode(null);
+      rememberEmail(sentTo); // a code typed for an address the page was opened for was never remembered by a send
       forgetAccountFavourites(); // a previous session's copy of the favourites must not show for this account
       // The field stays as it is while the page opens. replace, not assign: Back from "Minu konto" goes to the page before
       // the login, never to a code that is used up (nor to this form as it was left, from the browser's page cache).
@@ -215,7 +220,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     if (arrived.current) return;
     arrived.current = true;
     const saved = rememberedEmail();
-    const { problem, again, email: given, cleaned } = readLoginAddress(window.location.href);
+    const { problem, again, code: haveCode, email: given, cleaned } = readLoginAddress(window.location.href);
     if (cleaned !== null) window.history.replaceState(window.history.state, "", cleaned);
     const prefill = given || saved;
     if (prefill) setEmail((typed) => typed || prefill);
@@ -226,6 +231,12 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     }
     if (again && saved) {
       void send(saved);
+      return;
+    }
+    if (haveCode) {
+      // The code is in the mailbox already (the confirmation e-mail of a registration that asked for an account): the code step for
+      // that address at once, nothing sent, and not remembered as a step of this tab. The code may be old: "Saada uus kood" works now.
+      showCodeStep(given, null);
       return;
     }
     const pending = pendingCode(Date.now());

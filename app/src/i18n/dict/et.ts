@@ -413,17 +413,19 @@ export const et = {
       // The e-mail to a visitor who registered or sent a request (account-mail.ts registrationConfirmationMail,
       // requestConfirmationMail). {title} is the course or the practice package. The next-step sentence, the payment
       // rows and "Koht kinnitatakse …" are the account's own (`next`, `dashboard.payment`, `course.confirmAfterPrepayment`),
-      // so the e-mail and the dashboard say the same. With a login code the e-mail has the code and "Logi sisse" (`button`)
-      // instead of `open`: one button only.
+      // so the e-mail and the dashboard say the same (a waitlist entry says `next.waitlist`, and has no `contact` line). With a
+      // login code the e-mail has the code and "Logi sisse" (`button`) instead of `open`: one button only; under the 30 minutes
+      // a small text link (`codeHere` + `codeLink`) opens the login page at its code step, for typing the code there.
       confirm: {
         subjectRegistration: "Registreering on vastu võetud — {title}",
         subjectRequest: "Päring on vastu võetud — {title}",
         subjectWaitlist: "Oled ootenimekirjas — {title}",
         registration: "Registreering on vastu võetud.",
         request: "Päring on vastu võetud.",
-        waitlist: "Oled ootenimekirjas.",
         contact: "Maria võtab sinuga ühendust.",
         open: "Ava minu konto",
+        codeHere: "Kui nupp ei tööta, sisesta kood siin:",
+        codeLink: "Ava sisselogimine",
       },
     },
     // The e-mail that confirms an account deletion (account-mail.ts deletionMail): the greeting and signature are `mail`'s.

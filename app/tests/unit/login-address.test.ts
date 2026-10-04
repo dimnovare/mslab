@@ -9,23 +9,38 @@ const read = (suffix: string) => readLoginAddress(BASE + suffix);
 
 describe("readLoginAddress", () => {
   test("nothing in the address: nothing to read, nothing to clean", () => {
-    expect(read("")).toEqual({ problem: null, again: false, email: "", cleaned: null });
-    expect(read("#main")).toEqual({ problem: null, again: false, email: "", cleaned: null });
-    expect(read("?utm_source=x")).toEqual({ problem: null, again: false, email: "", cleaned: null });
+    expect(read("")).toEqual({ problem: null, again: false, email: "", code: false, cleaned: null });
+    expect(read("#main")).toEqual({ problem: null, again: false, email: "", code: false, cleaned: null });
+    expect(read("?utm_source=x")).toEqual({ problem: null, again: false, email: "", code: false, cleaned: null });
   });
 
-  test("the fragment: viga, korda and email, and the address is cleaned of them", () => {
-    expect(read("#viga=link")).toEqual({ problem: "link", again: false, email: "", cleaned: "/konto/sisene" });
-    expect(read("#viga=server")).toEqual({ problem: "server", again: false, email: "", cleaned: "/konto/sisene" });
-    expect(read("#korda=1")).toEqual({ problem: null, again: true, email: "", cleaned: "/konto/sisene" });
-    expect(read("#email=Kati.Tamm%40Example.test")).toEqual({ problem: null, again: false, email: "kati.tamm@example.test", cleaned: "/konto/sisene" });
-    expect(read("#viga=link&korda=1&email=a%40example.test")).toEqual({ problem: "link", again: true, email: "a@example.test", cleaned: "/konto/sisene" });
+  test("the fragment: viga, korda, email and kood, and the address is cleaned of them", () => {
+    expect(read("#viga=link")).toEqual({ problem: "link", again: false, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("#viga=server")).toEqual({ problem: "server", again: false, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("#korda=1")).toEqual({ problem: null, again: true, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("#email=Kati.Tamm%40Example.test")).toEqual({ problem: null, again: false, email: "kati.tamm@example.test", code: false, cleaned: "/konto/sisene" });
+    expect(read("#viga=link&korda=1&email=a%40example.test")).toEqual({ problem: "link", again: true, email: "a@example.test", code: false, cleaned: "/konto/sisene" });
+  });
+
+  test("kood=1 with an address: the code step for that address; without a valid address, or with another value, it is nothing (but is still cleaned away)", () => {
+    expect(read("#email=kati%2Btest%40example.test&kood=1")).toEqual({ problem: null, again: false, email: "kati+test@example.test", code: true, cleaned: "/konto/sisene" });
+    expect(readLoginAddress("http://localhost:3000/ru/konto/sisene#email=a%40example.test&kood=1")).toMatchObject({ email: "a@example.test", code: true, cleaned: "/ru/konto/sisene" });
+    expect(read("#kood=1")).toEqual({ problem: null, again: false, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("#email=nope&kood=1")).toMatchObject({ email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("#email=a%40example.test&kood=0")).toMatchObject({ email: "a@example.test", code: false });
+    expect(read("#email=a%40example.test&kood=true")).toMatchObject({ code: false });
+    // the query form of an old or mangled link is read the same, and the fragment wins
+    expect(read("?kood=1&email=a%40example.test")).toMatchObject({ email: "a@example.test", code: true, cleaned: "/konto/sisene" });
+    expect(read("?kood=0&email=a%40example.test#kood=1")).toMatchObject({ code: true });
+    // it travels with the others: viga and korda are read next to it, the page decides who wins
+    expect(read("#viga=link&email=a%40example.test&kood=1")).toMatchObject({ problem: "link", code: true, email: "a@example.test" });
+    expect(read("#korda=1&email=a%40example.test&kood=1")).toMatchObject({ again: true, code: true });
   });
 
   test("the query, for links already out there (an e-mail with ?viga=link, a bookmark): read the same, and cleaned", () => {
-    expect(read("?viga=link")).toEqual({ problem: "link", again: false, email: "", cleaned: "/konto/sisene" });
-    expect(read("?korda=1")).toEqual({ problem: null, again: true, email: "", cleaned: "/konto/sisene" });
-    expect(read("?email=a%40example.test&viga=server")).toEqual({ problem: "server", again: false, email: "a@example.test", cleaned: "/konto/sisene" });
+    expect(read("?viga=link")).toEqual({ problem: "link", again: false, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("?korda=1")).toEqual({ problem: null, again: true, email: "", code: false, cleaned: "/konto/sisene" });
+    expect(read("?email=a%40example.test&viga=server")).toEqual({ problem: "server", again: false, email: "a@example.test", code: false, cleaned: "/konto/sisene" });
   });
 
   test("the fragment wins over the query for the same name", () => {

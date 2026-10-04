@@ -89,13 +89,13 @@ export type SiteRoute =
   | { kind: "other" };
 
 /** The parameters of the account's pages that travel in the fragment: the browser reads them there (LoginForm), and a fragment never reaches a server, a log or a cache. */
-const FRAGMENT_PARAMS = ["viga", "korda", "email"] as const;
+const FRAGMENT_PARAMS = ["viga", "korda", "email", "kood"] as const;
 /** A longer value is no e-mail address or flag of ours: dropped. */
 const FRAGMENT_VALUE_MAX = 254;
 
 /**
  * Where a request for the account shell `path` (a clean, known path such as "/konto/sisene" or "/ru/konto/kursus/x") that carries a
- * query is sent instead: the same path, with the parameters the page knows (viga, korda, email; the first of each, URL-encoded) moved
+ * query is sent instead: the same path, with the parameters the page knows (viga, korda, email, kood; the first of each, URL-encoded) moved
  * into the fragment, and everything else dropped. Next.js keeps the address of the request that renders a page (path and query) in
  * the page it caches, for every later visitor; so no request with a query may reach a shell. Built from `path` and the query only.
  */

@@ -50,6 +50,13 @@ describe("accountLink: Ava minu konto", () => {
     expect(link).not.toContain("?");
     expect(decodeURIComponent(link.split("#email=")[1])).toBe(EMAIL);
   });
+
+  test("enterCode adds &kood=1 to the same fragment (the login page opens at the code step); still no query", () => {
+    expect(accountLink(BASE, EMAIL, "et", true)).toBe(`${BASE}/konto/sisene#email=kati%2Btest%40example.test&kood=1`);
+    expect(accountLink(`${BASE}/`, "kati@example.test", "ru", true)).toBe(`${BASE}/ru/konto/sisene#email=kati%40example.test&kood=1`);
+    expect(accountLink(BASE, EMAIL, "et", true)).not.toContain("?");
+    expect(accountLink(BASE, EMAIL)).not.toContain("kood");
+  });
 });
 
 describe("registration confirmation, Estonian", () => {
@@ -177,10 +184,24 @@ describe("registration confirmation without payment instructions", () => {
 
 describe("with a login code (the visitor ticked 'Loo mulle kohe konto')", () => {
   const login = { token: TOKEN, code: "042917" };
+  const CASES = [
+    {
+      locale: "et", intro: "Sinu sisselogimiskood:", button: "Logi sisse", valid: "Kood ja link kehtivad 30 minutit.",
+      ignore: "Kui sa ei palunud sisselogimist, võid selle kirja kustutada.",
+      codeHere: "Kui nupp ei tööta, sisesta kood siin:", codeLink: "Ava sisselogimine",
+      link: `${BASE}/api/konto/verify?t=${TOKEN}`, codePage: `${BASE}/konto/sisene#email=kati%2Btest%40example.test&kood=1`,
+    },
+    {
+      locale: "ru", intro: "Ваш код для входа:", button: "Войти", valid: "Код и ссылка действуют 30 минут.",
+      ignore: "Если вы не запрашивали вход, просто удалите это письмо.",
+      codeHere: "Если кнопка не работает, введите код здесь:", codeLink: "Открыть страницу входа",
+      link: `${BASE}/api/konto/verify?t=${TOKEN}&l=ru`, codePage: `${BASE}/ru/konto/sisene#email=kati%2Btest%40example.test&kood=1`,
+    },
+  ] as const;
 
-  test.each([["et", "Sinu sisselogimiskood:", "Logi sisse", "Kood ja link kehtivad 30 minutit.", `${BASE}/api/konto/verify?t=${TOKEN}`], ["ru", "Ваш код для входа:", "Войти", "Код и ссылка действуют 30 минут.", `${BASE}/api/konto/verify?t=${TOKEN}&l=ru`]] as const)(
-    "%s: the code large, ONE button 'Logi sisse' to the login link in place of 'Ava minu konto', and the 30 minutes",
-    (locale, intro, button, valid, link) => {
+  test.each(CASES)(
+    "$locale: the code large, ONE button 'Logi sisse' to the login link, the 30 minutes, the ignore line and a small link to the code step",
+    ({ locale, intro, button, valid, ignore, codeHere, codeLink, link, codePage }) => {
       const mail = registrationConfirmationMail(registration({ locale, login }));
       expect(link).toBe(verifyLink(BASE, TOKEN, locale));
       const text = lines(mail.text);
@@ -189,8 +210,10 @@ describe("with a login code (the visitor ticked 'Loo mulle kohe konto')", () => 
       expect(text).toContain(`${button}:`);
       expect(text).toContain(link);
       expect(text).toContain(valid);
-      expect(mail.text).not.toContain("#email=");
-      expect(mail.text).not.toMatch(/Ava minu konto|Открыть мой кабинет/);
+      // the 30 minutes, then the ignore line, then one sentence followed by the URL of the login page's code step
+      expect(text.indexOf(ignore)).toBe(text.indexOf(valid) + 1);
+      expect(text.slice(text.indexOf(codeHere), text.indexOf(codeHere) + 2)).toEqual([codeHere, codePage]);
+      expect(mail.text).not.toMatch(/Ava minu konto|Открыть мой кабинет/); // the one button is the login's
       // the registration part is still all there
       expect(mail.text).toContain("14.11.2026 · 10:00");
       expect(mail.text).toContain("MSLAB-42");
@@ -202,10 +225,23 @@ describe("with a login code (the visitor ticked 'Loo mulle kohe konto')", () => 
       expect(html).toContain("font:600 32px"); // the code, large
       expect(html).toContain(">042917</div>");
       expect(html).toContain(valid);
-      expect(html).not.toContain("#email=");
+      expect(html).toContain(ignore);
+      expect(html.indexOf(ignore)).toBeGreaterThan(html.indexOf(valid));
+      // the small link: text, not a button (no pill, no 48 px height), to the code step
+      expect(html).toContain(`${codeHere} <a href="${esc(codePage)}" style="color:#222222;text-decoration:underline;">${codeLink}</a>`);
+      expect(html.indexOf(codeHere)).toBeGreaterThan(html.indexOf(ignore));
       expect(html).not.toMatch(/Ava minu konto|Открыть мой кабинет/);
     },
   );
+
+  test("the e-mail without a code has none of it: no code step link, no ignore line, no 30 minutes", () => {
+    for (const locale of ["et", "ru"] as const) {
+      const mail = registrationConfirmationMail(registration({ locale }));
+      expect(mail.text).not.toContain("kood=1");
+      expect(mail.html).not.toContain("kood=1");
+      expect(mail.text).not.toMatch(/30 minut/);
+    }
+  });
 
   test("the subject is the registration's, not the login e-mail's: the code is not shown in a notification", () => {
     expect(registrationConfirmationMail(registration({ login })).subject).toBe("Registreering on vastu võetud — Kulmude baaskoolitus");
@@ -244,13 +280,24 @@ describe("request confirmations", () => {
     ]);
   });
 
-  test("waitlist, Estonian and Russian: 'Oled ootenimekirjas.', the date and place, and the same line and button", () => {
+  test("waitlist, Estonian and Russian: the dashboard's sentence (account.next.waitlist) and the date and place; no 'Maria võtab sinuga ühendust.'", () => {
     const et = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "et", kind: "waitlist", title: { et: "Kulmud" }, session: SESSION });
     expect(et.subject).toBe("Oled ootenimekirjas — Kulmud");
-    expect(lines(et.text)).toEqual(expect.arrayContaining(["Oled ootenimekirjas.", "Kulmud", "14.11.2026 · 10:00", "Pärnu, MS LAB stuudio", "Maria võtab sinuga ühendust.", "Ava minu konto:"]));
+    expect(lines(et.text)).toEqual([
+      "Tere, Kati!", "",
+      "Oled ootenimekirjas. Anname teada, kui koht vabaneb.", "",
+      "Kulmud", "14.11.2026 · 10:00", "Pärnu, MS LAB stuudio", "",
+      "Ava minu konto:", `${BASE}/konto/sisene#email=kati%2Btest%40example.test`, "",
+      "MS LAB Koolituskeskus",
+    ]);
+    expect(et.text).not.toContain("Maria võtab sinuga ühendust.");
     const ru = requestConfirmationMail({ siteUrl: BASE, email: EMAIL, name: "Kati", locale: "ru", kind: "waitlist", title: { et: "Kulmud", ru: "Брови" }, session: SESSION });
-    expect(ru.subject).toBe("Вы в списке ожидания — Брови");
-    expect(lines(ru.text)).toEqual(expect.arrayContaining(["Вы в списке ожидания.", "Брови", "14.11.2026 · 10:00", "Мария свяжется с вами.", "Открыть мой кабинет:"]));
+    expect(ru.subject).toBe("Вы в\u00a0списке ожидания — Брови");
+    expect(lines(ru.text)).toEqual(expect.arrayContaining([getDict("ru").account.next.waitlist, "Брови", "14.11.2026 · 10:00", "Открыть мой кабинет:"]));
+    expect(ru.text).not.toContain("свяжется");
+    // the same sentence as the dashboard card says
+    for (const [locale, mail] of [["et", et], ["ru", ru]] as const) expect(mail.text).toContain(getDict(locale).account.next.waitlist);
+    expect(et.html).toContain("Oled ootenimekirjas. Anname teada, kui koht vabaneb.");
   });
 
   test("an individual request that ticked the account box can carry a login code and then has ONE button, 'Logi sisse'", () => {

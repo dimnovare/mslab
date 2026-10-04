@@ -12,7 +12,13 @@ export const LOGIN_TTL_MS = 30 * 60_000;
 export const CLIENT_SESSION_TTL_MS = 180 * 86_400_000;
 export const CODE_ATTEMPTS = 5;
 export const CLIENT_LOGIN_CAP = 3;
+/**
+ * The day's mails to visitors share one counter (the `mail_quota` row; Resend Free sends 100 a day, form notifications to Maria
+ * included): a login e-mail or a confirmation that carries a login code stops at 60, a confirmation without a code at 50 (so
+ * the last 10 of the 60 are left for sign-ins, and Maria's notifications keep their room).
+ */
 export const LOGIN_MAIL_DAILY_CAP = 60;
+export const CONFIRMATION_MAIL_DAILY_CAP = 50;
 /** Renew the session expiry at most once a day (fewer writes). */
 const RENEW_AFTER_MS = 86_400_000;
 

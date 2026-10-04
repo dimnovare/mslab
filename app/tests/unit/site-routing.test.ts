@@ -65,6 +65,9 @@ describe("routeSitePath", () => {
   test("accountShellTarget: the parameters the page knows move into the fragment, in a fixed order, URL-encoded; the rest is dropped", () => {
     const target = (path: string, query: string) => accountShellTarget(path, new URLSearchParams(query));
     expect(target("/konto/sisene", "email=a%40example.test&viga=link&korda=1")).toBe("/konto/sisene#viga=link&korda=1&email=a%40example.test");
+    // an old or mangled ?kood=1 link (the e-mail's own link has it in the fragment already) still works
+    expect(target("/konto/sisene", "kood=1&email=a%2Bb%40example.test")).toBe("/konto/sisene#email=a%2Bb%40example.test&kood=1");
+    expect(target("/ru/konto/sisene", "kood=1&email=a%40example.test")).toBe("/ru/konto/sisene#email=a%40example.test&kood=1");
     expect(target("/ru/konto", "")).toBe("/ru/konto");
     expect(target("/ru/konto", "utm=1&_rsc=x")).toBe("/ru/konto");
     expect(target("/konto/sisene", "viga=link&viga=server")).toBe("/konto/sisene#viga=link");

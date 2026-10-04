@@ -7,7 +7,7 @@ import {
   clientFavourites, clientLoginTokens, clients, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, subscribers,
   termsAcceptances,
 } from "@/db/schema";
-import { sortCards, type AccountCard, type PrepaymentInfo } from "@/domain/account-cards";
+import { PREPAYMENT_KEY, parsePrepayment, sortCards, type AccountCard, type PrepaymentInfo } from "@/domain/account-cards";
 import { upcomingFrom } from "@/domain/calendar";
 import { DEFAULT_TERMS_VERSION, TERMS_PAGE_KEY, TERMS_VERSION_KEY } from "@/domain/course-terms";
 import { nextSessionByCourse } from "@/domain/home";
@@ -23,9 +23,6 @@ import { newToken } from "./token";
 // read-only "view as client" (loadDashboard). Every function takes the client's id from the verified session, never from the
 // request, and scopes every read and write to it: a registration, request, favourite or access row of another client is
 // never read, changed or reported to exist.
-
-/** The settings key read here: where to pay the prepayment (admin "Ettemaksu juhised"). The e-course terms' keys are in domain/course-terms.ts. */
-export const PREPAYMENT_KEY = "prepayment";
 
 /** At most this much of a request's text goes onto its card ("what was asked"). */
 const DETAIL_MAX = 200;
@@ -54,15 +51,6 @@ export type EcourseView = {
 };
 
 const iso = (d: Date): string => d.toISOString();
-
-/** The prepayment setting as the cards use it: strings only; null when it is missing, not an object or every field is empty. */
-export function parsePrepayment(value: unknown): PrepaymentInfo | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const v = value as Record<string, unknown>;
-  const field = (key: string) => (typeof v[key] === "string" ? (v[key] as string).trim() : "");
-  const info = { receiver: field("receiver"), iban: field("iban"), bank: field("bank"), referencePrefix: field("referencePrefix") };
-  return Object.values(info).some(Boolean) ? info : null;
-}
 
 /** The version of the e-course terms: the settings key `courseTermsVersion` (an ISO time, set when the admin saves the terms text), "1" until then. */
 export async function courseTermsVersion(db: Db): Promise<string> {

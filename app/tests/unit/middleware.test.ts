@@ -48,10 +48,10 @@ describe("an account shell asked for with a query", () => {
     };
   };
 
-  test("any method: 303 to the clean path with viga, korda and email in the fragment (URL-encoded, in that order), never kept", () => {
+  test("any method: 303 to the clean path with viga, korda, email and kood in the fragment (URL-encoded, in that order), never kept", () => {
     for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
-      const res = answer("/konto/sisene?email=probe%40example.test&korda=1&viga=link", method);
-      expect(res, method).toMatchObject({ status: 303, location: "/konto/sisene#viga=link&korda=1&email=probe%40example.test", cache: "no-store", rewrite: null });
+      const res = answer("/konto/sisene?kood=1&email=probe%40example.test&korda=1&viga=link", method);
+      expect(res, method).toMatchObject({ status: 303, location: "/konto/sisene#viga=link&korda=1&email=probe%40example.test&kood=1", cache: "no-store", rewrite: null });
       expect(res.robots, method).toBe("noindex, nofollow");
     }
   });

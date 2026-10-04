@@ -5,9 +5,9 @@ import {
   clientFavourites, clientLoginTokens, clients, clientSessions, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, settings,
   subscribers, termsAcceptances,
 } from "@/db/schema";
-import { nextStep } from "@/domain/account-cards";
+import { nextStep, parsePrepayment } from "@/domain/account-cards";
 import {
-  acceptTerms, courseTermsVersion, createChangeRequest, deleteClient, favouriteSlugs, loadDashboard, loadEcourse, mergeFavourites, parsePrepayment,
+  acceptTerms, courseTermsVersion, createChangeRequest, deleteClient, favouriteSlugs, loadDashboard, loadEcourse, mergeFavourites,
   setFavourite, setNewsletter, updateProfile,
 } from "@/server/client-data";
 import { issueClientLogin, redeemClientCode, redeemClientLink } from "@/server/client-auth";

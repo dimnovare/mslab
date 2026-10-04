@@ -23,7 +23,7 @@ import {
 } from "@/server/admin-site";
 import type { EditResult } from "@/server/edit-check";
 import { newPostDraft, type PostDraft } from "@/domain/site-editor";
-import { parsePrepayment } from "@/server/client-data";
+import { parsePrepayment } from "@/domain/account-cards";
 
 // Task 13B: the site content editors' form handling on a real (PGlite) database with the prototype seed.
 

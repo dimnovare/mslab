@@ -24,6 +24,7 @@ import {
   type SiteTable,
   type SlideRow,
 } from "@/db/queries/admin-site";
+import { PREPAYMENT_KEY } from "@/domain/account-cards";
 import { tallinnFormParts, tallinnInstant } from "@/domain/calendar";
 import { nextTermsVersion, TERMS_PAGE_KEY, TERMS_PAGE_TITLE, TERMS_VERSION_KEY } from "@/domain/course-terms";
 import {
@@ -57,7 +58,6 @@ import {
 import type { I18n } from "@/i18n/field";
 import { isSlug, SLUG_MAX, slugify } from "@/lib/slug";
 import { contentVersion } from "@/lib/version";
-import { PREPAYMENT_KEY } from "./client-data";
 import { Check, field, invalid, type EditResult, type SavedParts } from "./edit-check";
 
 // The site content editors' form handling (Task 13B): home page, practice packages, trainer page, campaign, settings
