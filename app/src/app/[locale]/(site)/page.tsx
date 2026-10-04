@@ -27,6 +27,7 @@ import { pick, pickList } from "@/i18n/field";
 import { fill, formatDate, formatDayMonth, formatWeekday } from "@/i18n/format";
 import { href } from "@/i18n/href";
 import { getDict, isLocale } from "@/i18n/locales";
+import { DELETED_MARK } from "@/lib/account-marks";
 import { mediaUrl } from "@/lib/media";
 import { shareMetadata } from "@/server/share-meta";
 import styles from "./home.module.css";
@@ -104,6 +105,8 @@ export default async function Home({ params }: Props) {
     vigane: { tone: "warn", title: nl.linkInvalid },
     viga: { tone: "warn", title: d.forms.errorGeneric },
   };
+  // "Minu andmed" lands here with #konto-kustutatud after deleting the account (a fragment: the server never sees it).
+  const accountNotices: Record<string, FlashMessage> = { [DELETED_MARK]: { tone: "ok", title: d.account.details.deleted } };
 
   return (
     <>
@@ -243,7 +246,7 @@ export default async function Home({ params }: Props) {
         }}
       />
 
-      <FlashNotice param="uudiskiri" notices={newsletterNotices} closeLabel={d.common.close} />
+      <FlashNotice param="uudiskiri" notices={newsletterNotices} fragments={accountNotices} closeLabel={d.common.close} />
 
       {campaign && (
         <CampaignPopup c={campaign} locale={locale} t={{ close: d.common.close, copy: d.campaign.copy, copied: d.campaign.copied, selected: d.campaign.selected }} />

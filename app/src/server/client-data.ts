@@ -1,6 +1,8 @@
 import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import type { CourseCardData } from "@/components/site/CourseCard";
+import { courseCardData } from "@/components/site/course-card-data";
 import type { Db } from "@/db/client";
-import { readSetting } from "@/db/queries/public";
+import { listPublishedCourses, listUpcomingSessions, readSetting } from "@/db/queries/public";
 import {
   clientFavourites, clientLoginTokens, clients, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, subscribers,
   termsAcceptances,
@@ -8,9 +10,12 @@ import {
 import { sortCards, type AccountCard, type PrepaymentInfo } from "@/domain/account-cards";
 import { upcomingFrom } from "@/domain/calendar";
 import { DEFAULT_TERMS_VERSION, TERMS_PAGE_KEY, TERMS_VERSION_KEY } from "@/domain/course-terms";
+import { nextSessionByCourse } from "@/domain/home";
 import { registrationPrice } from "@/domain/registration";
 import { normalizeEmail } from "@/domain/email";
 import type { I18n } from "@/i18n/field";
+import { href } from "@/i18n/href";
+import { getDict, type Locale } from "@/i18n/locales";
 import { lockAddress } from "./client-auth";
 import { newToken } from "./token";
 
@@ -277,6 +282,34 @@ export async function favouriteSlugs(db: Db, clientId: number): Promise<string[]
     .where(and(eq(clientFavourites.clientId, clientId), eq(courses.published, true)))
     .orderBy(desc(clientFavourites.createdAt), courses.sort, courses.id);
   return rows.map((r) => r.slug);
+}
+
+/** One course of the Lemmikud tab: its slug (what ♡ sends) and the public catalogue's card for it, in the page's language. */
+export type FavouriteCard = { slug: string; card: CourseCardData };
+
+/** The Lemmikud tab: the cards, newest favourite first, and their slugs (`favourites`, as every favourites answer has them). */
+export type FavouriteCards = { favourites: string[]; cards: FavouriteCard[] };
+
+/**
+ * The client's published favourites as the catalogue shows them (components/site/course-card-data.ts: photo, badge, chips, the next
+ * date and city or "Veebis · alusta kohe", the price), from the catalogue's own queries narrowed to these courses. In `locale`, with
+ * links to that language's course pages. The cards are built here, per request and per client, never cached: the Lemmikud page
+ * itself is the static shell.
+ */
+export async function loadFavouriteCards(db: Db, clientId: number, locale: Locale, now: Date): Promise<FavouriteCards> {
+  const slugs = await favouriteSlugs(db, clientId);
+  if (slugs.length === 0) return { favourites: [], cards: [] };
+  const [list, sessions] = await Promise.all([listPublishedCourses(db, { slugs }), listUpcomingSessions(db, upcomingFrom(now), { slugs })]);
+  const next = nextSessionByCourse(sessions);
+  const d = getDict(locale);
+  const to = (path: string) => href(locale, path);
+  const bySlug = new Map(list.map((c) => [c.slug, c]));
+  const cards = slugs.flatMap((slug) => {
+    const course = bySlug.get(slug);
+    return course ? [{ slug, card: courseCardData(course, next.get(course.id), locale, d, to) }] : [];
+  });
+  // a course unpublished between the two reads has no card: it is not listed either
+  return { favourites: cards.map((c) => c.slug), cards };
 }
 
 /**

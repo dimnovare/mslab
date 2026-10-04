@@ -8,7 +8,7 @@ import type { Dict } from "@/i18n/dict/et";
 import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
 import { readLoginAddress } from "./login-address";
-import { rememberEmail, rememberedEmail } from "./useAccount";
+import { PENDING_KEY, rememberEmail, rememberedEmail } from "./useAccount";
 import styles from "./LoginForm.module.css";
 
 export type LoginTexts = Dict["account"]["login"] & { title: string; badEmail: string };
@@ -20,8 +20,6 @@ export const RESEND_AFTER_MS = 60_000;
  * minute, because `sentAt` is stamped when the answer arrives, a little after the server issued the code.
  */
 const KEEP_CODE_STEP_MS = 29 * 60_000;
-/** sessionStorage key of the code step in this tab: `{ sentTo, sentAt }`. */
-export const PENDING_KEY = "mslab-login-code";
 
 type SendError = "email" | "rate" | "server";
 /** `short`: Enter (a phone's "Go") with fewer than six digits. */

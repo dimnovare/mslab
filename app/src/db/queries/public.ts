@@ -40,9 +40,11 @@ async function confirmedBySession(db: Db, sessionIds: number[]): Promise<Map<num
   return new Map(rows.flatMap((r) => (r.sessionId == null ? [] : [[r.sessionId, r.confirmed] as const])));
 }
 
-export async function listPublishedCourses(db: Db): Promise<CourseWithImages[]> {
+/** The published courses in the catalogue's order; `only.slugs` keeps just those courses (the account's favourites). */
+export async function listPublishedCourses(db: Db, only?: { slugs: string[] }): Promise<CourseWithImages[]> {
+  if (only && only.slugs.length === 0) return [];
   return db.query.courses.findMany({
-    where: eq(courses.published, true),
+    where: only ? and(eq(courses.published, true), inArray(courses.slug, only.slugs)) : eq(courses.published, true),
     orderBy: [asc(courses.sort), asc(courses.id)],
     with: { images: { orderBy: imageOrder } },
   });
@@ -75,14 +77,15 @@ export async function getCourseBySlug(
 /**
  * Sessions of published contact courses starting on or after `fromDate`, soonest first. Cancelled sessions are included
  * (the calendar shows them as cancelled). Only contact courses have dates (K1/K2): a session row of an e-learning course
- * (none can be made: the editor refuses a type change while sessions exist) is never shown.
+ * (none can be made: the editor refuses a type change while sessions exist) is never shown. `only.slugs` keeps just those courses' sessions.
  */
-export async function listUpcomingSessions(db: Db, fromDate: Date): Promise<UpcomingSession[]> {
+export async function listUpcomingSessions(db: Db, fromDate: Date, only?: { slugs: string[] }): Promise<UpcomingSession[]> {
+  if (only && only.slugs.length === 0) return [];
   const rows = await db
     .select({ session: courseSessions, course: courses })
     .from(courseSessions)
     .innerJoin(courses, eq(courseSessions.courseId, courses.id))
-    .where(and(eq(courses.published, true), eq(courses.type, "contact"), gte(courseSessions.startsAt, fromDate)))
+    .where(and(eq(courses.published, true), eq(courses.type, "contact"), gte(courseSessions.startsAt, fromDate), only ? inArray(courses.slug, only.slugs) : undefined))
     .orderBy(asc(courseSessions.startsAt), asc(courseSessions.id));
   const counts = await confirmedBySession(db, rows.map((r) => r.session.id));
   return rows.map((r) => ({ ...r.session, course: r.course, confirmed: counts.get(r.session.id) ?? 0 }));

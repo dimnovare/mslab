@@ -20,10 +20,10 @@ describe("the data endpoints of the account API", () => {
   test("the section and its handlers are found", () => {
     expect(SOURCE.indexOf(START)).toBeGreaterThan(0);
     expect(SOURCE.indexOf(END)).toBeGreaterThan(SOURCE.indexOf(START));
-    expect(handlers.map(nameOf)).toEqual(["dashboard", "ecourse", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"]);
+    expect(handlers.map(nameOf)).toEqual(["dashboard", "ecourse", "favouriteCourses", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"]);
   });
 
-  test.each(["dashboard", "ecourse", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"])(
+  test.each(["dashboard", "ecourse", "favouriteCourses", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"])(
     "%s starts with requireClient and hands a refusal back unchanged",
     (name) => {
       const body = handlers.find((h) => nameOf(h) === name)!.split("{\n").slice(1).join("{\n");
@@ -58,7 +58,7 @@ describe("the data endpoints of the account API", () => {
     const router = SOURCE.slice(SOURCE.indexOf(END), SOURCE.indexOf("/** The router: `null`"));
     const cases = [...router.matchAll(/case "(\w+) ([^"]+)": return (\w+)\(request, deps\);/g)].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
     expect(cases).toEqual([
-      "GET / dashboard", "POST /lemmikud favourite", "POST /lemmikud/merge mergeFavouriteList", "PATCH /andmed profile", "POST /uudiskiri newsletter",
+      "GET / dashboard", "GET /lemmikud favouriteCourses", "POST /lemmikud favourite", "POST /lemmikud/merge mergeFavouriteList", "PATCH /andmed profile", "POST /uudiskiri newsletter",
       "POST /muutmine changeRequest", "POST /tingimused terms", "POST /kustuta deleteAccount",
     ]);
     expect(router).toContain('request.method === "GET" ? COURSE_PATH.exec(path) : null');

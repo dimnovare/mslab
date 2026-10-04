@@ -1,0 +1,52 @@
+/* "Lemmikud": the public catalogue's grid (CatalogueFilters .grid: three columns, two from 1180 px, one on phones) as a list of
+   its course cards, each with ♡ under it in the course page's own action style (CourseActions .action: ♡ "Lisa lemmikutesse"
+   there, ♡ "Eemalda lemmikutest" here, 44 px tall). The page, heading and empty box are the "Minu koolitused" tab's. Tokens only. */
+
+.list {
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The card fills its row, so the price lines of a row line up (CourseCard pushes them to the bottom); ♡ comes under it. */
+.item {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.item > a {
+  flex: 1 0 auto;
+}
+
+.remove {
+  align-self: flex-start;
+  margin-top: 10px;
+}
+
+/* a favourite's filled heart (CourseActions: the pressed button's heart) */
+.remove .heart {
+  color: var(--warn);
+}
+
+.remove[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* A live region: always there, with no height and no room while empty. */
+.failed {
+  margin: 6px 0 0;
+  color: var(--bad);
+  font: 500 14px/1.45 var(--font-body);
+}
+
+.failed:empty {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .list {
+    margin-top: 22px;
+  }
+}

@@ -75,6 +75,47 @@ describe("useAccount", () => {
     expect(localStorage.getItem(EMAIL_KEY)).toBe("mari@example.test");
   });
 
+  test("every 200 keeps the account's favourites in this tab and merges the browser's own once (lib/favourites.ts); a 401 forgets the copy", async () => {
+    sessionStorage.clear();
+    localStorage.setItem("mslab-fav", '["lami"]');
+    const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+    fetchMock.mockImplementation(async (_input, init) =>
+      init?.method === "POST" ? json(200, { ok: true, favourites: ["lami", "botox"] }) : json(200, { client: { email: "kati@example.test" }, favourites: ["botox"] }),
+    );
+    await mount();
+    expect(hook().state).toBe("ready");
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0][0]).toBe("/api/konto/lemmikud/merge");
+    expect(JSON.parse(String(posts()[0][1]?.body))).toEqual({ slugs: ["lami"] });
+    expect(localStorage.getItem("mslab-fav")).toBeNull();
+    expect(sessionStorage.getItem("mslab-account-fav")).toBe('["lami","botox"]');
+
+    // the next load of an account page: nothing left to merge; its list is the copy now
+    fetchMock.mockImplementation(async () => json(200, { client: { email: "kati@example.test" }, favourites: ["lami", "botox", "e-kursus"] }));
+    await act(async () => void hook().reload({ quiet: true }));
+    await settle();
+    expect(posts()).toHaveLength(1);
+    expect(sessionStorage.getItem("mslab-account-fav")).toBe('["lami","botox","e-kursus"]');
+
+    // signed out: the copy is gone, so the course pages' ♡ shows this browser's own list again
+    vi.spyOn(window.location, "replace").mockImplementation(() => {});
+    fetchMock.mockImplementation(async () => json(401, { ok: false, reason: "none" }));
+    await act(async () => void hook().reload({ quiet: true }));
+    await settle();
+    expect(hook().state).toBe("signedOut");
+    expect(sessionStorage.getItem("mslab-account-fav")).toBeNull();
+  });
+
+  test("a merge that fails keeps the browser's favourites for the next account load", async () => {
+    sessionStorage.clear();
+    localStorage.setItem("mslab-fav", '["lami"]');
+    fetchMock.mockImplementation(async (_input, init) => (init?.method === "POST" ? json(500, { ok: false, error: "server" }) : json(200, { email: "kati@example.test" })));
+    await mount();
+    expect(hook().state).toBe("ready");
+    expect(localStorage.getItem("mslab-fav")).toBe('["lami"]');
+    expect(sessionStorage.getItem("mslab-account-fav")).toBeNull();
+  });
+
   test("401 replaced: the 'another device' state, no redirect; the header is told (the hint cookie is gone)", async () => {
     const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {});
     const told = vi.fn();

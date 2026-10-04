@@ -8,6 +8,8 @@ import {
 import { clearedCookies, handleAccountApi, sessionCookies, type AccountDeps } from "@/server/account-api";
 import { CLIENT_SESSION_TTL_MS, LOGIN_MAIL_DAILY_CAP } from "@/server/client-auth";
 import { sha256 } from "@/server/token";
+import { formatEUR } from "@/domain/money";
+import { formatDayMonth } from "@/i18n/format";
 import { fakeKv, stubFetch } from "../fakes";
 import { makeTestDb } from "./helpers";
 
@@ -937,6 +939,41 @@ describe("favourites", () => {
       expect(bad.status).toBe(400);
       expect(await bad.json()).toEqual({ ok: false, error: "slugs" });
     }
+  });
+
+  test("GET /lemmikud?l=…: the published favourites as the catalogue's cards, newest first, in the page's language; private, and the client's own", async () => {
+    const { deps, cookie, client } = await account();
+    const empty = await call(deps, "/lemmikud", { cookie });
+    expect(empty.status).toBe(200);
+    expect(empty.headers.get("cache-control")).toBe("private, no-store");
+    expect(await empty.json()).toEqual({ ok: true, favourites: [], cards: [] });
+
+    // hearted: the unpublished course first (it was hidden since: not shown), then the e-course, the contact course last (the newest)
+    await db.insert(clientFavourites).values([
+      { clientId: client.id, courseId: seeded.hidden.id, createdAt: at(-3) },
+      { clientId: client.id, courseId: seeded.online.id, createdAt: at(-2) },
+      { clientId: client.id, courseId: seeded.lami.id, createdAt: at(-1) },
+    ]);
+    type Answer = { ok: boolean; favourites: string[]; cards: { slug: string; card: Record<string, unknown> }[] };
+    const et = (await (await call(deps, "/lemmikud", { cookie })).json()) as Answer;
+    expect(et.favourites).toEqual(["kulmude-lami", "veebikursus"]);
+    expect(et.cards.map((c) => c.slug)).toEqual(["kulmude-lami", "veebikursus"]);
+    expect(et.cards[0].card).toEqual({
+      id: seeded.lami.id, type: "contact", href: "/koolitused/kulmude-lami", title: "Kulmude lamineerimine", summary: "", image: "", imageAlt: "Kulmude lamineerimine",
+      badge: null, tags: ["Kontaktõpe", "Baaskoolitus"], meta: { lead: formatDayMonth(seeded.session.startsAt, "et"), text: "Pärnu" }, price: formatEUR(35000, "et"),
+    });
+    expect(et.cards[1].card).toMatchObject({ type: "e_learning", href: "/koolitused/veebikursus", meta: { text: "Veebis · alusta kohe" }, price: formatEUR(9500, "et") });
+
+    const ru = (await (await call(deps, "/lemmikud?l=ru", { cookie })).json()) as Answer;
+    expect(ru.cards.map((c) => c.card.href)).toEqual(["/ru/koolitused/kulmude-lami", "/ru/koolitused/veebikursus"]);
+    expect(ru.cards[1].card.meta).toEqual({ text: "Онлайн · начать сразу" });
+    // any other language is Estonian
+    const other = (await (await call(deps, "/lemmikud?l=fi", { cookie })).json()) as Answer;
+    expect(other.cards[0].card.href).toBe("/koolitused/kulmude-lami");
+
+    // another client sees none of them
+    const b = await account({ email: "mari@example.test" });
+    expect(await (await call(b.deps, "/lemmikud", { cookie: b.cookie })).json()).toEqual({ ok: true, favourites: [], cards: [] });
   });
 
   test("a client's hearts are its own", async () => {

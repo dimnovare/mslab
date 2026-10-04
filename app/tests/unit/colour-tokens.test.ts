@@ -31,6 +31,8 @@ const COURSE_CSS = [
   "src/components/account/TermsGate.module.css",
   "src/components/account/EcourseView.module.css",
   "src/components/account/EcoursePage.module.css",
+  "src/components/account/FavouritesTab.module.css",
+  "src/components/account/DetailsTab.module.css",
   // the site's modal dialog (the campaign popup and the account's change request)
   "src/components/ui/modal.module.css",
   "src/components/site/CampaignPopup.module.css",

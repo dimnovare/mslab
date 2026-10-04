@@ -542,6 +542,40 @@ export const et = {
       access: "Ligipääs kuni {date}",
       soon: "Sisu lisandub peagi.",
     },
+    // "Lemmikud" /konto/lemmikud (components/account/FavouritesTab.tsx): the hearted courses as the catalogue's cards, each with ♡ to
+    // take it off. {title} is a course's title (the button's name for a screen reader, and what was taken off).
+    favourites: {
+      title: "Sinu lemmikud",
+      remove: "Eemalda lemmikutest",
+      removeCourse: "Eemalda lemmikutest: {title}",
+      removed: "Eemaldatud lemmikutest: {title}",
+      removeFailed: "Ei õnnestunud eemaldada. Proovi uuesti.",
+      empty: "Lisa koolitus lemmikuks ♡ koolituse lehel.",
+      browse: "Vaata koolitusi",
+      loading: "Laadin lemmikuid…",
+    },
+    // "Minu andmed" /konto/andmed (components/account/DetailsTab.tsx): name, phone and language with one "Salvesta"; the newsletter
+    // switch saves at once; "Kustuta konto" at the very bottom with one confirmation step. Each language's name is in that language.
+    details: {
+      title: "Sinu andmed",
+      email: "E-post",
+      name: "Nimi",
+      phone: "Telefon",
+      language: "Keel",
+      languages: { et: "Eesti keel", ru: "Русский язык" },
+      save: "Salvesta",
+      saved: "Salvestatud.",
+      saveFailed: "Ei õnnestunud salvestada. Proovi uuesti.",
+      newsletter: "Saada mulle uudiskirja",
+      delete: "Kustuta konto",
+      deleteQuestion: "Kas kustutame su konto? Sinu registreeringud jäävad Mariale alles.",
+      deleteYes: "Jah, kustuta",
+      deleteNo: "Tühista",
+      deleteFailed: "Kustutamine ei õnnestunud. Proovi uuesti.",
+      // the home page's notice after the deletion (/#konto-kustutatud)
+      deleted: "Konto on kustutatud.",
+      loading: "Laadin andmeid…",
+    },
   },
 
   // Localized 404 inside the site shell.

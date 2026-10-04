@@ -14,6 +14,12 @@ export type CoursesTexts = Dict["account"]["dashboard"] & {
   loader: LoaderTexts;
 };
 
+/** "Lemmikud": the account.favourites strings and AccountLoader's. */
+export type FavouritesTexts = Dict["account"]["favourites"] & { loader: LoaderTexts };
+
+/** "Minu andmed": the account.details strings and AccountLoader's. */
+export type DetailsTexts = Dict["account"]["details"] & { loader: LoaderTexts };
+
 /** The e-course page's: the account.ecourse strings, the modules' lock label (course.locked), AccountLoader's. */
 export type EcourseTexts = Dict["account"]["ecourse"] & { locked: string; loader: LoaderTexts };
 
@@ -24,3 +30,7 @@ export const loaderTexts = (d: Dict): LoaderTexts => d.account.loader;
 export const ecourseTexts = (d: Dict): EcourseTexts => ({ ...d.account.ecourse, locked: d.course.locked, loader: loaderTexts(d) });
 
 export const coursesTexts = (d: Dict): CoursesTexts => ({ ...d.account.dashboard, next: d.account.next, loader: loaderTexts(d) });
+
+export const favouritesTexts = (d: Dict): FavouritesTexts => ({ ...d.account.favourites, loader: loaderTexts(d) });
+
+export const detailsTexts = (d: Dict): DetailsTexts => ({ ...d.account.details, loader: loaderTexts(d) });

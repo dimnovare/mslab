@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import { HINT_COOKIE } from "@/lib/account-cookies";
+import { afterAccountLoad, forgetAccountFavourites } from "@/lib/favourites";
+import { forgetChangeRequests } from "./sent-requests";
 
 // The client account in the browser. The /konto… pages are static shells, the same for every visitor (served by the CDN
 // without a render); everything personal comes from /api/konto/* after the page has loaded, read here.
@@ -15,6 +17,8 @@ import { HINT_COOKIE } from "@/lib/account-cookies";
 
 /** localStorage key of the last e-mail used to sign in here. */
 export const EMAIL_KEY = "mslab-email";
+/** sessionStorage key of the login page's code step in this tab (LoginForm): `{ sentTo, sentAt }`. */
+export const PENDING_KEY = "mslab-login-code";
 /** Fired on window when this tab learns that the sign-in state changed (the hint cookie was set or cleared). */
 export const ACCOUNT_EVENT = "mslab-account-change";
 
@@ -55,6 +59,25 @@ export function rememberEmail(email: string): void {
   }
 }
 
+/**
+ * Forgets everything this browser keeps about the account (its deletion): the remembered e-mail, the login page's code step,
+ * this tab's copy of the favourites and the change requests sent from it. Blocked storage is nothing to forget.
+ */
+export function forgetAccountMemory(): void {
+  try {
+    localStorage.removeItem(EMAIL_KEY);
+  } catch {
+    // blocked storage: nothing was kept
+  }
+  try {
+    sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    // blocked storage: nothing was kept
+  }
+  forgetAccountFavourites();
+  forgetChangeRequests();
+}
+
 /** The login page of a locale: "/konto/sisene" or "/ru/konto/sisene" (without one, the locale of the address shown). */
 export const loginPath = (locale?: Locale): string =>
   href(locale ?? (/^\/ru(\/|$)/.test(window.location.pathname) ? "ru" : "et"), "/konto/sisene");
@@ -66,6 +89,9 @@ type Loaded<T> = { state: AccountState; data: T | null };
 /**
  * Loads one account endpoint (`path`, e.g. "/api/konto/me") with the session cookie.
  * - 200: "ready" with the JSON as `data`; an `email` in it (or `client.email`, the dashboard's) is remembered for the next login in this browser.
+ *   Every 200 also goes through lib/favourites.ts afterAccountLoad: a `favourites` list in it (the dashboard's, Lemmikud's) becomes this
+ *   tab's copy for the course pages' ♡, and the favourites this browser kept before signing in are merged into the account, once per
+ *   browser, whichever account page loads first.
  * - 401 `{ reason: "replaced" }` (another device signed in): "replaced", for the page to say so with one "Saada uus kood".
  * - any other 401 (never signed in, logged out, 180 days unused): "signedOut", and the visitor is sent to the login page of
  *   `locale` (the page's own; without it, the locale of the address) — `redirect: false` keeps them here.
@@ -74,7 +100,7 @@ type Loaded<T> = { state: AccountState; data: T | null };
  *   (it is an answer, not a failure). Any other 404 (a page of the platform, no JSON) and every 404 for a page that did not ask are
  *   plain failures, as below.
  * - anything else, no answer, or a 200 without a JSON object: "error"; `reload()` asks again.
- * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again.
+ * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again, and this tab's copy of the favourites is forgotten.
  * `reload({ quiet: true })` asks again in the background: the page keeps showing what it has ("ready" and the old data)
  * until the new answer is in, and a failure leaves it as it is; a 401 still ends the page as above.
  * `reload()` answers with a promise: true when the server gave an answer the page now shows (also a 401 or a 404 that ends it), false
@@ -131,9 +157,12 @@ export function useAccount<T>(
         const email = answer?.email ?? answer?.client?.email;
         if (typeof email === "string" && email) rememberEmail(email);
         setLoaded({ state: "ready", data: body as T });
-        return settle(n, true);
+        settle(n, true);
+        void afterAccountLoad(body);
+        return;
       }
       if (res.status === 401) {
+        forgetAccountFavourites();
         window.dispatchEvent(new Event(ACCOUNT_EVENT));
         const replaced = (body as { reason?: unknown } | null)?.reason === "replaced";
         // signed out: the page keeps its waiting look while the login page loads

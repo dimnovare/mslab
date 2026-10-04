@@ -11,7 +11,7 @@ import {
   redeemClientLink, reserveLoginMail,
 } from "./client-auth";
 import {
-  acceptTerms, createChangeRequest, deleteClient, loadDashboard, loadEcourse, mergeFavourites, setFavourite, setNewsletter, updateProfile,
+  acceptTerms, createChangeRequest, deleteClient, loadDashboard, loadEcourse, loadFavouriteCards, mergeFavourites, setFavourite, setNewsletter, updateProfile,
 } from "./client-data";
 import { logFailure, logNote } from "./log";
 import { changeRequestSummary } from "./messages";
@@ -29,8 +29,8 @@ import { clientIp, rateKey, rateLimit } from "./ratelimit";
 // read to show "Minu konto" instead of "Logi sisse" (it grants nothing). The login answer is the same for every address.
 // Every answer is `private, no-store`: it is one visitor's data, never kept by a CDN or a shared cache.
 //
-// Behind a session (the data endpoints, at the bottom): GET / the dashboard, GET /kursus/:slug an e-course, POST /lemmikud and
-// /lemmikud/merge favourites, PATCH /andmed the profile, POST /uudiskiri the newsletter, POST /muutmine a request to cancel or
+// Behind a session (the data endpoints, at the bottom): GET / the dashboard, GET /kursus/:slug an e-course, GET /lemmikud the
+// favourites as course cards, POST /lemmikud and /lemmikud/merge favourites, PATCH /andmed the profile, POST /uudiskiri the newsletter, POST /muutmine a request to cancel or
 // move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion.
 // Each one starts with requireClient and answers through clientResponse (a renewed session's cookies reach the browser); the
 // client is always the session's, never a value from the request. A body that is not what the endpoint expects is 400
@@ -284,6 +284,17 @@ async function ecourse(request: Request, deps: AccountDeps, rawSlug: string): Pr
   return view ? clientResponse(session, view) : clientResponse(session, { ok: false }, 404);
 }
 
+/**
+ * GET /lemmikud?l=<et|ru>: the Lemmikud tab, `{ ok, favourites, cards }` (client-data.ts FavouriteCards): the client's published favourites
+ * as the catalogue's course cards, newest first, in the page's language `l` (anything but "ru" is Estonian).
+ */
+async function favouriteCourses(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const locale = pageLocaleOf(new URL(request.url).searchParams.get("l")) ?? "et";
+  return clientResponse(session, { ok: true, ...(await loadFavouriteCards(deps.db, session.clientId, locale, deps.now)) });
+}
+
 /** POST /lemmikud `{ slug, on }`: hearts or un-hearts a published course. 200 `{ ok, favourites }`; 404 `{ error: "slug" }` for a course that is not published. */
 async function favourite(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
@@ -383,6 +394,7 @@ const COURSE_PATH = /^\/kursus\/([^/]+)$/;
 async function dataRoute(request: Request, path: string, deps: AccountDeps): Promise<Response> {
   switch (`${request.method} ${path}`) {
     case "GET /": return dashboard(request, deps);
+    case "GET /lemmikud": return favouriteCourses(request, deps);
     case "POST /lemmikud": return favourite(request, deps);
     case "POST /lemmikud/merge": return mergeFavouriteList(request, deps);
     case "PATCH /andmed": return profile(request, deps);

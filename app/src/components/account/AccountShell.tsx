@@ -6,6 +6,7 @@ import { Icon, type IconName } from "@/components/site/Icon";
 import ui from "@/components/site/ui.module.css";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
+import { forgetAccountFavourites } from "@/lib/favourites";
 import { forgetChangeRequests } from "./sent-requests";
 import type { ShellTexts } from "./texts";
 import { ACCOUNT_EVENT, hasAccountHint, subscribeAccountHint } from "./useAccount";
@@ -100,8 +101,8 @@ export function AccountShell({
 
 /**
  * The round button (B `.avatar`) and its one choice, "Logi välja": the session ends on the server (POST
- * /api/konto/logout clears both cookies), and the student is taken to the home page in the page's language, where the
- * header says "Logi sisse" again. A failed request says so and stays. Esc, a tap elsewhere or the button again close it.
+ * /api/konto/logout clears both cookies), this tab forgets its account memory (the change requests sent, the copy of the
+ * favourites), and the student is taken to the home page in the page's language, where the header says "Logi sisse" again. A failed request says so and stays. Esc, a tap elsewhere or the button again close it.
  */
 function AccountMenu({ locale, t, readOnly }: { locale: Locale; t: ShellTexts; readOnly: boolean }) {
   const [open, setOpen] = useState(false);
@@ -144,6 +145,7 @@ function AccountMenu({ locale, t, readOnly }: { locale: Locale; t: ShellTexts; r
       return;
     }
     forgetChangeRequests();
+    forgetAccountFavourites(); // the course pages' ♡ shows this browser's own list again
     window.dispatchEvent(new Event(ACCOUNT_EVENT)); // the hint cookie is gone: the header says "Logi sisse"
     window.location.assign(href(locale, "/"));
   };

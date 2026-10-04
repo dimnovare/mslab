@@ -124,10 +124,14 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
   expect(await (await fromCache(request, "/ostukorv")).text()).not.toBe(cart);
 });
 
-// The client account's pages are static shells (phase 2a): one cached copy for every visitor, whoever is signed in. Task 8
-// adds its shells to this list. An e-course's shell (/konto/kursus/<slug>) is rendered on its first visit, then cached per slug.
+// The client account's pages are static shells (phase 2a): one cached copy for every visitor, whoever is signed in: Minu koolitused,
+// the login page, Lemmikud, Minu andmed (Task 8) and an e-course's shell (/konto/kursus/<slug>, rendered on its first visit, then
+// cached per slug).
 const ECOURSE_SHELL = `/konto/kursus/${SEED_ECOURSE_SLUG}`;
-const ACCOUNT_SHELLS = ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", ECOURSE_SHELL, `/ru${ECOURSE_SHELL}`];
+const ACCOUNT_SHELLS = [
+  "/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/ru/konto/lemmikud", "/konto/andmed", "/ru/konto/andmed",
+  ECOURSE_SHELL, `/ru${ECOURSE_SHELL}`,
+];
 
 test("the account's pages come from the cache with no Set-Cookie, for a signed-in browser too; /api/konto/me never does (phase 2a)", async ({ request }) => {
   const signedIn = { cookie: `__Host-mslab_client=${"e2e".repeat(15)}; mslab_in=1` };
@@ -173,7 +177,7 @@ const leak = (text: string): string => {
 };
 
 test("an account shell asked for with a query is answered with a 303 to the fragment, by every method, and the cached shell never holds the query", async ({ request }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000); // ten shells
   for (const path of ACCOUNT_SHELLS) {
     revalidateLocalPages(); // the first request that reaches a shell now renders it: it must not be one with a query
     for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {

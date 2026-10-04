@@ -1,5 +1,6 @@
-/* Grey stand-ins while an account page loads: the greeting (two bars) and a course card (the card's own box from
-   AccountCourseCard.module.css). One gentle pulse; none with reduced motion (globals.css). Tokens only. */
+/* Grey stand-ins while an account page loads: the greeting (two bars), a course card (the card's own box from
+   AccountCourseCard.module.css), a catalogue card's square photo (Lemmikud) and a form field (Minu andmed). One gentle pulse;
+   none with reduced motion (globals.css). Tokens only. */
 
 .bone {
   display: block;
@@ -55,4 +56,25 @@
   width: 160px;
   height: 49px;
   margin-top: 24px;
+}
+
+/* Lemmikud: the catalogue card's square photo (CourseCard .photo.square) */
+.photo {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 18px;
+}
+
+/* Minu andmed: a field's label and its box (B .field, LoginForm.module.css) */
+.label {
+  width: 90px;
+  height: 13px;
+  margin-top: 28px;
+}
+
+.field {
+  width: 100%;
+  height: 52px;
+  margin-top: 8px;
+  border-radius: 12px;
 }

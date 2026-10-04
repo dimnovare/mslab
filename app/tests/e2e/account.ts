@@ -289,3 +289,59 @@ export async function takeTerms(): Promise<() => Promise<void>> {
     throw e;
   }
 }
+
+// ---------- favourites and my details (account-favourites.spec.ts, account-details.spec.ts) ----------
+
+/** Published seed courses the favourites tests heart (a heart changes no public page). */
+export const SEED_FAVOURITES = { lami: { slug: "kulmude-lami", title: "Kulmude LAMI" }, botox: { slug: "lash-lift-botox", title: "Lash Lift BOTOX baaskoolitus" } };
+
+/** A client of its own (written straight to the LOCAL database) with no cards; its id. */
+export async function insertClient(email: string, opts: { name?: string; phone?: string; locale?: "et" | "ru" } = {}): Promise<number> {
+  const [row] = await localDb(
+    (sql) => sql<{ id: number }[]>`insert into clients (email, name, phone, locale) values (${email}, ${opts.name ?? ""}, ${opts.phone ?? ""}, ${opts.locale ?? "et"}) returning id`,
+  );
+  return row.id;
+}
+
+/** Hearts these courses for the client, the first one first (so the last one is the newest). */
+export async function addFavourites(clientId: number, slugs: string[]): Promise<void> {
+  await localDb(async (sql) => {
+    for (const [i, slug] of slugs.entries())
+      await sql`insert into client_favourites (client_id, course_id, created_at)
+                select ${clientId}, id, now() - ${`${slugs.length - i} minutes`}::interval from courses where slug = ${slug}`;
+  });
+}
+
+/** The client's favourites as stored, newest first. */
+export async function storedFavourites(clientId: number): Promise<string[]> {
+  const rows = await localDb(
+    (sql) => sql<{ slug: string }[]>`select c.slug from client_favourites f join courses c on c.id = f.course_id where f.client_id = ${clientId} order by f.created_at desc, c.slug`,
+  );
+  return rows.map((r) => r.slug);
+}
+
+/** The client row of an address (null when there is none). */
+export async function storedClient(email: string): Promise<{ id: number; name: string; phone: string; locale: string } | null> {
+  const [row] = await localDb((sql) => sql<{ id: number; name: string; phone: string; locale: string }[]>`select id, name, phone, locale from clients where email = ${email}`);
+  return row ?? null;
+}
+
+/** The newsletter row of an address (any case), or null. */
+export async function storedNewsletter(email: string): Promise<{ email: string; confirmed: boolean; clientId: number | null } | null> {
+  const [row] = await localDb(
+    (sql) => sql<{ email: string; confirmed: boolean; clientId: number | null }[]>`
+      select email, confirmed_at is not null as confirmed, client_id as "clientId" from subscribers where lower(email) = ${email.toLowerCase()}`,
+  );
+  return row ?? null;
+}
+
+/** Ends every open session of the client as another device's login would (the browser keeps its cookies: its next request is a 401). */
+export async function endClientSessions(clientId: number): Promise<void> {
+  await localDb((sql) => sql`update client_sessions set ended_at = now(), end_reason = 'replaced' where client_id = ${clientId} and ended_at is null`);
+}
+
+/** A registration as Maria keeps it: its client link and address (null when it is gone). */
+export async function storedRegistration(id: number): Promise<{ clientId: number | null; email: string; name: string } | null> {
+  const [row] = await localDb((sql) => sql<{ clientId: number | null; email: string; name: string }[]>`select client_id as "clientId", email, name from registrations where id = ${id}`);
+  return row ?? null;
+}

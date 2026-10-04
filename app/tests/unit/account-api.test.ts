@@ -51,7 +51,7 @@ describe("routing and the cross-site check", () => {
     const unknown = [
       req("/nothing"), req("/login"), req("/me", { method: "POST" }), req("/me", { method: "HEAD" }), req("/", { method: "HEAD" }),
       // known paths with the wrong method
-      post("/", {}), req("/lemmikud"), req("/lemmikud/merge"), req("/andmed"), post("/andmed", {}), req("/uudiskiri"), req("/muutmine"), req("/tingimused"), req("/kustuta"),
+      post("/", {}), req("/lemmikud/merge"), req("/andmed"), post("/andmed", {}), req("/uudiskiri"), req("/muutmine"), req("/tingimused"), req("/kustuta"),
       req("/kustuta", { method: "DELETE" }), req("/lemmikud", { method: "PATCH" }),
       // the e-course path: one slug only, GET only
       post("/kursus/x", {}), req("/kursus"), req("/kursus/"), req("/kursus/a/b"), req("/kursus/x", { method: "PATCH" }), req("/Kursus/x"), req("/lemmikud/"),
@@ -183,7 +183,7 @@ describe("bad input is a 400, never a 500, and never reaches the database", () =
 describe("the data endpoints without a session", () => {
   // Every one starts with requireClient: no cookie (or one that is not a token) is 401 before anything else, the body is not read and the database is not used.
   const endpoints: [string, string, unknown?][] = [
-    ["GET", ""], ["GET", "/"], ["GET", "/kursus/kulmude-lami"], ["GET", "/kursus/%E0%A4%A"],
+    ["GET", ""], ["GET", "/"], ["GET", "/kursus/kulmude-lami"], ["GET", "/kursus/%E0%A4%A"], ["GET", "/lemmikud"], ["GET", "/lemmikud?l=ru"],
     ["POST", "/lemmikud", { slug: "kulmude-lami", on: true }], ["POST", "/lemmikud/merge", { slugs: ["kulmude-lami"] }],
     ["PATCH", "/andmed", { name: "Kati", phone: "", locale: "et" }], ["POST", "/uudiskiri", { on: true }],
     ["POST", "/muutmine", { registrationId: 1, kind: "cancel", message: "" }], ["POST", "/tingimused", { slug: "veebikursus" }],

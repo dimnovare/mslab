@@ -7,25 +7,43 @@ import styles from "./FlashNotice.module.css";
 export type FlashMessage = { tone: "ok" | "warn"; title: string; text?: string };
 
 /**
- * A short notice after a redirect (the newsletter confirmation link → /?uudiskiri=kinnitatud), fixed at the bottom of
- * the screen until closed. The page is cached and shared by every visitor, so the server renders only the empty polite
- * status region; the browser reads the query parameter after hydration, puts the matching text into the region (so
- * screen readers announce it) and removes the parameter from the address, so a reload or a shared link does not
- * repeat it. `notices`: the text for each value of the parameter; any other value shows nothing.
+ * A short notice after a redirect, fixed at the bottom of the screen until closed: the newsletter confirmation link →
+ * /?uudiskiri=kinnitatud, and an account page that sends the visitor here with a fragment (/#konto-kustutatud after the
+ * account was deleted: lib/account-marks.ts). The page is cached and shared by every visitor, so the server renders only the
+ * empty polite status region; the browser reads the address after hydration, puts the matching text into the region (so
+ * screen readers announce it) and removes the parameter or the fragment from the address, so a reload or a shared link does
+ * not repeat it. `notices`: the text for each value of the query parameter `param`; `fragments`: the text for each whole
+ * fragment; anything else shows nothing and is left alone.
  */
-export function FlashNotice({ param, notices, closeLabel }: { param: string; notices: Record<string, FlashMessage>; closeLabel: string }) {
+export function FlashNotice({
+  param,
+  notices,
+  fragments = {},
+  closeLabel,
+}: {
+  param: string;
+  notices: Record<string, FlashMessage>;
+  fragments?: Record<string, FlashMessage>;
+  closeLabel: string;
+}) {
   const [shown, setShown] = useState<FlashMessage | null>(null);
 
   useEffect(() => {
     const url = new URL(window.location.href);
     const value = url.searchParams.get(param);
-    if (value === null) return;
-    url.searchParams.delete(param);
+    const mark = url.hash.slice(1);
+    let notice: FlashMessage | null;
+    if (value !== null) {
+      url.searchParams.delete(param);
+      notice = Object.hasOwn(notices, value) ? notices[value] : null;
+    } else if (mark && Object.hasOwn(fragments, mark)) {
+      url.hash = "";
+      notice = fragments[mark];
+    } else return;
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    const notice = Object.hasOwn(notices, value) ? notices[value] : null;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the address is only known in the browser, after hydration
     if (notice) setShown(notice);
-  }, [param, notices]);
+  }, [param, notices, fragments]);
 
   return (
     <div className={styles.region} role="status" data-flash-notice={shown?.tone ?? ""}>

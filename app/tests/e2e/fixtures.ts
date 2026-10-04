@@ -298,9 +298,11 @@ export async function removeClientRows(email?: string): Promise<number> {
     await sql`delete from requests where payload->>'email' like ${match}`;
     await sql`delete from courses where slug like ${courses}`; // on delete cascade: its sessions
     await sql`delete from client_login_tokens where email like ${match}`;
+    await sql`delete from subscribers where email like ${match}`; // "Saada mulle uudiskirja" in Minu andmed
     await sql`delete from clients where email like ${match}`; // on delete cascade: sessions, favourites, access, terms
     const [{ n }] = await sql<{ n: number }[]>`
       select (select count(*) from client_login_tokens where email like ${match})
+           + (select count(*) from subscribers where email like ${match})
            + (select count(*) from clients where email like ${match})
            + (select count(*) from registrations where email like ${match})
            + (select count(*) from requests where payload->>'email' like ${match})
