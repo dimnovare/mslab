@@ -279,7 +279,7 @@ export type RegistrationConfirmationInput = {
   paymentChoice: "full" | "half";
   /** What the registration is measured against (domain/registration.ts registrationPrice), cents; null when the course has no such price. */
   priceCents: number | null;
-  /** The admin's prepayment setting (client-data.ts parsePrepayment); without a receiver and an IBAN Maria sends an invoice. */
+  /** The admin's prepayment setting (domain/account-cards.ts parsePrepayment); without a receiver and an IBAN Maria sends an invoice. */
   prepayment: PrepaymentInfo | null;
   /** A live login for the address, when the visitor ticked "Loo mulle kohe konto" and one could be issued. */
   login: LoginCode | null;
