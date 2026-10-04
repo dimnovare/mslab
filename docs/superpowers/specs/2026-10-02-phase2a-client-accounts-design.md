@@ -65,7 +65,7 @@ Personal pages cannot come from the shared page cache, and rendering a page for 
 - The daily `/api/cron/sweep` deletes expired `client_login_tokens` (they hold the address in plain text), sessions ended or run out more than 30 days ago, and `mail_quota` rows older than 7 days.
 - New request type `change_request` (cancel or change date) with the registration id, shown in the admin inbox.
 
-The terms text is a new `pages` key `course_terms` (ET/RU, edited in the admin); `terms_version` = its last-updated timestamp.
+The terms text is a new `pages` key `course_terms` (ET/RU, edited in the admin); `terms_version` = the settings key `courseTermsVersion`, the time of the last save that changed the text ("1" until the first such save).
 
 ## 5. Login and sessions
 
