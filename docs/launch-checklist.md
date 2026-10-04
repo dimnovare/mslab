@@ -26,7 +26,7 @@ The switches below are **Vercel environment variables** (Project → Settings �
 ## 2. Stay inside the free plans (owner rules out paid plans)
 Vercel Hobby limits that matter here: **1 million function invocations a month**, **100 GB of transfer a month**, **4.5 MB request body** (the image upload limit in the app is 4 MB), **cron jobs once a day at most** (the one cron, `/api/cron/sweep`, is daily). Railway and Resend have their own quotas (Resend Free: 100 mails a day).
 - [ ] **Check Vercel's terms for the launch**: the Hobby plan is meant for personal, non-commercial use. A public business site that sells courses may fall outside it; read the current terms (and ask Vercel if unsure) before real visitors arrive. If Pro turns out to be required, that is a decision for Dim: the owner has ruled out paid plans so far.
-- [ ] After the first weeks of traffic read Vercel → Usage (invocations, transfer, ISR writes) against the limits. The home page prefetches about 30 internal links per first visit; pages served from the ISR cache are cheap, the admin and the API routes are invocations. A scanner asking for made-up slugs under `koolitused/`, `uudised/` or `ostukorv/` costs one invocation and one ISR write per address (each gets its own cached 404); other unknown paths are rewritten to `/leidmata` and do not.
+- [ ] After the first weeks of traffic read Vercel → Usage (invocations, transfer, ISR writes) against the limits. The home page prefetches about 30 internal links per first visit; pages served from the ISR cache are cheap, the admin and the API routes are invocations. A scanner asking for made-up slugs under `koolitused/`, `uudised/` or `ostukorv/` costs one invocation and one ISR write per address (each gets its own cached 404), and so does one under `konto/kursus/` (each gets its own cached account shell); other unknown paths are rewritten to `/leidmata` and do not.
 - [ ] Abuse/quota hardening: Turnstile (free) on public forms; a global daily cap on outgoing mail (Resend Free: 100/day); the rate limits now live in Postgres (`kv_entries`, Railway), so a flood of form posts costs invocations and database writes: a Vercel Firewall rule (or Attack Challenge Mode) for scanners.
 - [ ] Every Next.js upgrade (the version is pinned): run the unit tests, in particular the canary in `app/tests/unit/r2.test.ts` (it fails with a message when Next changes the fetch behaviour the R2 workaround depends on), and the production-build e2e (`E2E_PROD_BUILD=1`, which tests the freshness contract: the next public request after an admin save shows the change). That run depends on `app/tests/e2e/page-cache.cjs`, which wraps Next's own file cache through an internal module (`next/dist/…/file-system-cache.js`) and has no unit test of its own: if Next moves those internals the production e2e fails loudly, so fix the wrapper there. The R2 canary builds Next's fetch by hand and cannot see how a new version wires it, so also check once the upgrade is live: a missing `/media` key answers 404 within a second (`docs/deploy.md` section 3).
 
@@ -63,3 +63,23 @@ Vercel Hobby limits that matter here: **1 million function invocations a month**
 - [ ] `frame-ancestors 'none'` for admin if no same-origin framing is needed any more.
 - [ ] CI drift check: `drizzle-kit generate` must produce no diff.
 - [ ] R2 media deletion (uploads are never deleted today) — remember Vercel's CDN copies of `/media` images are immutable for a year (a deleted image can stay visible there until the copy expires).
+
+## 7. Phase 2a (client accounts)
+From the final review of phase 2a (04.10.2026); the merge-blocking items were fixed on the branch.
+- [ ] One counter for every mail the site sends (logins, confirmations, Maria's notifications, deletion and change-request mails, admin logins, newsletter confirmations): a hard cap of about 95 a day with a share per kind, and the 3 000 a month. Until then confirmations without a code stop at 30 a day (M1).
+- [ ] Check live whether a mail scanner's plain GET uses up the login link and code (and, one device only, ends the student's session): Gmail, Outlook.com and an Estonian ISP mailbox. If it does, the link opens a "Logi sisse" page that POSTs, like the newsletter interstitial in §5 (M2).
+- [ ] Watch Vercel Usage for made-up slugs under `konto/kursus/` (each renders and caches its own shell; §2's scanner note) (M3).
+- [ ] Decide Maria's reply address and set `replyTo` on the visitor mails; replies go to the unread sending address today (M5).
+- [ ] Native-speaker pass on the Russian account texts and mails: «лист ожидания» vs «списке ожидания», "оплатите предоплату" → "внесите предоплату", the request mail's "Запрос отправлен. Мария скоро ответит." (M6).
+- [ ] `admin-auth.spec` under `E2E_PROD_BUILD=1`: skip its devLink tests there, and delete leftover admin tokens in `global-setup` (they block the admin sign-in for 15 minutes) (M9).
+- [ ] `clients.email` lower-case enforced by the database (a CHECK or a unique `lower()` index), with §6's migration (triage row 4).
+- [ ] Partial unique index `client_sessions(client_id) where ended_at is null`: the one-device rule in the schema too (row 8).
+- [ ] `set local lock_timeout` at `lockAddress`, so a stuck lock cannot hold a request for its whole 30 s (row 10).
+- [ ] Accessibility: the account banner (`role=status`) is inserted with its text and may not be announced; add it to §5's list (row 29).
+- [ ] Probe live whether a cached 404 page keeps an unknown address's query (task-11 probe 5); if it does, strip queries on unknown addresses with a 303 (row 40).
+- [ ] Õpilased list turns into cards below about 1360 px, Maria's laptop width; check on her screen (row 45).
+- [ ] Admin copy: "(mustand) (avatud kuni …)" has two pairs of brackets in the grant select (row 49).
+- [ ] Maria fills "Ettemaksu juhised" in Seaded (until then every unpaid card and mail says "Maria saadab sulle arve …").
+- [ ] Maria saves the real "E-koolituse tingimused" text in Seaded before the first real "Ava ligipääs" (the seeded one ends "(Näidistekst — Maria täiendab.)").
+- [ ] Before renaming `middleware` to `proxy` (a Next 16 build warning): the 303 shell defence lives there; rerun the task-11 probes after any rename.
+- [ ] Watch the logs for `[account] login request rate limited`: the per-IP login limits (10 and 20 per 10 minutes) may bite students behind a mobile carrier's shared address (CGNAT).
