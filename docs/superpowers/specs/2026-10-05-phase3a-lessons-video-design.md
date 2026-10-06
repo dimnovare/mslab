@@ -21,6 +21,7 @@ Out of scope for 3a: test, practical work, certificate, free preview lesson, cap
 | Done rule | **Automatic at ~90 % watched**; text-only lessons have "Märgi tehtuks". Admins can open the next lesson for a stuck student. |
 | Protection | **Signed playback links + the student's e-mail as a faint moving watermark**, no download, mslab domains only, plus the existing one-device account. |
 | Existing videos | None yet (being recorded): no import. |
+| Video shape | Upright or mixed shapes allowed (Dim, 06.10.2026): each lesson stores its video's width and height from Bunny; the player and the watermark fit the video's own shape (upright videos capped in height). |
 
 ## 3. Data
 
