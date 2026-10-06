@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { courseModules, courses, lessons } from "@/db/schema";
 import { BunnyError, bunnyConfig, tusSignature, UPLOAD_TTL_SEC, type BunnyApi } from "@/server/bunny";
-import { refreshLessonVideo, startLessonVideo, SWEEP_BATCH, sweepStuckProcessing, sweepStuckUploads } from "@/server/lesson-videos";
+import { refreshLessonVideo, startLessonVideo, SWEEP_BATCH, sweepStuckProcessing, sweepStuckUploads, sweepStuckVideos } from "@/server/lesson-videos";
 import { makeTestDb } from "./helpers";
 
 const NOW = new Date("2026-10-06T10:00:00Z");
@@ -330,14 +330,40 @@ describe("sweepStuckUploads (the daily cron)", () => {
     expect(await row()).toMatchObject({ videoId: guid(9), videoStatus: "ready", durationSec: 125, videoWidth: 1080, videoHeight: 1920 });
   });
 
-  test("a Bunny failure leaves the row as it is, for the next day", async () => {
+  test("the lesson is reset first and the video deleted from Bunny after that write (not before)", async () => {
+    const b = fakeBunny();
+    const seen: string[] = [];
+    b.api.deleteVideo = vi.fn(async (id: string) => {
+      seen.push(`${id} deleted while the lesson was ${(await row()).videoStatus}`); // the row as the delete finds it
+    });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300, videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(1);
+    expect(seen).toEqual([`${guid(9)} deleted while the lesson was ready`]); // already back on the replaced video
+  });
+
+  test("a write that lost (the webhook settled the upload while Bunny was asked) deletes nothing from Bunny: the ready video is never destroyed", async () => {
+    const b = fakeBunny();
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300, videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    b.api.getVideo = vi.fn(async () => {
+      // Bunny still says created, but meanwhile the webhook's read stored the finished upload and deleted the replaced video
+      await db.update(lessons).set({ videoStatus: "ready", durationSec: 125, replacedVideoId: null, videoStartedAt: null }).where(eq(lessons.id, lessonId));
+      return { status: 0, length: 0, width: 0, height: 0 };
+    });
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
+    expect(b.api.deleteVideo).not.toHaveBeenCalled();
+    expect(await row()).toMatchObject({ videoId: guid(9), videoStatus: "ready", durationSec: 125, replacedVideoId: null });
+  });
+
+  test("a delete that fails at Bunny after the write is logged without ids: the lesson stays reset, and the sweep goes on", async () => {
     const b = fakeBunny();
     b.api.deleteVideo = vi.fn(async () => {
       throw new Error("down");
     });
     await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
-    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
-    expect((await row()).videoStatus).toBe("uploading");
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(1);
+    expect(await row()).toMatchObject({ videoId: null, videoStatus: "none", videoStartedAt: null });
+    expect(String(vi.mocked(console.error).mock.calls)).toContain("[lesson] video not deleted");
+    expect(String(vi.mocked(console.error).mock.calls)).not.toContain(guid(9));
   });
 
   test("an upload that did finish, but nobody asked Bunny about it since (editor closed at once, no webhook), is settled, not deleted", async () => {
@@ -525,5 +551,58 @@ describe("sweepStuckProcessing (the daily cron, second part)", () => {
     expect(await sweepStuckProcessing(db, b.api, NOW)).toEqual({ ready: 0, failed: 0 });
     expect(await row()).toMatchObject({ videoId: guid(10), videoStatus: "uploading", replacedVideoId: guid(1) });
     expect(b.deleted).toEqual([]);
+  });
+});
+
+describe("sweepStuckVideos (both sweeps in one budget)", () => {
+  const OLD = new Date(NOW.getTime() - 25 * 3600_000);
+  const more = async (n: number, values: Partial<typeof lessons.$inferInsert>) => {
+    const [{ moduleId }] = await db.select({ moduleId: lessons.moduleId }).from(lessons).where(eq(lessons.id, lessonId));
+    for (let i = 0; i < n; i++) await db.insert(lessons).values({ moduleId, position: 100 + i + (values.videoStatus === "processing" ? 1000 : 0), title: { et: `L${i}` }, videoId: guid((values.videoStatus === "processing" ? 800 : 700) + i), videoStartedAt: OLD, ...values });
+  };
+
+  test("uploads and processing are swept, with the counts of both", async () => {
+    const b = fakeBunny({ [guid(9)]: { status: 4, length: 60 } });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "processing", videoStartedAt: OLD }).where(eq(lessons.id, lessonId));
+    await more(2, { videoStatus: "uploading" });
+    expect(await sweepStuckVideos(db, b.api, NOW)).toEqual({ uploads: 2, processingReady: 1, processingFailed: 0, left: 0, outOfTime: false });
+  });
+
+  test("the rows over the bound are counted as left, for each kind", async () => {
+    const b = fakeBunny();
+    await more(SWEEP_BATCH + 2, { videoStatus: "uploading" });
+    await more(SWEEP_BATCH + 3, { videoStatus: "processing" });
+    expect(await sweepStuckVideos(db, b.api, NOW)).toEqual({ uploads: SWEEP_BATCH, processingReady: 0, processingFailed: SWEEP_BATCH, left: 2 + 3, outOfTime: false });
+    expect(await sweepStuckVideos(db, b.api, NOW)).toMatchObject({ uploads: 2, processingFailed: 3, left: 0 });
+  });
+
+  test("past the deadline no new row is started: nothing is asked of Bunny, every row is left", async () => {
+    const b = fakeBunny();
+    await more(2, { videoStatus: "uploading" });
+    await more(1, { videoStatus: "processing" });
+    expect(await sweepStuckVideos(db, b.api, NOW, Date.now() - 1)).toEqual({ uploads: 0, processingReady: 0, processingFailed: 0, left: 3, outOfTime: true });
+    expect(b.api.getVideo).not.toHaveBeenCalled();
+    expect(b.api.deleteVideo).not.toHaveBeenCalled();
+  });
+
+  test("a row that has begun is finished, and the deadline stops the next one", async () => {
+    const b = fakeBunny();
+    await more(3, { videoStatus: "uploading" });
+    const until = Date.now() + 60_000;
+    let calls = 0;
+    const get = b.api.getVideo;
+    b.api.getVideo = vi.fn(async (id: string) => {
+      if (++calls === 1) vi.setSystemTime(until + 1); // the first row's read takes the budget
+      return get(id);
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now());
+      const result = await sweepStuckVideos(db, b.api, NOW, until);
+      expect(result).toMatchObject({ uploads: 1, left: 2, outOfTime: true });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(b.api.getVideo).toHaveBeenCalledTimes(1);
   });
 });

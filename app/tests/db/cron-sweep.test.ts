@@ -21,7 +21,7 @@ import { GET } from "@/app/api/cron/sweep/route";
 
 const SECRET = "cron-secret-for-tests-0123456789";
 const call = (authorization?: string) => GET(new Request("https://mslab.example/api/cron/sweep", { headers: authorization ? { authorization } : {} }));
-const NO_VIDEOS = { uploads: 0, processingReady: 0, processingFailed: 0 };
+const NO_VIDEOS = { uploads: 0, processingReady: 0, processingFailed: 0, videosLeft: 0 };
 const keys = async (db: Db) => (await db.select().from(kvEntries)).map((r) => r.key).sort();
 
 /** Three rows: one expired an hour ago, one expiring in an hour, one without expiry. */
@@ -44,6 +44,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("GET /api/cron/sweep", () => {
@@ -191,14 +192,14 @@ describe("GET /api/cron/sweep: the lesson videos", () => {
     const f = fakeBunny({ [A]: { status: 0, length: 0 } }); // Bunny has it as created: nothing ever arrived
     const lesson = await course();
     const l = await lesson({ videoId: A, videoStatus: "uploading", videoStartedAt: ago(25) });
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 1, processingReady: 0, processingFailed: 0 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 1, processingReady: 0, processingFailed: 0, videosLeft: 0 });
     expect(f.calls.map((c) => [c.method, c.url])).toEqual([
       ["GET", `https://video.bunnycdn.com/library/12345/videos/${A}`],
       ["DELETE", `https://video.bunnycdn.com/library/12345/videos/${A}`],
     ]);
     expect(await row(l.id)).toMatchObject({ videoId: null, videoStatus: "none", videoStartedAt: null });
     expect(info).toHaveBeenCalledWith(
-      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 1 stuck video uploads deleted, 0 stuck processing videos found ready, 0 marked failed",
+      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 1 stuck video uploads deleted, 0 stuck processing videos found ready, 0 marked failed, 0 video rows left for the next run",
     );
   });
 
@@ -211,7 +212,7 @@ describe("GET /api/cron/sweep: the lesson videos", () => {
     const hung = await lesson({ videoId: B, videoStatus: "processing", videoStartedAt: ago(26), replacedVideoId: KEPT, durationSec: 300 });
     const young = await lesson({ videoId: C, videoStatus: "processing", videoStartedAt: ago(5) });
     const playing = await lesson({ videoId: "11111111-2222-4333-8444-5555555555ff", videoStatus: "ready", durationSec: 90 });
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 0, processingReady: 1, processingFailed: 1 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 0, processingReady: 1, processingFailed: 1, videosLeft: 0 });
     expect(f.calls.map((c) => [c.method, c.url.split("/").pop()])).toEqual([
       ["GET", A],
       ["DELETE", REPLACED], // the new video is ready: the old one is deleted
@@ -222,10 +223,54 @@ describe("GET /api/cron/sweep: the lesson videos", () => {
     expect(await row(young.id)).toMatchObject({ videoStatus: "processing" });
     expect(await row(playing.id)).toMatchObject({ videoStatus: "ready", durationSec: 90 });
     expect(info).toHaveBeenCalledWith(
-      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 0 stuck video uploads deleted, 1 stuck processing videos found ready, 1 marked failed",
+      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 0 stuck video uploads deleted, 1 stuck processing videos found ready, 1 marked failed, 0 video rows left for the next run",
     );
     // the next day there is nothing more
     expect(await (await call(`Bearer ${SECRET}`)).json()).toMatchObject({ uploads: 0, processingReady: 0, processingFailed: 0 });
+  });
+
+  test("the rows over the 20-row bound are counted in the answer and the log line (counts only), and swept the next day", async () => {
+    bunnyOn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = fakeBunny({}); // Bunny knows none of them: each upload is given up
+    const lesson = await course();
+    for (let i = 0; i < 22; i++) await lesson({ videoId: `11111111-2222-4333-8444-${String(i).padStart(12, "0")}`, videoStatus: "uploading", videoStartedAt: ago(30) });
+    const answer = await (await call(`Bearer ${SECRET}`)).json();
+    expect(answer).toMatchObject({ ok: true, uploads: 20, videosLeft: 2 });
+    expect(info).toHaveBeenCalledWith(
+      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 20 stuck video uploads deleted, 0 stuck processing videos found ready, 0 marked failed, 2 video rows left for the next run",
+    );
+    expect(info).toHaveBeenCalledTimes(1); // not out of time: no second line
+    expect(f.calls.filter((c) => c.method === "DELETE")).toHaveLength(20);
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toMatchObject({ uploads: 2, videosLeft: 0 });
+  });
+
+  test("after about 45 s of the run no new video row is started: a row begun is finished, the rest is left, logged and answered", async () => {
+    bunnyOn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.useFakeTimers({ toFake: ["Date"] }); // the run's own clock: every Bunny call takes 20 s of it
+    const f = stubFetch((url, init) => {
+      vi.setSystemTime(Date.now() + 20_000);
+      return init?.method === "DELETE" ? Response.json({ success: true }) : Response.json({ guid: url.split("/").pop(), status: 0, length: 0 });
+    });
+    const lesson = await course();
+    const rows = [];
+    for (const id of [A, B, C]) rows.push(await lesson({ videoId: id, videoStatus: "uploading", videoStartedAt: ago(30) }));
+    const processing = await lesson({ videoId: REPLACED, videoStatus: "processing", videoStartedAt: ago(30) });
+    const started = Date.now();
+    const answer = await (await call(`Bearer ${SECRET}`)).json();
+    // row 1 runs from 0 to 40 s, row 2 starts at 40 s (before 45) and ends at 80 s, row 3 and the processing row would start after 45 s
+    expect(Date.now() - started).toBe(80_000);
+    expect(answer).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 2, processingReady: 0, processingFailed: 0, videosLeft: 2 });
+    expect(f.calls.map((c) => [c.method, c.url.split("/").pop()])).toEqual([["GET", A], ["DELETE", A], ["GET", B], ["DELETE", B]]);
+    expect(await row(rows[0].id)).toMatchObject({ videoStatus: "none" });
+    expect(await row(rows[1].id)).toMatchObject({ videoStatus: "none" });
+    expect(await row(rows[2].id)).toMatchObject({ videoId: C, videoStatus: "uploading" });
+    expect(await row(processing.id)).toMatchObject({ videoStatus: "processing" });
+    expect(info.mock.calls.map(String)).toEqual([
+      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 2 stuck video uploads deleted, 0 stuck processing videos found ready, 0 marked failed, 2 video rows left for the next run",
+      "[cron] sweep: no new video row started after 45 s",
+    ]);
   });
 
   test("without Bunny's settings the video rows are not touched and Bunny is never called", async () => {

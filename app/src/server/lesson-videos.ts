@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, isNull, lt, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lt, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { courseModules, courses, lessons, type VideoStatus } from "@/db/schema";
 import { abandonUpload, settleVideo, startUpload, type VideoFields } from "@/domain/lessons";
@@ -134,64 +134,90 @@ export async function refreshLessonVideo(db: Db, api: BunnyApi, target: { lesson
 }
 
 /**
- * The daily cron's part (spec 7): uploads still "uploading" more than 24 h after they began. Bunny is asked first: an upload that
- * did arrive (nobody asked since: the editor was closed at once and no webhook came) is settled like any status read. One that never
- * arrived is deleted from Bunny, and the lesson gets its replaced video back, or has none again. A Bunny failure leaves the row for
- * the next day. At most SWEEP_BATCH rows a run. Answers the number of lessons reset.
+ * What bounds a sweep run: at most `limit` rows (oldest first), and no new row is started after `until` (epoch ms; the cron gives
+ * itself about 45 s). A row that was started is finished.
  */
-export async function sweepStuckUploads(db: Db, api: BunnyApi, now: Date): Promise<number> {
-  const stuck = await db
-    .select({ id: lessons.id, ...VIDEO_COLUMNS })
-    .from(lessons)
-    .where(and(eq(lessons.videoStatus, "uploading"), lt(lessons.videoStartedAt, new Date(now.getTime() - STUCK_MS))))
-    .orderBy(asc(lessons.id))
-    .limit(SWEEP_BATCH);
+export type SweepBudget = { limit?: number; until?: number };
+
+/** What a pass over one kind of stuck rows leaves: rows that matched but were not looked at (over the bound, or out of time). */
+type PassEnd = { left: number; stopped: boolean };
+
+async function countWhere(db: Db, where: SQL): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(lessons).where(where);
+  return row.n;
+}
+
+/** One pass over the uploads still "uploading" for a day; see sweepStuckUploads. */
+async function uploadsPass(db: Db, api: BunnyApi, now: Date, { limit = SWEEP_BATCH, until = Infinity }: SweepBudget): Promise<PassEnd & { swept: number }> {
+  const where = and(eq(lessons.videoStatus, "uploading"), lt(lessons.videoStartedAt, new Date(now.getTime() - STUCK_MS)))!;
+  const stuck = await db.select({ id: lessons.id, ...VIDEO_COLUMNS }).from(lessons).where(where).orderBy(asc(lessons.id)).limit(limit);
+  const matching = await countWhere(db, where);
   let swept = 0;
+  let looked = 0;
+  let stopped = false;
   for (const row of stuck) {
+    if (Date.now() > until) {
+      stopped = true;
+      break;
+    }
+    looked += 1;
     try {
       const bunny = row.videoId ? await api.getVideo(row.videoId) : null;
       if (row.videoId && bunny && lessonVideoStatus(bunny.status) !== "uploading") {
         await storeAnswer(db, api, row, row.videoId, bunny);
         continue;
       }
+      // the write first (compare-and-set: still this upload, still "uploading"), the Bunny delete after the winning write only: a
+      // write that lost (the webhook settled the video meanwhile) must never have its video deleted
       const { next, obsolete } = abandonUpload(row);
-      for (const id of obsolete) await api.deleteVideo(id);
       const reset = await db
         .update(lessons)
         .set({ ...next, videoStartedAt: null })
-        .where(unchangedSince(row.id, row)) // still this upload, still "uploading"
+        .where(unchangedSince(row.id, row))
         .returning();
-      swept += reset.length;
+      if (!reset.length) continue;
+      swept += 1;
+      await deleteBunnyVideos(api, obsolete); // never throws: a delete that fails is logged, and the video stays at Bunny
     } catch (e) {
       logFailure("[video] stuck upload not swept", e);
     }
   }
-  return swept;
+  return { swept, left: Math.max(0, matching - looked), stopped };
 }
 
-/** What the sweep of stuck processing did: videos found ready (or in Bunny's own error state, counted under failed), and videos given up. */
+/**
+ * The daily cron's part (spec 7): uploads still "uploading" more than 24 h after they began. Bunny is asked first: an upload that
+ * did arrive (nobody asked since: the editor was closed at once and no webhook came) is settled like any status read. One that never
+ * arrived is given up: the lesson gets its replaced video back, or has none again (compare-and-set), and only after that write is
+ * the video deleted from Bunny (a delete that fails is logged and leaves the video at Bunny). A Bunny failure on the status read
+ * leaves the row for the next day. At most SWEEP_BATCH rows a run. Answers the number of lessons reset.
+ */
+export async function sweepStuckUploads(db: Db, api: BunnyApi, now: Date, limit: number = SWEEP_BATCH): Promise<number> {
+  return (await uploadsPass(db, api, now, { limit })).swept;
+}
+
+/** What the sweep of stuck processing did: videos found ready, and videos failed (Bunny's own error state, or given up after a day). */
 export type ProcessingSweep = { ready: number; failed: number };
 
-/**
- * The daily cron's second part: videos still "processing" more than 24 h after their upload began (spec 7). Nobody asked Bunny
- * since (the editor was closed, no webhook came), or Bunny's encoding hangs; either way the editor has no replace button while a
- * video is processing, so without this the lesson would wait for ever. Bunny is asked first and its answer is stored like any
- * status read (settleVideo, compare-and-set): ready is kept (its replaced video is deleted, as on any ready), Bunny's own error or
- * a video it does not know is failed. A video Bunny still has as processing after a day (or one it calls ready but without a
- * usable length) is given up as failed: the editor then offers "Lae uuesti üles", and the retry deletes the stale video from Bunny.
- * A failed upload never deletes a replaced video: it keeps playing. A ready video is never touched (only "processing" rows are read,
- * and a write only goes through while the row is as it was read). A Bunny failure leaves the row for the next day. At most `limit`
- * rows a run, the oldest first. The counts are of the rows THIS run changed.
- */
-export async function sweepStuckProcessing(db: Db, api: BunnyApi, now: Date, limit: number = SWEEP_BATCH): Promise<ProcessingSweep> {
+/** One pass over the videos still "processing" for a day; see sweepStuckProcessing. */
+async function processingPass(db: Db, api: BunnyApi, now: Date, { limit = SWEEP_BATCH, until = Infinity }: SweepBudget): Promise<PassEnd & ProcessingSweep> {
+  const where = and(eq(lessons.videoStatus, "processing"), isNotNull(lessons.videoId), lt(lessons.videoStartedAt, new Date(now.getTime() - STUCK_MS)))!;
   const stuck = await db
     .select({ id: lessons.id, ...VIDEO_COLUMNS })
     .from(lessons)
-    .where(and(eq(lessons.videoStatus, "processing"), isNotNull(lessons.videoId), lt(lessons.videoStartedAt, new Date(now.getTime() - STUCK_MS))))
+    .where(where)
     .orderBy(asc(lessons.videoStartedAt), asc(lessons.id))
     .limit(limit);
-  const swept: ProcessingSweep = { ready: 0, failed: 0 };
+  const matching = await countWhere(db, where);
+  const swept = { ready: 0, failed: 0 };
+  let looked = 0;
+  let stopped = false;
   for (const row of stuck) {
+    if (Date.now() > until) {
+      stopped = true;
+      break;
+    }
+    looked += 1;
     if (!row.videoId) continue; // (never: the query asks for a video id)
     try {
       let answer = await applyAnswer(db, api, row, row.videoId, await api.getVideo(row.videoId));
@@ -203,5 +229,35 @@ export async function sweepStuckProcessing(db: Db, api: BunnyApi, now: Date, lim
       logFailure("[video] stuck processing video not swept", e);
     }
   }
-  return swept;
+  return { ...swept, left: Math.max(0, matching - looked), stopped };
+}
+
+/**
+ * The daily cron's second part: videos still "processing" more than 24 h after their upload began (spec 7). Nobody asked Bunny
+ * since (the editor was closed, no webhook came), or Bunny's encoding hangs; either way the editor has no replace button while a
+ * video is processing, so without this the lesson would wait for ever. Bunny is asked first and its answer is stored like any
+ * status read (settleVideo, compare-and-set, the replaced video deleted only after a winning write that made the new one ready):
+ * ready is kept, Bunny's own error or a video it does not know is failed. A video Bunny still has as processing after a day (or
+ * one it calls ready but without a usable length) is given up as failed: the editor then offers "Lae uuesti üles", and the retry
+ * deletes the stale video from Bunny. A failed upload never deletes a replaced video: it keeps playing. A ready video is never
+ * touched (only "processing" rows are read, and a write only goes through while the row is as it was read). A Bunny failure leaves
+ * the row for the next day. At most `limit` rows a run, the oldest first. The counts are of the rows THIS run changed.
+ */
+export async function sweepStuckProcessing(db: Db, api: BunnyApi, now: Date, limit: number = SWEEP_BATCH): Promise<ProcessingSweep> {
+  const { ready, failed } = await processingPass(db, api, now, { limit });
+  return { ready, failed };
+}
+
+/** The cron's answer about the videos: what was done, and what is left for the next run (counts only). */
+export type VideoSweep = { uploads: number; processingReady: number; processingFailed: number; left: number; outOfTime: boolean };
+
+/**
+ * Both sweeps, one after the other (uploads, then processing), within one budget: each takes at most SWEEP_BATCH rows, and no new
+ * row is started after `until` (epoch ms). `left`: stuck rows this run did not look at, over the bound or out of time (rows a
+ * Bunny failure kept stuck are not counted: they were looked at); `outOfTime`: the deadline stopped a pass.
+ */
+export async function sweepStuckVideos(db: Db, api: BunnyApi, now: Date, until: number = Infinity): Promise<VideoSweep> {
+  const uploads = await uploadsPass(db, api, now, { until });
+  const processing = await processingPass(db, api, now, { until });
+  return { uploads: uploads.swept, processingReady: processing.ready, processingFailed: processing.failed, left: uploads.left + processing.left, outOfTime: uploads.stopped || processing.stopped };
 }

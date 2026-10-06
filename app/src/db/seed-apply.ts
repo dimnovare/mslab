@@ -1,7 +1,7 @@
 import { eq, getTableName, isNotNull, or, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import type { Db } from "./client";
-import { campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessonProgress, lessons, pages, posts, practicePackages, registrations, settings } from "./schema";
+import { campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessonFiles, lessonProgress, lessons, pages, posts, practicePackages, registrations, settings } from "./schema";
 import { campaignSeed, courseSeeds, faqSeeds, heroSeeds, pageSeeds, postSeeds, practiceSeeds, settingSeeds, trainerWorks } from "./seed-data";
 
 // Applies the prototype content. Plain drizzle: no Cloudflare bindings, so it runs from the CLI (seed.ts) and from tests.
@@ -16,13 +16,24 @@ export type SeedOptions = {
   reset?: boolean;
   /**
    * Allow `reset` even when registrations exist (they are deleted together with the courses they belong to). It never allows a
-   * reset over students' lesson progress, course access or lesson videos (see `studentData`).
+   * reset over students' lesson progress, course access, lesson videos or lesson files (see `studentData`).
    */
   force?: boolean;
 };
 
 const CONTENT_TABLES = ["courses", "course_images", "course_modules", "course_sessions", "registrations", "practice_packages", "hero_slides", "faq", "posts", "pages", "gallery_items", "campaign", "settings"];
 const TRAINER_WORKS = "trainer_works";
+
+/**
+ * A reset the seed refuses. The CLI prints `text` as it is: counts and advice, never a row's content. (Every other error is a
+ * database error, and prints only its code: safeDbError.)
+ */
+export class SeedRefusal extends Error {
+  constructor(readonly text: string) {
+    super(text);
+    this.name = "SeedRefusal";
+  }
+}
 
 async function total(db: Db, table: PgTable): Promise<number> {
   const [row] = await db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(table);
@@ -31,28 +42,41 @@ async function total(db: Db, table: PgTable): Promise<number> {
 
 /**
  * What the reset's TRUNCATE ... CASCADE would take with the courses and that no flag may take: the students' lesson progress and
- * course access, and the lessons' Bunny videos (the lesson rows go, so the video ids are lost and nobody can delete the videos from
- * Bunny any more: they would stay there, billed). `videos` counts lessons (a replacement in progress is one more Bunny video).
+ * course access, and the lessons' Bunny videos and R2 files (the lesson rows go, so the video ids and file keys are lost and nobody
+ * can delete the videos from Bunny or the files from R2 any more: they would stay there, billed). `videos` counts lessons (a
+ * replacement in progress is one more Bunny video).
  */
-async function studentData(db: Db): Promise<{ progress: number; access: number; videos: number }> {
+type StudentData = { progress: number; access: number; videos: number; files: number };
+async function studentData(db: Db): Promise<StudentData> {
   const [videos] = await db
     .select({ n: sql<number>`count(*)`.mapWith(Number) })
     .from(lessons)
     .where(or(isNotNull(lessons.videoId), isNotNull(lessons.replacedVideoId)));
-  return { progress: await total(db, lessonProgress), access: await total(db, courseAccess), videos: videos.n };
+  return { progress: await total(db, lessonProgress), access: await total(db, courseAccess), videos: videos.n, files: await total(db, lessonFiles) };
+}
+
+/** The refusal's text: the counts, then what to do for each kind that is there. Counts only. */
+export function studentDataRefusal({ progress, access, videos, files }: StudentData): string {
+  const found = [
+    progress && `${progress} lesson progress row(s)`,
+    access && `${access} course access row(s)`,
+    videos && `${videos} lesson video(s)`,
+    files && `${files} lesson file(s)`,
+  ].filter(Boolean);
+  const todo = [
+    (videos || files) && "Lesson videos and files would stay on Bunny and in R2 with nobody able to delete them: remove them in the admin first (Kustuta õppetund).",
+    (progress || access) && "Progress and access mean this database has real students: do not reset it, use a fresh database for a clean seed.",
+  ].filter(Boolean);
+  return `Refusing to reset: ${found.join(", ")} would be deleted with their courses. --force does not override this. ${todo.join(" ")}`;
 }
 
 export async function applySeed(db: Db, opts: SeedOptions = {}): Promise<Record<string, number>> {
   if (opts.reset) {
-    const { progress, access, videos } = await studentData(db);
-    if (progress + access + videos > 0) {
-      const found = [progress && `${progress} lesson progress row(s)`, access && `${access} course access row(s)`, videos && `${videos} lesson video(s)`].filter(Boolean);
-      const orphans = videos ? " (the videos would stay on Bunny, with nobody able to delete them)" : "";
-      throw new Error(`Refusing to reset: ${found.join(", ")} would be deleted with their courses${orphans}. --force does not override this: reset only a database without students' data, and remove the lesson videos in the admin first.`);
-    }
+    const data = await studentData(db);
+    if (data.progress + data.access + data.videos + data.files > 0) throw new SeedRefusal(studentDataRefusal(data));
     const existing = await total(db, registrations);
     if (existing > 0 && !opts.force) {
-      throw new Error(`Refusing to reset: ${existing} registration(s) would be deleted with their courses. Pass --force to do it anyway.`);
+      throw new SeedRefusal(`Refusing to reset: ${existing} registration(s) would be deleted with their courses. Pass --force to do it anyway.`);
     }
     await db.execute(sql.raw(`TRUNCATE TABLE ${CONTENT_TABLES.join(", ")} RESTART IDENTITY CASCADE`));
   }
