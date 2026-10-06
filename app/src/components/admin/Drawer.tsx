@@ -1,32 +1,79 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { AdminIcon } from "./AdminIcon";
+import ui from "./ui.module.css";
 import styles from "./Drawer.module.css";
+
+/** The question a drawer asks before it closes over unsaved changes ("Salvestamata muudatused lähevad kaotsi. Sulgen?"). */
+export type CloseQuestion = { question: string; yes: string; no: string };
+
+/** What a part of the drawer reports while it has changes that are not saved: where "Ei" puts the focus back. */
+type Unsaved = { focusBack: () => void };
+const UnsavedContext = createContext<((part: string, unsaved: Unsaved | null) => void) | null>(null);
+
+/**
+ * A part of the drawer with its own "Salvesta" reports here while its fields differ from the stored values; the drawer then
+ * asks before it closes (only when it was given `confirmClose`). `focusBack`: where "Ei" puts the focus (the changed field).
+ */
+export function useUnsavedInDrawer(dirty: boolean, focusBack: () => void): void {
+  const report = useContext(UnsavedContext);
+  const part = useId();
+  const back = useRef(focusBack);
+  useEffect(() => {
+    back.current = focusBack;
+  });
+  useEffect(() => {
+    report?.(part, dirty ? { focusBack: () => back.current() } : null);
+  }, [report, part, dirty]);
+  useEffect(() => () => report?.(part, null), [report, part]);
+}
 
 /**
  * Detail panel on the right (full width on a phone), opened by a link with `?id=` so every detail has its own address.
  * A modal dialog: focus stays inside, the page behind does not scroll. Esc, the close button and a click on the
  * backdrop close it; then the address goes back to `closeHref` (the list without the id) and the focus to
  * `returnFocus` (the row's link). The dialog is closed first, so the page behind is no longer inert when it is focused.
+ *
+ * `confirmClose`: while a part of the drawer has unsaved changes (useUnsavedInDrawer), Esc, the close button and the backdrop
+ * ask first, in place ("Jah, sulge" / "Ei"), as the admin's other confirming steps do. `fallbackFocus`: when the drawer goes
+ * away by a navigation (its item deleted) and `returnFocus` is gone with it, the focus goes to this element instead of <body>.
  */
 export function Drawer({
   label,
   closeHref,
   closeLabel,
   returnFocus,
+  fallbackFocus,
+  confirmClose,
   children,
 }: {
   label: string;
   closeHref: string;
   closeLabel: string;
   returnFocus?: string;
+  fallbackFocus?: string;
+  confirmClose?: CloseQuestion;
   children: React.ReactNode;
 }) {
+  const uid = useId();
   const ref = useRef<HTMLDialogElement>(null);
   const overflow = useRef("");
   const router = useRouter();
+  const unsaved = useRef(new Map<string, Unsaved>());
+  /** "Jah, sulge" was pressed: the next close goes through. */
+  const confirmed = useRef(false);
+  const [asking, setAsking] = useState(false);
+  const question = useRef<HTMLParagraphElement>(null);
+  const focus = useRef({ returnFocus, fallbackFocus });
+  useEffect(() => {
+    focus.current = { returnFocus, fallbackFocus };
+  });
+  const [report] = useState(() => (part: string, state: Unsaved | null) => {
+    if (state) unsaved.current.set(part, state);
+    else unsaved.current.delete(part);
+  });
 
   useEffect(() => {
     const dialog = ref.current;
@@ -36,8 +83,26 @@ export function Drawer({
     root.style.overflow = "hidden";
     return () => {
       root.style.overflow = overflow.current;
+      // gone by a navigation (not by its own close): the focus goes back to the page instead of being lost
+      const { returnFocus: back, fallbackFocus: fallback } = focus.current;
+      if (!fallback) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        ((back && document.getElementById(back)) || document.getElementById(fallback))?.focus();
+      });
     };
   }, []);
+
+  useEffect(() => {
+    if (asking) question.current?.focus();
+  }, [asking]);
+
+  /** Unsaved changes to ask about before closing (only with `confirmClose`). */
+  const mustAsk = () => Boolean(confirmClose) && !confirmed.current && unsaved.current.size > 0;
+  const requestClose = () => {
+    if (mustAsk()) setAsking(true);
+    else ref.current?.close();
+  };
 
   return (
     <dialog
@@ -45,21 +110,66 @@ export function Drawer({
       className={styles.drawer}
       aria-label={label}
       data-drawer=""
+      onCancel={(e) => {
+        // Esc: asked first while something is not saved
+        if (!mustAsk()) return;
+        e.preventDefault();
+        setAsking(true);
+      }}
       onClose={() => {
+        // a close the browser forced past the question (a second Esc at once): open again and ask
+        if (mustAsk()) {
+          ref.current?.showModal();
+          setAsking(true);
+          return;
+        }
         document.documentElement.style.overflow = overflow.current;
         router.replace(closeHref, { scroll: false });
         if (returnFocus) document.getElementById(returnFocus)?.focus();
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) ref.current?.close();
+        if (e.target === e.currentTarget) requestClose();
       }}
     >
-      <div className={styles.body}>
-        <button type="button" className={styles.close} aria-label={closeLabel} onClick={() => ref.current?.close()}>
-          <AdminIcon name="close" size={20} />
-        </button>
-        {children}
-      </div>
+      <UnsavedContext.Provider value={report}>
+        <div className={styles.body}>
+          <button type="button" className={styles.close} aria-label={closeLabel} onClick={requestClose}>
+            <AdminIcon name="close" size={20} />
+          </button>
+          {asking && confirmClose && (
+            <div className={styles.ask} role="group" aria-labelledby={`${uid}-ask`} data-drawer-confirm="">
+              <p id={`${uid}-ask`} ref={question} tabIndex={-1} className={`${ui.notice} ${styles.question}`}>
+                {confirmClose.question}
+              </p>
+              <div className={styles.answers}>
+                <button
+                  type="button"
+                  className={`${ui.btn} ${ui.danger} ${ui.smallBtn}`}
+                  onClick={() => {
+                    confirmed.current = true;
+                    setAsking(false);
+                    ref.current?.close();
+                  }}
+                >
+                  {confirmClose.yes}
+                </button>
+                <button
+                  type="button"
+                  className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`}
+                  onClick={() => {
+                    setAsking(false);
+                    const first = unsaved.current.values().next().value;
+                    requestAnimationFrame(() => first?.focusBack());
+                  }}
+                >
+                  {confirmClose.no}
+                </button>
+              </div>
+            </div>
+          )}
+          {children}
+        </div>
+      </UnsavedContext.Provider>
     </dialog>
   );
 }

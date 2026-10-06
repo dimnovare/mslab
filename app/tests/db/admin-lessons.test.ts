@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import type { Db } from "@/db/client";
 import { clients, courses, lessonFiles, lessonProgress, lessons } from "@/db/schema";
 import {
-  addLessonForm, addModuleForm, deleteLessonFileForm, deleteLessonForm, deleteModuleForm, listCourseLessons, moveLessonForm, moveModuleForm, renameModuleForm,
+  addLessonForm, addModuleForm, courseOfLesson, deleteLessonFileForm, deleteLessonForm, deleteModuleForm, listCourseLessons, moveLessonForm, moveModuleForm, renameModuleForm,
   saveLessonForm, setLessonHiddenForm, setLessonKindForm,
 } from "@/server/admin-lessons";
 import type { EditResult } from "@/server/edit-check";
@@ -73,6 +73,16 @@ describe("lessons", () => {
     expect((await db.select().from(lessons).where(eq(lessons.id, w.l1)))[0].body).toBeNull();
     expect(await saveLessonForm(db, form({ id: w.l1, titleEt: "", bodyEt: "x".repeat(5001) }))).toEqual({ ok: false, error: "invalid", fields: { title: "required", body: "tooLong" } });
     expect(await addLessonForm(db, form({ moduleId: 999999, titleEt: "X" }))).toEqual({ ok: false, error: "notFound" });
+  });
+
+  test("only an e-course has lessons: a module of a contact course is notFound; a lesson's own course is read through its module", async () => {
+    const w = await twoModules();
+    expect(await courseOfLesson(db, w.l3)).toBe(courseId);
+    expect(await courseOfLesson(db, 999999)).toBeNull();
+    const [{ id: contact }] = await db.insert(courses).values({ slug: "kontakt", type: "contact", level: "basic", title: { et: "Kontakt" }, summary: { et: "" }, body: { et: "" } }).returning();
+    const programme = idOf(await addModuleForm(db, form({ courseId: contact, titleEt: "Programmi punkt" }))); // a contact course's programme: fine
+    expect(await addLessonForm(db, form({ moduleId: programme, titleEt: "X" }))).toEqual({ ok: false, error: "notFound" });
+    expect(await db.select().from(lessons).where(eq(lessons.moduleId, programme))).toHaveLength(0);
   });
 
   test("↑ ↓ within a module and across modules; the very first stays", async () => {

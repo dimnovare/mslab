@@ -43,6 +43,8 @@ export function LessonFiles({ lessonId, files }: { lessonId: number; files: Admi
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  /** One upload at a time: a pick while one is on its way is ignored (the picker does not even open). */
+  const uploading = useRef(false);
   const [removed, removeAction, removing] = useActionState<EditResult | null, FormData>(deleteLessonFile, null);
   const removeError = lessonError(removed);
 
@@ -53,6 +55,7 @@ export function LessonFiles({ lessonId, files }: { lessonId: number; files: Admi
 
   const upload = async (file: File) => {
     if (file.size > MAX_BYTES) return setStatus({ kind: "error", text: t.files.size });
+    uploading.current = true;
     setStatus({ kind: "busy" });
     const body = new FormData();
     body.set("lessonId", String(lessonId));
@@ -63,6 +66,7 @@ export function LessonFiles({ lessonId, files }: { lessonId: number; files: Admi
     } catch {
       text = t.files.server;
     }
+    uploading.current = false;
     if (text) return setStatus({ kind: "error", text });
     setStatus({ kind: "done" });
     router.refresh();
@@ -115,14 +119,21 @@ export function LessonFiles({ lessonId, files }: { lessonId: number; files: Admi
           type="file"
           accept={ACCEPT}
           aria-describedby={`${uid}-hint ${uid}-status`}
+          aria-disabled={busy || undefined}
+          onClick={(e) => {
+            // while a file is uploading, "Lisa fail" does nothing: no second picker
+            if (uploading.current) e.preventDefault();
+          }}
           onChange={(e) => {
             const file = e.target.files?.[0];
             // reset at once, so the same file can be picked again
             e.target.value = "";
-            if (file && !busy) void upload(file);
+            // a pick that still arrives during an upload (a file dropped on the field, a test) is ignored too
+            if (!file || uploading.current) return;
+            void upload(file);
           }}
         />
-        <label htmlFor={`${uid}-file`} className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`}>
+        <label htmlFor={`${uid}-file`} className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`} aria-disabled={busy || undefined} data-file-add="">
           {t.files.add}
         </label>
         <p id={`${uid}-hint`} className={`${ui.muted} ${ed.uploadHint}`}>

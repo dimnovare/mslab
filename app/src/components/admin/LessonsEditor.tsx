@@ -307,7 +307,7 @@ function LessonList({
                 </span>
                 <span className={styles.tags}>
                   {l.hidden && (
-                    <span className={`${ui.tag} ${ui.warn}`} data-lesson-hidden="">
+                    <span className={`${ui.tag} ${ui.muted}`} data-lesson-hidden="">
                       {t.hiddenTag}
                     </span>
                   )}
@@ -392,9 +392,9 @@ function AddLessonForm({ moduleId, courseId }: { moduleId: number; courseId: num
       <input type="hidden" name="moduleId" value={moduleId} />
       <input type="hidden" name="courseId" value={courseId} />
       <div className={`${ui.field} ${styles.addField}`}>
-        <label htmlFor={`${uid}-name`}>{t.newLesson}</label>
+        <label htmlFor={`add-lesson-${moduleId}`}>{t.newLesson}</label>
         <input
-          id={`${uid}-name`}
+          id={`add-lesson-${moduleId}`}
           name="titleEt"
           className={ui.input}
           type="text"

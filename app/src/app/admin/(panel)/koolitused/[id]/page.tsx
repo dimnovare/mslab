@@ -8,7 +8,7 @@ import { adminTitle } from "@/components/admin/sections";
 import { Shell } from "@/components/admin/Shell";
 import ui from "@/components/admin/ui.module.css";
 import { getDb } from "@/db/client";
-import { courseUsage, getCourseForEdit, listAllCourses } from "@/db/queries/admin";
+import { courseUsage, getCourseForEdit, listAllCourses, typeLocked } from "@/db/queries/admin";
 import { getCourseBySlug } from "@/db/queries/public";
 import { draftFromCourse, newCourseDraft } from "@/domain/course-editor";
 import { adminEt } from "@/i18n/dict/admin";
@@ -87,7 +87,7 @@ export default async function CourseEditPage({ params, searchParams }: Props) {
         next={next ? { startsAt: next.startsAt.toISOString(), city: next.city } : null}
         publicHref={course?.published ? `/koolitused/${course.slug}` : null}
         created={sp.loodud === "1"}
-        typeLocked={Boolean(usage && (usage.sessions > 0 || usage.registrations > 0))}
+        typeLocked={typeLocked(usage)}
       />
       <LessonsEditor courseId={course?.id ?? null} online={course?.type === "e_learning"} modules={course ? modules : []} />
       {course && lesson && (
@@ -97,6 +97,9 @@ export default async function CourseEditPage({ params, searchParams }: Props) {
           closeHref={`/admin/koolitused/${course.id}`}
           closeLabel={adminEt.lessons.drawer.close}
           returnFocus={`edit-lesson-${lesson.id}`}
+          // deleted from the drawer: its row is gone, the focus goes to its module's "Uue õppetunni nimi"
+          fallbackFocus={`add-lesson-${lesson.moduleId}`}
+          confirmClose={{ question: adminEt.lessons.drawer.closeQuestion, yes: adminEt.lessons.drawer.closeYes, no: adminEt.lessons.drawer.closeNo }}
         >
           <LessonDrawer key={lesson.id} courseId={course.id} lesson={lesson} bunnyReady={bunnyConfig() !== null} />
         </Drawer>

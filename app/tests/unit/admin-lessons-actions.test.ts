@@ -5,7 +5,8 @@ import { fakeMediaStore } from "../fakes";
 
 // server/actions/admin-lessons.ts around its form handlers (tests/db/admin-lessons.test.ts): which changes revalidate the public
 // course pages (module titles show there; lessons do not), where the actions go next, and that the work outside the database
-// (Bunny videos, stored files) never turns a stored change into a failure: a Bunny error or time-out is logged without ids.
+// (Bunny videos, stored files) runs after the answer (next/server after(): scheduled here, run by runScheduled()) and never turns
+// a stored change into a failure: a Bunny error or time-out is logged without ids.
 
 class Redirect extends Error {
   constructor(readonly url: string) {
@@ -16,8 +17,10 @@ class Redirect extends Error {
 const mocks = vi.hoisted(() => ({
   names: [
     "addModuleForm", "renameModuleForm", "moveModuleForm", "deleteModuleForm", "addLessonForm", "saveLessonForm", "moveLessonForm", "setLessonHiddenForm",
-    "setLessonKindForm", "deleteLessonForm", "deleteLessonFileForm",
+    "setLessonKindForm", "deleteLessonForm", "deleteLessonFileForm", "courseOfLesson",
   ],
+  /** The callbacks given to after(): they run once the answer has gone. */
+  scheduled: [] as (() => unknown)[],
   forms: {} as Record<string, ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>>,
   config: null as unknown,
   config_throws: false,
@@ -30,6 +33,7 @@ vi.mock("@/server/admin-lessons", () => Object.fromEntries(mocks.names.map((name
 vi.mock("@/server/auth", () => ({ adminAction: (fn: (admin: { email: string }, ...args: unknown[]) => unknown) => (...args: unknown[]) => fn({ email: "admin@example.test" }, ...args) }));
 vi.mock("@/db/client", () => ({ getDb: () => "the-db" }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
+vi.mock("next/server", () => ({ after: (task: () => unknown) => void mocks.scheduled.push(task) }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new Redirect(url);
@@ -54,6 +58,10 @@ const form = (fields: Record<string, string | number>) => {
   return fd;
 };
 const OK: EditResult = { ok: true, id: 7 };
+/** Runs what the actions left for after the answer (as Next.js does once the response has gone). */
+async function runScheduled(): Promise<void> {
+  for (const task of mocks.scheduled.splice(0)) await task();
+}
 /** The redirect an action ends with (null: it answers instead). */
 async function redirectOf(run: Promise<unknown>): Promise<string | null> {
   try {
@@ -68,6 +76,8 @@ async function redirectOf(run: Promise<unknown>): Promise<string | null> {
 let log: MockInstance<typeof console.error>;
 beforeEach(() => {
   for (const name of mocks.names) mocks.forms[name] = vi.fn(async () => OK);
+  mocks.forms.courseOfLesson = vi.fn(async () => 5);
+  mocks.scheduled.length = 0;
   mocks.config = { libraryId: "lib" };
   mocks.config_throws = false;
   mocks.deleteVideo.mockReset();
@@ -115,26 +125,47 @@ describe("what a change revalidates", () => {
 });
 
 describe("where an action goes next", () => {
-  test("Lisa õppetund opens the new lesson in the drawer; a refused one stays; a course id that is not a row id goes nowhere", async () => {
+  test("Lisa õppetund opens the new lesson in the drawer of its own course, whatever course the form names; a refused one stays", async () => {
     mocks.forms.addLessonForm.mockResolvedValue({ ok: true, id: 9, created: true });
     expect(await redirectOf(actions.addLesson(null, form({ moduleId: 3, courseId: 5, titleEt: "Tere" })))).toBe("/admin/koolitused/5?oppetund=9");
-    expect(await redirectOf(actions.addLesson(null, form({ moduleId: 3, courseId: "05", titleEt: "Tere" })))).toBeNull();
+    expect(await redirectOf(actions.addLesson(null, form({ moduleId: 3, courseId: 8, titleEt: "Tere" })))).toBe("/admin/koolitused/5?oppetund=9");
+    expect(await redirectOf(actions.addLesson(null, form({ moduleId: 3, titleEt: "Tere" })))).toBe("/admin/koolitused/5?oppetund=9");
+    expect(mocks.forms.courseOfLesson.mock.calls).toEqual([["the-db", 9], ["the-db", 9], ["the-db", 9]]);
     mocks.forms.addLessonForm.mockResolvedValue({ ok: false, error: "invalid", fields: { title: "required" } });
     expect(await redirectOf(actions.addLesson(null, form({ moduleId: 3, courseId: 5 })))).toBeNull();
+    expect(mocks.forms.courseOfLesson).toHaveBeenCalledTimes(3); // not asked for a lesson that was not added
   });
 
-  test("Kustuta õppetund: its videos leave Bunny and its files the store, then back to the course (the drawer closes)", async () => {
+  test("Kustuta õppetund: back to the lesson's own course (read before the row goes); its videos and files go after the answer", async () => {
     const store = fakeMediaStore({ "lessons/a.pdf": { bytes: [1] } });
     mocks.store = store;
     mocks.forms.deleteLessonForm.mockResolvedValue({ result: { ok: true, id: 7, deleted: true }, cleanup: { videoIds: ["v1", "v2"], fileKeys: ["lessons/a.pdf"] } });
-    expect(await redirectOf(actions.deleteLesson(null, form({ id: 7, courseId: 5 })))).toBe("/admin/koolitused/5");
+    expect(await redirectOf(actions.deleteLesson(null, form({ id: 7, courseId: 8 })))).toBe("/admin/koolitused/5");
+    expect(mocks.forms.courseOfLesson).toHaveBeenCalledExactlyOnceWith("the-db", 7);
+    expect(mocks.forms.courseOfLesson.mock.invocationCallOrder[0]).toBeLessThan(mocks.forms.deleteLessonForm.mock.invocationCallOrder[0]);
+    // the answer has gone: nothing has been asked of Bunny or the store yet, one task is scheduled
+    expect(mocks.deleteVideo).not.toHaveBeenCalled();
+    expect(store.deleted).toEqual([]);
+    expect(mocks.scheduled).toHaveLength(1);
+    await runScheduled();
     expect(mocks.deleteVideo.mock.calls).toEqual([["v1"], ["v2"]]);
     expect(store.deleted).toEqual(["lessons/a.pdf"]);
+  });
+
+  test("the answer does not wait for Bunny: a delete that never answers still lets the action finish", async () => {
+    mocks.deleteVideo.mockImplementation(() => new Promise(() => {}));
+    mocks.forms.deleteLessonForm.mockResolvedValue({ result: { ok: true, id: 7, deleted: true }, cleanup: { videoIds: ["v1"], fileKeys: [] } });
+    expect(await redirectOf(actions.deleteLesson(null, form({ id: 7 })))).toBe("/admin/koolitused/5");
+    mocks.forms.setLessonKindForm.mockResolvedValue({ result: OK, obsolete: ["v2"] });
+    expect(await actions.setLessonKind(null, form({ id: 7, kind: "text" }))).toEqual(OK);
+    expect(mocks.scheduled).toHaveLength(2);
+    expect(mocks.deleteVideo).not.toHaveBeenCalled();
   });
 
   test("a lesson with progress is not deleted: nothing leaves Bunny or the store, and the drawer stays with the answer", async () => {
     mocks.forms.deleteLessonForm.mockResolvedValue({ result: { ok: false, error: "inUse" }, cleanup: { videoIds: [], fileKeys: [] } });
     expect(await actions.deleteLesson(null, form({ id: 7, courseId: 5 }))).toEqual({ ok: false, error: "inUse" });
+    expect(mocks.scheduled).toHaveLength(0);
     expect(mocks.deleteVideo).not.toHaveBeenCalled();
   });
 
@@ -143,6 +174,8 @@ describe("where an action goes next", () => {
     mocks.store = store;
     mocks.forms.deleteLessonFileForm.mockResolvedValue({ result: { ok: true, id: 4, deleted: true }, key: "lessons/b.pdf" });
     expect(await actions.deleteLessonFile(null, form({ id: 4 }))).toEqual({ ok: true, id: 4, deleted: true });
+    expect(store.deleted).toEqual([]);
+    await runScheduled();
     expect(store.deleted).toEqual(["lessons/b.pdf"]);
   });
 });
@@ -155,6 +188,8 @@ describe("Bunny never fails a stored change", () => {
       if (id === "bad-video") throw new BunnyError("delete", 500);
     });
     expect(await actions.setLessonKind(null, form({ id: 7, kind: "text" }))).toEqual(OK);
+    expect(mocks.deleteVideo).not.toHaveBeenCalled(); // after the answer
+    await runScheduled();
     expect(mocks.deleteVideo.mock.calls).toEqual([["slow-video"], ["bad-video"], ["good-video"]]);
     expect(log.mock.calls.map((c) => c[0])).toEqual([expect.stringMatching(/^\[lesson\] video not deleted: TimeoutError\b/), "[lesson] video not deleted: BunnyError (status 500)"]);
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/slow-video|bad-video|good-video/);
@@ -164,11 +199,13 @@ describe("Bunny never fails a stored change", () => {
     mocks.forms.setLessonKindForm.mockResolvedValue({ result: OK, obsolete: ["v1"] });
     mocks.config = null;
     expect(await actions.setLessonKind(null, form({ id: 7, kind: "text" }))).toEqual(OK);
+    await runScheduled();
     expect(mocks.deleteVideo).not.toHaveBeenCalled();
     mocks.config_throws = true;
     expect(await actions.setLessonKind(null, form({ id: 7, kind: "text" }))).toEqual(OK);
     mocks.forms.deleteLessonForm.mockResolvedValue({ result: { ok: true, id: 7, deleted: true }, cleanup: { videoIds: ["v1"], fileKeys: [] } });
     expect(await redirectOf(actions.deleteLesson(null, form({ id: 7, courseId: 5 })))).toBe("/admin/koolitused/5");
+    await expect(runScheduled()).resolves.toBeUndefined();
     expect(log.mock.calls.map((c) => c[0])).toEqual(["[admin] lesson kind cleanup failed: Error", "[admin] lesson delete cleanup failed: Error"]);
   });
 
@@ -178,6 +215,7 @@ describe("Bunny never fails a stored change", () => {
     mocks.deleteVideo.mockRejectedValue(new DOMException("Bunny did not answer in time", "TimeoutError"));
     mocks.forms.deleteLessonForm.mockResolvedValue({ result: { ok: true, id: 7, deleted: true }, cleanup: { videoIds: ["v1"], fileKeys: ["lessons/c.pdf"] } });
     expect(await redirectOf(actions.deleteLesson(null, form({ id: 7, courseId: 5 })))).toBe("/admin/koolitused/5");
+    await runScheduled();
     expect(store.deleted).toEqual(["lessons/c.pdf"]);
   });
 });

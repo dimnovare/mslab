@@ -505,6 +505,8 @@ export const adminEt = {
     invalid: "Kontrolli märgitud välju.",
     stale: "Seda koolitust salvestati vahepeal mujal (nt teises aknas). Laadi leht uuesti, et näha kehtivat seisu; sinu siinsed muudatused jäävad siis salvestamata.",
     reload: "Laadi uuesti",
+    // an e-course with lessons or students keeps its type (errors.typeLocked says it for a contact course)
+    typeLockedOnline: "Sellel e-koolitusel on õppetunde või õpilasi, seega õppevormi muuta ei saa. Vajadusel loo uus koolitus.",
     errors: fieldErrors,
   },
 
@@ -550,6 +552,10 @@ export const adminEt = {
       body: "Lühike tekst",
       bodyHint: "Näidatakse õppetunni lehel. Tühi rida alustab uut lõiku.",
       saved: "Salvestatud.",
+      // closing (Esc, "Sulge", a click beside the drawer) while the name or the text is not saved: asked first
+      closeQuestion: "Salvestamata muudatused lähevad kaotsi. Sulgen?",
+      closeYes: "Jah, sulge",
+      closeNo: "Ei",
       // "Õppetunni liik": a video lesson is done at 90 % of its video; a text lesson with "Märgi tehtuks"
       kind: {
         label: "Õppetunni liik",

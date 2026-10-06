@@ -260,18 +260,18 @@ export function CourseEditor({ initial, others, next, publicHref, created, typeL
                     name={`${uid}-type`}
                     value={ty}
                     checked={draft.type === ty}
-                    // a course with sessions or registrations keeps its type (the server refuses the change too)
+                    // a course with sessions, registrations, lessons or access keeps its type (the server refuses the change too)
                     disabled={typeLocked && base.type !== ty}
                     onChange={() => set("type", ty)}
                   />
                 ))}
               </div>
               <p id={`${uid}-type-hint`} className={ui.hint} data-type-hint="">
-                {typeLocked ? t.errors.typeLocked : f.typeHint}
+                {typeLocked ? (base.type === "e_learning" ? t.typeLockedOnline : t.errors.typeLocked) : f.typeHint}
               </p>
               {err("type") && (
                 <p id={`${uid}-type-error`} className={ui.error}>
-                  {err("type")}
+                  {fields.type === "typeLocked" && base.type === "e_learning" ? t.typeLockedOnline : err("type")}
                 </p>
               )}
             </fieldset>

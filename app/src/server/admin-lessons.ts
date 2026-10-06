@@ -141,7 +141,7 @@ export async function deleteModuleForm(db: Db, fd: FormData): Promise<EditResult
   });
 }
 
-/** "Lisa õppetund": fields moduleId, titleEt, titleRu. Last in its module; no video, no text, visible. */
+/** "Lisa õppetund": fields moduleId, titleEt, titleRu. Last in its module; no video, no text, visible. Only an e-course has lessons: a module of a contact course is notFound. */
 export async function addLessonForm(db: Db, fd: FormData): Promise<EditResult> {
   const moduleId = idOf(field(fd, "moduleId"));
   if (moduleId === null) return { ok: false, error: "invalid" };
@@ -149,12 +149,27 @@ export async function addLessonForm(db: Db, fd: FormData): Promise<EditResult> {
   const title = c.text("title", i18nOf(fd, "title"), LESSON_LIMITS.title, { required: true });
   if (!c.ok || !title) return invalid(c.errors);
   return db.transaction(async (tx): Promise<EditResult> => {
-    const [mod] = await tx.select({ id: courseModules.id }).from(courseModules).where(eq(courseModules.id, moduleId)).for("update");
-    if (!mod) return { ok: false, error: "notFound" };
+    const [mod] = await tx
+      .select({ id: courseModules.id, type: courses.type })
+      .from(courseModules)
+      .innerJoin(courses, eq(courseModules.courseId, courses.id))
+      .where(eq(courseModules.id, moduleId))
+      .for("update", { of: courseModules });
+    if (!mod || mod.type !== "e_learning") return { ok: false, error: "notFound" };
     const [{ last }] = await tx.select({ last: sql<number | null>`max(${lessons.position})` }).from(lessons).where(eq(lessons.moduleId, moduleId));
     const [row] = await tx.insert(lessons).values({ moduleId, position: (last ?? 0) + 1, title }).returning();
     return { ok: true, id: row.id, created: true };
   });
+}
+
+/** The course a lesson belongs to (through its module), or null when there is no such lesson: where the admin goes back to. */
+export async function courseOfLesson(db: Db, lessonId: number): Promise<number | null> {
+  const [row] = await db
+    .select({ courseId: courseModules.courseId })
+    .from(lessons)
+    .innerJoin(courseModules, eq(lessons.moduleId, courseModules.id))
+    .where(eq(lessons.id, lessonId));
+  return row?.courseId ?? null;
 }
 
 /** The lesson drawer's "Salvesta": fields id, titleEt, titleRu, bodyEt, bodyRu (the short text; blank is none). */

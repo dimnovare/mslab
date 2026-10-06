@@ -8,6 +8,7 @@ import { deleteLesson, saveLesson, setLessonHidden, setLessonKind } from "@/serv
 import type { AdminLesson } from "@/server/admin-lessons";
 import type { EditResult } from "@/server/edit-check";
 import { Choice } from "./Choice";
+import { useUnsavedInDrawer } from "./Drawer";
 import { I18nInput } from "./I18nInput";
 import { LessonFiles } from "./LessonFiles";
 import { lessonError } from "./LessonsEditor";
@@ -77,10 +78,24 @@ function LessonText({ lesson }: { lesson: AdminLesson }) {
     if (state && !state.ok && state.fields) form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
   }, [state]);
   const dirty = !sameText(draft, textOf(lesson));
+  // while the name or the text is not saved, the drawer asks before it closes; "Ei" comes back to the changed field
+  useUnsavedInDrawer(dirty, () => {
+    const changed = sameText({ ...draft, body: textOf(lesson).body }, textOf(lesson)) ? "lesson-body" : "lesson-title";
+    form.current?.querySelector<HTMLElement>(`[data-i18n="${changed}"]`)?.focus();
+  });
   const fields = state && !state.ok ? (state.fields ?? {}) : {};
   const fieldText = (name: "title" | "body") => (fields[name] ? (fields[name] === "tooLong" ? t.errors.tooLong : t.errors.required) : undefined);
   const error = state && !state.ok ? (state.fields ? null : lessonError(state)) : null;
-  const message = pending ? adminEt.common.saving : (error ?? (state?.ok && !dirty ? t.drawer.saved : ""));
+  // as the course editor's save bar: saving, refused, not saved yet ("Salvestamata muudatused"), saved
+  const status: { text: string; tone: string } = pending
+    ? { text: adminEt.common.saving, tone: ui.hint }
+    : error
+      ? { text: error, tone: ui.error }
+      : dirty
+        ? { text: adminEt.courseEditor.dirty, tone: ui.hint }
+        : state?.ok
+          ? { text: t.drawer.saved, tone: ui.success }
+          : { text: "", tone: ui.hint };
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -106,8 +121,8 @@ function LessonText({ lesson }: { lesson: AdminLesson }) {
         <button type="submit" className={`${ui.btn} ${ui.smallBtn}`} aria-disabled={pending || undefined} data-save-lesson="">
           {pending ? adminEt.common.saving : t.save}
         </button>
-        <p id={`${uid}-msg`} role="status" className={pending ? ui.hint : error ? ui.error : ui.success} data-lesson-status="">
-          {message}
+        <p id={`${uid}-msg`} role="status" className={status.tone} data-lesson-status="">
+          {status.text}
         </p>
       </div>
     </form>
@@ -129,7 +144,14 @@ function LessonKindField({ lesson }: { lesson: AdminLesson }) {
     setConfirming(false);
   }
   const [state, action, pending] = useActionState<EditResult | null, FormData>(setLessonKind, null);
+  // a refused switch (notFound, server): the choice goes back to the stored kind
+  const [answer, setAnswer] = useState(state);
+  if (answer !== state) {
+    setAnswer(state);
+    if (state && !state.ok) setChoice(lesson.kind);
+  }
   const question = useRef<HTMLParagraphElement>(null);
+  const status = useRef<HTMLParagraphElement>(null);
   const hasVideo = lesson.videoStatus !== "none" || lesson.replacing;
   const error = lessonError(state);
 
@@ -154,7 +176,7 @@ function LessonKindField({ lesson }: { lesson: AdminLesson }) {
 
   return (
     <section className={cd.section} data-lesson-kind="">
-      <fieldset className={`${ed.fieldset} ${styles.kind}`} aria-describedby={error ? `${uid}-msg` : undefined} aria-busy={pending || undefined}>
+      <fieldset className={`${ed.fieldset} ${styles.kind}`} aria-describedby={`${uid}-msg`} aria-busy={pending || undefined}>
         <legend className={ui.legend}>{t.drawer.kind.label}</legend>
         <div className={ed.choices}>
           {(["video", "text"] as const).map((k) => (
@@ -182,6 +204,8 @@ function LessonKindField({ lesson }: { lesson: AdminLesson }) {
             if (pending) return;
             setConfirming(false);
             send(action, { id: lesson.id, kind: "text" });
+            // the question is gone with its buttons: the focus goes to the line that says how the switch went
+            requestAnimationFrame(() => status.current?.focus());
           }}
           data-kind-confirm=""
         >
@@ -198,11 +222,9 @@ function LessonKindField({ lesson }: { lesson: AdminLesson }) {
           </div>
         </form>
       )}
-      {error && (
-        <p id={`${uid}-msg`} role="alert" className={ui.error}>
-          {error}
-        </p>
-      )}
+      <p id={`${uid}-msg`} ref={status} tabIndex={-1} role="status" className={`${error ? ui.error : pending ? ui.hint : ui.success} ${styles.status}`} data-kind-status="">
+        {pending ? adminEt.common.saving : (error ?? (state?.ok ? t.drawer.saved : ""))}
+      </p>
     </section>
   );
 }

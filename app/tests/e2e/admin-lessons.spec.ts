@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { clientEmail } from "./account";
@@ -11,14 +11,29 @@ import { submitsForms, test, expect } from "./test";
 // opens in the drawer), its short text saved, "Õppetunni liik" switched (with the in-place question when it has a video), a file
 // added and removed, the lesson hidden and shown, moved and deleted; and the contact course's "Programm". The admin signs in as Dim
 // through the devLink (dev server only, admin-login.ts). The test's own unpublished e-course (slug e2e-konto-les-<project>) is
-// removed after each test with everything under it (removeClientRows: modules, lessons and their files cascade).
+// removed after each test with everything under it (removeClientRows: modules, lessons and their files cascade), and the files it
+// uploaded leave .media-local then too (also after a failed run).
 
 const created: CreatedRows = { tokens: new Set(), sessions: new Set() };
 const made = new Set<string>();
+/** Store keys this worker's tests uploaded (removed from .media-local after each test, whatever happened). */
+const storedKeys = new Set<string>();
 
 test.beforeEach(() => submitsForms());
 
+/** A stored lesson file in the dev server's folder (server/media-local.ts: <key> and <key>.type). */
+const localPath = (key: string) => join(process.cwd(), ".media-local", ...key.split("/"));
+
 test.afterEach(async () => {
+  for (const email of made) {
+    // the files of the test's course: the rows say which (a file whose row is gone was recorded when it was uploaded)
+    const rows = await db((sql) => sql<{ key: string }[]>`
+      select f.r2_key as key from lesson_files f join lessons l on l.id = f.lesson_id join course_modules m on m.id = l.module_id join courses c on c.id = m.course_id
+      where c.slug = ${accountCourseSlug(email)}`);
+    for (const { key } of rows) storedKeys.add(key);
+  }
+  for (const key of storedKeys) for (const path of [localPath(key), `${localPath(key)}.type`]) rmSync(path, { force: true });
+  storedKeys.clear();
   for (const email of made) await removeClientRows(email);
   made.clear();
   await removeAdminRows(created).catch(() => {});
@@ -131,9 +146,31 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
   const row = editor.locator(`[data-lesson="${first}"]`);
   await expect(row).toContainText("2.1"); // the second module's first lesson
   await expect(row).toContainText("Tere tulemast");
+  // an e-course with a lesson keeps its type: the course editor's Kontaktõpe is locked and says why
+  await expect(page.locator("[data-type-switch]").getByRole("radio", { name: "Kontaktõpe" })).toBeDisabled();
+  await expect(page.locator("[data-type-hint]")).toHaveText("Sellel e-koolitusel on õppetunde või õpilasi, seega õppevormi muuta ei saa. Vajadusel loo uus koolitus.");
 
-  // 4. the short text
-  await drawer.getByRole("textbox", { name: "Lühike tekst" }).fill("Vaata video lõpuni.\n\nSiis jätka.");
+  // 4. the short text. Not saved yet: the status line says so, and Esc, "Sulge" and a click beside the drawer ask first
+  const body = drawer.getByRole("textbox", { name: "Lühike tekst" });
+  await body.fill("Vaata video lõpuni.\n\nSiis jätka.");
+  await expect(drawer.locator("[data-lesson-status]")).toHaveText("Salvestamata muudatused");
+  const ask = drawer.locator("[data-drawer-confirm]");
+  const closers: [string, () => Promise<void>][] = [
+    ["Esc", () => page.keyboard.press("Escape")],
+    ["Sulge", () => drawer.getByRole("button", { name: "Sulge" }).click()],
+  ];
+  if (!isMobile) closers.push(["the backdrop", () => page.mouse.click(20, 450)]); // a phone's drawer is the whole screen
+  for (const [how, close] of closers) {
+    await close();
+    await expect(ask, how).toContainText("Salvestamata muudatused lähevad kaotsi. Sulgen?");
+    await expect(ask.locator("p"), how).toBeFocused();
+    await expect(drawer).toBeVisible();
+    expect(page.url(), how).toMatch(new RegExp(`\\?oppetund=${first}$`));
+    await ask.getByRole("button", { name: "Ei" }).click();
+    await expect(ask).toHaveCount(0);
+    await expect(body, how).toBeFocused();
+    await expect(body).toHaveValue("Vaata video lõpuni.\n\nSiis jätka.");
+  }
   await drawer.locator("[data-save-lesson]").click();
   await expect(drawer.locator("[data-lesson-status]")).toHaveText("Salvestatud.");
   expect((await lessonRow(first)).body).toEqual({ et: "Vaata video lõpuni.\n\nSiis jätka." });
@@ -164,6 +201,8 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
   await kind.getByRole("radio", { name: "Tekst" }).check();
   await confirm.getByRole("button", { name: "Jah, jätka" }).click();
   await expect(row.locator("[data-lesson-kind='text']")).toHaveText("Tekst");
+  await expect(kind.locator("[data-kind-status]")).toBeFocused(); // the question is gone: the line that says how it went
+  await expect(kind.locator("[data-kind-status]")).toHaveText("Salvestatud.");
   expect(await lessonRow(first)).toMatchObject({ kind: "text", videoId: null, videoStatus: "none" });
   await kind.getByRole("radio", { name: "Video" }).check();
   await expect(row.locator("[data-lesson-video]")).toHaveText("Video puudub");
@@ -171,25 +210,47 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
   // 5. a file: added (a lessons/ key in the store), then removed (row and stored file gone)
   const files = drawer.locator("[data-lesson-files]");
   await expect(files).toContainText("Faile pole.");
-  await files.locator("input[type=file]").setInputFiles({ name: "Juhend.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%e2e\n") });
+  // while it uploads (held back here), "Lisa fail" is aria-disabled, the line says so, and a second pick is ignored
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let posts = 0;
+  await page.route("**/api/admin/lesson-file", async (route) => {
+    posts++;
+    await held;
+    await route.continue();
+  });
+  const picker = files.locator("input[type=file]");
+  await picker.setInputFiles({ name: "Juhend.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%e2e\n") });
+  await expect(files.locator("[data-file-status]")).toHaveText("Laen faili üles…");
+  await expect(files.locator("[data-file-add]")).toHaveAttribute("aria-disabled", "true");
+  await picker.setInputFiles({ name: "Teine.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%teine\n") });
+  release();
   await expect(files.locator("[data-file-status]")).toHaveText("Fail lisatud.");
+  await page.unroute("**/api/admin/lesson-file");
+  expect(posts).toBe(1);
+  await expect(files.locator("[data-file-add]")).not.toHaveAttribute("aria-disabled");
   await expect(files.locator("[data-lesson-file]")).toHaveCount(1);
   await expect(files.locator("[data-lesson-file]")).toContainText("Juhend.pdf");
   const stored = await db((sql) => sql<{ key: string }[]>`select r2_key as key from lesson_files where lesson_id = ${first}`);
   expect(stored).toHaveLength(1);
+  storedKeys.add(stored[0].key);
   expect(stored[0].key).toMatch(/^lessons\/[0-9a-f-]{36}\.pdf$/);
-  const path = join(process.cwd(), ".media-local", ...stored[0].key.split("/"));
+  const path = localPath(stored[0].key);
   expect(existsSync(path)).toBe(true);
   await files.getByRole("button", { name: "Eemalda fail: Juhend.pdf" }).click();
   await expect(files.locator("[data-lesson-file]")).toHaveCount(0);
   await expect(files).toContainText("Faile pole.");
   expect(await db((sql) => sql`select 1 from lesson_files where lesson_id = ${first}`)).toHaveLength(0);
-  expect(existsSync(path)).toBe(false);
+  await expect.poll(() => existsSync(path)).toBe(false); // removed once the answer has gone (after())
 
   // 6. Peida → "Peidetud" in the list behind the drawer; Näita õpilastele → gone
   const visibility = drawer.locator("[data-lesson-visibility]");
   await visibility.getByRole("button", { name: "Peida" }).click();
   await expect(row.locator("[data-lesson-hidden]")).toHaveText("Peidetud");
+  // "Peidetud" is a quiet tag; "Video puudub" (it locks the lessons after it) keeps the warning colours
+  const tone = (tag: string) => row.locator(tag).evaluate((e) => `${getComputedStyle(e).backgroundColor} ${getComputedStyle(e).color}`);
+  await expect(row.locator("[data-lesson-video]")).toHaveText("Video puudub");
+  expect(await tone("[data-lesson-hidden]")).not.toBe(await tone("[data-lesson-video]"));
   await expect(visibility).toContainText("Peidetud: õpilased seda ei näe ja see ei loe edenemises.");
   expect((await lessonRow(first)).hidden).toBe(true);
   await visibility.getByRole("button", { name: "Näita õpilastele" }).click();
@@ -212,8 +273,10 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
   const second = lessonOfAddress(page);
   expect(second).not.toBe(first);
   await expect(drawer.getByRole("textbox", { name: "Õppetunni nimi" })).toHaveValue("Teine");
-  await drawer.getByRole("button", { name: "Sulge" }).click();
+  await expect(drawer.locator("[data-lesson-status]")).toHaveText("");
+  await page.keyboard.press("Escape"); // nothing unsaved: it closes at once
   await expect(drawer).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/admin/koolitused/${courseId}$`));
   const up = editor.getByRole("button", { name: "Liiguta üles: Teine" });
   await up.click();
   await expect.poll(() => shownLessons(page, intro)).toEqual(["Teine", "Tere tulemast"]);
@@ -228,8 +291,20 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
   await editor.getByRole("button", { name: "Liiguta alla: Teine" }).click();
   await expect.poll(() => shownLessons(page, intro)).toEqual(["Teine", "Tere tulemast"]);
 
+  // "Jah, sulge": closed, the text not saved, the focus back on its "Muuda"
   await editor.getByRole("link", { name: "Muuda õppetundi: Teine" }).click();
   await expect(page).toHaveURL(new RegExp(`\\?oppetund=${second}$`));
+  await drawer.getByRole("textbox", { name: "Lühike tekst" }).fill("Mustand, mida ei salvestata");
+  await page.keyboard.press("Escape");
+  await ask.getByRole("button", { name: "Jah, sulge" }).click();
+  await expect(drawer).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/admin/koolitused/${courseId}$`));
+  await expect(page.locator(`#edit-lesson-${second}`)).toBeFocused();
+  expect((await lessonRow(second)).body).toBeNull();
+
+  await editor.getByRole("link", { name: "Muuda õppetundi: Teine" }).click();
+  await expect(page).toHaveURL(new RegExp(`\\?oppetund=${second}$`));
+  await expect(drawer.getByRole("textbox", { name: "Lühike tekst" })).toHaveValue(""); // the draft was dropped
   const remove = drawer.locator("[data-delete-lesson]");
   await remove.getByRole("button", { name: "Kustuta õppetund" }).click();
   await expect(remove).toContainText("Kas kustutan õppetunni „Teine“ koos video ja failidega?");
@@ -238,6 +313,7 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
   await expect(page).toHaveURL(new RegExp(`/admin/koolitused/${courseId}$`));
   await expect(editor.locator("[data-lesson]")).toHaveCount(1);
   expect(await lessonTitles(intro)).toEqual(["Tere tulemast"]);
+  await expect(page.locator(`#add-lesson-${intro}`)).toBeFocused(); // its row is gone: the module's "Uue õppetunni nimi"
 
   // a lesson with progress is only hidden: its drawer says so instead of offering "Kustuta õppetund"
   const [{ id: student }] = await db((sql) => sql<{ id: number }[]>`insert into clients (email) values (${email}) returning id`);
@@ -276,6 +352,30 @@ test("Moodulid ja õppetunnid: modules, a lesson in the drawer (text, kind, file
 
   // 10. a phone again, for the programme
   await checkPhone(page, isMobile);
+});
+
+test("a refused kind switch (the lesson is gone meanwhile) puts the choice back on the stored kind and says why", async ({ page, context, visitorIp }, info) => {
+  const email = clientEmail("les-kind", info.project.name);
+  made.add(email);
+  await removeClientRows(email);
+  const lessonId = await db(async (sql) => {
+    const [{ id }] = await sql<{ id: number }[]>`insert into courses (slug, type, level, title, summary, body, price, access_months, published)
+      values (${accountCourseSlug(email)}, 'e_learning', 'basic', ${sql.json({ et: "E2E liik" })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 9500, 6, false) returning id`;
+    const [m] = await sql<{ id: number }[]>`insert into course_modules (course_id, position, title) values (${id}, 1, ${sql.json({ et: "Moodul" })}) returning id`;
+    const [l] = await sql<{ id: number }[]>`insert into lessons (module_id, position, title) values (${m.id}, 1, ${sql.json({ et: "Tund" })}) returning id`;
+    return l.id;
+  });
+  const [{ courseId }] = await db((sql) => sql<{ courseId: number }[]>`select m.course_id as "courseId" from lessons l join course_modules m on m.id = l.module_id where l.id = ${lessonId}`);
+  await signInAsAdmin(page, context, visitorIp, created);
+  await page.goto(`/admin/koolitused/${courseId}?oppetund=${lessonId}`);
+  await adminReady(page);
+  const kind = page.locator("dialog[data-drawer] [data-lesson-kind]");
+  await expect(kind.getByRole("radio", { name: "Video" })).toBeChecked();
+  await db((sql) => sql`delete from lessons where id = ${lessonId}`);
+  await kind.getByRole("radio", { name: "Tekst" }).check();
+  await expect(kind.locator("[data-kind-status]")).toHaveText("Seda ei leitud. Laadi leht uuesti.");
+  await expect(kind.getByRole("radio", { name: "Video" })).toBeChecked();
+  await expect(kind.getByRole("radio", { name: "Tekst" })).not.toBeChecked();
 });
 
 test("a new course says to save it first", async ({ page, context, visitorIp }) => {
