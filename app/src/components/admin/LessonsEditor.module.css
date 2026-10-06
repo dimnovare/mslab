@@ -1,0 +1,219 @@
+/* "Moodulid ja õppetunnid" / "Programm" under the course editor (LessonsEditor.tsx) and the parts of the lesson drawer
+   (LessonDrawer.tsx, LessonFiles.tsx). Built from editor.module.css's list rows (B .module), ui.module.css and the student
+   drawer's sections (ClientDrawer.module.css); colours from tokens.css only. Every control is at least 44px tall. */
+
+/* below the course editor's save bar */
+.editor {
+  display: grid;
+  gap: 18px;
+  margin-top: 25px;
+}
+
+.intro {
+  display: grid;
+  gap: 8px;
+}
+
+.modules {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* B .module: one module as a box of its own */
+.module {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+}
+
+.moduleHead {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-areas: "num name tools";
+  align-items: start;
+  gap: 12px;
+}
+
+.moduleNum {
+  grid-area: num;
+}
+
+.rename {
+  grid-area: name;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.save {
+  justify-self: start;
+}
+
+/* the arrows sit level with the field (under its label row) */
+.moduleTools {
+  grid-area: tools;
+  padding-top: 51px;
+}
+
+.rowError {
+  flex-basis: 100%;
+}
+
+/* an e-course module's lessons, under its name */
+.lessonPart {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.lessons {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lesson {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.lesson:first-child {
+  padding-top: 0;
+}
+
+.lessonNum {
+  flex: none;
+  min-width: 30px;
+  color: var(--rose);
+  font: 400 15px/1.2 var(--font-display);
+}
+
+.lessonTitle {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lessonTools {
+  flex-wrap: wrap;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* "Lisa õppetund", "Lisa moodul": one field and its button */
+.add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.addField {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 560px;
+}
+
+.addMsg {
+  flex-basis: 100%;
+}
+
+.addModule {
+  padding-top: 4px;
+}
+
+/* ---------- the lesson drawer ---------- */
+
+.kind {
+  display: grid;
+  gap: 10px;
+}
+
+.files {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.file:first-child {
+  padding-top: 0;
+}
+
+.fileName {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fileName strong {
+  font-weight: 600;
+}
+
+.saveRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+@media (max-width: 640px) {
+  .module {
+    padding: 12px;
+  }
+
+  /* the number and the arrows on one line, the name under them */
+  .moduleHead {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num tools"
+      "name name";
+    align-items: center;
+    gap: 8px;
+  }
+
+  .moduleNum {
+    padding-top: 0;
+  }
+
+  .moduleTools {
+    padding-top: 0;
+  }
+
+  .lessonTools {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

@@ -5,6 +5,7 @@ import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, TEST
 import { ADMIN, adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
 import { accountCourseSlug, holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
 import { LOCAL_URL, TARGET } from "./target";
+import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
 
 // Phase 2a Task 9: the admin's Õpilased — "Lisa õpilane", e-course access granted and ended (the student then sees it), the
@@ -49,11 +50,6 @@ const sessions = (id: number) =>
   onLocalDb((sql) => sql<{ idHash: string; endedAt: Date | null; expiresAt: Date }[]>`select id_hash as "idHash", ended_at as "endedAt", expires_at as "expiresAt" from client_sessions where client_id = ${id} order by id_hash`, { marksPages: false });
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 const drawer = (page: Page) => page.locator("dialog[data-drawer]");
-/** The controls in `scope` less than 44 px tall (the touch target rule). */
-const smallTargets = (scope: Locator) =>
-  scope
-    .locator("a:visible, button:visible, input:visible, select:visible")
-    .evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height < 44).map((e) => e.outerHTML.slice(0, 120)));
 const card = (page: Page, key: string) => page.locator(`[data-card="${key}"]`);
 
 /** Opens a student's drawer from the list by searching her address. */

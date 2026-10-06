@@ -62,11 +62,16 @@ describe("POST /api/admin/lesson-file", () => {
       { lessonId: "-3", file: pdf() },
       { lessonId: "1.5", file: pdf() },
       { lessonId: "2147483648", file: pdf() }, // over an integer column's range: a database error, not a 404
+      // lib/row-id.ts parseRowId: what Number() would have taken is not an id
+      { lessonId: "1e3", file: pdf() },
+      { lessonId: "0x10", file: pdf() },
+      { lessonId: " 7", file: pdf() },
+      { lessonId: "007", file: pdf() },
       { lessonId: "1", file: "just text, not a file" },
     ];
     for (const fields of cases) {
       const res = await post(fields);
-      expect(res.status, JSON.stringify(Object.keys(fields))).toBe(400);
+      expect(res.status, JSON.stringify({ lessonId: fields.lessonId ?? null, file: fields.file instanceof File ? "File" : (fields.file ?? null) })).toBe(400);
       expect(await res.json()).toEqual({ ok: false, error: "missing" });
     }
     expect(mocks.addLessonFile).not.toHaveBeenCalled();

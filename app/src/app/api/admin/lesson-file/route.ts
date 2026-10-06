@@ -1,4 +1,5 @@
 import { getDb } from "@/db/client";
+import { parseRowId } from "@/lib/row-id";
 import { withAdmin } from "@/server/auth";
 import { addLessonFile } from "@/server/lesson-files";
 import { logFailure, logNote } from "@/server/log";
@@ -23,8 +24,9 @@ export const POST = withAdmin(async (request) => {
   if (Number(request.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES + ENVELOPE) return json({ ok: false, error: "size" }, 413);
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
-  const lessonId = Number(form?.get("lessonId"));
-  if (!(file instanceof File) || !Number.isInteger(lessonId) || lessonId <= 0 || lessonId > 2_147_483_647) return json({ ok: false, error: "missing" }, 400);
+  // lib/row-id.ts: digits only, no leading zero, within the integer column ("1e3", "0x10", " 7", "007" are not ids)
+  const lessonId = parseRowId(String(form?.get("lessonId") ?? ""));
+  if (!(file instanceof File) || lessonId === null) return json({ ok: false, error: "missing" }, 400);
   try {
     const store = mediaStore();
     if (!store) {
