@@ -590,6 +590,27 @@ export const adminEt = {
       session: "Sessioon on aegunud. Logi uuesti sisse ja proovi siis uuesti.",
       server: "Üleslaadimine ei õnnestunud. Proovi uuesti.",
     },
+    // the drawer's video field (LessonVideoField.tsx), for a video lesson: the upload goes from the browser straight to Bunny Stream
+    video: {
+      title: "Video",
+      hint: "Video laaditakse otse videoteenusesse. Hoia leht lahti, kuni üleslaadimine on lõppenud.",
+      choose: "Vali video",
+      // shown while a video lesson has no video students can watch (none, uploading, processing, failed, and no old one playing)
+      waitingHint: "Õpilased näevad „Video lisandub peagi“ ja järgmine õppetund jääb lukku, kuni video on valmis.",
+      uploading: "Laen üles… {percent} %",
+      processing: "Töötlemisel…",
+      ready: "Valmis · {duration}",
+      replace: "Asenda video",
+      replaceHint: "Vana video jääb õpilastele nähtavaks, kuni uus on valmis.",
+      interrupted: "Üleslaadimine katkes",
+      retry: "Proovi uuesti",
+      failed: "Töötlemine ebaõnnestus",
+      reupload: "Lae uuesti üles",
+      notSetUp: "Video seadistamata",
+      notSetUpHint: "Videoteenuse seaded puuduvad — anna arendajale teada.",
+      type: "Vali videofail.",
+      error: "Video üleslaadimine ei õnnestunud. Proovi uuesti.",
+    },
   },
 
   // The admin calendar: the sessions of the contact courses (B adminOther "calendar").

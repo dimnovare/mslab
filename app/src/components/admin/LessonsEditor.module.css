@@ -223,3 +223,11 @@
     justify-content: flex-end;
   }
 }
+
+/* the video field's upload (LessonVideoField.tsx): the browser's own bar, in the palette */
+.progress {
+  width: 100%;
+  max-width: 460px;
+  height: 8px;
+  accent-color: var(--ink);
+}

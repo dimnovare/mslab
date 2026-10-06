@@ -1,0 +1,277 @@
+import { eq, sql } from "drizzle-orm";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { Db } from "@/db/client";
+import { courseModules, courses, lessons } from "@/db/schema";
+import { BunnyError, bunnyConfig, tusSignature, UPLOAD_TTL_SEC, type BunnyApi } from "@/server/bunny";
+import { refreshLessonVideo, startLessonVideo, sweepStuckUploads } from "@/server/lesson-videos";
+import { makeTestDb } from "./helpers";
+
+const NOW = new Date("2026-10-06T10:00:00Z");
+const CONFIG = bunnyConfig({ BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "test-api-key", BUNNY_TOKEN_KEY: "test-token-key" }, false)!;
+const guid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+/** A Bunny that remembers videos: created at status 0, deleted ones gone. */
+function fakeBunny(videos: Record<string, { status: number; length: number }> = {}) {
+  let n = 100;
+  const titles: string[] = [];
+  const deleted: string[] = [];
+  const api: BunnyApi = {
+    createVideo: vi.fn(async (title: string) => {
+      titles.push(title);
+      const id = guid(++n);
+      videos[id] = { status: 0, length: 0 };
+      return id;
+    }),
+    getVideo: vi.fn(async (id: string) => videos[id] ?? null),
+    deleteVideo: vi.fn(async (id: string) => {
+      deleted.push(id);
+      delete videos[id];
+    }),
+  };
+  return { api, videos, titles, deleted };
+}
+
+let db: Db;
+let lessonId: number;
+const row = async () => (await db.select().from(lessons).where(eq(lessons.id, lessonId)))[0];
+/** The row version (Postgres xmin): it changes with every UPDATE of the row, also one that writes the same values. */
+const version = async () => {
+  const res = (await db.execute(sql`select xmin::text as v from lessons where id = ${lessonId}`)) as unknown as { rows: { v: string }[] };
+  return res.rows[0].v;
+};
+beforeEach(async () => {
+  db = await makeTestDb();
+  const [c] = await db.insert(courses).values({ slug: "veeb", type: "e_learning", level: "basic", title: { et: "Veebikursus" }, summary: { et: "" }, body: { et: "" } }).returning();
+  const [m] = await db.insert(courseModules).values({ courseId: c.id, position: 1, title: { et: "M" } }).returning();
+  [{ id: lessonId }] = await db.insert(lessons).values({ moduleId: m.id, position: 1, title: { et: "Esimene" } }).returning();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+describe("createLessonVideo's work", () => {
+  test("a first upload: a Bunny video titled course · lesson and a tus ticket signed for 6 hours; the lesson is uploading", async () => {
+    const b = fakeBunny();
+    const ticket = await startLessonVideo(db, b.api, CONFIG, lessonId, NOW);
+    if (ticket === "notFound") throw new Error("lesson");
+    const expires = Math.floor(NOW.getTime() / 1000) + UPLOAD_TTL_SEC;
+    expect(ticket).toEqual({
+      videoId: guid(101), libraryId: "12345", expires, endpoint: "https://video.bunnycdn.com/tusupload", title: "Veebikursus · Esimene",
+      signature: await tusSignature("12345", "test-api-key", expires, guid(101)),
+    });
+    expect(b.titles).toEqual(["Veebikursus · Esimene"]);
+    expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "uploading", replacedVideoId: null, videoStartedAt: NOW });
+  });
+
+  test("the ticket carries nothing secret: no API key, no token key", async () => {
+    const ticket = await startLessonVideo(db, fakeBunny().api, CONFIG, lessonId, NOW);
+    const text = JSON.stringify(ticket);
+    expect(text).not.toContain("test-api-key");
+    expect(text).not.toContain("test-token-key");
+    expect(Object.keys(ticket as object).sort()).toEqual(["endpoint", "expires", "libraryId", "signature", "title", "videoId"]);
+  });
+
+  test("an unknown lesson, or a text lesson (it has no video): notFound, and no Bunny video is made", async () => {
+    const b = fakeBunny();
+    expect(await startLessonVideo(db, b.api, CONFIG, 999999, NOW)).toBe("notFound");
+    await db.update(lessons).set({ kind: "text" }).where(eq(lessons.id, lessonId));
+    expect(await startLessonVideo(db, b.api, CONFIG, lessonId, NOW)).toBe("notFound");
+    expect(b.api.createVideo).not.toHaveBeenCalled();
+  });
+
+  test("“Asenda video”: the ready video keeps playing until the new one is ready, then it is deleted from Bunny", async () => {
+    const b = fakeBunny({ [guid(1)]: { status: 4, length: 300 } });
+    await db.update(lessons).set({ videoId: guid(1), videoStatus: "ready", durationSec: 300 }).where(eq(lessons.id, lessonId));
+    await startLessonVideo(db, b.api, CONFIG, lessonId, NOW);
+    expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300 });
+    b.videos[guid(101)] = { status: 3, length: 0 };
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "processing", durationSec: 300, replacing: true });
+    expect(b.deleted).toEqual([]);
+    b.videos[guid(101)] = { status: 4, length: 754 };
+    expect(await refreshLessonVideo(db, b.api, { videoId: guid(101) })).toEqual({ status: "ready", durationSec: 754, replacing: false });
+    expect(b.deleted).toEqual([guid(1)]);
+    expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "ready", replacedVideoId: null, durationSec: 754 });
+  });
+
+  test("“Lae uuesti üles” after a failure deletes the failed video and keeps a replaced one", async () => {
+    const b = fakeBunny();
+    await db.update(lessons).set({ videoId: guid(2), videoStatus: "failed", replacedVideoId: guid(1), durationSec: 300 }).where(eq(lessons.id, lessonId));
+    await startLessonVideo(db, b.api, CONFIG, lessonId, NOW);
+    expect(b.deleted).toEqual([guid(2)]);
+    expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "uploading", replacedVideoId: guid(1) });
+  });
+
+  test("Bunny refusing the new video: the error goes up and the lesson is unchanged", async () => {
+    const b = fakeBunny();
+    b.api.createVideo = vi.fn(async () => {
+      throw new BunnyError("create", 401);
+    });
+    await expect(startLessonVideo(db, b.api, CONFIG, lessonId, NOW)).rejects.toThrow(BunnyError);
+    expect(await row()).toMatchObject({ videoId: null, videoStatus: "none", videoStartedAt: null });
+  });
+
+  test("the lesson deleted between Bunny's answer and the write: notFound, and the new video is deleted again", async () => {
+    const b = fakeBunny();
+    const create = b.api.createVideo;
+    b.api.createVideo = vi.fn(async (title: string) => {
+      const id = await create(title);
+      await db.delete(lessons).where(eq(lessons.id, lessonId));
+      return id;
+    });
+    expect(await startLessonVideo(db, b.api, CONFIG, lessonId, NOW)).toBe("notFound");
+    expect(b.deleted).toEqual([guid(101)]);
+  });
+});
+
+describe("refreshLessonVideo", () => {
+  test("asks Bunny only about an upload in progress; Bunny not knowing the video is a failure; another video is ignored", async () => {
+    const b = fakeBunny();
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "none", durationSec: null, replacing: false });
+    expect(b.api.getVideo).not.toHaveBeenCalled();
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "uploading" }).where(eq(lessons.id, lessonId));
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "failed", durationSec: null, replacing: false });
+    expect(await refreshLessonVideo(db, b.api, { videoId: guid(77) })).toBeNull();
+    expect(await refreshLessonVideo(db, b.api, { lessonId: 999999 })).toBeNull();
+  });
+
+  test("Bunny 0 (created) keeps it uploading, 1–3 are processing, 5 is failed", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 0, length: 0 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "uploading" }).where(eq(lessons.id, lessonId));
+    expect((await refreshLessonVideo(db, b.api, { lessonId }))?.status).toBe("uploading");
+    b.videos[guid(5)].status = 1;
+    expect((await refreshLessonVideo(db, b.api, { lessonId }))?.status).toBe("processing");
+    b.videos[guid(5)].status = 5;
+    expect((await refreshLessonVideo(db, b.api, { lessonId }))?.status).toBe("failed");
+  });
+
+  test("the upload's start time stays while it is processing and is cleared once it is ready or failed", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 2, length: 0 }, [guid(6)]: { status: 6, length: 0 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "uploading", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "processing", videoStartedAt: NOW });
+    b.videos[guid(5)] = { status: 4, length: 61 };
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "ready", durationSec: 61, videoStartedAt: null });
+
+    await db.update(lessons).set({ videoId: guid(6), videoStatus: "processing", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "failed", videoStartedAt: null });
+  });
+
+  test("the same answer again (a repeated webhook, the next poll) writes nothing", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 2, length: 0 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
+    const before = await version();
+    expect(await refreshLessonVideo(db, b.api, { videoId: guid(5) })).toEqual({ status: "processing", durationSec: null, replacing: false });
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "processing", durationSec: null, replacing: false });
+    expect(await version()).toBe(before);
+  });
+
+  test("a stale read never overwrites a newer write: the webhook stored ready while the poll was asking Bunny", async () => {
+    const b = fakeBunny({ [guid(1)]: { status: 4, length: 300 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300 }).where(eq(lessons.id, lessonId));
+    // the poll read the row as uploading and Bunny says "transcoding"; meanwhile the webhook's read stored ready (and deleted the replaced video)
+    b.api.getVideo = vi.fn(async () => {
+      await db.update(lessons).set({ videoStatus: "ready", replacedVideoId: null, durationSec: 754, videoStartedAt: null }).where(eq(lessons.id, lessonId));
+      return { status: 3, length: 0 };
+    });
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "ready", durationSec: 754, replacing: false });
+    expect(await row()).toMatchObject({ videoId: guid(5), videoStatus: "ready", durationSec: 754, replacedVideoId: null });
+    expect(b.deleted).toEqual([]); // only the write that won deletes the replaced video
+  });
+
+  test("two reads that both see ready: one write, one delete of the replaced video", async () => {
+    const b = fakeBunny({ [guid(1)]: { status: 4, length: 300 }, [guid(5)]: { status: 4, length: 754 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing", replacedVideoId: guid(1), durationSec: 300 }).where(eq(lessons.id, lessonId));
+    const get = b.api.getVideo;
+    let waiting: () => void = () => {};
+    const both = new Promise<void>((resolve) => (waiting = resolve));
+    let asked = 0;
+    // both callers have Bunny's answer before either writes (the webhook and the poll at the same moment)
+    b.api.getVideo = vi.fn(async (id: string) => {
+      const answer = await get(id);
+      if (++asked === 2) waiting();
+      await both;
+      return answer;
+    });
+    const [a, c] = await Promise.all([refreshLessonVideo(db, b.api, { lessonId }), refreshLessonVideo(db, b.api, { videoId: guid(5) })]);
+    expect(a).toEqual({ status: "ready", durationSec: 754, replacing: false });
+    expect(c).toEqual({ status: "ready", durationSec: 754, replacing: false });
+    expect(b.deleted).toEqual([guid(1)]);
+  });
+
+  test("a new upload begun while Bunny was asked about the old one: the old answer is dropped", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 4, length: 754 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
+    b.api.getVideo = vi.fn(async () => {
+      await db.update(lessons).set({ videoId: guid(6), videoStatus: "uploading", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
+      return { status: 4, length: 754 };
+    });
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "uploading", durationSec: null, replacing: false });
+    expect(await row()).toMatchObject({ videoId: guid(6), videoStatus: "uploading", durationSec: null });
+  });
+
+  test("Bunny failing or not answering goes up to the caller (a 500 for the webhook, `server` for the editor); the row stays", async () => {
+    const b = fakeBunny();
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
+    b.api.getVideo = vi.fn(async () => {
+      throw new BunnyError("get", 500);
+    });
+    await expect(refreshLessonVideo(db, b.api, { lessonId })).rejects.toThrow(BunnyError);
+    b.api.getVideo = vi.fn(async () => {
+      throw new DOMException("Bunny did not answer in time", "TimeoutError");
+    });
+    await expect(refreshLessonVideo(db, b.api, { lessonId })).rejects.toThrow("Bunny did not answer in time");
+    expect((await row()).videoStatus).toBe("processing");
+  });
+});
+
+describe("sweepStuckUploads (the daily cron)", () => {
+  test("an upload older than 24 h is deleted from Bunny: the replaced video comes back, or the lesson has none; a younger one stays", async () => {
+    const b = fakeBunny();
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300, videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(1);
+    expect(b.deleted).toEqual([guid(9)]);
+    expect(await row()).toMatchObject({ videoId: guid(1), videoStatus: "ready", replacedVideoId: null, durationSec: 300, videoStartedAt: null });
+
+    await db.update(lessons).set({ videoId: guid(10), videoStatus: "uploading", replacedVideoId: null, durationSec: null, videoStartedAt: new Date(NOW.getTime() - 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
+    expect(await row()).toMatchObject({ videoId: guid(10), videoStatus: "uploading" });
+  });
+
+  test("a Bunny failure leaves the row as it is, for the next day", async () => {
+    const b = fakeBunny();
+    b.api.deleteVideo = vi.fn(async () => {
+      throw new Error("down");
+    });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
+    expect((await row()).videoStatus).toBe("uploading");
+  });
+
+  test("an upload that did finish, but nobody asked Bunny about it since (editor closed at once, no webhook), is settled, not deleted", async () => {
+    const b = fakeBunny({ [guid(9)]: { status: 4, length: 125 } });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300, videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
+    expect(b.deleted).toEqual([guid(1)]); // the replaced video, as on any ready
+    expect(await row()).toMatchObject({ videoId: guid(9), videoStatus: "ready", durationSec: 125, replacedVideoId: null, videoStartedAt: null });
+  });
+
+  test("an upload Bunny still has as created (nothing arrived) is given up", async () => {
+    const b = fakeBunny({ [guid(9)]: { status: 0, length: 0 } });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(1);
+    expect(b.deleted).toEqual([guid(9)]);
+    expect(await row()).toMatchObject({ videoId: null, videoStatus: "none", durationSec: null, videoStartedAt: null });
+  });
+
+  test("Bunny not answering the status read: the row stays for the next day and the other rows go on", async () => {
+    const b = fakeBunny();
+    b.api.getVideo = vi.fn(async () => {
+      throw new DOMException("Bunny did not answer in time", "TimeoutError");
+    });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
+    expect(b.deleted).toEqual([]);
+    expect((await row()).videoStatus).toBe("uploading");
+    expect(String(vi.mocked(console.error).mock.calls)).not.toContain(guid(9));
+  });
+});

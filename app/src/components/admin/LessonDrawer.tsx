@@ -11,6 +11,7 @@ import { Choice } from "./Choice";
 import { useUnsavedInDrawer } from "./Drawer";
 import { I18nInput } from "./I18nInput";
 import { LessonFiles } from "./LessonFiles";
+import { LessonVideoField } from "./LessonVideoField";
 import { lessonError } from "./LessonsEditor";
 import ui from "./ui.module.css";
 import ed from "./editor.module.css";
@@ -19,9 +20,9 @@ import cd from "./ClientDrawer.module.css";
 import styles from "./LessonsEditor.module.css";
 
 // One lesson in the admin drawer (?oppetund=<id> on the course editor's address), top to bottom: its name and short text
-// ("Salvesta"), "Õppetunni liik" (Video / Tekst), its files, "Peida" / "Näita õpilastele" and "Kustuta õppetund". Each part is
-// saved on its own (server/actions/admin-lessons.ts); the page then comes back with the stored lesson. Task 6 adds the video
-// field after "Õppetunni liik", for a video lesson only.
+// ("Salvesta"), "Õppetunni liik" (Video / Tekst), the video (a video lesson only: LessonVideoField.tsx), its files, "Peida" /
+// "Näita õpilastele" and "Kustuta õppetund". Each part is saved on its own (server/actions/admin-lessons.ts); the page then comes
+// back with the stored lesson.
 
 const t = adminEt.lessons;
 
@@ -40,11 +41,11 @@ const sameText = (a: { title: I18n; body: I18n }, b: { title: I18n; body: I18n }
 type Props = {
   courseId: number;
   lesson: AdminLesson;
-  /** Bunny is set up (the video field, Task 6): until then unused. */
+  /** Bunny is set up: else the video field only says "Video seadistamata". */
   bunnyReady: boolean;
 };
 
-export function LessonDrawer({ courseId, lesson }: Props) {
+export function LessonDrawer({ courseId, lesson, bunnyReady }: Props) {
   return (
     <div className={cd.detail} data-lesson-drawer={lesson.id}>
       <div className={cd.head}>
@@ -54,6 +55,9 @@ export function LessonDrawer({ courseId, lesson }: Props) {
       </div>
       <LessonText lesson={lesson} />
       <LessonKindField lesson={lesson} />
+      {lesson.kind === "video" && (
+        <LessonVideoField lessonId={lesson.id} bunnyReady={bunnyReady} video={{ status: lesson.videoStatus, durationSec: lesson.durationSec, replacing: lesson.replacing }} />
+      )}
       <LessonFiles lessonId={lesson.id} files={lesson.files} />
       <LessonVisibility lesson={lesson} />
       <LessonDelete courseId={courseId} lesson={lesson} />

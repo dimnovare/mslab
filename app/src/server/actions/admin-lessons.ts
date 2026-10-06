@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { getDb } from "@/db/client";
 import type { Db } from "@/db/client";
-import { parseRowId } from "@/lib/row-id";
+import { parseRowId, ROW_ID_MAX } from "@/lib/row-id";
 import {
   addLessonForm, addModuleForm, courseOfLesson, deleteLessonFileForm, deleteLessonForm, deleteModuleForm, moveLessonForm, moveModuleForm, renameModuleForm,
   saveLessonForm, setLessonHiddenForm, setLessonKindForm, type LessonCleanup,
@@ -14,6 +14,7 @@ import { adminAction } from "../auth";
 import { bunnyApi, bunnyConfig } from "../bunny";
 import type { EditResult } from "../edit-check";
 import { deleteBunnyVideos, removeLessonMedia } from "../lesson-media";
+import { refreshLessonVideo, startLessonVideo, type VideoCheckResult, type VideoTicketResult } from "../lesson-videos";
 import { logFailure } from "../log";
 import { mediaStore } from "../media-store";
 import { revalidatePublic } from "../public-cache";
@@ -128,4 +129,38 @@ export const deleteLessonFile = adminAction(async (_admin, _prev: EditResult | n
   const stored = key;
   if (result.ok && stored) afterwards("lesson file delete", () => removeLessonMedia({ videoIds: [], fileKeys: [stored] }, { bunny: null, files: mediaStore() }));
   return result;
+});
+
+/** A lesson id as the video field sends it (a number; the browser may send anything): a row id, or the answer is notFound. */
+const isLessonId = (id: unknown): id is number => Number.isInteger(id) && (id as number) > 0 && (id as number) <= ROW_ID_MAX;
+
+/**
+ * "Vali video" / "Asenda video" / "Proovi uuesti" / "Lae uuesti üles": a new Bunny video for the lesson and the signed tus upload
+ * (the API key never reaches the browser). `setup` when Bunny is not configured ("Video seadistamata").
+ */
+export const createLessonVideo = adminAction(async (_admin, lessonId: number): Promise<VideoTicketResult> => {
+  const config = bunnyConfig();
+  if (!config) return { ok: false, error: "setup" };
+  if (!isLessonId(lessonId)) return { ok: false, error: "notFound" };
+  try {
+    const ticket = await startLessonVideo(getDb(), bunnyApi(config), config, lessonId, new Date());
+    return ticket === "notFound" ? { ok: false, error: "notFound" } : { ok: true, ticket };
+  } catch (e) {
+    logFailure("[admin] video create failed", e);
+    return { ok: false, error: "server" };
+  }
+});
+
+/** The editor's poll (every 5 s while a video is processing): the lesson's video state, read from Bunny for an upload in progress. */
+export const checkLessonVideo = adminAction(async (_admin, lessonId: number): Promise<VideoCheckResult> => {
+  const config = bunnyConfig();
+  if (!config) return { ok: false, error: "setup" };
+  if (!isLessonId(lessonId)) return { ok: false, error: "notFound" };
+  try {
+    const video = await refreshLessonVideo(getDb(), bunnyApi(config), { lessonId });
+    return video ? { ok: true, video } : { ok: false, error: "notFound" };
+  } catch (e) {
+    logFailure("[admin] video check failed", e);
+    return { ok: false, error: "server" };
+  }
 });

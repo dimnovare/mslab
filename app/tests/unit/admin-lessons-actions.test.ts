@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   store: null as unknown,
   refresh: vi.fn(),
   revalidatePublic: vi.fn(),
+  startLessonVideo: vi.fn(),
+  refreshLessonVideo: vi.fn(),
 }));
 vi.mock("@/server/admin-lessons", () => Object.fromEntries(mocks.names.map((name) => [name, (...args: unknown[]) => mocks.forms[name](...args)])));
 vi.mock("@/server/auth", () => ({ adminAction: (fn: (admin: { email: string }, ...args: unknown[]) => unknown) => (...args: unknown[]) => fn({ email: "admin@example.test" }, ...args) }));
@@ -49,6 +51,8 @@ vi.mock("@/server/bunny", async (original) => ({
   },
   bunnyApi: () => ({ createVideo: vi.fn(), getVideo: vi.fn(), deleteVideo: mocks.deleteVideo }),
 }));
+
+vi.mock("@/server/lesson-videos", () => ({ startLessonVideo: mocks.startLessonVideo, refreshLessonVideo: mocks.refreshLessonVideo }));
 
 import * as actions from "@/server/actions/admin-lessons";
 
@@ -84,6 +88,8 @@ beforeEach(() => {
   mocks.store = fakeMediaStore();
   mocks.refresh.mockReset();
   mocks.revalidatePublic.mockReset();
+  mocks.startLessonVideo.mockReset();
+  mocks.refreshLessonVideo.mockReset();
   log = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -217,5 +223,52 @@ describe("Bunny never fails a stored change", () => {
     expect(await redirectOf(actions.deleteLesson(null, form({ id: 7, courseId: 5 })))).toBe("/admin/koolitused/5");
     await runScheduled();
     expect(store.deleted).toEqual(["lessons/c.pdf"]);
+  });
+});
+
+describe("the video field's two actions (createLessonVideo, checkLessonVideo)", () => {
+  const TICKET = { videoId: "v-1", libraryId: "lib", expires: 99, signature: "sig", endpoint: "https://tus.example/tusupload", title: "K · L" };
+
+  test("the ticket and the state pass through; nothing is revalidated or refreshed (the field refreshes on a status change)", async () => {
+    mocks.startLessonVideo.mockResolvedValue(TICKET);
+    mocks.refreshLessonVideo.mockResolvedValue({ status: "processing", durationSec: null, replacing: false });
+    expect(await actions.createLessonVideo(7)).toEqual({ ok: true, ticket: TICKET });
+    expect(mocks.startLessonVideo).toHaveBeenCalledWith("the-db", expect.anything(), mocks.config, 7, expect.any(Date));
+    expect(await actions.checkLessonVideo(7)).toEqual({ ok: true, video: { status: "processing", durationSec: null, replacing: false } });
+    expect(mocks.refreshLessonVideo).toHaveBeenCalledWith("the-db", expect.anything(), { lessonId: 7 });
+    expect(mocks.revalidatePublic).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  test("without Bunny set up: `setup`, and nothing is asked", async () => {
+    mocks.config = null;
+    expect(await actions.createLessonVideo(7)).toEqual({ ok: false, error: "setup" });
+    expect(await actions.checkLessonVideo(7)).toEqual({ ok: false, error: "setup" });
+    expect(mocks.startLessonVideo).not.toHaveBeenCalled();
+    expect(mocks.refreshLessonVideo).not.toHaveBeenCalled();
+  });
+
+  test("anything but a row id from the browser is notFound, and nothing is asked", async () => {
+    for (const id of [0, -1, 1.5, 2_147_483_648, Number.NaN, "7", null, { id: 7 }] as unknown as number[]) {
+      expect(await actions.createLessonVideo(id), String(id)).toEqual({ ok: false, error: "notFound" });
+      expect(await actions.checkLessonVideo(id), String(id)).toEqual({ ok: false, error: "notFound" });
+    }
+    expect(mocks.startLessonVideo).not.toHaveBeenCalled();
+    expect(mocks.refreshLessonVideo).not.toHaveBeenCalled();
+  });
+
+  test("an unknown or text lesson is notFound", async () => {
+    mocks.startLessonVideo.mockResolvedValue("notFound");
+    mocks.refreshLessonVideo.mockResolvedValue(null);
+    expect(await actions.createLessonVideo(7)).toEqual({ ok: false, error: "notFound" });
+    expect(await actions.checkLessonVideo(7)).toEqual({ ok: false, error: "notFound" });
+  });
+
+  test("Bunny failing or not answering is `server`, logged without ids or keys", async () => {
+    mocks.startLessonVideo.mockRejectedValue(new BunnyError("create", 401));
+    mocks.refreshLessonVideo.mockRejectedValue(new DOMException("Bunny did not answer in time", "TimeoutError"));
+    expect(await actions.createLessonVideo(7)).toEqual({ ok: false, error: "server" });
+    expect(await actions.checkLessonVideo(7)).toEqual({ ok: false, error: "server" });
+    expect(log.mock.calls.map((c) => c[0])).toEqual(["[admin] video create failed: BunnyError (status 401)", expect.stringMatching(/^\[admin\] video check failed: TimeoutError\b/)]);
   });
 });
