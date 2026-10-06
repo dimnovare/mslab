@@ -304,8 +304,9 @@ test.describe("static files and the hub: the same headers as a page (Task 5)", (
         expect(res.status(), label).toBe(200);
         expect(res.headers()["content-type"], label).toMatch(type);
         expectSiteHeaders(res, label);
-        // a built file is named by its content hash: kept for a year (not by `next dev`, which rebuilds them)
-        if (file === undefined && TARGET) expect(res.headers()["cache-control"], label).toBe("public, max-age=31536000, immutable");
+        // a built file is named by its content hash: kept for a year (not by `next dev`, which rebuilds them); Vercel writes
+        // the value without spaces
+        if (file === undefined && TARGET) expect(res.headers()["cache-control"]?.replace(/\s+/g, ""), label).toBe("public,max-age=31536000,immutable");
         // the file itself, not the site's 404 page or another file (the hub's index pages are served by the middleware)
         if (file !== undefined && method === "GET") {
           const onDisk = readFileSync(join(process.cwd(), "public", file));

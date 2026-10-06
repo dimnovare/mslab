@@ -4,7 +4,7 @@ import {
   clientEmail, currentTermsVersion, E2E_TERMS, insertEcourseAccess, removeTermsPage, SEED_ECOURSE_SLUG, setTerms, signInAsClient, storedAcceptances, takeTerms,
 } from "./account";
 import { adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
-import { LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows } from "./fixtures";
+import { LOCAL_FIXTURES, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows } from "./fixtures";
 import { PROD_BUILD } from "./target";
 import { submitsForms, test, expect } from "./test";
 
@@ -13,6 +13,9 @@ import { submitsForms, test, expect } from "./test";
 // save asks everyone to accept again. Clients are sample addresses (`e2e-client-…@example.test`, never mailed) with rows written
 // straight to the local database (account.ts). The terms text and version are shared by every client, so each test takes them
 // (takeTerms: an advisory lock, a snapshot, restored afterwards) and the desktop and phone runs take turns.
+
+// Every test signs a client in through a token row in the local database: a local server only, never a deployment.
+test.skip(!LOCAL_FIXTURES, "signs in through the local database: runs against a local server only");
 
 let restoreTerms: (() => Promise<void>) | null = null;
 /** The addresses this worker's tests made rows for: removed after each test (the admin course list would show their courses). */
