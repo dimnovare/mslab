@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AdminVideo } from "@/server/lesson-videos";
 
 // The lesson drawer's video field (LessonVideoField.tsx) in a browser-like document: every state's words and buttons, the poll every
-// 5 s while Bunny processes, and an upload through tus-js-client (replaced here by FakeUpload, which records what it was given).
+// 5 s while Bunny processes (paused while the tab is hidden, every 30 s after 10 minutes), and an upload through tus-js-client (replaced here by FakeUpload, which records what it was given).
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -57,6 +57,11 @@ const pick = async (file: File) => {
   Object.defineProperty(el, "files", { value: [file], configurable: true });
   await act(async () => el!.dispatchEvent(new Event("change", { bubbles: true })));
 };
+/** The tab's visibility, as a browser reports it: the property and the event. */
+const visibility = async (state: "visible" | "hidden") => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+};
 const mp4 = () => new File([new Uint8Array(10)], "tund.mp4", { type: "video/mp4" });
 
 beforeEach(() => {
@@ -73,6 +78,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
+  delete (document as unknown as Record<string, unknown>).visibilityState; // back to the document's own (visible)
 });
 
 describe("what the field says", () => {
@@ -197,6 +203,112 @@ describe("the poll", () => {
     expect(actions.checkLessonVideo).toHaveBeenCalledTimes(3);
     expect(text()).toContain("Töötlemine ebaõnnestus");
     expect(alert()).toBeNull();
+  });
+
+  const FAKE = ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const;
+
+  test("a hidden tab is not asked about: the poll pauses, asks at once when the tab is shown again, and goes on every 5 s", async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("processing") });
+    await mount(video("processing"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1); // on opening
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    await visibility("hidden"); // 3 s into the wait: the timer is dropped
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1);
+    await visibility("visible");
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2); // at once
+    await act(async () => vi.advanceTimersByTimeAsync(4999));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(4);
+  });
+
+  test("a tab that is hidden when the field opens waits for being shown (the first read on opening is the only one)", async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    await visibility("hidden");
+    actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("processing") });
+    await mount(video("processing"));
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1);
+    await visibility("visible");
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(3);
+  });
+
+  test("hiding and showing the tab while a read is on its way starts no second poll", async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    let release: (v: unknown) => void = () => {};
+    actions.checkLessonVideo.mockResolvedValueOnce({ ok: true, video: video("processing") }); // on opening
+    actions.checkLessonVideo.mockReturnValueOnce(new Promise((resolve) => (release = resolve))); // the first tick: slow
+    actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("processing") });
+    await mount(video("processing"));
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2);
+    await visibility("hidden");
+    await visibility("visible"); // the read is still on its way: no new one
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2);
+    await act(async () => release({ ok: true, video: video("processing") }));
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(4); // one chain, not two
+  });
+
+  test("after 10 minutes of processing the poll backs off from 5 s to 30 s", async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("processing") });
+    await mount(video("processing"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(10 * 60_000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1 + 120); // on opening, then every 5 s for 10 minutes
+    await act(async () => vi.advanceTimersByTimeAsync(29_999));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(121);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(122);
+    await act(async () => vi.advanceTimersByTimeAsync(5 * 60_000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(132); // every 30 s from there
+  });
+
+  test("a hidden tab is asked once on being shown after the 10 minutes, and goes on every 30 s", async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("processing") });
+    await mount(video("processing"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await visibility("hidden");
+    await act(async () => vi.advanceTimersByTimeAsync(15 * 60_000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1);
+    await visibility("visible");
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(29_999));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(3);
+  });
+
+  test("showing the tab after the video went ready (or the field is gone) asks nothing", async () => {
+    vi.useFakeTimers({ toFake: [...FAKE] });
+    actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("ready", { durationSec: 125 }) });
+    await mount(video("processing"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(field().getAttribute("data-lesson-video")).toBe("ready");
+    await visibility("hidden");
+    await visibility("visible");
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await visibility("hidden");
+    await visibility("visible");
+    expect(actions.checkLessonVideo).toHaveBeenCalledTimes(1);
   });
 
   test("the poll stops when the field goes away (the drawer closed)", async () => {

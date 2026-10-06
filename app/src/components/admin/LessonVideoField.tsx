@@ -16,12 +16,15 @@ import styles from "./LessonsEditor.module.css";
 // The lesson drawer's video field, for a video lesson (spec 3a sections 4 and 7). A picked file goes from the browser straight to
 // Bunny Stream with tus (tus-js-client, loaded only here and only when a file is picked: no other page's bundle carries it),
 // resumably and with retries; the server only signs the upload (createLessonVideo: the API key never comes here). Then Bunny encodes
-// it: "Töötlemisel…", asked every 5 s (checkLessonVideo) until "Valmis · 12:34" or "Töötlemine ebaõnnestus". A status change
-// refreshes the page, so the tag in the list behind the drawer follows.
+// it: "Töötlemisel…", asked every 5 s (checkLessonVideo) until "Valmis · 12:34" or "Töötlemine ebaõnnestus": not while the tab is
+// hidden (asked again as soon as it is shown), and every 30 s once it has gone on for 10 minutes. A status change refreshes the page,
+// so the tag in the list behind the drawer follows.
 
 const t = adminEt.lessons.video;
-/** How often the editor asks while Bunny encodes. */
+/** How often the editor asks while Bunny encodes; after POLL_SLOW_AFTER_MS of it, every POLL_SLOW_MS (a long encode is no news every 5 s). */
 const POLL_MS = 5000;
+const POLL_SLOW_MS = 30_000;
+const POLL_SLOW_AFTER_MS = 10 * 60_000;
 /** tus-js-client tries again after these pauses (ms) when the network or Bunny fails; the upload goes on from where it stopped. */
 const RETRY_DELAYS = [0, 3000, 5000, 10000, 20000, 60000];
 
@@ -108,11 +111,40 @@ export function LessonVideoField({ lessonId, bunnyReady, video: given }: Props) 
     if (bunnyReady && inProgress(current.current.status)) void check();
   }, [bunnyReady, check]);
 
-  // while Bunny encodes: every 5 s, until ready, failed or none, or until the field goes away
+  // while Bunny encodes: every 5 s (30 s after 10 minutes), until ready, failed or none, or until the field goes away. Nothing is
+  // asked while the tab is hidden; when it is shown again the poll asks at once and goes on. One timer at a time, and none while a
+  // read is on its way (a read can take up to 10 s, and the tab can be hidden and shown meanwhile).
   useEffect(() => {
     if (notSetUp || busy || shown !== "processing") return;
-    const timer = setInterval(() => void check(), POLL_MS);
-    return () => clearInterval(timer);
+    const began = Date.now();
+    const hidden = () => document.visibilityState === "hidden";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let reading = false;
+    let stopped = false;
+    const arm = () => {
+      if (stopped || reading || timer !== undefined || hidden()) return;
+      timer = setTimeout(() => void tick(), Date.now() - began >= POLL_SLOW_AFTER_MS ? POLL_SLOW_MS : POLL_MS);
+    };
+    const tick = async () => {
+      timer = undefined;
+      reading = true;
+      await check();
+      reading = false;
+      arm();
+    };
+    const onVisibility = () => {
+      if (hidden()) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else if (timer === undefined && !reading && !stopped) void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    arm();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [notSetUp, busy, shown, check]);
 
   // during an upload, leaving the page asks first (as the course editor does with unsaved changes); so does closing the drawer
