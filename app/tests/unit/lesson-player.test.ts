@@ -12,7 +12,7 @@ declare global {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const ORIGIN = "https://player.mediadelivery.net";
-const VIDEO = { embedUrl: `${ORIGIN}/embed/12345/v1?token=t&expires=1&autoplay=false`, durationSec: 100, resumeAt: 0 };
+const VIDEO = { embedUrl: `${ORIGIN}/embed/12345/v1?token=t&expires=1&autoplay=false`, durationSec: 100, resumeAt: 0, shape: null };
 let container: HTMLDivElement;
 let root: Root;
 const posted: { method?: string; value?: unknown; context?: string; version?: string }[] = [];
@@ -389,7 +389,7 @@ test("once the player is gone, nothing it started reaches the page and no queued
 test("another lesson in the same place (the page does not key the player): it starts afresh; the first one's last point goes to the first lesson", async () => {
   await fromPlayer("ready", {});
   await fromPlayer("timeupdate", { seconds: 50, duration: 100 });
-  const second = { embedUrl: `${ORIGIN}/embed/12345/v2?token=u&expires=1&autoplay=false`, durationSec: 200, resumeAt: 0 };
+  const second = { embedUrl: `${ORIGIN}/embed/12345/v2?token=u&expires=1&autoplay=false`, durationSec: 200, resumeAt: 0, shape: null };
   await rerender({ lessonId: 8, title: "Teine", video: second });
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/konto/kursus/veebikursus/7/progress"]);
   expect(progressPosts()).toEqual([{ watchedSec: 50 }]);
@@ -483,4 +483,51 @@ test("Russian: the button and the error in Russian", async () => {
   expect(container.querySelector("iframe")?.getAttribute("title")).toBe("Видео: Esimene");
   await tick(20_000);
   expect(container.querySelector("[data-player-error]")?.textContent).toBe("Видео не загружается. Попробуйте позже.");
+});
+
+// ---- the video's shape (Task 8b): the frame takes the video's aspect; unknown means 16:9 ----
+
+/** What the wrapper says about the frame's shape: the CSS number `--aspect` (the frame and the enlarged box read it) and `data-upright`. */
+const shapeOf = () => {
+  const wrapper = container.querySelector("[data-player]") as HTMLElement;
+  return { aspect: Number(wrapper.style.getPropertyValue("--aspect")), upright: wrapper.hasAttribute("data-upright") };
+};
+
+test("no shape known (null): a 16:9 frame, not upright", () => {
+  expect(shapeOf()).toEqual({ aspect: 16 / 9, upright: false });
+});
+
+test("the frame gets the video's own aspect, width / height; upright and square videos are marked for the height cap", async () => {
+  for (const [width, height, upright] of [[1920, 1080, false], [1080, 1920, true], [1440, 1080, false], [1080, 1080, true], [1080, 1350, true], [3840, 1080, false]] as const) {
+    await remount({ video: { ...VIDEO, shape: { width, height } } });
+    expect(shapeOf(), `${width} × ${height}`).toEqual({ aspect: width / height, upright });
+  }
+  await remount({ video: { ...VIDEO, shape: { width: 1080, height: 1920 } } });
+  expect((container.querySelector("[data-player]") as HTMLElement).style.getPropertyValue("--aspect")).toBe("0.5625");
+});
+
+test("a shape that cannot be one (0, one side, not a number, a fraction, too big) is no shape: 16:9", async () => {
+  for (const shape of [{ width: 0, height: 0 }, { width: 1080, height: 0 }, { width: NaN, height: 1920 }, { width: 1080.5, height: 1920 }, { width: 1080, height: 20_000 }, { width: -1080, height: 1920 }]) {
+    await remount({ video: { ...VIDEO, shape } });
+    expect(shapeOf(), JSON.stringify(shape)).toEqual({ aspect: 16 / 9, upright: false });
+  }
+});
+
+test("another lesson in the same place with another shape: the frame follows it (the player starts afresh with the new video)", async () => {
+  await remount({ video: { ...VIDEO, shape: { width: 1080, height: 1920 } } });
+  expect(shapeOf().upright).toBe(true);
+  const other = { embedUrl: `${ORIGIN}/embed/12345/v9?token=u&expires=1&autoplay=false`, durationSec: 60, resumeAt: 0, shape: { width: 1920, height: 1080 } };
+  await rerender({ lessonId: 9, title: "Üheksas", video: other });
+  expect(shapeOf()).toEqual({ aspect: 16 / 9, upright: false });
+  const again = { ...other, embedUrl: `${ORIGIN}/embed/12345/v10?token=u&expires=1&autoplay=false`, shape: { width: 1080, height: 1920 } };
+  await rerender({ lessonId: 10, title: "Kümnes", video: again });
+  expect(shapeOf()).toEqual({ aspect: 9 / 16, upright: true });
+});
+
+test("the shape changes nothing else: the same iframe, the watermark inside the frame, one fullscreen button", async () => {
+  await remount({ video: { ...VIDEO, shape: { width: 1080, height: 1920 } } });
+  const frame = container.querySelector("[data-player-frame]")!;
+  expect(frame.querySelector("iframe")?.getAttribute("src")).toBe(VIDEO.embedUrl);
+  expect(frame.querySelector("[data-watermark]")?.textContent).toBe("kati@example.test");
+  expect(container.querySelectorAll("[data-fullscreen]")).toHaveLength(1);
 });

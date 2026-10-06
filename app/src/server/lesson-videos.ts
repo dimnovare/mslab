@@ -24,10 +24,22 @@ export type VideoCheckResult = { ok: true; video: AdminVideo } | { ok: false; er
 /** An upload this old is given up by the daily sweep (spec 7). */
 const STUCK_MS = 24 * 3600_000;
 
-const VIDEO_COLUMNS = { videoId: lessons.videoId, videoStatus: lessons.videoStatus, replacedVideoId: lessons.replacedVideoId, durationSec: lessons.durationSec };
+const VIDEO_COLUMNS = {
+  videoId: lessons.videoId,
+  videoStatus: lessons.videoStatus,
+  replacedVideoId: lessons.replacedVideoId,
+  durationSec: lessons.durationSec,
+  videoWidth: lessons.videoWidth,
+  videoHeight: lessons.videoHeight,
+};
 const adminVideo = (v: VideoFields): AdminVideo => ({ status: v.videoStatus, durationSec: v.durationSec, replacing: v.replacedVideoId !== null });
 const sameVideo = (a: VideoFields, b: VideoFields) =>
-  a.videoId === b.videoId && a.videoStatus === b.videoStatus && a.replacedVideoId === b.replacedVideoId && a.durationSec === b.durationSec;
+  a.videoId === b.videoId &&
+  a.videoStatus === b.videoStatus &&
+  a.replacedVideoId === b.replacedVideoId &&
+  a.durationSec === b.durationSec &&
+  a.videoWidth === b.videoWidth &&
+  a.videoHeight === b.videoHeight;
 const nullable = (column: typeof lessons.videoId | typeof lessons.replacedVideoId, value: string | null): SQL => (value === null ? isNull(column) : eq(column, value));
 /** The row still has the video columns it was read with (the compare of compare-and-set). */
 const unchangedSince = (id: number, v: VideoFields): SQL =>
@@ -76,12 +88,13 @@ type VideoRow = VideoFields & { id: number };
 
 /**
  * Stores Bunny's answer about the row's current upload (null: Bunny does not know the video, which counts as failed), by
- * compare-and-set against `row` as it was read before Bunny was asked. Ready or failed ends the upload (its start time is cleared).
+ * compare-and-set against `row` as it was read before Bunny was asked. Ready or failed ends the upload (its start time is cleared); ready
+ * also stores the video's picture size (the two columns are in the same write, so a stale write cannot change them either).
  * The lesson's video as it is now: the new state, the row unchanged, or (another write came first) the row read again.
  */
 async function storeAnswer(db: Db, api: BunnyApi, row: VideoRow, videoId: string, bunny: BunnyVideo | null): Promise<AdminVideo | null> {
   const status = bunny ? lessonVideoStatus(bunny.status) : "failed";
-  const settled = settleVideo(row, videoId, status, bunny?.length ?? 0);
+  const settled = settleVideo(row, videoId, status, bunny?.length ?? 0, bunny && { width: bunny.width, height: bunny.height });
   if (!settled || sameVideo(settled.next, row)) return adminVideo(row); // nothing new (a stale or repeated answer): no write
   const done = settled.next.videoStatus === "ready" || settled.next.videoStatus === "failed";
   const written = await db

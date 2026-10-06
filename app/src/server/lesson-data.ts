@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { clients, courseModules, lessonFiles, lessonProgress, lessons } from "@/db/schema";
-import { completion, isWatched, nextLessonAfter, playableVideo, resumeAt } from "@/domain/lessons";
+import { completion, isWatched, nextLessonAfter, playableVideo, resumeAt, validShape, type VideoShape } from "@/domain/lessons";
 import type { I18n } from "@/i18n/field";
 import { EMBED_TTL_SEC, signedEmbedUrl, type BunnyConfig } from "./bunny";
 import { activeAccess, termsState } from "./client-data";
@@ -14,7 +14,10 @@ import { courseOutline, type CourseOutline } from "./lesson-outline";
 // How a lesson is completed follows its kind (domain/lessons.ts completion): a text lesson by "Märgi tehtuks", a video lesson only
 // by watching 90 % of a playable video — a video lesson waiting for its video cannot be completed, so the next one stays locked.
 
-export type LessonVideo = { state: "ready"; embedUrl: string; expires: number; resumeAt: number; durationSec: number } | { state: "soon" };
+export type LessonVideo =
+  /** `shape`: the picture size in pixels of the video that plays (the player's frame takes its shape); null: unknown, the player assumes 16:9. */
+  | { state: "ready"; embedUrl: string; expires: number; resumeAt: number; durationSec: number; shape: VideoShape | null }
+  | { state: "soon" };
 export type LessonView = {
   course: { slug: string; title: I18n };
   module: { title: I18n };
@@ -52,6 +55,8 @@ export async function visibleLesson(db: Db, courseId: number, clientId: number, 
       videoStatus: lessons.videoStatus,
       replacedVideoId: lessons.replacedVideoId,
       durationSec: lessons.durationSec,
+      videoWidth: lessons.videoWidth,
+      videoHeight: lessons.videoHeight,
       watchedSec: sql<number>`coalesce(${lessonProgress.watchedSec}, 0)`.mapWith(Number),
       done: sql<boolean>`${lessonProgress.doneAt} is not null`,
     })
@@ -88,14 +93,25 @@ export async function openLesson(db: Db, clientId: number, slug: string, lessonI
   return { kind: "open", access, row, outline };
 }
 
-/** The video part of a lesson: null for a text lesson; ready with a URL signed for 4 hours (from the resume point); else soon. */
+/**
+ * The video part of a lesson: null for a text lesson; ready with a URL signed for 4 hours (from the resume point) and the picture
+ * size of the video that plays (`shape`, null when unknown); else soon. The shape is stored with the playing video (a replacement
+ * in progress leaves it), and is checked again here, so a bad stored value reaches the player as null.
+ */
 async function videoOf(row: LessonRow, bunny: BunnyConfig | null, now: Date): Promise<LessonVideo | null> {
   if (row.kind === "text") return null;
   const videoId = playableVideo(row);
   if (!videoId || !bunny || !row.durationSec) return { state: "soon" };
   const expires = Math.floor(now.getTime() / 1000) + EMBED_TTL_SEC;
   const start = resumeAt(row.watchedSec, row.durationSec, row.done);
-  return { state: "ready", embedUrl: await signedEmbedUrl(bunny, videoId, expires, start), expires, resumeAt: start, durationSec: row.durationSec };
+  return {
+    state: "ready",
+    embedUrl: await signedEmbedUrl(bunny, videoId, expires, start),
+    expires,
+    resumeAt: start,
+    durationSec: row.durationSec,
+    shape: validShape(row.videoWidth !== null && row.videoHeight !== null ? { width: row.videoWidth, height: row.videoHeight } : null),
+  };
 }
 
 /** GET a lesson (spec 6): the only endpoint with the terms check. */

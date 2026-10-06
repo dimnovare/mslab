@@ -1,6 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { asc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
@@ -8,24 +6,12 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { expect, test } from "vitest";
 import * as schema from "@/db/schema";
 import { courseModules, courses } from "@/db/schema";
+import { migrationsThrough } from "./helpers";
 
 // Migration 0003 copies every course's module titles (courses.modules, jsonb) into course_modules, in their order, and keeps the
 // column (the live code reads it until the 3a deploy). Checked as the Railway database goes through it: 0000–0002 applied, courses
 // with titles, then 0003. courses.modules is written and read by plain SQL, and the test stops at 0003, so it stays true after
-// migration 0004 drops the column from the schema and the database (Task 12).
-
-/** A copy of ./drizzle whose journal ends with `tag` (the migrator applies what the journal lists, by its time stamps). */
-function migrationsThrough(tag: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "mslab-migrations-"));
-  cpSync("./drizzle", dir, { recursive: true });
-  const path = join(dir, "meta", "_journal.json");
-  const journal = JSON.parse(readFileSync(path, "utf8")) as { entries: { tag: string }[] };
-  const at = journal.entries.findIndex((e) => e.tag === tag);
-  expect(at, tag).toBeGreaterThanOrEqual(0);
-  journal.entries = journal.entries.slice(0, at + 1);
-  writeFileSync(path, JSON.stringify(journal));
-  return dir;
-}
+// migration 0005 drops the column from the schema and the database (Task 12; 0004 adds the lessons' video shape).
 
 test("0003 copies the module titles of every course into course_modules, in order; courses.modules stays", async () => {
   const db = drizzle(new PGlite(), { schema });

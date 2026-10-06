@@ -231,7 +231,14 @@ export async function setLessonKindForm(db: Db, fd: FormData): Promise<{ result:
   if (id === null || (kind !== "video" && kind !== "text")) return { result: { ok: false, error: "invalid" }, obsolete: [] };
   return db.transaction(async (tx): Promise<{ result: EditResult; obsolete: string[] }> => {
     const [row] = await tx
-      .select({ videoId: lessons.videoId, videoStatus: lessons.videoStatus, replacedVideoId: lessons.replacedVideoId, durationSec: lessons.durationSec })
+      .select({
+        videoId: lessons.videoId,
+        videoStatus: lessons.videoStatus,
+        replacedVideoId: lessons.replacedVideoId,
+        durationSec: lessons.durationSec,
+        videoWidth: lessons.videoWidth,
+        videoHeight: lessons.videoHeight,
+      })
       .from(lessons)
       .where(eq(lessons.id, id))
       .for("update");

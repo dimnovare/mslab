@@ -2,7 +2,7 @@ import type { Frame, Page, Request } from "@playwright/test";
 import { clientEmail, signInAsClient, takeTerms } from "./account";
 import { E2E_BUNNY } from "./bunny-values";
 import { LOCK_WAIT_MS, removeClientRows } from "./fixtures";
-import { insertPlayerLesson, openPlayerHarness, readyLesson, setProgress, storedProgress } from "./player-harness";
+import { insertPlayerLesson, openPlayerHarness, readyLesson, setProgress, storedProgress, type FakeShape } from "./player-harness";
 import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
 
@@ -11,7 +11,9 @@ import { submitsForms, test, expect } from "./test";
 // page in the iframe (fake-bunny.ts) and the real progress endpoint: the frame, the watermark over it, the reports up to done, only
 // the player's origin heard, the last point sent on leaving, "Video ei lae. Proovi hiljem uuesti." when Bunny never answers, our
 // fullscreen with the Fullscreen API and without it (an iPhone), with the watermark on the picture in every corner, upright and
-// sideways; the resume point. Clients are sample addresses (`e2e-client-…@example.test`, never
+// sideways; the resume point; and (Task 8b) an upright video (1080 × 1920 in the fake Bunny, stored by the app through the webhook
+// and handed to the player by the lesson API): the frame has its shape, is capped in height and centred at normal size, and is the
+// largest upright box that fits, centred, when enlarged, with the watermark on the picture each time. Clients are sample addresses (`e2e-client-…@example.test`, never
 // mailed); the lesson API checks the course terms, so the terms are taken (takeTerms) just for reading the lesson.
 
 const made = new Set<string>();
@@ -27,11 +29,11 @@ test.afterEach(async () => {
 });
 
 /** A fresh student with a ready video lesson, signed in on `page` (which is on /konto), and the lesson API's answer for it. */
-async function student(page: Page, label: string, project: string, opts: { watchedSec?: number } = {}) {
+async function student(page: Page, label: string, project: string, opts: { watchedSec?: number; shape?: FakeShape } = {}) {
   const email = clientEmail(label, project);
   made.add(email);
   await removeClientRows(email);
-  const lesson = await insertPlayerLesson(email);
+  const lesson = await insertPlayerLesson(email, { shape: opts.shape });
   if (opts.watchedSec !== undefined) await setProgress(lesson.clientId, lesson.lessonId, opts.watchedSec);
   // in the fake player's frame: a note of the events the page asks for (the fake keeps its own list to itself)
   await page.addInitScript((fake) => {
@@ -76,26 +78,38 @@ const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.
 type Box = { x: number; y: number; w: number; h: number };
 const box = (r: { x: number; y: number; width: number; height: number }): Box => ({ x: r.x, y: r.y, w: r.width, h: r.height });
 
+/** The player's boxes now: the wrapper's column, the stage, the frame, the iframe in it and the watermark (with the corner it is in). */
+async function playerBoxes(page: Page) {
+  const b = await page.evaluate(() => {
+    const r = (el: Element) => el.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number };
+    const frame = document.querySelector("[data-player-frame]")!;
+    const wrapper = document.querySelector("[data-player]")!;
+    const mark = document.querySelector("[data-watermark]")!;
+    return {
+      column: r(wrapper.parentElement!),
+      wrapper: r(wrapper),
+      stage: r(frame.parentElement!),
+      frame: r(frame),
+      iframe: r(frame.querySelector("iframe")!),
+      mark: r(mark),
+      corner: mark.getAttribute("data-corner")!,
+    };
+  });
+  return { column: box(b.column), wrapper: box(b.wrapper), stage: box(b.stage), frame: box(b.frame), iframe: box(b.iframe), mark: box(b.mark), corner: b.corner };
+}
+
 /**
- * Enlarged (our fullscreen or the window-filling wrapper): the frame is a 16:9 box (the picture Bunny shows in it), as large as fits
- * in the space above the button and in its middle, the iframe exactly on it, and the watermark inside it, in each of its four corners
- * (the page's clock moves it on: page.clock must be installed).
+ * The frame is the video's shape (`aspect` = width / height) with the iframe exactly on it, and the watermark lies inside it, in each of
+ * its four corners (the page's clock moves it on: page.clock must be installed). `check` adds what the screen state asks of the frame.
  */
-async function expectWatermarkOnPicture(page: Page): Promise<void> {
+async function expectPictureWithWatermark(page: Page, aspect: number, check: (b: Awaited<ReturnType<typeof playerBoxes>>, where: string) => void): Promise<void> {
   const corners = new Set<string>();
   for (let i = 0; i < 4; i++) {
-    const b = await page.evaluate(() => {
-      const r = (el: Element) => el.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number };
-      const frame = document.querySelector("[data-player-frame]")!;
-      const mark = document.querySelector("[data-watermark]")!;
-      return { frame: r(frame), stage: r(frame.parentElement!), iframe: r(frame.querySelector("iframe")!), mark: r(mark), corner: mark.getAttribute("data-corner")! };
-    });
-    const [frame, stage, iframe, mark] = [box(b.frame), box(b.stage), box(b.iframe), box(b.mark)];
+    const b = await playerBoxes(page);
+    const { frame, stage, iframe, mark } = b;
     const where = `corner ${b.corner}: frame ${JSON.stringify(frame)}, stage ${JSON.stringify(stage)}, mark ${JSON.stringify(mark)}`;
-    expect(Math.abs(frame.w / frame.h - 16 / 9), where).toBeLessThan(0.01);
-    expect(Math.abs(frame.w - stage.w) <= 1 || Math.abs(frame.h - stage.h) <= 1, `${where}: as large as fits`).toBe(true);
-    expect(Math.abs(frame.x + frame.w / 2 - (stage.x + stage.w / 2)), `${where}: centred across`).toBeLessThanOrEqual(1);
-    expect(Math.abs(frame.y + frame.h / 2 - (stage.y + stage.h / 2)), `${where}: centred down`).toBeLessThanOrEqual(1);
+    expect(Math.abs(frame.w / frame.h - aspect) / aspect, `${where}: the video's shape`).toBeLessThan(0.01);
+    check(b, where);
     expect(iframe, where).toEqual(frame);
     const inside = mark.x >= frame.x && mark.y >= frame.y && mark.x + mark.w <= frame.x + frame.w + 0.5 && mark.y + mark.h <= frame.y + frame.h + 0.5;
     expect(inside, `${where}: the watermark on the picture`).toBe(true);
@@ -103,6 +117,35 @@ async function expectWatermarkOnPicture(page: Page): Promise<void> {
     await page.clock.fastForward(60_000);
   }
   expect([...corners].sort()).toEqual(["0", "1", "2", "3"]);
+}
+
+/**
+ * Enlarged (our fullscreen or the window-filling wrapper): the frame is a box of the video's shape (16:9 unless said: the picture
+ * Bunny shows in it), as large as fits in the space above the button and in its middle, the iframe exactly on it, the watermark on it
+ * in every corner.
+ */
+const expectWatermarkOnPicture = (page: Page, aspect = 16 / 9) =>
+  expectPictureWithWatermark(page, aspect, ({ frame, stage }, where) => {
+    expect(Math.abs(frame.w - stage.w) <= 1 || Math.abs(frame.h - stage.h) <= 1, `${where}: as large as fits`).toBe(true);
+    expect(frame.w <= stage.w + 1 && frame.h <= stage.h + 1, `${where}: within the stage`).toBe(true);
+    expect(Math.abs(frame.x + frame.w / 2 - (stage.x + stage.w / 2)), `${where}: centred across`).toBeLessThanOrEqual(1);
+    expect(Math.abs(frame.y + frame.h / 2 - (stage.y + stage.h / 2)), `${where}: centred down`).toBeLessThanOrEqual(1);
+  });
+
+/**
+ * Normal size, a video that is not wide: its height is at most 80 % of the window's (and 720 px), the frame is in its column
+ * (never wider) and centred in it, the watermark on the picture in every corner; nothing runs off the screen sideways.
+ */
+async function expectUprightInColumn(page: Page, aspect: number): Promise<void> {
+  const viewport = page.viewportSize()!;
+  await expectPictureWithWatermark(page, aspect, ({ frame, column }, where) => {
+    expect(frame.h, `${where}: at most 80 % of the window's height`).toBeLessThanOrEqual(viewport.height * 0.8 + 0.5);
+    expect(frame.h, `${where}: at most 720 px`).toBeLessThanOrEqual(720.5);
+    expect(frame.w, `${where}: within the column`).toBeLessThanOrEqual(column.w + 0.5);
+    expect(Math.abs(frame.x + frame.w / 2 - (column.x + column.w / 2)), `${where}: centred in the column`).toBeLessThanOrEqual(1);
+    expect(frame.x >= 0 && frame.x + frame.w <= viewport.width + 0.5, `${where}: on the screen across`).toBe(true);
+  });
+  expect(await noOverflow(page)).toBe(true);
 }
 
 /** The progress reports for `lessonId` made in this browser context (keepalive ones of a page going away included). */
@@ -260,4 +303,97 @@ test("resume: the frame starts at the saved second (t=40) and the reports begin 
   await postFromPlayer(fake, "pause");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 45, done: false });
   expect(reports).toEqual([{ watchedSec: 45 }]);
+});
+
+// ---- the video's shape (Task 8b): Maria may record upright on a phone, or mix shapes ----
+
+/** A phone video held upright, stored by the fake Bunny as 1080 × 1920. */
+const UPRIGHT: FakeShape = { width: 1080, height: 1920 };
+const SIZES = { phone: { width: 390, height: 844 }, sideways: { width: 844, height: 390 }, desktop: { width: 1440, height: 900 } };
+
+test("an upright video (1080 × 1920 from Bunny, through the webhook): the frame is upright, at most 80 % of the window high and centred in its column at 390 × 844 and 1440 × 900", async ({ page }, info) => {
+  const { lesson, view } = await student(page, "upright", info.project.name, { shape: UPRIGHT });
+  expect(view.video.shape).toEqual({ width: 1080, height: 1920 }); // what the app stored from Bunny's answer
+  await page.clock.install();
+  await openPlayerHarness(page, lesson, view);
+  await subscribed(await fakeFrame(page));
+  const wrapper = page.locator("[data-player]");
+  await expect(wrapper).toHaveAttribute("data-upright", "");
+  for (const size of [SIZES.phone, SIZES.desktop]) {
+    await page.setViewportSize(size);
+    await expectUprightInColumn(page, 1080 / 1920);
+    // not smaller than it may be: as tall as the cap lets it be, or (a phone) as wide as its column
+    const { frame, column } = await playerBoxes(page);
+    const atCap = frame.h >= Math.min(size.height * 0.8, 720) - 1;
+    expect(atCap || Math.abs(frame.w - column.w) <= 1, `${size.width} × ${size.height}: frame ${JSON.stringify(frame)}, column ${JSON.stringify(column)}`).toBe(true);
+    expect(await smallTargets(wrapper)).toEqual([]);
+  }
+  // the fullscreen button is under the frame, within the frame's column
+  const { frame, wrapper: w } = await playerBoxes(page);
+  const button = (await page.locator("[data-fullscreen]").boundingBox())!;
+  expect(button.y).toBeGreaterThanOrEqual(frame.y + frame.h - 1);
+  expect(button.x >= w.x - 1 && button.x + button.width <= w.x + w.w + 1).toBe(true);
+});
+
+test("an upright video, our fullscreen: the largest upright box that fits the screen, in its middle, the watermark on the picture; the same button leaves it", async ({ page }, info) => {
+  const { lesson, view } = await student(page, "upfull", info.project.name, { shape: UPRIGHT });
+  await page.clock.install();
+  await openPlayerHarness(page, lesson, view);
+  await subscribed(await fakeFrame(page));
+  const button = page.locator("[data-fullscreen]");
+  await button.click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.hasAttribute("data-player") ?? false)).toBe(true);
+  expect(await page.evaluate(() => document.fullscreenElement!.contains(document.querySelector("[data-watermark]")))).toBe(true);
+  await expectWatermarkOnPicture(page, 1080 / 1920);
+  await button.click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(button).toHaveText("Täisekraan");
+  await expectUprightInColumn(page, 1080 / 1920); // back to the capped column
+});
+
+test("an upright video without the Fullscreen API (an iPhone): the wrapper covers the window, the frame is the largest upright box, upright and sideways", async ({ page }, info) => {
+  const { lesson, view } = await student(page, "upcover", info.project.name, { shape: UPRIGHT });
+  await page.addInitScript(() => {
+    delete (Element.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+  });
+  await page.clock.install();
+  await openPlayerHarness(page, lesson, view);
+  await subscribed(await fakeFrame(page));
+  const wrapper = page.locator("[data-player]");
+  const button = page.locator("[data-fullscreen]");
+  await button.click();
+  await expect(wrapper).toHaveAttribute("data-expanded", "");
+  for (const size of [SIZES.phone, SIZES.sideways, SIZES.desktop]) {
+    await page.setViewportSize(size);
+    expect(await wrapper.boundingBox(), `${size.width} × ${size.height}: the wrapper covers the window`).toEqual({ x: 0, y: 0, ...size });
+    await expect(button).toBeInViewport();
+    await expectWatermarkOnPicture(page, 1080 / 1920);
+  }
+  await page.keyboard.press("Escape");
+  await expect(wrapper).not.toHaveAttribute("data-expanded");
+  await page.setViewportSize(SIZES.phone);
+  await expectUprightInColumn(page, 1080 / 1920); // the capped column is back, not the window-filling box
+});
+
+test("a 4:3 video (a mixed course): at normal size it fills the column like a wide one; enlarged it is its own 4:3 box", async ({ page }, info) => {
+  const { lesson, view } = await student(page, "fourthree", info.project.name, { shape: { width: 1440, height: 1080 } });
+  expect(view.video.shape).toEqual({ width: 1440, height: 1080 });
+  await page.clock.install();
+  await openPlayerHarness(page, lesson, view);
+  await subscribed(await fakeFrame(page));
+  await expect(page.locator("[data-player]")).not.toHaveAttribute("data-upright");
+  for (const size of [SIZES.phone, SIZES.desktop]) {
+    await page.setViewportSize(size);
+    const { frame, column } = await playerBoxes(page);
+    expect(Math.abs(frame.w - column.w), `${size.width} × ${size.height}: fills the column`).toBeLessThanOrEqual(1);
+    expect(Math.abs(frame.w / frame.h - 4 / 3)).toBeLessThan(0.01);
+  }
+  await page.locator("[data-fullscreen]").click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.hasAttribute("data-player") ?? false)).toBe(true);
+  await expectWatermarkOnPicture(page, 4 / 3);
+});
+
+test("a video stored with a quarter turn (1920 × 1080, rotation 90: a phone held upright) is handed to the player as 1080 × 1920", async ({ page }, info) => {
+  const { view } = await student(page, "turned", info.project.name, { shape: { width: 1920, height: 1080, rotation: 90 } });
+  expect(view.video.shape).toEqual({ width: 1080, height: 1920 });
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import ui from "@/components/site/ui.module.css";
+import { validShape, type VideoShape } from "@/domain/lessons";
 import { fill } from "@/i18n/format";
 import { PLAYER_EVENTS, playerCommand, readPlayerMessage, secondsOf } from "./player-js";
 import type { LessonTexts } from "./texts";
@@ -18,7 +19,8 @@ type Props = {
   slug: string;
   lessonId: number;
   title: string;
-  video: { embedUrl: string; durationSec: number; resumeAt: number };
+  /** `shape`: the picture size of the video, from the lesson answer; null when unknown (then 16:9). */
+  video: { embedUrl: string; durationSec: number; resumeAt: number; shape: VideoShape | null };
   watermark: string;
   /** Already done: nothing more is reported. */
   done: boolean;
@@ -35,8 +37,10 @@ type Sent = "taken" | "later" | "refused";
  * second. Over it the student's e-mail as a faint watermark that moves between the corners (it does not take clicks). The iframe may
  * not go fullscreen or picture-in-picture on its own (either would drop the watermark): our button enlarges the wrapper, iframe and
  * watermark together (an iPhone without the Fullscreen API gets the wrapper over the whole window; its native video fullscreen still
- * shows no watermark — accepted). Enlarged, the frame stays a 16:9 box in the middle of the screen, the size of the picture, so the
- * watermark's corners are the picture's (not the black bars around it). Progress: the furthest second reached, reported every 15 s
+ * shows no watermark — accepted). The frame has the video's own shape (`video.shape`, 16:9 when unknown), as a CSS number `--aspect`
+ * on the wrapper: a wide video fills the column, an upright or square one (`data-upright`) is centred with its height capped (CSS).
+ * Enlarged, the frame is the largest box of that shape that fits the screen, in its middle, the size of the picture, so the
+ * watermark's corners are the picture's (not black bars around it). Progress: the furthest second reached, reported every 15 s
  * when it moved, and at pause and end.
  *
  * The reports never trouble the student. A report the server cannot take now (408, 429, 5xx) or that gets no answer keeps the
@@ -238,9 +242,18 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }
   };
   const big = fullscreen || expanded;
   const broken = failed && !ready;
+  const shape = validShape(video.shape);
+  const aspect = shape ? shape.width / shape.height : 16 / 9;
 
   return (
-    <div ref={wrapper} className={styles.player} data-player="" data-expanded={expanded ? "" : undefined}>
+    <div
+      ref={wrapper}
+      className={styles.player}
+      style={{ "--aspect": String(aspect) } as CSSProperties}
+      data-player=""
+      data-upright={aspect <= 1 ? "" : undefined}
+      data-expanded={expanded ? "" : undefined}
+    >
       <div className={styles.stage}>
         <div className={styles.frame} data-player-frame="">
           {listening && (

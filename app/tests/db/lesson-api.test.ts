@@ -94,6 +94,7 @@ test("an open lesson with a ready video: Bunny's URL signed for 4 hours, from th
     expires,
     resumeAt: 0,
     durationSec: 100,
+    shape: null, // no size known (an older video): the player assumes 16:9
   });
   expect(view).toMatchObject({
     course: { slug: "veebikursus", title: { et: "Veebikursus" } },
@@ -106,6 +107,35 @@ test("an open lesson with a ready video: Bunny's URL signed for 4 hours, from th
   const locked = await call(deps(), w.cookie, lessonPath(w.l2.id));
   expect(locked.status).toBe(403);
   expect(await locked.json()).toEqual({ ok: false, error: "locked", next: w.l1.id });
+});
+
+test("a ready video carries its picture size as `shape` ({ width, height }); null when it is not known", async () => {
+  const w = await world();
+  const shapeOf = async () => (await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json()).video.shape;
+  expect(await shapeOf()).toBeNull();
+  await db.update(lessons).set({ videoWidth: 1080, videoHeight: 1920 }).where(eq(lessons.id, w.l1.id));
+  expect(await shapeOf()).toEqual({ width: 1080, height: 1920 });
+  await db.update(lessons).set({ videoWidth: 1920, videoHeight: 1080 }).where(eq(lessons.id, w.l1.id));
+  expect(await shapeOf()).toEqual({ width: 1920, height: 1080 });
+});
+
+test("a stored size that cannot be a shape (one side only, 0, over 10000) reaches the player as null, never as a number", async () => {
+  const w = await world();
+  const shapeOf = async () => (await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json()).video.shape;
+  for (const [videoWidth, videoHeight] of [[1080, null], [null, 1920], [0, 0], [1080, 0], [20_000, 1080], [-1080, 1920]] as const) {
+    await db.update(lessons).set({ videoWidth, videoHeight }).where(eq(lessons.id, w.l1.id));
+    expect(await shapeOf(), `${videoWidth} × ${videoHeight}`).toBeNull();
+  }
+});
+
+test("during a replacement the lesson answers with the shape of the video that plays (the old one); a text lesson has no video and no shape", async () => {
+  const w = await world();
+  await db.update(lessons).set({ videoWidth: 1080, videoHeight: 1920, videoId: "44444444-4444-4444-8444-444444444444", videoStatus: "processing", replacedVideoId: VIDEO_1 }).where(eq(lessons.id, w.l1.id));
+  const video = (await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json()).video;
+  expect(video.embedUrl).toContain(`/embed/12345/${VIDEO_1}?`);
+  expect(video.shape).toEqual({ width: 1080, height: 1920 });
+  await db.update(lessons).set({ kind: "text" }).where(eq(lessons.id, w.l1.id));
+  expect((await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json()).video).toBeNull();
 });
 
 test("progress is kept at its highest; at 90 % the lesson is done and the next one opens; a done lesson starts from the beginning", async () => {

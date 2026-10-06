@@ -10,8 +10,11 @@ const NOW = new Date("2026-10-06T10:00:00Z");
 const CONFIG = bunnyConfig({ BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "test-api-key", BUNNY_TOKEN_KEY: "test-token-key" }, false)!;
 const guid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
+/** What the fake Bunny holds of a video; no `width` and `height`: Bunny gives 0 for a video it has no size of (older, or still being processed). */
+type Held = { status: number; length: number; width?: number; height?: number };
+
 /** A Bunny that remembers videos: created at status 0, deleted ones gone. */
-function fakeBunny(videos: Record<string, { status: number; length: number }> = {}) {
+function fakeBunny(videos: Record<string, Held> = {}) {
   let n = 100;
   const titles: string[] = [];
   const deleted: string[] = [];
@@ -22,7 +25,7 @@ function fakeBunny(videos: Record<string, { status: number; length: number }> = 
       videos[id] = { status: 0, length: 0 };
       return id;
     }),
-    getVideo: vi.fn(async (id: string) => videos[id] ?? null),
+    getVideo: vi.fn(async (id: string) => (videos[id] ? { width: 0, height: 0, ...videos[id] } : null)),
     deleteVideo: vi.fn(async (id: string) => {
       deleted.push(id);
       delete videos[id];
@@ -91,6 +94,28 @@ describe("createLessonVideo's work", () => {
     expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "ready", replacedVideoId: null, durationSec: 754 });
   });
 
+  test("“Asenda video” and the shape: the playing video's stays through the upload and the processing, the new video's replaces it once ready", async () => {
+    const b = fakeBunny({ [guid(1)]: { status: 4, length: 300, width: 1920, height: 1080 } });
+    await db.update(lessons).set({ videoId: guid(1), videoStatus: "ready", durationSec: 300, videoWidth: 1920, videoHeight: 1080 }).where(eq(lessons.id, lessonId));
+    await startLessonVideo(db, b.api, CONFIG, lessonId, NOW);
+    expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "uploading", videoWidth: 1920, videoHeight: 1080 });
+    b.videos[guid(101)] = { status: 3, length: 0 }; // transcoding: Bunny has no size to give yet
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "processing", replacedVideoId: guid(1), videoWidth: 1920, videoHeight: 1080 });
+    b.videos[guid(101)] = { status: 4, length: 60, width: 1080, height: 1920 };
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoId: guid(101), videoStatus: "ready", replacedVideoId: null, durationSec: 60, videoWidth: 1080, videoHeight: 1920 });
+  });
+
+  test("a failed replacement keeps the shape of the video that plays", async () => {
+    const b = fakeBunny({ [guid(1)]: { status: 4, length: 300, width: 1080, height: 1920 } });
+    await db.update(lessons).set({ videoId: guid(1), videoStatus: "ready", durationSec: 300, videoWidth: 1080, videoHeight: 1920 }).where(eq(lessons.id, lessonId));
+    await startLessonVideo(db, b.api, CONFIG, lessonId, NOW);
+    b.videos[guid(101)] = { status: 5, length: 0 };
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "failed", replacedVideoId: guid(1), videoWidth: 1080, videoHeight: 1920 });
+  });
+
   test("“Lae uuesti üles” after a failure deletes the failed video and keeps a replaced one", async () => {
     const b = fakeBunny();
     await db.update(lessons).set({ videoId: guid(2), videoStatus: "failed", replacedVideoId: guid(1), durationSec: 300 }).where(eq(lessons.id, lessonId));
@@ -156,6 +181,33 @@ describe("refreshLessonVideo", () => {
     expect(await row()).toMatchObject({ videoStatus: "failed", videoStartedAt: null });
   });
 
+  test("ready stores the picture size Bunny reports, in the same write as the length", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 4, length: 61, width: 1080, height: 1920 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
+    expect(await refreshLessonVideo(db, b.api, { videoId: guid(5) })).toEqual({ status: "ready", durationSec: 61, replacing: false });
+    expect(await row()).toMatchObject({ videoStatus: "ready", durationSec: 61, videoWidth: 1080, videoHeight: 1920 });
+  });
+
+  test("ready without a size from Bunny (none in its answer, or one side 0): ready all the same, the shape null", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 4, length: 61 }, [guid(6)]: { status: 4, length: 62, width: 1920, height: 0 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "ready", durationSec: 61, replacing: false });
+    expect(await row()).toMatchObject({ videoStatus: "ready", videoWidth: null, videoHeight: null });
+    await db.update(lessons).set({ videoId: guid(6), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "ready", durationSec: 62, videoWidth: null, videoHeight: null }); // one side only is no shape
+  });
+
+  test("a size comes only with ready: processing and failed write none", async () => {
+    const b = fakeBunny({ [guid(5)]: { status: 2, length: 0, width: 1080, height: 1920 }, [guid(6)]: { status: 5, length: 0, width: 1080, height: 1920 } });
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "uploading" }).where(eq(lessons.id, lessonId));
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "processing", videoWidth: null, videoHeight: null });
+    await db.update(lessons).set({ videoId: guid(6) }).where(eq(lessons.id, lessonId));
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoStatus: "failed", videoWidth: null, videoHeight: null });
+  });
+
   test("the same answer again (a repeated webhook, the next poll) writes nothing", async () => {
     const b = fakeBunny({ [guid(5)]: { status: 2, length: 0 } });
     await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
@@ -171,11 +223,34 @@ describe("refreshLessonVideo", () => {
     // the poll read the row as uploading and Bunny says "transcoding"; meanwhile the webhook's read stored ready (and deleted the replaced video)
     b.api.getVideo = vi.fn(async () => {
       await db.update(lessons).set({ videoStatus: "ready", replacedVideoId: null, durationSec: 754, videoStartedAt: null }).where(eq(lessons.id, lessonId));
-      return { status: 3, length: 0 };
+      return { status: 3, length: 0, width: 0, height: 0 };
     });
     expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "ready", durationSec: 754, replacing: false });
     expect(await row()).toMatchObject({ videoId: guid(5), videoStatus: "ready", durationSec: 754, replacedVideoId: null });
     expect(b.deleted).toEqual([]); // only the write that won deletes the replaced video
+  });
+
+  test("a stale read cannot overwrite the shape either: the write that came first stored ready with its size, the late answer's size is dropped", async () => {
+    const b = fakeBunny();
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
+    b.api.getVideo = vi.fn(async () => {
+      // another write came first: ready, 1920 × 1080; this read, begun before it, is told ready and 1080 × 1920
+      await db.update(lessons).set({ videoStatus: "ready", durationSec: 754, videoWidth: 1920, videoHeight: 1080, videoStartedAt: null }).where(eq(lessons.id, lessonId));
+      return { status: 4, length: 800, width: 1080, height: 1920 };
+    });
+    expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "ready", durationSec: 754, replacing: false });
+    expect(await row()).toMatchObject({ videoStatus: "ready", durationSec: 754, videoWidth: 1920, videoHeight: 1080 });
+  });
+
+  test("a read of an old upload cannot give the new upload its shape: a replacement began while Bunny was asked", async () => {
+    const b = fakeBunny();
+    await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
+    b.api.getVideo = vi.fn(async () => {
+      await db.update(lessons).set({ videoId: guid(6), videoStatus: "uploading", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
+      return { status: 4, length: 754, width: 1080, height: 1920 };
+    });
+    await refreshLessonVideo(db, b.api, { lessonId });
+    expect(await row()).toMatchObject({ videoId: guid(6), videoStatus: "uploading", videoWidth: null, videoHeight: null });
   });
 
   test("two reads that both see ready: one write, one delete of the replaced video", async () => {
@@ -203,7 +278,7 @@ describe("refreshLessonVideo", () => {
     await db.update(lessons).set({ videoId: guid(5), videoStatus: "processing" }).where(eq(lessons.id, lessonId));
     b.api.getVideo = vi.fn(async () => {
       await db.update(lessons).set({ videoId: guid(6), videoStatus: "uploading", videoStartedAt: NOW }).where(eq(lessons.id, lessonId));
-      return { status: 4, length: 754 };
+      return { status: 4, length: 754, width: 1920, height: 1080 };
     });
     expect(await refreshLessonVideo(db, b.api, { lessonId })).toEqual({ status: "uploading", durationSec: null, replacing: false });
     expect(await row()).toMatchObject({ videoId: guid(6), videoStatus: "uploading", durationSec: null });
@@ -235,6 +310,24 @@ describe("sweepStuckUploads (the daily cron)", () => {
     await db.update(lessons).set({ videoId: guid(10), videoStatus: "uploading", replacedVideoId: null, durationSec: null, videoStartedAt: new Date(NOW.getTime() - 3600_000) }).where(eq(lessons.id, lessonId));
     expect(await sweepStuckUploads(db, b.api, NOW)).toBe(0);
     expect(await row()).toMatchObject({ videoId: guid(10), videoStatus: "uploading" });
+  });
+
+  test("the sweep gives the replaced video back with its shape; a first upload given up has none", async () => {
+    const b = fakeBunny();
+    const old = new Date(NOW.getTime() - 25 * 3600_000);
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", replacedVideoId: guid(1), durationSec: 300, videoWidth: 1080, videoHeight: 1920, videoStartedAt: old }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(1);
+    expect(await row()).toMatchObject({ videoId: guid(1), videoStatus: "ready", replacedVideoId: null, videoWidth: 1080, videoHeight: 1920 });
+    await db.update(lessons).set({ videoId: guid(10), videoStatus: "uploading", replacedVideoId: null, durationSec: null, videoWidth: null, videoHeight: null, videoStartedAt: old }).where(eq(lessons.id, lessonId));
+    expect(await sweepStuckUploads(db, b.api, NOW)).toBe(1);
+    expect(await row()).toMatchObject({ videoId: null, videoStatus: "none", videoWidth: null, videoHeight: null });
+  });
+
+  test("an upload that did finish is settled by the sweep with its size", async () => {
+    const b = fakeBunny({ [guid(9)]: { status: 4, length: 125, width: 1080, height: 1920 } });
+    await db.update(lessons).set({ videoId: guid(9), videoStatus: "uploading", videoStartedAt: new Date(NOW.getTime() - 25 * 3600_000) }).where(eq(lessons.id, lessonId));
+    await sweepStuckUploads(db, b.api, NOW);
+    expect(await row()).toMatchObject({ videoId: guid(9), videoStatus: "ready", durationSec: 125, videoWidth: 1080, videoHeight: 1920 });
   });
 
   test("a Bunny failure leaves the row as it is, for the next day", async () => {

@@ -1,20 +1,30 @@
-/* One lesson's video (LessonPlayer.tsx): Bunny's iframe in a 16:9 frame, the student's e-mail as a faint watermark in one of its
-   corners, and under it our fullscreen button (ui.btnOutline, 49 px). In fullscreen (the Fullscreen API on the wrapper, or the
-   wrapper over the window where there is none) the stage takes the space above the button and the frame stays 16:9, as large as
-   fits, in its middle: the size of the picture Bunny shows, so the watermark's corners are on the picture and never on black bars
-   around it (a container query box: 100cqw wide, or 100cqh × 16/9 when the screen is wider). The rounded corners are the frame's
-   (not the wrapper's), so the button's focus ring and hover lift are never cut off. No animation and no transition: the watermark
-   jumps between the corners, so prefers-reduced-motion has nothing to turn off. Tokens only. */
+/* One lesson's video (LessonPlayer.tsx): Bunny's iframe in a frame of the video's own shape (--aspect, width / height, set on the
+   wrapper: 16 / 9 when the shape is unknown), the student's e-mail as a faint watermark in one of its corners, and under it our
+   fullscreen button (ui.btnOutline, 49 px). A wide video fills the column. An upright or square one ([data-upright]) is centred
+   in a column whose width follows from a capped height (the smaller of 80 % of the screen height and 720 px), so it never runs off
+   the screen; the button stays under it. In fullscreen (the Fullscreen API on the wrapper, or the wrapper over the window where
+   there is none) the stage takes the space above the button and the frame is the largest box of the video's shape that fits, in
+   its middle: the size of the picture Bunny shows, so the watermark's corners are on the picture and never on black bars around it
+   (a container query box: 100cqw wide, or 100cqh × the aspect when the screen is wider). The rounded corners are the frame's (not
+   the wrapper's), so the button's focus ring and hover lift are never cut off. No animation and no transition: the watermark jumps
+   between the corners, so prefers-reduced-motion has nothing to turn off. Tokens only. */
 
 .player {
   display: flex;
   flex-direction: column;
 }
 
+/* upright or square: as tall as the cap allows (vh first for browsers without svh), as wide as that and the column allow, centred */
+.player[data-upright] {
+  width: min(100%, calc(min(80vh, 720px) * var(--aspect)));
+  width: min(100%, calc(min(80svh, 720px) * var(--aspect)));
+  margin-inline: auto;
+}
+
 .frame {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--aspect);
   overflow: hidden;
   border-radius: var(--r-card);
   background: var(--ink);
@@ -93,6 +103,8 @@
 .player[data-expanded] {
   position: fixed;
   inset: 0;
+  width: auto;
+  margin: 0;
   z-index: 1000;
 }
 
@@ -107,7 +119,7 @@
 
 .player:fullscreen .frame,
 .player[data-expanded] .frame {
-  width: min(100cqw, 100cqh * 16 / 9);
+  width: min(100cqw, 100cqh * var(--aspect));
   border-radius: 0;
 }
 

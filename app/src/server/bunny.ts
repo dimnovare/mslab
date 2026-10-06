@@ -77,12 +77,16 @@ export async function signedEmbedUrl(config: BunnyConfig, videoId: string, expir
   return `${config.embedBase}/${encodeURIComponent(config.libraryId)}/${encodeURIComponent(videoId)}?${query}`;
 }
 
-export type BunnyVideo = { status: number; length: number };
+/**
+ * What the app reads of Bunny's video object: its status, its length (s) and the picture size in pixels as it is SHOWN (`width` ×
+ * `height`; 0 when Bunny gives none: an older video, or one still being processed). A missing size never fails the read.
+ */
+export type BunnyVideo = { status: number; length: number; width: number; height: number };
 
 export type BunnyApi = {
   /** A new, empty video titled `title`; its guid. */
   createVideo(title: string): Promise<string>;
-  /** Its status and length (s), or null when Bunny does not know it (404). */
+  /** Its status, length (s) and picture size, or null when Bunny does not know it (404). */
   getVideo(videoId: string): Promise<BunnyVideo | null>;
   /** Deletes it; a video that is gone already (404) is fine. */
   deleteVideo(videoId: string): Promise<void>;
@@ -163,10 +167,11 @@ export function bunnyApi(config: BunnyConfig, fetchImpl: typeof fetch = (input, 
           discard(res);
           throw new BunnyError("get", res.status);
         }
-        const json = (await res.json().catch(() => null)) as { status?: unknown; length?: unknown } | null;
+        const json = (await res.json().catch(() => null)) as { status?: unknown; length?: unknown; width?: unknown; height?: unknown; rotation?: unknown } | null;
         // An answer without a numeric status is not an answer: it must not pass for "still processing".
         if (typeof json?.status !== "number") throw new BunnyError("get", res.status);
-        return { status: json.status, length: typeof json.length === "number" ? json.length : 0 };
+        const size = shownSize(json.width, json.height, json.rotation);
+        return { status: json.status, length: typeof json.length === "number" ? json.length : 0, ...size };
       }),
     deleteVideo: (videoId) =>
       call(`${videos}/${encodeURIComponent(videoId)}`, "DELETE", undefined, async (res) => {
@@ -174,6 +179,22 @@ export function bunnyApi(config: BunnyConfig, fetchImpl: typeof fetch = (input, 
         if (!res.ok && res.status !== 404) throw new BunnyError("delete", res.status);
       }),
   };
+}
+
+/** A number Bunny sent, or 0 (missing, not a number, not finite). */
+const numberOr0 = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+
+/**
+ * The picture size a student sees. Bunny's `width` and `height` are those "of the original video file" (video_getvideo, checked
+ * 06.10.2026), and `rotation` is the turn its container says to apply ("Rotation of the source file in degrees … e.g. 90, -90, 180,
+ * 270; null when no rotation metadata is present"). A phone held upright often stores a 1920 × 1080 picture with a 90° turn: shown,
+ * it is 1080 × 1920. So a quarter turn (90, -90, 270) swaps the sides; any other value, or none, leaves them. A side that is missing or
+ * not a number is 0.
+ */
+function shownSize(width: unknown, height: unknown, rotation: unknown): { width: number; height: number } {
+  const [w, h] = [numberOr0(width), numberOr0(height)];
+  const quarterTurn = typeof rotation === "number" && Number.isFinite(rotation) && Math.abs(rotation) % 180 === 90;
+  return quarterTurn ? { width: h, height: w } : { width: w, height: h };
 }
 
 export type BunnyVideoStatus = "uploading" | "processing" | "ready" | "failed";

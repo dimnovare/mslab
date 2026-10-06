@@ -81,8 +81,32 @@ export function moveLesson(layout: readonly ModuleLayout[], lessonId: number, di
   return out;
 }
 
-/** A lesson's video columns (schema `lessons`). */
-export type VideoFields = { videoId: string | null; videoStatus: VideoStatus; replacedVideoId: string | null; durationSec: number | null };
+/** The picture size of a video in pixels, as Bunny reports it. */
+export type VideoShape = { width: number; height: number };
+
+/** The largest side Bunny can hold (8K is 7680): anything above is not a video's size. */
+const MAX_SIDE = 10_000;
+
+/** A usable shape: both sides whole numbers of 1 … 10 000 pixels (Bunny gives 0 for an unknown one), else null. */
+export function validShape(shape: { width: number; height: number } | null | undefined): VideoShape | null {
+  if (!shape) return null;
+  const { width, height } = shape;
+  const fine = (n: number) => Number.isInteger(n) && n >= 1 && n <= MAX_SIDE;
+  return fine(width) && fine(height) ? { width, height } : null;
+}
+
+/**
+ * A lesson's video columns (schema `lessons`). `videoWidth` / `videoHeight` are the picture size of the video that PLAYS (the ready
+ * one, or the replaced one while a replacement uploads): both numbers or both null (unknown: the player assumes 16:9).
+ */
+export type VideoFields = {
+  videoId: string | null;
+  videoStatus: VideoStatus;
+  replacedVideoId: string | null;
+  durationSec: number | null;
+  videoWidth: number | null;
+  videoHeight: number | null;
+};
 /** The columns after a change, and the Bunny videos nobody plays any more (to delete). */
 export type VideoChange = { next: VideoFields; obsolete: string[] };
 
@@ -105,10 +129,10 @@ export function completion(l: VideoFields & { kind: LessonKind }): Completion {
   return playableVideo(l) && (l.durationSec ?? 0) > 0 ? "watch" : "wait";
 }
 
-/** The admin switches a lesson to "Tekst": every video it has (the current upload, a replaced one) becomes obsolete. */
+/** The admin switches a lesson to "Tekst": every video it has (the current upload, a replaced one) becomes obsolete; its shape goes too. */
 export function dropVideo(v: VideoFields): VideoChange {
   return {
-    next: { videoId: null, videoStatus: "none", replacedVideoId: null, durationSec: null },
+    next: { videoId: null, videoStatus: "none", replacedVideoId: null, durationSec: null, videoWidth: null, videoHeight: null },
     obsolete: [v.videoId, v.replacedVideoId].filter((id): id is string => id !== null),
   };
 }
@@ -122,10 +146,19 @@ export function startUpload(v: VideoFields, newVideoId: string): VideoChange {
 
 /**
  * Bunny's word about `videoId` (the editor's poll, the webhook): null when unchanged (not the current upload, a stale status,
- * a downgrade, or an unusable length). Ready: its length is stored and the replaced video becomes obsolete. Status moves forward
- * only: uploading < processing < ready/failed. Allows recovery (failed → ready) but not downgrade (ready → failed).
+ * a downgrade, or an unusable length). Ready: its length and its shape are stored and the replaced video becomes obsolete. The shape
+ * is the one of the video that plays: stored only on the way to ready (both sides whole numbers of 1 … 10 000, else both null: the
+ * player then assumes 16:9), so while a replacement uploads or processes the old video's shape stays, and the new one's takes its
+ * place when it is ready. Any other status leaves the shape alone. Status moves forward only: uploading < processing <
+ * ready/failed. Allows recovery (failed → ready) but not downgrade (ready → failed).
  */
-export function settleVideo(v: VideoFields, videoId: string, status: "uploading" | "processing" | "ready" | "failed", lengthSec: number): VideoChange | null {
+export function settleVideo(
+  v: VideoFields,
+  videoId: string,
+  status: "uploading" | "processing" | "ready" | "failed",
+  lengthSec: number,
+  shape?: { width: number; height: number } | null,
+): VideoChange | null {
   if (v.videoId !== videoId) return null;
 
   // Status rank: uploading=0, processing=1, ready/failed=2
@@ -141,15 +174,22 @@ export function settleVideo(v: VideoFields, videoId: string, status: "uploading"
   if (status === "ready") {
     const rounded = Math.round(lengthSec);
     if (!Number.isFinite(lengthSec) || rounded < 1) return null;
-    return { next: { videoId, videoStatus: "ready", replacedVideoId: null, durationSec: rounded }, obsolete: v.replacedVideoId ? [v.replacedVideoId] : [] };
+    const fit = validShape(shape);
+    return {
+      next: { videoId, videoStatus: "ready", replacedVideoId: null, durationSec: rounded, videoWidth: fit?.width ?? null, videoHeight: fit?.height ?? null },
+      obsolete: v.replacedVideoId ? [v.replacedVideoId] : [],
+    };
   }
   return { next: { ...v, videoStatus: status }, obsolete: [] };
 }
 
-/** An upload left unfinished for a day (the daily sweep): the replaced video comes back, or the lesson has no video again. Never abandons a ready video. */
+/**
+ * An upload left unfinished for a day (the daily sweep): the replaced video comes back (with its shape, which was kept for it), or the
+ * lesson has no video again. Never abandons a ready video.
+ */
 export function abandonUpload(v: VideoFields): VideoChange {
   if (v.videoStatus === "ready") return { next: v, obsolete: [] };
   const obsolete = v.videoId ? [v.videoId] : [];
-  if (v.replacedVideoId) return { next: { videoId: v.replacedVideoId, videoStatus: "ready", replacedVideoId: null, durationSec: v.durationSec }, obsolete };
-  return { next: { videoId: null, videoStatus: "none", replacedVideoId: null, durationSec: null }, obsolete };
+  if (v.replacedVideoId) return { next: { videoId: v.replacedVideoId, videoStatus: "ready", replacedVideoId: null, durationSec: v.durationSec, videoWidth: v.videoWidth, videoHeight: v.videoHeight }, obsolete };
+  return { next: { videoId: null, videoStatus: "none", replacedVideoId: null, durationSec: null, videoWidth: null, videoHeight: null }, obsolete };
 }

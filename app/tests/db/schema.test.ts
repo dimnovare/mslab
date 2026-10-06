@@ -49,7 +49,7 @@ test("lesson tables: modules, lessons, files and progress, with their defaults, 
   const [course] = await db.insert(courses).values({ slug: "lt", type: "e_learning", level: "basic", title: { et: "L" }, summary: { et: "" }, body: { et: "" } }).returning();
   const [mod] = await db.insert(courseModules).values({ courseId: course.id, position: 1, title: { et: "M" } }).returning();
   const [lesson] = await db.insert(lessons).values({ moduleId: mod.id, position: 1, title: { et: "Õ" } }).returning();
-  expect([lesson.kind, lesson.hidden, lesson.videoStatus, lesson.videoId, lesson.durationSec, lesson.body, lesson.replacedVideoId, lesson.videoStartedAt]).toEqual(["video", false, "none", null, null, null, null, null]);
+  expect([lesson.kind, lesson.hidden, lesson.videoStatus, lesson.videoId, lesson.durationSec, lesson.body, lesson.replacedVideoId, lesson.videoStartedAt, lesson.videoWidth, lesson.videoHeight]).toEqual(["video", false, "none", null, null, null, null, null, null, null]);
   const [text] = await db.insert(lessons).values({ moduleId: mod.id, position: 2, title: { et: "T" }, kind: "text" }).returning();
   expect(text.kind).toBe("text");
   await db.insert(lessonFiles).values({ lessonId: lesson.id, position: 1, name: "a.pdf", r2Key: "lessons/x.pdf", size: 10, contentType: "application/pdf" });

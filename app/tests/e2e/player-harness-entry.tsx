@@ -8,6 +8,7 @@ import ui from "@/components/site/ui.module.css";
 import page from "@/components/account/EcoursePage.module.css";
 import { LessonPlayer } from "@/components/account/LessonPlayer";
 import { lessonTexts } from "@/components/account/texts";
+import type { VideoShape } from "@/domain/lessons";
 import { getDict, type Locale } from "@/i18n/locales";
 
 export type HarnessProps = {
@@ -16,7 +17,7 @@ export type HarnessProps = {
   lessonId: number;
   module: string;
   title: string;
-  video: { embedUrl: string; durationSec: number; resumeAt: number };
+  video: { embedUrl: string; durationSec: number; resumeAt: number; shape: VideoShape | null };
   watermark: string;
   done: boolean;
 };

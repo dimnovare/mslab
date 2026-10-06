@@ -26,10 +26,11 @@ test.afterEach(async () => {
 });
 
 const db = <T>(work: Parameters<typeof onLocalDb<T>>[0]) => onLocalDb(work, { marksPages: false });
-type LessonRow = { kind: string; videoId: string | null; videoStatus: string; durationSec: number | null; replacedVideoId: string | null };
+type LessonRow = { kind: string; videoId: string | null; videoStatus: string; durationSec: number | null; replacedVideoId: string | null; videoWidth: number | null; videoHeight: number | null };
 const lessonRow = async (id: number) =>
   (await db((sql) => sql<LessonRow[]>`
-    select kind, video_id as "videoId", video_status as "videoStatus", duration_sec as "durationSec", replaced_video_id as "replacedVideoId" from lessons where id = ${id}`))[0];
+    select kind, video_id as "videoId", video_status as "videoStatus", duration_sec as "durationSec", replaced_video_id as "replacedVideoId",
+      video_width as "videoWidth", video_height as "videoHeight" from lessons where id = ${id}`))[0];
 /** What the fake Bunny holds: its videos and the ids it was asked to delete. */
 const fakeState = async () => (await (await fetch(`${E2E_BUNNY.url}/_fake/state`)).json()) as { videos: { guid: string; status: number; length: number }[]; deleted: string[] };
 const video = (n: number) => ({ name: `tund-${n}.mp4`, mimeType: "video/mp4", buffer: Buffer.alloc(256 * 1024, n) });
@@ -78,7 +79,7 @@ test("a lesson's video: chosen, sent to Bunny with tus, processed, replaced, dro
   await expect(field.locator("[data-video-pick]")).toHaveText("Asenda video");
   await expect(row.locator("[data-lesson-video]")).toHaveText("Video 2:05"); // the list behind the drawer follows
   const first = await lessonRow(lessonId);
-  expect(first).toMatchObject({ kind: "video", videoStatus: "ready", durationSec: 125, replacedVideoId: null });
+  expect(first).toMatchObject({ kind: "video", videoStatus: "ready", durationSec: 125, replacedVideoId: null, videoWidth: 1920, videoHeight: 1080 }); // the fake's usual 16:9, stored with the length
   expect((await fakeState()).videos.map((v) => v.guid)).toContain(first.videoId);
 
   // 3. "Asenda video": the old video plays until the new one is ready, then it is deleted from Bunny
@@ -86,9 +87,14 @@ test("a lesson's video: chosen, sent to Bunny with tus, processed, replaced, dro
   await expect(field.locator("[data-video-status]")).toHaveText("Töötlemisel…");
   await expect(field).toContainText("Vana video jääb õpilastele nähtavaks, kuni uus on valmis.");
   await expect(field.locator("[data-video-waiting]")).toHaveCount(0);
+  // the new video is an upright one (the fake gives it 1080 × 1920 when it finishes): until then the playing video's shape stays
+  const replacing = await lessonRow(lessonId);
+  expect(replacing).toMatchObject({ replacedVideoId: first.videoId, videoWidth: 1920, videoHeight: 1080 });
+  const planned = await fetch(`${E2E_BUNNY.url}/_fake/shape`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ videoId: replacing.videoId, width: 1080, height: 1920 }) });
+  expect(planned.status).toBe(200);
   await expect(field.locator("[data-video-status]")).toHaveText("Valmis · 2:05", { timeout: 20_000 });
   const second = await lessonRow(lessonId);
-  expect(second).toMatchObject({ videoStatus: "ready", durationSec: 125, replacedVideoId: null });
+  expect(second).toMatchObject({ videoStatus: "ready", durationSec: 125, replacedVideoId: null, videoWidth: 1080, videoHeight: 1920 }); // the new video's shape took its place
   expect(second.videoId).not.toBe(first.videoId);
   await expect.poll(async () => (await fakeState()).deleted).toContain(first.videoId);
   expect((await fakeState()).videos.map((v) => v.guid)).toContain(second.videoId);
@@ -105,7 +111,7 @@ test("a lesson's video: chosen, sent to Bunny with tus, processed, replaced, dro
   await confirm.getByRole("button", { name: "Jah, jätka" }).click();
   await expect(kind.locator("[data-kind-status]")).toHaveText("Salvestatud.");
   await expect(field).toHaveCount(0);
-  expect(await lessonRow(lessonId)).toMatchObject({ kind: "text", videoStatus: "none", videoId: null, replacedVideoId: null, durationSec: null });
+  expect(await lessonRow(lessonId)).toMatchObject({ kind: "text", videoStatus: "none", videoId: null, replacedVideoId: null, durationSec: null, videoWidth: null, videoHeight: null });
   await expect.poll(async () => (await fakeState()).deleted).toContain(second.videoId); // after the answer (after())
   await kind.getByRole("radio", { name: "Video" }).check();
   await expect(field.locator("[data-video-pick]")).toHaveText("Vali video");

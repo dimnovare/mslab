@@ -27,7 +27,7 @@ export const courses = pgTable("courses", {
   body: jsonb("body").$type<I18n>().notNull(),
   outcomes: jsonb("outcomes").$type<I18n[]>().notNull().default([]),
   includes: jsonb("includes").$type<I18n[]>().notNull().default([]),
-  // Legacy (phase 3a): module titles live in course_modules; nothing reads or writes this column. Migration 0004 drops it after the 3a deploy.
+  // Legacy (phase 3a): module titles live in course_modules; nothing reads or writes this column. Migration 0005 drops it after the 3a deploy.
   modules: jsonb("modules").$type<I18n[]>().notNull().default([]),
   language: text("language").notNull().default("ET"),        // "ET" | "RU" | "ET / RU"
   price: integer("price"),                                     // e-learning, cents
@@ -222,6 +222,8 @@ export type LessonKind = "video" | "text";
  * A lesson of an e-course module, in `position` order within its module. `kind`: see LessonKind. `videoId` is the Bunny video
  * uploaded last; `replacedVideoId` is the ready video it replaces ("Asenda video"), which plays until the new one is ready and is
  * then deleted. `videoStartedAt`: when the current upload began (the daily sweep gives up uploads older than 24 h).
+ * `videoWidth` / `videoHeight`: the picture size in pixels of the video that PLAYS, as Bunny reports it when that video is ready
+ * (both set, or both null when unknown: older videos, a size Bunny did not give). A replacement in progress leaves them alone.
  */
 export const lessons = pgTable("lessons", {
   id: serial("id").primaryKey(),
@@ -234,6 +236,8 @@ export const lessons = pgTable("lessons", {
   videoId: text("video_id"),
   videoStatus: text("video_status").$type<VideoStatus>().notNull().default("none"),
   durationSec: integer("duration_sec"),
+  videoWidth: integer("video_width"),
+  videoHeight: integer("video_height"),
   replacedVideoId: text("replaced_video_id"),
   videoStartedAt: timestamp("video_started_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

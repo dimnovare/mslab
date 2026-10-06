@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { build } from "esbuild";
+import { E2E_BUNNY } from "./bunny-values";
 import { accountCourseSlug, onLocalDb } from "./fixtures";
 import type { HarnessProps } from "./player-harness-entry";
+import { LOCAL_URL, TARGET } from "./target";
 
 // The lesson player's e2e harness (lesson-player.spec.ts). The lesson page that holds LessonPlayer comes with Task 9; the player is
 // tested on its own here, also in the cases that page cannot show on demand (Bunny not answering, a browser without the Fullscreen
@@ -39,14 +41,44 @@ function harnessBundle(): Promise<{ js: string; css: string }> {
 /** The lesson the harness plays: one ready video lesson (the fake's 125 s) and a text lesson after it. */
 export type PlayerLesson = { clientId: number; slug: string; lessonId: number; nextId: number };
 
+/** A video's picture as the fake Bunny stores it: the size of the file and, for a phone held upright, a quarter turn in its metadata. */
+export type FakeShape = { width: number; height: number; rotation?: number };
+
+/**
+ * Lesson 1's video comes through the real chain, the way Bunny's news reaches the app in production: a finished video of this shape
+ * in the fake Bunny (`POST /_fake/video`), a lesson waiting for it ("processing"), and Bunny's webhook, to which the app answers by
+ * reading the video's status and size from the fake's API and storing them (lesson-videos.ts) once it is ready.
+ */
+async function shapedVideo(shape: FakeShape): Promise<{ guid: string; settle(lessonId: number): Promise<void> }> {
+  const made = await fetch(`${E2E_BUNNY.url}/_fake/video`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(shape) });
+  if (!made.ok) throw new Error(`e2e: the fake Bunny refused a video of ${JSON.stringify(shape)} (${made.status})`);
+  const { guid } = (await made.json()) as { guid: string };
+  return {
+    guid,
+    async settle(lessonId) {
+      const hook = await fetch(`${TARGET || LOCAL_URL}/api/bunny/webhook?secret=${E2E_BUNNY.webhookSecret}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ VideoLibraryId: Number(E2E_BUNNY.libraryId), VideoGuid: guid, Status: 4 }),
+      });
+      if (!hook.ok) throw new Error(`e2e: the webhook answered ${hook.status}`);
+      const [row] = await onLocalDb((sql) => sql<{ status: string }[]>`select video_status as status from lessons where id = ${lessonId}`, { marksPages: false });
+      if (row?.status !== "ready") throw new Error(`e2e: the lesson's video is "${row?.status}" after the webhook`);
+    },
+  };
+}
+
 /**
  * A client (written straight to the LOCAL database) with six months of access to an e-course of her own (`e2e-konto-<label>-<project>`,
  * not published; removeClientRows deletes it with its module, lessons and progress) and the terms of version "1" accepted (takeTerms
  * sets that version): module "Alustame" with lesson 1 "Esimene tund", a video lesson with a ready video of 125 s on the fake Bunny
- * (any id: the fake's player checks only the token), and lesson 2, a text lesson.
+ * (any id: the fake's player checks only the token), and lesson 2, a text lesson. The video's shape is unknown (the lesson API
+ * answers `shape: null`, the player assumes 16:9) unless `shape` is given: then it is a video of that picture in the fake Bunny, made
+ * ready by its webhook, so the shape reaches the lesson API as the app stores it.
  */
-export async function insertPlayerLesson(email: string): Promise<PlayerLesson> {
-  return onLocalDb(
+export async function insertPlayerLesson(email: string, opts: { shape?: FakeShape } = {}): Promise<PlayerLesson> {
+  const shaped = opts.shape ? await shapedVideo(opts.shape) : null;
+  const lesson = await onLocalDb(
     async (sql) => {
       const [client] = await sql<{ id: number }[]>`insert into clients (email, locale) values (${email}, 'et') returning id`;
       const slug = accountCourseSlug(email);
@@ -54,9 +86,13 @@ export async function insertPlayerLesson(email: string): Promise<PlayerLesson> {
         insert into courses (slug, type, level, title, summary, body, price, access_months, published)
         values (${slug}, 'e_learning', 'basic', ${sql.json({ et: "E2E õppetunnid", ru: "E2E уроки" })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 9500, 6, false) returning id`;
       const [m] = await sql<{ id: number }[]>`insert into course_modules (course_id, position, title) values (${course.id}, 1, ${sql.json({ et: "Alustame", ru: "Начинаем" })}) returning id`;
-      const [video] = await sql<{ id: number }[]>`
-        insert into lessons (module_id, position, title, kind, video_id, video_status, duration_sec)
-        values (${m.id}, 1, ${sql.json({ et: "Esimene tund", ru: "Первый урок" })}, 'video', ${crypto.randomUUID()}, 'ready', 125) returning id`;
+      const [video] = shaped
+        ? await sql<{ id: number }[]>`
+            insert into lessons (module_id, position, title, kind, video_id, video_status)
+            values (${m.id}, 1, ${sql.json({ et: "Esimene tund", ru: "Первый урок" })}, 'video', ${shaped.guid}, 'processing') returning id`
+        : await sql<{ id: number }[]>`
+            insert into lessons (module_id, position, title, kind, video_id, video_status, duration_sec)
+            values (${m.id}, 1, ${sql.json({ et: "Esimene tund", ru: "Первый урок" })}, 'video', ${crypto.randomUUID()}, 'ready', 125) returning id`;
       const [text] = await sql<{ id: number }[]>`insert into lessons (module_id, position, title, kind) values (${m.id}, 2, ${sql.json({ et: "Teine tund" })}, 'text') returning id`;
       await sql`insert into course_access (client_id, course_id, granted_by, expires_at) values (${client.id}, ${course.id}, 'e2e', now() + interval '6 months')`;
       await sql`insert into terms_acceptances (client_id, course_id, terms_version) values (${client.id}, ${course.id}, '1')`;
@@ -64,6 +100,8 @@ export async function insertPlayerLesson(email: string): Promise<PlayerLesson> {
     },
     { marksPages: false },
   );
+  await shaped?.settle(lesson.lessonId);
+  return lesson;
 }
 
 /** A saved point for the student, as earlier reports would have left it (watched `watchedSec`, not done). */
@@ -82,7 +120,7 @@ export async function storedProgress(clientId: number, lessonId: number): Promis
 }
 
 /** What the lesson API gives the page for a ready video (lesson-data.ts LessonView), read with the student's session. */
-export type ReadyLesson = { module: { title: { et: string; ru?: string } }; lesson: { title: { et: string; ru?: string } }; video: { state: "ready"; embedUrl: string; durationSec: number; resumeAt: number }; watermark: string };
+export type ReadyLesson = { module: { title: { et: string; ru?: string } }; lesson: { title: { et: string; ru?: string } }; video: { state: "ready"; embedUrl: string; durationSec: number; resumeAt: number; shape: { width: number; height: number } | null }; watermark: string };
 
 export async function readyLesson(page: Page, lesson: PlayerLesson): Promise<ReadyLesson> {
   const res = await page.request.get(`/api/konto/kursus/${lesson.slug}/${lesson.lessonId}`);
@@ -110,7 +148,7 @@ export async function openPlayerHarness(page: Page, lesson: PlayerLesson, view: 
     lessonId: lesson.lessonId,
     module: view.module.title[locale] ?? view.module.title.et,
     title: view.lesson.title[locale] ?? view.lesson.title.et,
-    video: { embedUrl: opts.embedUrl ?? view.video.embedUrl, durationSec: view.video.durationSec, resumeAt: view.video.resumeAt },
+    video: { embedUrl: opts.embedUrl ?? view.video.embedUrl, durationSec: view.video.durationSec, resumeAt: view.video.resumeAt, shape: view.video.shape },
     watermark: view.watermark,
     done: false,
   };
