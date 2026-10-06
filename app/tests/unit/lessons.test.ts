@@ -49,18 +49,24 @@ describe("the 90 % rule and the resume point", () => {
     expect(isWatched(679, 754)).toBe(true); // 90.05 %
     expect(isWatched(500, null)).toBe(false);
     expect(isWatched(0, 0)).toBe(false);
+    expect(isWatched(100, 100)).toBe(true);
+    expect(isWatched(150, 100)).toBe(true); // watched > duration is still watched
   });
   test("resume at the saved second, but from the start when done or barely begun, and never in the last 5 s", () => {
     expect(resumeAt(42.7, 100, false)).toBe(42);
     expect(resumeAt(4, 100, false)).toBe(0);
     expect(resumeAt(99, 100, false)).toBe(95);
     expect(resumeAt(80, 100, true)).toBe(0);
+    expect(resumeAt(5, 100, false)).toBe(5);
+    expect(resumeAt(6, 10, false)).toBe(5); // video shorter than 10s, start at 5
   });
   test("durations as the admin and the student read them", () => {
     expect(formatDuration(754)).toBe("12:34");
     expect(formatDuration(59)).toBe("0:59");
     expect(formatDuration(3723)).toBe("1:02:03");
     expect(formatDuration(-3)).toBe("0:00");
+    expect(formatDuration(59.5)).toBe("1:00");
+    expect(formatDuration(3600)).toBe("1:00:00");
   });
 });
 
@@ -69,15 +75,28 @@ describe("moveLesson (↑ ↓ within and across modules)", () => {
   test("swaps with its neighbour inside the module", () => {
     expect(moveLesson(layout, 2, -1)).toEqual([{ moduleId: 10, lessonIds: [2, 1] }, { moduleId: 20, lessonIds: [] }, { moduleId: 30, lessonIds: [3] }]);
   });
-  test("past the end of its module: to the start of the next one (an empty one too), or the end of the one before", () => {
+  test("past the end of its module: to the start of the next one (empty or not), or the end of the one before", () => {
     expect(moveLesson(layout, 2, 1)).toEqual([{ moduleId: 10, lessonIds: [1] }, { moduleId: 20, lessonIds: [2] }, { moduleId: 30, lessonIds: [3] }]);
     expect(moveLesson(layout, 3, -1)).toEqual([{ moduleId: 10, lessonIds: [1, 2] }, { moduleId: 20, lessonIds: [3] }, { moduleId: 30, lessonIds: [] }]);
+  });
+  test("with non-empty target modules", () => {
+    const denseLayout = [{ moduleId: 10, lessonIds: [1, 2] }, { moduleId: 20, lessonIds: [7, 8] }];
+    expect(moveLesson(denseLayout, 2, 1)).toEqual([{ moduleId: 10, lessonIds: [1] }, { moduleId: 20, lessonIds: [2, 7, 8] }]);
+    expect(moveLesson(denseLayout, 7, -1)).toEqual([{ moduleId: 10, lessonIds: [1, 2, 7] }, { moduleId: 20, lessonIds: [8] }]);
   });
   test("the very first and the very last cannot move further; an unknown id is null; the input is not changed", () => {
     expect(moveLesson(layout, 1, -1)).toBeNull();
     expect(moveLesson(layout, 3, 1)).toBeNull();
     expect(moveLesson(layout, 99, 1)).toBeNull();
     expect(layout[0].lessonIds).toEqual([1, 2]);
+  });
+  test("successful moves don't mutate the input", () => {
+    const immutableLayout = [{ moduleId: 10, lessonIds: [1, 2] }, { moduleId: 20, lessonIds: [3, 4] }];
+    const original = JSON.stringify(immutableLayout);
+    moveLesson(immutableLayout, 2, -1);
+    expect(JSON.stringify(immutableLayout)).toBe(original);
+    moveLesson(immutableLayout, 2, 1);
+    expect(JSON.stringify(immutableLayout)).toBe(original);
   });
 });
 
@@ -101,6 +120,28 @@ describe("a lesson's video: upload, replacement, the sweep", () => {
     expect(settleVideo(replacing.next, "new", "ready", 754.4)).toEqual({ next: { videoId: "new", videoStatus: "ready", replacedVideoId: null, durationSec: 754 }, obsolete: ["old"] });
   });
 
+  test("settleVideo: ready on a first upload (no replacement)", () => {
+    const uploading: VideoFields = { videoId: "v1", videoStatus: "uploading", replacedVideoId: null, durationSec: null };
+    expect(settleVideo(uploading, "v1", "ready", 100)).toEqual({ next: { videoId: "v1", videoStatus: "ready", replacedVideoId: null, durationSec: 100 }, obsolete: [] });
+  });
+
+  test("settleVideo: status only moves forward; never downgrades a ready video", () => {
+    expect(settleVideo(ready, "old", "processing", 0)).toBeNull();
+    expect(settleVideo(ready, "old", "failed", 0)).toBeNull();
+    expect(settleVideo({ videoId: "uploading", videoStatus: "uploading", replacedVideoId: null, durationSec: null }, "uploading", "processing", 0)).toEqual({ next: { videoId: "uploading", videoStatus: "processing", replacedVideoId: null, durationSec: null }, obsolete: [] });
+  });
+
+  test("settleVideo: ready with bad lengthSec (non-finite or ≤ 0) returns null", () => {
+    expect(settleVideo(none, "v1", "ready", 0)).toBeNull();
+    expect(settleVideo(none, "v1", "ready", -5)).toBeNull();
+    expect(settleVideo(none, "v1", "ready", Infinity)).toBeNull();
+    expect(settleVideo(none, "v1", "ready", NaN)).toBeNull();
+  });
+
+  test("settleVideo: failed status", () => {
+    expect(settleVideo({ videoId: "bad", videoStatus: "uploading", replacedVideoId: null, durationSec: null }, "bad", "failed", 0)).toEqual({ next: { videoId: "bad", videoStatus: "failed", replacedVideoId: null, durationSec: null }, obsolete: [] });
+  });
+
   test("a retry gives up the unfinished or failed upload but keeps the replaced one", () => {
     const failed: VideoFields = { videoId: "bad", videoStatus: "failed", replacedVideoId: "old", durationSec: 300 };
     expect(startUpload(failed, "again")).toEqual({ next: { videoId: "again", videoStatus: "uploading", replacedVideoId: "old", durationSec: 300 }, obsolete: ["bad"] });
@@ -113,6 +154,11 @@ describe("a lesson's video: upload, replacement, the sweep", () => {
   test("the daily sweep: the replaced video comes back, or the lesson has no video again", () => {
     expect(abandonUpload({ videoId: "new", videoStatus: "uploading", replacedVideoId: "old", durationSec: 300 })).toEqual({ next: { videoId: "old", videoStatus: "ready", replacedVideoId: null, durationSec: 300 }, obsolete: ["new"] });
     expect(abandonUpload({ videoId: "v1", videoStatus: "uploading", replacedVideoId: null, durationSec: null })).toEqual({ next: none, obsolete: ["v1"] });
+  });
+
+  test("abandonUpload: never destroys a ready video", () => {
+    expect(abandonUpload(ready)).toEqual({ next: ready, obsolete: [] });
+    expect(abandonUpload({ videoId: "processing", videoStatus: "processing", replacedVideoId: "old", durationSec: 100 })).toEqual({ next: { videoId: "old", videoStatus: "ready", replacedVideoId: null, durationSec: 100 }, obsolete: ["processing"] });
   });
 
   test("switched to \"Tekst\": every video of the lesson becomes obsolete and the lesson has none", () => {
@@ -133,6 +179,11 @@ describe("completing a lesson: the kind is explicit (controller ruling)", () => 
     expect(completion({ videoId: "v", videoStatus: "ready", replacedVideoId: null, durationSec: 300, kind: "video" })).toBe("watch");
     for (const videoStatus of ["none", "uploading", "processing", "failed"] as const)
       expect(completion({ ...none, videoId: videoStatus === "none" ? null : "v", videoStatus, kind: "video" }), videoStatus).toBe("wait");
+  });
+
+  test("ready video with null or 0 duration is not watchable → wait", () => {
+    expect(completion({ videoId: "v", videoStatus: "ready", replacedVideoId: null, durationSec: null, kind: "video" })).toBe("wait");
+    expect(completion({ videoId: "v", videoStatus: "ready", replacedVideoId: null, durationSec: 0, kind: "video" })).toBe("wait");
   });
   // That a waiting video lesson keeps the next one locked is checked end to end in Task 7's DB test (the API refuses to complete it).
 });

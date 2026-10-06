@@ -102,7 +102,7 @@ export type Completion = "mark" | "watch" | "wait";
 
 export function completion(l: VideoFields & { kind: LessonKind }): Completion {
   if (l.kind === "text") return "mark";
-  return playableVideo(l) && l.durationSec !== null ? "watch" : "wait";
+  return playableVideo(l) && (l.durationSec ?? 0) > 0 ? "watch" : "wait";
 }
 
 /** The admin switches a lesson to "Tekst": every video it has (the current upload, a replaced one) becomes obsolete. */
@@ -115,22 +115,27 @@ export function dropVideo(v: VideoFields): VideoChange {
 
 /** A new upload of `newVideoId` begins. A ready video becomes the replaced one (it keeps playing); an unfinished or failed one is given up. */
 export function startUpload(v: VideoFields, newVideoId: string): VideoChange {
-  if (v.videoStatus === "ready" && v.videoId) return { next: { ...v, videoId: newVideoId, videoStatus: "uploading", replacedVideoId: v.videoId }, obsolete: [] };
+  if (v.videoStatus === "ready" && v.videoId && v.videoId !== newVideoId) return { next: { ...v, videoId: newVideoId, videoStatus: "uploading", replacedVideoId: v.videoId }, obsolete: [] };
   return { next: { ...v, videoId: newVideoId, videoStatus: "uploading" }, obsolete: v.videoId && v.videoId !== newVideoId ? [v.videoId] : [] };
 }
 
 /**
  * Bunny's word about `videoId` (the editor's poll, the webhook): null when it is not the lesson's current upload (an older one:
- * nothing changes). Ready: its length is stored and the replaced video becomes obsolete.
+ * nothing changes). Ready: its length is stored and the replaced video becomes obsolete. Never downgrades a ready video.
  */
 export function settleVideo(v: VideoFields, videoId: string, status: "uploading" | "processing" | "ready" | "failed", lengthSec: number): VideoChange | null {
   if (v.videoId !== videoId) return null;
-  if (status === "ready") return { next: { videoId, videoStatus: "ready", replacedVideoId: null, durationSec: Math.max(1, Math.round(lengthSec)) }, obsolete: v.replacedVideoId ? [v.replacedVideoId] : [] };
+  if (v.videoStatus === "ready" && status !== "ready") return null;
+  if (status === "ready") {
+    if (!Number.isFinite(lengthSec) || lengthSec <= 0) return null;
+    return { next: { videoId, videoStatus: "ready", replacedVideoId: null, durationSec: Math.round(lengthSec) }, obsolete: v.replacedVideoId ? [v.replacedVideoId] : [] };
+  }
   return { next: { ...v, videoStatus: status }, obsolete: [] };
 }
 
-/** An upload left unfinished for a day (the daily sweep): the replaced video comes back, or the lesson has no video again. */
+/** An upload left unfinished for a day (the daily sweep): the replaced video comes back, or the lesson has no video again. Never abandons a ready video. */
 export function abandonUpload(v: VideoFields): VideoChange {
+  if (v.videoStatus === "ready") return { next: v, obsolete: [] };
   const obsolete = v.videoId ? [v.videoId] : [];
   if (v.replacedVideoId) return { next: { videoId: v.replacedVideoId, videoStatus: "ready", replacedVideoId: null, durationSec: v.durationSec }, obsolete };
   return { next: { videoId: null, videoStatus: "none", replacedVideoId: null, durationSec: null }, obsolete };
