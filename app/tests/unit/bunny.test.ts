@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { describe, expect, test, vi } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { bunnyApi, BunnyError, bunnyConfig, embedToken, lessonVideoStatus, signedEmbedUrl, tusSignature } from "@/server/bunny";
 
 const VIDEO = "11111111-2222-3333-4444-555555555555";
@@ -20,6 +22,25 @@ describe("signing", () => {
     expect(`${url.origin}${url.pathname}`).toBe(`https://player.mediadelivery.net/embed/12345/${VIDEO}`);
     expect(Object.fromEntries(url.searchParams)).toEqual({ token: "adebd867cd8a745b86fb42b2337b4488d397ad9134efbb4a7da8ed5869a55e48", expires: "1767225600", autoplay: "false" });
     expect(new URL(await signedEmbedUrl(CONFIG, VIDEO, 1767225600, 95.7)).searchParams.get("t")).toBe("95");
+  });
+  test("startSec: below 1 s, negative or not finite gives no t; 1 s gives t=1", async () => {
+    const t = async (startSec?: number) => new URL(await signedEmbedUrl(CONFIG, VIDEO, 1767225600, startSec)).searchParams.get("t");
+    for (const none of [undefined, 0, 0.9, 0.999, -0, -1, -95, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) expect(await t(none), String(none)).toBeNull();
+    expect(await t(1)).toBe("1");
+    expect(await t(1.9)).toBe("1");
+    expect(await t(3600)).toBe("3600");
+  });
+  test("expires is whole unix seconds: a fraction, NaN, Infinity or an unsafe integer is a TypeError, never a signature", async () => {
+    const bad = [1767225600.5, Date.now() / 1000 + 0.3, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 2 ** 53, Number.MAX_VALUE];
+    for (const expires of bad) {
+      await expect(tusSignature("12345", "test-api-key", expires, VIDEO), String(expires)).rejects.toThrow(TypeError);
+      await expect(embedToken("test-token-key", VIDEO, expires), String(expires)).rejects.toThrow(TypeError);
+      await expect(signedEmbedUrl(CONFIG, VIDEO, expires), String(expires)).rejects.toThrow(TypeError);
+    }
+    // the refusal names neither key, and a valid expiry (even 0) still signs
+    const err = await tusSignature("12345", "test-api-key", Number.NaN, VIDEO).catch((e) => e);
+    expect(String(err.message)).not.toContain("test-api-key");
+    expect(await tusSignature("12345", "test-api-key", 0, VIDEO)).toBe(sha(`12345test-api-key0${VIDEO}`));
   });
 });
 
@@ -42,10 +63,10 @@ describe("bunnyConfig", () => {
 
 /** A fetch that records the calls and answers with `respond`. */
 function fakeFetch(respond: (url: string, init: RequestInit) => Response) {
-  const calls: { url: string; method: string; headers: Headers; body: unknown; signal: AbortSignal | null | undefined }[] = [];
+  const calls: { url: string; method: string; headers: Headers; body: unknown; signal: AbortSignal | null | undefined; redirect: RequestRedirect | undefined }[] = [];
   const fn = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
-    calls.push({ url, method: init.method ?? "GET", headers: new Headers(init.headers), body: init.body ? JSON.parse(String(init.body)) : undefined, signal: init.signal });
+    calls.push({ url, method: init.method ?? "GET", headers: new Headers(init.headers), body: init.body ? JSON.parse(String(init.body)) : undefined, signal: init.signal, redirect: init.redirect });
     return respond(url, init);
   });
   return { calls, fetch: fn as unknown as typeof fetch };
@@ -78,6 +99,155 @@ describe("the API client", () => {
     const err = await bunnyApi(CONFIG, fakeFetch(() => new Response("key test-api-key", { status: 401 })).fetch).deleteVideo(VIDEO).catch((e) => e);
     expect(err).toEqual(new BunnyError("delete", 401));
     expect(String(err.message)).not.toContain("test-api-key");
+  });
+  test("getVideo: only 404 is null; any other error status rejects with BunnyError('get', status), never null", async () => {
+    for (const status of [400, 401, 403, 429, 500, 502, 503]) {
+      const err = await bunnyApi(CONFIG, fakeFetch(() => new Response("key test-api-key", { status })).fetch)
+        .getVideo(VIDEO)
+        .then(
+          (v) => `resolved ${JSON.stringify(v)}`,
+          (e) => e,
+        );
+      expect(err, String(status)).toBeInstanceOf(BunnyError);
+      expect(err).toMatchObject({ op: "get", status });
+      expect(err.message).toBe(`Bunny get answered ${status}`);
+    }
+  });
+  test("getVideo: a 200 whose body has no numeric status is a BunnyError, not 'still processing'", async () => {
+    const answers = [() => Response.json({}), () => Response.json({ length: 10 }), () => Response.json({ status: "4", length: 10 }), () => Response.json({ status: null }), () => Response.json(null), () => Response.json([]), () => new Response("<html>not json</html>")];
+    for (const answer of answers) {
+      const err = await bunnyApi(CONFIG, fakeFetch(answer).fetch)
+        .getVideo(VIDEO)
+        .then(
+          (v) => `resolved ${JSON.stringify(v)}`,
+          (e) => e,
+        );
+      expect(err).toBeInstanceOf(BunnyError);
+      expect(err).toMatchObject({ op: "get", status: 200 });
+    }
+    // a missing length is not an error (a video still uploading has none yet): 0
+    expect(await bunnyApi(CONFIG, fakeFetch(() => Response.json({ guid: VIDEO, status: 0 })).fetch).getVideo(VIDEO)).toEqual({ status: 0, length: 0 });
+  });
+  test("every request refuses redirects, so the AccessKey is never sent on to another address", async () => {
+    const f = fakeFetch(() => Response.json({ guid: VIDEO, status: 4, length: 1 }));
+    const api = bunnyApi(CONFIG, f.fetch);
+    await api.createVideo("x");
+    await api.getVideo(VIDEO);
+    await api.deleteVideo(VIDEO);
+    expect(f.calls.map((c) => c.method)).toEqual(["POST", "GET", "DELETE"]);
+    for (const call of f.calls) expect(call.redirect, call.method).toBe("error");
+  });
+});
+
+type Api = ReturnType<typeof bunnyApi>;
+const OPS = {
+  createVideo: (api: Api) => api.createVideo("x"),
+  getVideo: (api: Api) => api.getVideo(VIDEO),
+  deleteVideo: (api: Api) => api.deleteVideo(VIDEO),
+};
+
+describe("a redirect with the platform's own fetch (local servers, no Bunny)", () => {
+  const servers: Server[] = [];
+  const listen = (handler: Parameters<typeof createServer>[1]) =>
+    new Promise<string>((resolve) => {
+      const server = createServer(handler).listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`));
+      servers.push(server);
+    });
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((s) => new Promise((done) => s.close(done))));
+  });
+
+  test("is not followed: the other address never sees a request, so the key never leaves", async () => {
+    const seen: { url: string | undefined; accessKey: string | string[] | undefined }[] = [];
+    const elsewhere = await listen((req, res) => {
+      seen.push({ url: req.url, accessKey: req.headers.accesskey });
+      res.end("{}");
+    });
+    const api = await listen((_req, res) => {
+      res.writeHead(307, { location: `${elsewhere}/stolen` }).end();
+    });
+    const config = bunnyConfig({ ...ENV, BUNNY_FAKE_URL: api }, false)!;
+    for (const [name, run] of Object.entries(OPS)) {
+      await expect(run(bunnyApi(config)), name).rejects.toThrow(TypeError);
+      expect(seen, name).toEqual([]);
+    }
+  });
+});
+
+describe("the answer time limit (10 s, headers and body together)", () => {
+  afterEach(() => vi.useRealTimers());
+  const neverBody = () => new Response(new ReadableStream({ start() {} }), { status: 200 });
+  type State = "pending" | "resolved" | { rejected: Error };
+  /** Lets `ms` of fake time pass and says how the call stands: pending, resolved, or how it was rejected. */
+  async function stateAfter(call: { state: State }, ms: number): Promise<State> {
+    await vi.advanceTimersByTimeAsync(ms);
+    return call.state;
+  }
+  function watch(promise: Promise<unknown>): { state: State } {
+    const call: { state: State } = { state: "pending" };
+    promise.then(
+      () => (call.state = "resolved"),
+      (e) => (call.state = { rejected: e }),
+    );
+    return call;
+  }
+
+  test.each(Object.entries(OPS))("%s: a fetch that never answers rejects with a TimeoutError at 10 s, not before, and aborts the request", async (_name, run) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const f = fakeFetch(() => new Promise<Response>(() => {}) as unknown as Response);
+    const call = watch(run(bunnyApi(CONFIG, f.fetch)));
+    expect(await stateAfter(call, 9_999)).toBe("pending");
+    expect(f.calls[0].signal?.aborted).toBe(false);
+    const state = await stateAfter(call, 1);
+    expect(state).toMatchObject({ rejected: { name: "TimeoutError" } });
+    expect((state as { rejected: Error }).rejected.message).not.toMatch(/test-api-key|12345|bunnycdn/);
+    expect(f.calls[0].signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test.each([
+    ["createVideo", OPS.createVideo],
+    ["getVideo", OPS.getVideo],
+  ] as const)("%s: headers that arrive with a body that never does reject at 10 s too", async (_name, run) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const f = fakeFetch(neverBody);
+    const call = watch(run(bunnyApi(CONFIG, f.fetch)));
+    expect(await stateAfter(call, 9_999)).toBe("pending");
+    expect(vi.getTimerCount()).toBe(1); // still running while the body is read
+    expect(await stateAfter(call, 1)).toMatchObject({ rejected: { name: "TimeoutError" } });
+    expect(f.calls[0].signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("a late failure of the aborted call is not an unhandled rejection", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      let fail: (e: Error) => void = () => {};
+      const f = fakeFetch(() => new Promise<Response>((_, reject) => (fail = reject)) as unknown as Response);
+      const call = watch(bunnyApi(CONFIG, f.fetch).getVideo(VIDEO));
+      expect(await stateAfter(call, 10_000)).toMatchObject({ rejected: { name: "TimeoutError" } });
+      fail(new Error("aborted by the platform"));
+      vi.useRealTimers();
+      await new Promise((r) => setTimeout(r, 20)); // a real macrotask: Node reports unhandled rejections once the microtasks have drained
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  test.each(Object.entries(OPS))("%s: the timer is cleared when the call ends, by an answer, an error status or a failing fetch", async (_name, run) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await run(bunnyApi(CONFIG, fakeFetch(() => Response.json({ guid: VIDEO, status: 4, length: 3 })).fetch));
+    expect(vi.getTimerCount()).toBe(0);
+    await run(bunnyApi(CONFIG, fakeFetch(() => new Response("", { status: 500 })).fetch)).catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+    const failing = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    await expect(run(bunnyApi(CONFIG, failing))).rejects.toThrow(TypeError);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

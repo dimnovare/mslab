@@ -52,14 +52,25 @@ export const EMBED_TTL_SEC = 4 * 3600;
 /** How long one tus upload may go on (Bunny checks the expiry on every request and advises an hour at least). */
 export const UPLOAD_TTL_SEC = 6 * 3600;
 
-export const tusSignature = (libraryId: string, apiKey: string, expires: number, videoId: string): Promise<string> => sha256(`${libraryId}${apiKey}${expires}${videoId}`);
+/** `expires` is unix seconds: a whole, safe integer. A fraction (Date.now() / 1000) or a mix-up would sign a value Bunny never accepts. */
+function checkExpires(expires: number): void {
+  if (!Number.isSafeInteger(expires)) throw new TypeError("expires must be a whole number of unix seconds");
+}
 
-export const embedToken = (tokenKey: string, videoId: string, expires: number): Promise<string> => sha256(`${tokenKey}${videoId}${expires}`);
+export async function tusSignature(libraryId: string, apiKey: string, expires: number, videoId: string): Promise<string> {
+  checkExpires(expires);
+  return sha256(`${libraryId}${apiKey}${expires}${videoId}`);
+}
 
-/** The player's address for one video, signed until `expires` (unix seconds); autoplay off; `startSec` > 0 starts there. */
+export async function embedToken(tokenKey: string, videoId: string, expires: number): Promise<string> {
+  checkExpires(expires);
+  return sha256(`${tokenKey}${videoId}${expires}`);
+}
+
+/** The player's address for one video, signed until `expires` (unix seconds); autoplay off; a `startSec` of 1 or more (finite) starts there, whole seconds. */
 export async function signedEmbedUrl(config: BunnyConfig, videoId: string, expires: number, startSec = 0): Promise<string> {
   const query = new URLSearchParams({ token: await embedToken(config.tokenKey, videoId, expires), expires: String(expires), autoplay: "false" });
-  if (startSec >= 1) query.set("t", String(Math.floor(startSec)));
+  if (Number.isFinite(startSec) && startSec >= 1) query.set("t", String(Math.floor(startSec)));
   return `${config.embedBase}/${encodeURIComponent(config.libraryId)}/${encodeURIComponent(videoId)}?${query}`;
 }
 
@@ -85,7 +96,7 @@ export class BunnyError extends Error {
   }
 }
 
-/** Bunny has 10 s to answer (the admin waits on create; the cron and the webhook on get and delete). */
+/** Bunny has 10 s to answer, headers and body together (the admin waits on create; the cron and the webhook on get and delete). */
 const ANSWER_TIMEOUT_MS = 10_000;
 
 const discard = (res: Response) => void res.body?.cancel().catch(() => {});
@@ -93,49 +104,72 @@ const discard = (res: Response) => void res.body?.cancel().catch(() => {});
 /** The REST client. `fetchImpl` is the platform's fetch (looked up at each call); tests pass a fake. Every call carries a signal (server/r2.ts explains why). */
 export function bunnyApi(config: BunnyConfig, fetchImpl: typeof fetch = (input, init) => fetch(input, init)): BunnyApi {
   const videos = `${config.apiBase}/library/${encodeURIComponent(config.libraryId)}/videos`;
-  async function send(url: string, method: "GET" | "POST" | "DELETE", body?: unknown): Promise<Response> {
+
+  /**
+   * One request, and `read` of its answer, within ANSWER_TIMEOUT_MS: the timer runs until `read` is done, so an answer whose body
+   * stalls is cut off too. On time-out the signal is aborted (the platform's fetch drops the connection) and the call rejects
+   * with a TimeoutError, whatever `fetchImpl` or `read` still do; the timer is cleared whichever way the call ends.
+   * `redirect: "error"`: the API does not redirect, and a redirect must never carry the AccessKey on to another address.
+   */
+  async function call<T>(url: string, method: "GET" | "POST" | "DELETE", body: unknown, read: (res: Response) => Promise<T>): Promise<T> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), ANSWER_TIMEOUT_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const reason = new DOMException("Bunny did not answer in time", "TimeoutError");
+        controller.abort(reason);
+        reject(reason);
+      }, ANSWER_TIMEOUT_MS);
+    });
+    const answered = (async () =>
+      read(
+        await fetchImpl(url, {
+          method,
+          headers: { AccessKey: config.apiKey, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          redirect: "error",
+          signal: controller.signal,
+        }),
+      ))();
     try {
-      return await fetchImpl(url, {
-        method,
-        headers: { AccessKey: config.apiKey, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-      });
+      // The race keeps listening to `answered` after the timer has won, so a late failure of the aborted call is handled, not an unhandled rejection.
+      return await Promise.race([answered, timedOut]);
     } finally {
       clearTimeout(timer);
     }
   }
+
   return {
-    async createVideo(title) {
-      const res = await send(videos, "POST", { title });
-      if (!res.ok) {
+    createVideo: (title) =>
+      call(videos, "POST", { title }, async (res) => {
+        if (!res.ok) {
+          discard(res);
+          throw new BunnyError("create", res.status);
+        }
+        const json = (await res.json().catch(() => null)) as { guid?: unknown } | null;
+        if (typeof json?.guid !== "string" || !json.guid) throw new BunnyError("create", res.status);
+        return json.guid;
+      }),
+    getVideo: (videoId) =>
+      call(`${videos}/${encodeURIComponent(videoId)}`, "GET", undefined, async (res) => {
+        if (res.status === 404) {
+          discard(res);
+          return null;
+        }
+        if (!res.ok) {
+          discard(res);
+          throw new BunnyError("get", res.status);
+        }
+        const json = (await res.json().catch(() => null)) as { status?: unknown; length?: unknown } | null;
+        // An answer without a numeric status is not an answer: it must not pass for "still processing".
+        if (typeof json?.status !== "number") throw new BunnyError("get", res.status);
+        return { status: json.status, length: typeof json.length === "number" ? json.length : 0 };
+      }),
+    deleteVideo: (videoId) =>
+      call(`${videos}/${encodeURIComponent(videoId)}`, "DELETE", undefined, async (res) => {
         discard(res);
-        throw new BunnyError("create", res.status);
-      }
-      const json = (await res.json().catch(() => null)) as { guid?: unknown } | null;
-      if (typeof json?.guid !== "string" || !json.guid) throw new BunnyError("create", res.status);
-      return json.guid;
-    },
-    async getVideo(videoId) {
-      const res = await send(`${videos}/${encodeURIComponent(videoId)}`, "GET");
-      if (res.status === 404) {
-        discard(res);
-        return null;
-      }
-      if (!res.ok) {
-        discard(res);
-        throw new BunnyError("get", res.status);
-      }
-      const json = (await res.json().catch(() => null)) as { status?: unknown; length?: unknown } | null;
-      return { status: typeof json?.status === "number" ? json.status : -1, length: typeof json?.length === "number" ? json.length : 0 };
-    },
-    async deleteVideo(videoId) {
-      const res = await send(`${videos}/${encodeURIComponent(videoId)}`, "DELETE");
-      discard(res);
-      if (!res.ok && res.status !== 404) throw new BunnyError("delete", res.status);
-    },
+        if (!res.ok && res.status !== 404) throw new BunnyError("delete", res.status);
+      }),
   };
 }
 
