@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
-import { courses, courseImages, courseSessions, registrations, requests, clients, clientSessions, courseAccess, mailQuota } from "@/db/schema";
+import { courses, courseImages, courseSessions, registrations, requests, clients, clientSessions, courseAccess, mailQuota, courseModules, lessons, lessonFiles, lessonProgress } from "@/db/schema";
 
 test("migrations apply and a course round-trips", async () => {
   const db = await makeTestDb();
@@ -42,4 +42,21 @@ test("client tables exist and link records", async () => {
   expect(await db.select().from(clientSessions)).toHaveLength(0);
   expect(await db.select().from(courseAccess)).toHaveLength(0);
   expect((await db.select().from(requests).where(eq(requests.kind, "change_request")))[0].clientId).toBeNull();
+});
+
+test("lesson tables: modules, lessons, files and progress, with their defaults, one progress row per student and lesson, cascading with the course", async () => {
+  const db = await makeTestDb();
+  const [course] = await db.insert(courses).values({ slug: "lt", type: "e_learning", level: "basic", title: { et: "L" }, summary: { et: "" }, body: { et: "" } }).returning();
+  const [mod] = await db.insert(courseModules).values({ courseId: course.id, position: 1, title: { et: "M" } }).returning();
+  const [lesson] = await db.insert(lessons).values({ moduleId: mod.id, position: 1, title: { et: "Õ" } }).returning();
+  expect([lesson.kind, lesson.hidden, lesson.videoStatus, lesson.videoId, lesson.durationSec, lesson.body, lesson.replacedVideoId, lesson.videoStartedAt]).toEqual(["video", false, "none", null, null, null, null, null]);
+  const [text] = await db.insert(lessons).values({ moduleId: mod.id, position: 2, title: { et: "T" }, kind: "text" }).returning();
+  expect(text.kind).toBe("text");
+  await db.insert(lessonFiles).values({ lessonId: lesson.id, position: 1, name: "a.pdf", r2Key: "lessons/x.pdf", size: 10, contentType: "application/pdf" });
+  const [c] = await db.insert(clients).values({ email: "lt@example.test" }).returning();
+  const [p] = await db.insert(lessonProgress).values({ clientId: c.id, lessonId: lesson.id }).returning();
+  expect([p.watchedSec, p.doneAt, p.unlockedBy]).toEqual([0, null, null]);
+  await expect(db.insert(lessonProgress).values({ clientId: c.id, lessonId: lesson.id })).rejects.toThrow();
+  await db.delete(courses).where(eq(courses.id, course.id));
+  for (const table of [courseModules, lessons, lessonFiles, lessonProgress]) expect(await db.select().from(table)).toHaveLength(0);
 });

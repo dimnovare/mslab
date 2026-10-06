@@ -9,7 +9,7 @@ import * as seedData from "@/db/seed-data";
 import { SEEDED_AT } from "@/db/seed-data";
 import { seedSessionStart } from "@/db/seed-dates";
 import { formatWeekday } from "@/i18n/format";
-import { getCourseBySlug, getGallery, getHomeData, getPage, getPracticePackages, getSettings, listPosts, listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
+import { getCourseBySlug, getGallery, getHomeData, getPage, getPracticePackages, getSettings, listModuleTitles, listPosts, listPublishedCourses, listUpcomingSessions } from "@/db/queries/public";
 import { upsertCourse } from "@/db/queries/admin";
 import { fromPrice, priceOptions } from "@/domain/course";
 import { mediaUrl } from "@/lib/media";
@@ -68,9 +68,10 @@ describe("prototype seed", () => {
   test("e-learning courses have access period, video and module counts; only the brow course has a next-course discount", async () => {
     const list = await listPublishedCourses(db);
     const online = Object.fromEntries(list.filter((c) => c.type === "e_learning").map((c) => [c.slug, c]));
-    expect([online["kulmumeistri-e-koolitus"].accessMonths, online["kulmumeistri-e-koolitus"].videoCount, online["kulmumeistri-e-koolitus"].modules.length]).toEqual([6, 24, 6]);
-    expect([online["kulmukuju-ja-summeetria"].accessMonths, online["kulmukuju-ja-summeetria"].videoCount, online["kulmukuju-ja-summeetria"].modules.length]).toEqual([6, 8, 3]);
-    expect([online["ripsmete-laminatsiooni-alused"].accessMonths, online["ripsmete-laminatsiooni-alused"].videoCount, online["ripsmete-laminatsiooni-alused"].modules.length]).toEqual([6, 12, 4]);
+    const moduleCount = async (slug: string) => (await listModuleTitles(db, online[slug].id)).length;
+    expect([online["kulmumeistri-e-koolitus"].accessMonths, online["kulmumeistri-e-koolitus"].videoCount, await moduleCount("kulmumeistri-e-koolitus")]).toEqual([6, 24, 6]);
+    expect([online["kulmukuju-ja-summeetria"].accessMonths, online["kulmukuju-ja-summeetria"].videoCount, await moduleCount("kulmukuju-ja-summeetria")]).toEqual([6, 8, 3]);
+    expect([online["ripsmete-laminatsiooni-alused"].accessMonths, online["ripsmete-laminatsiooni-alused"].videoCount, await moduleCount("ripsmete-laminatsiooni-alused")]).toEqual([6, 12, 4]);
     expect(online["kulmumeistri-e-koolitus"].nextDiscount?.et).toBe("−10% järgmiselt koolituselt");
     expect(online["kulmukuju-ja-summeetria"].nextDiscount).toBeNull();
   });

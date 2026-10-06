@@ -1,14 +1,15 @@
 import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { TERMS_PAGE_KEY } from "@/domain/course-terms";
+import type { I18n } from "@/i18n/field";
 import type { Db, Q } from "../client";
-import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "../schema";
+import { campaign, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage } from "../schema";
 
 // Public (read-only) queries. Every function takes the Db as its first argument and never creates one itself.
 
 export type CourseWithImages = Course & { images: CourseImage[] };
 export type SessionWithSeats = CourseSession & { confirmed: number };
-export type CourseDetail = CourseWithImages & { sessions: SessionWithSeats[] };
+export type CourseDetail = CourseWithImages & { sessions: SessionWithSeats[]; moduleTitles: I18n[] };
 export type UpcomingSession = SessionWithSeats & { course: Course };
 export type HomeData = {
   slides: HeroSlide[];
@@ -50,6 +51,16 @@ export async function listPublishedCourses(db: Db, only?: { slugs: string[] }): 
   });
 }
 
+/** The module titles of a course (course_modules), in their order: the public course page and the e-course page show them. */
+export async function listModuleTitles(db: Db, courseId: number): Promise<I18n[]> {
+  const rows = await db
+    .select({ title: courseModules.title })
+    .from(courseModules)
+    .where(eq(courseModules.courseId, courseId))
+    .orderBy(asc(courseModules.position), asc(courseModules.id));
+  return rows.map((r) => r.title);
+}
+
 /**
  * A course page. Drafts are hidden unless `includeUnpublished` is set (admin preview).
  * Sessions are ordered by start; pass `sessionsFrom` to drop sessions that started before that date.
@@ -70,8 +81,8 @@ export async function getCourseBySlug(
     },
   });
   if (!course) return null;
-  const counts = await confirmedBySession(db, course.sessions.map((s) => s.id));
-  return { ...course, sessions: course.sessions.map((s) => ({ ...s, confirmed: counts.get(s.id) ?? 0 })) };
+  const [counts, moduleTitles] = await Promise.all([confirmedBySession(db, course.sessions.map((s) => s.id)), listModuleTitles(db, course.id)]);
+  return { ...course, moduleTitles, sessions: course.sessions.map((s) => ({ ...s, confirmed: counts.get(s.id) ?? 0 })) };
 }
 
 /**

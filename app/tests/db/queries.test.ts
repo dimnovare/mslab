@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
-import { courses, courseSessions, registrations, requests, subscribers } from "@/db/schema";
+import { courseModules, courses, courseSessions, registrations, requests, subscribers } from "@/db/schema";
 import {
   getCourseBySlug,
   getGallery,
@@ -10,6 +10,7 @@ import {
   getPost,
   getPracticePackages,
   getSettings,
+  listModuleTitles,
   listPosts,
   listPublishedCourses,
   listUpcomingSessions,
@@ -319,4 +320,12 @@ describe("admin queries", () => {
     ]);
     expect((await listSubscribers(db)).map((s) => s.email)).toEqual(["b@example.com", "a@example.com"]);
   });
+});
+
+test("a course's module titles come from course_modules, in position order (phase 3a)", async () => {
+  const db = await makeTestDb();
+  const [c] = await db.insert(courses).values({ slug: "moodulid", type: "e_learning", level: "basic", title: { et: "M" }, summary: { et: "" }, body: { et: "" }, published: true }).returning();
+  await db.insert(courseModules).values([{ courseId: c.id, position: 2, title: { et: "Teine" } }, { courseId: c.id, position: 1, title: { et: "Esimene", ru: "Первый" } }]);
+  expect(await listModuleTitles(db, c.id)).toEqual([{ et: "Esimene", ru: "Первый" }, { et: "Teine" }]);
+  expect((await getCourseBySlug(db, "moodulid"))?.moduleTitles).toEqual([{ et: "Esimene", ru: "Первый" }, { et: "Teine" }]);
 });

@@ -109,7 +109,6 @@ describe("drafts", () => {
       summary: { et: "S" },
       body: { et: "B" },
       outcomes: [{ et: "O" }],
-      modules: [],
       includes: [{ et: "I" }],
       price: null,
       priceGroup: 22050,

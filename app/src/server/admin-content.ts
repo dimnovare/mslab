@@ -34,7 +34,6 @@ const draftSchema = z.object({
   summary: i18n,
   body: i18n,
   outcomes: z.array(i18n).max(200),
-  modules: z.array(i18n).max(200),
   includes: z.array(i18n).max(200),
   price: z.string().max(40),
   priceGroup: z.string().max(40),
@@ -81,7 +80,6 @@ export async function saveCourseForm(db: Db, formData: FormData): Promise<EditRe
   const summary = c.text("summary", d.summary, LIMITS.summary) ?? { et: "" };
   const body = c.text("body", d.body, LIMITS.body) ?? { et: "" };
   const outcomes = c.list("outcomes", d.outcomes);
-  const modules = c.list("modules", d.modules);
   const online = d.type === "e_learning";
 
   // the slug: typed, or made from the Estonian title
@@ -140,7 +138,6 @@ export async function saveCourseForm(db: Db, formData: FormData): Promise<EditRe
     summary,
     body,
     outcomes,
-    modules,
     includes,
     price,
     priceGroup,

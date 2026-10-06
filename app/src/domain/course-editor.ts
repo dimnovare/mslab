@@ -83,7 +83,6 @@ export type CourseDraft = {
   summary: I18n;
   body: I18n;
   outcomes: I18n[];
-  modules: I18n[];
   includes: I18n[];
   price: string;
   priceGroup: string;
@@ -117,7 +116,6 @@ export function newCourseDraft(): CourseDraft {
     summary: empty(),
     body: empty(),
     outcomes: [],
-    modules: [],
     includes: [],
     price: "",
     priceGroup: "",
@@ -145,7 +143,6 @@ type StoredCourse = {
   summary: I18n;
   body: I18n;
   outcomes: I18n[];
-  modules: I18n[];
   includes: I18n[];
   price: number | null;
   priceGroup: number | null;
@@ -174,7 +171,6 @@ export function draftFromCourse(c: StoredCourse): CourseDraft {
     summary: copy(c.summary),
     body: copy(c.body),
     outcomes: c.outcomes.map(copy),
-    modules: c.modules.map(copy),
     includes: c.includes.map(copy),
     price: amount(c.price),
     priceGroup: amount(c.priceGroup),

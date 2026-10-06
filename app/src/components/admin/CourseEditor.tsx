@@ -61,8 +61,8 @@ type Props = {
 /**
  * The course editor (prototype B editor layout; D badge block): every field of the course, its gallery, badge and
  * recommendations in one draft, saved together with "Salvesta". The type switch shows only that type's fields
- * (e-learning: price, access, videos, modules, next-course discount; contact: group and individual price, duration,
- * programme, "Koolitus sisaldab"). After a save the page reloads the stored course and the draft follows it.
+ * (e-learning: price, access, videos, next-course discount; contact: group and individual price, duration,
+ * "Koolitus sisaldab"). After a save the page reloads the stored course and the draft follows it.
  */
 export function CourseEditor({ initial, others, next, publicHref, created, typeLocked }: Props) {
   const t = adminEt.courseEditor;
@@ -297,19 +297,6 @@ export function CourseEditor({ initial, others, next, publicHref, created, typeL
 
           <section className={ui.card} aria-label={t.sections.outcomes}>
             <ListEditor title={t.sections.outcomes} itemLabel={f.outcomes} hint={f.outcomesHint} items={draft.outcomes} onChange={(v) => set("outcomes", v)} error={err("outcomes")} maxLength={LIMITS.item} multiline name="outcomes" />
-          </section>
-
-          <section className={ui.card} aria-label={online ? t.sections.modulesE : t.sections.modulesC}>
-            <ListEditor
-              title={online ? t.sections.modulesE : t.sections.modulesC}
-              itemLabel={online ? f.modulesE : f.modulesC}
-              hint={online ? f.modulesEHint : f.modulesCHint}
-              items={draft.modules}
-              onChange={(v) => set("modules", v)}
-              error={err("modules")}
-              maxLength={LIMITS.item}
-              name="modules"
-            />
           </section>
 
           {!online && (

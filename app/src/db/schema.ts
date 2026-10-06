@@ -27,6 +27,7 @@ export const courses = pgTable("courses", {
   body: jsonb("body").$type<I18n>().notNull(),
   outcomes: jsonb("outcomes").$type<I18n[]>().notNull().default([]),
   includes: jsonb("includes").$type<I18n[]>().notNull().default([]),
+  // Legacy (phase 3a): module titles live in course_modules; nothing reads or writes this column. Migration 0004 drops it after the 3a deploy.
   modules: jsonb("modules").$type<I18n[]>().notNull().default([]),
   language: text("language").notNull().default("ET"),        // "ET" | "RU" | "ET / RU"
   price: integer("price"),                                     // e-learning, cents
@@ -198,6 +199,70 @@ export const clientFavourites = pgTable("client_favourites", {
 
 export const mailQuota = pgTable("mail_quota", { day: text("day").primaryKey(), sent: integer("sent").notNull().default(0) });
 
+// ---------- phase 3a: modules, lessons, files, progress ----------
+
+/** A module of a course (an e-course's module, a contact course's programme item), in `position` order (1…n). */
+export const courseModules = pgTable("course_modules", {
+  id: serial("id").primaryKey(),
+  courseId: integer("course_id").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  title: jsonb("title").$type<I18n>().notNull(),
+}, (t) => [index("course_modules_course").on(t.courseId, t.position)]);
+
+/** A lesson video's state: none (no video uploaded yet), uploading (tus to Bunny), processing (Bunny encodes), ready, failed. */
+export type VideoStatus = "none" | "uploading" | "processing" | "ready" | "failed";
+
+/**
+ * A lesson's kind, chosen by the admin ("Õppetunni liik"): a video lesson is done at 90 % of its video, and cannot be completed
+ * while it has no video to play; a text lesson has no video and is done with "Märgi tehtuks". Never inferred from a missing video.
+ */
+export type LessonKind = "video" | "text";
+
+/**
+ * A lesson of an e-course module, in `position` order within its module. `kind`: see LessonKind. `videoId` is the Bunny video
+ * uploaded last; `replacedVideoId` is the ready video it replaces ("Asenda video"), which plays until the new one is ready and is
+ * then deleted. `videoStartedAt`: when the current upload began (the daily sweep gives up uploads older than 24 h).
+ */
+export const lessons = pgTable("lessons", {
+  id: serial("id").primaryKey(),
+  moduleId: integer("module_id").notNull().references(() => courseModules.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  title: jsonb("title").$type<I18n>().notNull(),
+  body: jsonb("body").$type<I18n>(),
+  kind: text("kind").$type<LessonKind>().notNull().default("video"),
+  hidden: boolean("hidden").notNull().default(false),
+  videoId: text("video_id"),
+  videoStatus: text("video_status").$type<VideoStatus>().notNull().default("none"),
+  durationSec: integer("duration_sec"),
+  replacedVideoId: text("replaced_video_id"),
+  videoStartedAt: timestamp("video_started_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("lessons_module").on(t.moduleId, t.position), uniqueIndex("lessons_video").on(t.videoId)]);
+
+/** A downloadable file of a lesson: the private R2 object `r2Key` (lessons/<uuid>.<ext>), shown as `name`. */
+export const lessonFiles = pgTable("lesson_files", {
+  id: serial("id").primaryKey(),
+  lessonId: integer("lesson_id").notNull().references(() => lessons.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  name: text("name").notNull(),
+  r2Key: text("r2_key").notNull(),
+  size: integer("size").notNull(),
+  contentType: text("content_type").notNull(),
+}, (t) => [index("lesson_files_lesson").on(t.lessonId, t.position)]);
+
+/**
+ * One student's progress on one lesson: `watchedSec` only grows; `doneAt` is set once (≥ 90 % watched, or "Märgi tehtuks");
+ * `unlockedBy` is the admin's e-mail when an admin opened this lesson for her ("Ava järgmine õppetund").
+ */
+export const lessonProgress = pgTable("lesson_progress", {
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  lessonId: integer("lesson_id").notNull().references(() => lessons.id, { onDelete: "cascade" }),
+  watchedSec: integer("watched_sec").notNull().default(0),
+  doneAt: timestamp("done_at", { withTimezone: true }),
+  unlockedBy: text("unlocked_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.clientId, t.lessonId] }), index("lesson_progress_lesson").on(t.lessonId)]);
+
 /** text compared byte by byte (collation "C"): the KV keys sort as in Cloudflare KV, and a LIKE 'prefix%' can use the primary key index. */
 const byteText = customType<{ data: string }>({ dataType: () => 'text COLLATE "C"' });
 
@@ -251,3 +316,7 @@ export type AuthToken = typeof authTokens.$inferSelect;
 export type AdminSession = typeof adminSessions.$inferSelect;
 export type Client = typeof clients.$inferSelect;
 export type ClientSession = typeof clientSessions.$inferSelect;
+export type CourseModule = typeof courseModules.$inferSelect;
+export type Lesson = typeof lessons.$inferSelect;
+export type LessonFile = typeof lessonFiles.$inferSelect;
+export type LessonProgressRow = typeof lessonProgress.$inferSelect;

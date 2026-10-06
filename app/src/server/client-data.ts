@@ -2,7 +2,7 @@ import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { CourseCardData } from "@/components/site/CourseCard";
 import { courseCardData } from "@/components/site/course-card-data";
 import type { Db } from "@/db/client";
-import { listPublishedCourses, listUpcomingSessions, readSetting } from "@/db/queries/public";
+import { listModuleTitles, listPublishedCourses, listUpcomingSessions, readSetting } from "@/db/queries/public";
 import {
   clientFavourites, clientLoginTokens, clients, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, subscribers,
   termsAcceptances,
@@ -195,7 +195,7 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
  */
 async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
   const [row] = await db
-    .select({ course: { id: courses.id, slug: courses.slug, title: courses.title, modules: courses.modules }, expiresAt: courseAccess.expiresAt })
+    .select({ course: { id: courses.id, slug: courses.slug, title: courses.title }, expiresAt: courseAccess.expiresAt })
     .from(courseAccess)
     .innerJoin(courses, eq(courseAccess.courseId, courses.id))
     .where(and(eq(courseAccess.clientId, clientId), eq(courses.slug, slug), isNull(courseAccess.revokedAt), gt(courseAccess.expiresAt, now)))
@@ -229,14 +229,15 @@ export async function loadEcourse(db: Db, clientId: number, slug: string, now: D
     const current = await courseTermsVersion(db);
     return [current, await db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1)] as const;
   };
-  const [[version, page], accepted] = await Promise.all([
+  const [[version, page], accepted, moduleTitles] = await Promise.all([
     versionThenText(),
     db.select({ version: termsAcceptances.termsVersion }).from(termsAcceptances).where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, access.course.id))),
+    listModuleTitles(db, access.course.id),
   ]);
   const text = termsText(page[0]?.body);
   const isAccepted = text === null || accepted.some((row) => row.version === version);
   return {
-    course: { slug: access.course.slug, title: access.course.title, modules: access.course.modules },
+    course: { slug: access.course.slug, title: access.course.title, modules: moduleTitles },
     access: { expiresAt: iso(access.expiresAt) },
     terms: { version, accepted: isAccepted, text: isAccepted ? null : text },
   };

@@ -1,6 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { Badge, StoredBadge } from "./schema";
-import { campaign, courseImages, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, settings } from "./schema";
+import { campaign, courseImages, courseModules, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, settings } from "./schema";
 import type { Db } from "./client";
 import { campaignSeed, courseSeeds, faqSeeds, heroSeeds, pageSeeds, postSeeds, practiceSeeds, settingSeeds, trainerWorks } from "./seed-data";
 import type { I18n } from "@/i18n/field";
@@ -117,11 +117,11 @@ export async function planRuFill(db: Db): Promise<RuFillPlan> {
   const updates: Update[] = [];
   const add = (table: string, apply: Update["apply"]) => updates.push({ table, apply });
 
-  // courses by slug, with their images (by key, while the Estonian alt text is still the seed's)
+  // courses by slug, with their images (by key, while the Estonian alt text is still the seed's) and module titles
   for (const seed of courseSeeds) {
     const [row] = await db.select().from(courses).where(eq(courses.slug, seed.slug)).limit(1);
     if (!row) continue;
-    const set = fillFields(row as Row, seed as unknown as Row, ["title", "summary", "body", "durationLabel", "nextDiscount"], ["outcomes", "includes", "modules"]) ?? {};
+    const set = fillFields(row as Row, seed as unknown as Row, ["title", "summary", "body", "durationLabel", "nextDiscount"], ["outcomes", "includes"]) ?? {};
     const badge = fillBadge(row.badge, seed.badge as Badge);
     if (badge) set.badge = badge;
     if (Object.keys(set).length) add("courses", (tx) => tx.update(courses).set({ ...set, updatedAt: sql`now()` }).where(eq(courses.id, row.id)));
@@ -130,6 +130,12 @@ export async function planRuFill(db: Db): Promise<RuFillPlan> {
       const seedImage = seed.images.find((s) => s.key === img.key && s.alt.et === img.alt?.et);
       const alt = fillI18n(img.alt, seedImage?.alt);
       if (alt) add("course_images", (tx) => tx.update(courseImages).set({ alt }).where(eq(courseImages.id, img.id)));
+    }
+    // the module titles (course_modules, by position), each while its Estonian text is still the seed's
+    const moduleRows = await db.select().from(courseModules).where(eq(courseModules.courseId, row.id)).orderBy(asc(courseModules.position), asc(courseModules.id));
+    for (const [i, m] of moduleRows.entries()) {
+      const title = fillI18n(m.title, seed.modules?.[i]);
+      if (title) add("course_modules", (tx) => tx.update(courseModules).set({ title }).where(eq(courseModules.id, m.id)));
     }
   }
 

@@ -1,7 +1,7 @@
 import { eq, getTableName, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import type { Db } from "./client";
-import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "./schema";
+import { campaign, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, settings } from "./schema";
 import { campaignSeed, courseSeeds, faqSeeds, heroSeeds, pageSeeds, postSeeds, practiceSeeds, settingSeeds, trainerWorks } from "./seed-data";
 
 // Applies the prototype content. Plain drizzle: no Cloudflare bindings, so it runs from the CLI (seed.ts) and from tests.
@@ -18,7 +18,7 @@ export type SeedOptions = {
   force?: boolean;
 };
 
-const CONTENT_TABLES = ["courses", "course_images", "course_sessions", "registrations", "practice_packages", "hero_slides", "faq", "posts", "pages", "gallery_items", "campaign", "settings"];
+const CONTENT_TABLES = ["courses", "course_images", "course_modules", "course_sessions", "registrations", "practice_packages", "hero_slides", "faq", "posts", "pages", "gallery_items", "campaign", "settings"];
 const TRAINER_WORKS = "trainer_works";
 
 async function total(db: Db, table: PgTable): Promise<number> {
@@ -35,8 +35,8 @@ export async function applySeed(db: Db, opts: SeedOptions = {}): Promise<Record<
     await db.execute(sql.raw(`TRUNCATE TABLE ${CONTENT_TABLES.join(", ")} RESTART IDENTITY CASCADE`));
   }
 
-  // Courses with their images and sessions: a course is seeded as a unit, only when its slug is new.
-  for (const [index, { images, sessions = [], ...course }] of courseSeeds.entries()) {
+  // Courses with their images, sessions and module titles: a course is seeded as a unit, only when its slug is new.
+  for (const [index, { images, sessions = [], modules = [], ...course }] of courseSeeds.entries()) {
     await db.transaction(async (tx) => {
       const [created] = await tx
         .insert(courses)
@@ -46,6 +46,7 @@ export async function applySeed(db: Db, opts: SeedOptions = {}): Promise<Record<
       if (!created) return;
       await tx.insert(courseImages).values(images.map((image, i) => ({ courseId: created.id, key: image.key, alt: image.alt, sort: i })));
       if (sessions.length) await tx.insert(courseSessions).values(sessions.map((session) => ({ ...session, courseId: created.id })));
+      if (modules.length) await tx.insert(courseModules).values(modules.map((title, i) => ({ courseId: created.id, position: i + 1, title })));
     });
   }
 

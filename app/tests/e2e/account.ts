@@ -201,11 +201,14 @@ export async function insertEcourseAccess(email: string, opts: { own?: boolean; 
     if (opts.own) {
       slug = accountCourseSlug(email);
       await sql`
-        insert into courses (slug, type, level, title, summary, body, price, access_months, modules, published)
-        values (${slug}, 'e_learning', 'basic', ${sql.json({ et: "E2E e-koolitus", ru: "E2E онлайн-курс" })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 9500, 6,
-                ${sql.json([{ et: "Sissejuhatus", ru: "Введение" }, { et: "Praktika", ru: "Практика" }])}, false)`;
+        insert into courses (slug, type, level, title, summary, body, price, access_months, published)
+        values (${slug}, 'e_learning', 'basic', ${sql.json({ et: "E2E e-koolitus", ru: "E2E онлайн-курс" })}, ${sql.json({ et: "" })}, ${sql.json({ et: "" })}, 9500, 6, false)`;
+      const [own] = await sql<{ id: number }[]>`select id from courses where slug = ${slug}`;
+      await sql`insert into course_modules (course_id, position, title) values
+                (${own.id}, 1, ${sql.json({ et: "Sissejuhatus", ru: "Введение" })}), (${own.id}, 2, ${sql.json({ et: "Praktika", ru: "Практика" })})`;
     }
-    const [course] = await sql<{ id: number; title: { et: string; ru?: string }; modules: { et: string; ru?: string }[] }[]>`select id, title, modules from courses where slug = ${slug}`;
+    const [course] = await sql<{ id: number; title: { et: string; ru?: string } }[]>`select id, title from courses where slug = ${slug}`;
+    const modules = await sql<{ title: { et: string; ru?: string } }[]>`select title from course_modules where course_id = ${course.id} order by position, id`;
     let expiresAt: Date | null = null;
     if (opts.access !== false) {
       const [access] = await sql<{ expiresAt: Date }[]>`
@@ -217,7 +220,7 @@ export async function insertEcourseAccess(email: string, opts: { own?: boolean; 
       clientId: client.id,
       slug,
       title: { et: course.title.et, ru: course.title.ru ?? course.title.et },
-      modules: course.modules.map((m) => ({ et: m.et, ru: m.ru ?? m.et })),
+      modules: modules.map(({ title: m }) => ({ et: m.et, ru: m.ru ?? m.et })),
       expiresAt,
     };
   });
