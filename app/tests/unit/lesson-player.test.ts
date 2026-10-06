@@ -19,10 +19,12 @@ const posted: { method?: string; value?: unknown; context?: string; version?: st
 const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>();
 const onProgress = vi.fn();
 
-/** A message from the player's iframe (a Player.js JSON string), from `origin`. */
-const fromPlayer = (event: string, value?: unknown, origin = ORIGIN) =>
+/** The player's window (the iframe's contentWindow): what the page posts to it is kept in `posted`. */
+const playerWindow = { postMessage: (m: unknown) => posted.push(JSON.parse(String(m))) };
+/** A message from the player's iframe (a Player.js JSON string), from `origin` and the window `source`. */
+const fromPlayer = (event: string, value?: unknown, origin = ORIGIN, source: unknown = playerWindow) =>
   act(async () => {
-    window.dispatchEvent(new MessageEvent("message", { origin, data: JSON.stringify({ context: "player.js", version: "0.0.11", event, value }) }));
+    window.dispatchEvent(new MessageEvent("message", { origin, source: source as Window, data: JSON.stringify({ context: "player.js", version: "0.0.11", event, value }) }));
   });
 const tick = (ms: number) =>
   act(async () => {
@@ -39,7 +41,7 @@ beforeEach(async () => {
   fetchMock.mockReset().mockResolvedValue(Response.json({ ok: true, done: false, next: 8 }));
   vi.stubGlobal("fetch", fetchMock);
   posted.length = 0;
-  Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => ({ postMessage: (m: unknown) => posted.push(JSON.parse(String(m))) }) });
+  Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => playerWindow });
   onProgress.mockReset();
   container = document.createElement("div");
   document.body.append(container);
@@ -141,24 +143,33 @@ test("no word from the player for 20 s: 'Video ei lae. Proovi hiljem uuesti.'", 
 
 // ---- beyond the brief: the controller's notes for Task 8 (robust reports, leaving the page, the origin, text only) ----
 
+type PlayerProps = Parameters<typeof LessonPlayer>[0];
+const props = (changed: Partial<PlayerProps> = {}): PlayerProps => ({
+  slug: "veebikursus",
+  lessonId: 7,
+  title: "Esimene",
+  video: VIDEO,
+  watermark: "kati@example.test",
+  done: false,
+  t: lessonTexts(getDict("et")),
+  onProgress,
+  ...changed,
+});
 /** Mounts a fresh player in place of the one beforeEach made (a new key: new state), with these props changed. */
-const remount = (props: Partial<Parameters<typeof LessonPlayer>[0]>) =>
-  act(async () =>
-    root.render(
-      createElement(LessonPlayer, {
-        key: Math.random(),
-        slug: "veebikursus",
-        lessonId: 7,
-        title: "Esimene",
-        video: VIDEO,
-        watermark: "kati@example.test",
-        done: false,
-        t: lessonTexts(getDict("et")),
-        onProgress,
-        ...props,
-      }),
-    ),
-  );
+const remount = (changed: Partial<PlayerProps>) => act(async () => root.render(createElement(LessonPlayer, { key: Math.random(), ...props(changed) })));
+/** The same player (no key) with these props changed, as a page re-rendering it would. */
+const rerender = (changed: Partial<PlayerProps>) => act(async () => root.render(createElement(LessonPlayer, props(changed))));
+/** The tab hidden (document.visibilityState "hidden" and its event). */
+const hideTab = async () => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  try {
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  } finally {
+    delete (document as unknown as { visibilityState?: string }).visibilityState;
+  }
+};
 const json = (body: unknown, status = 200) => async () => Response.json(body, { status });
 
 test("a report the server cannot take now (429, 5xx) or that never arrives: the furthest second goes with the next 15 s report, no error shown, no retry in between", async () => {
@@ -276,7 +287,7 @@ test("a lesson already done reports nothing; one resumed reports only past the s
 test("messages of other shapes from the player's origin change nothing", async () => {
   await act(async () => {
     for (const data of ["hello", "{bad json", JSON.stringify({ context: "player.js" }), JSON.stringify({ context: "other", event: "ready" }), { context: "player.js", event: 7 }, null])
-      window.dispatchEvent(new MessageEvent("message", { origin: ORIGIN, data }));
+      window.dispatchEvent(new MessageEvent("message", { origin: ORIGIN, source: playerWindow as unknown as Window, data }));
   });
   await fromPlayer("timeupdate", { seconds: "x", duration: 100 });
   await fromPlayer("timeupdate", null);
@@ -328,6 +339,142 @@ test("a video that does not load has no fullscreen button; a student already in 
   await fromPlayer("ready", {});
   expect(container.querySelector("[data-player-error]")).toBeNull();
   expect(container.querySelector("[data-fullscreen]")?.textContent).toBe("Täisekraan");
+});
+
+// ---- fix round 1 (review) ----
+
+test("only the player's own window is heard: its origin from another window (another frame, the page itself) is ignored", async () => {
+  await fromPlayer("ready", {}, ORIGIN, window);
+  await fromPlayer("ready", {}, ORIGIN, null);
+  await fromPlayer("ready", {}, ORIGIN, { postMessage: () => {} });
+  expect(posted).toEqual([]);
+  await fromPlayer("ready", {});
+  expect(posted).toHaveLength(3);
+  await fromPlayer("timeupdate", { seconds: 90, duration: 100 }, ORIGIN, window);
+  await fromPlayer("ended", undefined, ORIGIN, window);
+  await tick(15_000);
+  expect(progressPosts()).toEqual([]);
+});
+
+test.each([408, 503])("%i is 'try later' too: the point waits for the next 15 s report", async (status) => {
+  fetchMock.mockImplementation(json({ ok: true, done: false, next: 8 }));
+  fetchMock.mockImplementationOnce(json({ ok: false }, status));
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 20, duration: 100 });
+  await tick(15_000);
+  await fromPlayer("pause");
+  expect(progressPosts()).toEqual([{ watchedSec: 20 }]);
+  await tick(15_000);
+  expect(progressPosts()).toEqual([{ watchedSec: 20 }, { watchedSec: 20 }]);
+  expect(onProgress).toHaveBeenCalledOnce();
+});
+
+test("once the player is gone, nothing it started reaches the page and no queued report goes out (only the leaving one)", async () => {
+  let release: (r: Response) => void = () => {};
+  fetchMock.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 50, duration: 100 });
+  await fromPlayer("pause"); // on its way
+  await fromPlayer("timeupdate", { seconds: 60, duration: 100 });
+  await fromPlayer("pause"); // waits behind it
+  await act(async () => root.render(createElement("p")));
+  expect(progressPosts()).toEqual([{ watchedSec: 50 }, { watchedSec: 60 }]); // the second is the leaving one
+  expect(fetchMock.mock.calls[1][1]).toMatchObject({ keepalive: true });
+  release(Response.json({ ok: true, done: true, next: 8 }));
+  await tick(45_000);
+  expect(progressPosts()).toHaveLength(2);
+  expect(onProgress).not.toHaveBeenCalled();
+});
+
+test("another lesson in the same place (the page does not key the player): it starts afresh; the first one's last point goes to the first lesson", async () => {
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 50, duration: 100 });
+  const second = { embedUrl: `${ORIGIN}/embed/12345/v2?token=u&expires=1&autoplay=false`, durationSec: 200, resumeAt: 0 };
+  await rerender({ lessonId: 8, title: "Teine", video: second });
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/konto/kursus/veebikursus/7/progress"]);
+  expect(progressPosts()).toEqual([{ watchedSec: 50 }]);
+  expect(container.querySelector("iframe")?.getAttribute("src")).toBe(second.embedUrl);
+  expect(container.querySelector("iframe")?.getAttribute("title")).toBe("Video: Teine");
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 10, duration: 200 }); // below the first lesson's 50: the new one starts from its own 0
+  await tick(15_000);
+  expect(fetchMock.mock.calls.at(-1)![0]).toBe("/api/konto/kursus/veebikursus/8/progress");
+  expect(progressPosts().at(-1)).toEqual({ watchedSec: 10 });
+});
+
+test("while the leaving report is on its way, the 15 s report and a pause do not send the same second again; if it fails, the 15 s report does", async () => {
+  let release: (r: Response) => void = () => {};
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 30, duration: 100 });
+  fetchMock.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  await hideTab();
+  expect(progressPosts()).toEqual([{ watchedSec: 30 }]);
+  await fromPlayer("pause");
+  await tick(15_000);
+  await hideTab();
+  expect(progressPosts()).toHaveLength(1);
+  release(Response.json({ ok: false, error: "server" }, { status: 503 }));
+  await tick(15_000);
+  expect(progressPosts()).toEqual([{ watchedSec: 30 }, { watchedSec: 30 }]);
+  expect(fetchMock.mock.calls[1][1]).not.toHaveProperty("keepalive");
+});
+
+test("the lesson becomes done while the player is open (the page learns it): the same player plays on and reports nothing more", async () => {
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 30, duration: 100 });
+  const frame = container.querySelector("iframe");
+  await rerender({ done: true });
+  expect(container.querySelector("iframe")).toBe(frame);
+  await fromPlayer("timeupdate", { seconds: 70, duration: 100 });
+  await fromPlayer("pause");
+  await tick(30_000);
+  await act(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+  });
+  expect(progressPosts()).toEqual([]);
+});
+
+test("the window-filling wrapper keeps the focus inside; closing it, or leaving the browser's fullscreen, gives the focus back to the button", async () => {
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  try {
+    const wrapper = container.querySelector("[data-player]") as unknown as { requestFullscreen?: unknown; hasAttribute(name: string): boolean };
+    wrapper.requestFullscreen = undefined;
+    const button = container.querySelector("[data-fullscreen]") as HTMLButtonElement;
+    await act(async () => button.click());
+    expect(wrapper.hasAttribute("data-expanded")).toBe(true);
+    await act(async () => outside.focus());
+    expect(document.activeElement).toBe(button);
+    await act(async () => button.blur());
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(wrapper.hasAttribute("data-expanded")).toBe(false);
+    expect(document.activeElement).toBe(button);
+    await act(async () => outside.focus());
+    expect(document.activeElement).toBe(outside); // closed: no trap any more
+    // the browser's own fullscreen, left by the browser (Escape there)
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => wrapper });
+    await act(async () => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => null });
+    await act(async () => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+    expect(document.activeElement).toBe(button);
+  } finally {
+    outside.remove();
+    delete (document as unknown as { fullscreenElement?: unknown }).fullscreenElement;
+  }
+});
+
+test("the error's live region is in the page from the start, empty; the sentence comes into it", async () => {
+  const live = container.querySelector("[data-player-frame] [role=status]")!;
+  expect(live.textContent).toBe("");
+  await tick(20_000);
+  expect(container.querySelector("[data-player-frame] [role=status]")).toBe(live);
+  expect(live.textContent).toBe("Video ei lae. Proovi hiljem uuesti.");
 });
 
 test("Russian: the button and the error in Russian", async () => {

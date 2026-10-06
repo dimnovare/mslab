@@ -27,7 +27,7 @@ type Props = {
   onProgress(answer: { done: boolean; next: number | null }): void;
 };
 
-/** What became of one report: taken, worth trying again later (429, 5xx, no answer), or refused for good (the rest). */
+/** What became of one report: taken, worth trying again later (408, 429, 5xx, no answer), or refused for good (the rest). */
 type Sent = "taken" | "later" | "refused";
 
 /**
@@ -35,18 +35,27 @@ type Sent = "taken" | "later" | "refused";
  * second. Over it the student's e-mail as a faint watermark that moves between the corners (it does not take clicks). The iframe may
  * not go fullscreen or picture-in-picture on its own (either would drop the watermark): our button enlarges the wrapper, iframe and
  * watermark together (an iPhone without the Fullscreen API gets the wrapper over the whole window; its native video fullscreen still
- * shows no watermark — accepted). Progress: the furthest second reached, reported every 15 s when it moved, and at pause and end.
+ * shows no watermark — accepted). Enlarged, the frame stays a 16:9 box in the middle of the screen, the size of the picture, so the
+ * watermark's corners are the picture's (not the black bars around it). Progress: the furthest second reached, reported every 15 s
+ * when it moved, and at pause and end.
  *
- * The reports never trouble the student. A report the server cannot take now (429, 5xx) or that gets no answer keeps the furthest
- * second, which goes with the next 15 s report (no retry in between, not even at pause or end); one refused for good (403 locked,
- * 404, 409 no playable video, 401 signed out) ends the reports for this lesson. Leaving (the tab hidden, the page closed, or the
- * player gone by a link inside the site) sends the last point with `fetch(…, { keepalive: true })`: same-origin, with the session
+ * The reports never trouble the student. A report the server cannot take now (408, 429, 5xx) or that gets no answer keeps the
+ * furthest second, which goes with the next 15 s report (no retry in between, not even at pause or end); one refused for good (403
+ * locked, 404, 409 no playable video, 401 signed out) ends the reports for this lesson. Leaving (the tab hidden, the page closed, or
+ * the player gone by a link inside the site) sends the last point with `fetch(…, { keepalive: true })`: same-origin, with the session
  * cookie and the page's Origin like any other report (account-api's isCrossSite check passes it), where sendBeacon could set no
- * headers.
+ * headers. Once the player is gone, nothing it started reaches the page any more.
+ *
+ * Another lesson or another signed URL is another player (the key below): its state starts afresh, whether or not the page keys it.
  */
-export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t, onProgress }: Props) {
+export function LessonPlayer(props: Props) {
+  return <Player key={`${props.slug}/${props.lessonId}/${props.video.embedUrl}`} {...props} />;
+}
+
+function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
   const furthest = useRef(video.resumeAt);
   const reported = useRef(video.resumeAt);
   /** Nothing more to report: the lesson is done, or the server refused this lesson for good. */
@@ -58,8 +67,8 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
   const [corner, setCorner] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  // Only the player's own origin may talk to the page: https://player.mediadelivery.net, from the URL the server signed (the e2e
-  // run's fake Bunny gives its own address there; server/bunny.ts ignores that setting on Vercel).
+  // Only the player's own frame may talk to the page: its window, from https://player.mediadelivery.net (the origin of the URL the
+  // server signed; the e2e run's fake Bunny gives its own address there, a setting server/bunny.ts ignores on Vercel).
   const origin = new URL(video.embedUrl).origin;
   const progressUrl = `/api/konto/kursus/${encodeURIComponent(slug)}/${lessonId}/progress`;
 
@@ -74,8 +83,10 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
     let again = false;
     /** After a report the server could not take: the next try waits for the 15 s report. */
     let holding = false;
-    /** The point last sent on leaving (the tab hidden and then the page closed would send it twice). */
-    let left = 0;
+    /** The second of a leaving report still on its way (the tab hidden, then the page closed, must not send it twice). */
+    let leaving = 0;
+    /** The player is gone: no new report (but the leaving one), and no answer reaches the page. */
+    let disposed = false;
 
     const send = async (watchedSec: number, keepalive: boolean): Promise<Sent> => {
       try {
@@ -91,10 +102,10 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
           reported.current = Math.max(reported.current, watchedSec);
           const answer = { done: body?.done === true, next: typeof body?.next === "number" ? body.next : null };
           if (answer.done) finished.current = true;
-          answered.current(answer);
+          if (!disposed) answered.current(answer);
           return "taken";
         }
-        if (res.status === 429 || res.status >= 500) return "later";
+        if (res.status === 408 || res.status === 429 || res.status >= 500) return "later";
         finished.current = true; // locked, not found, no playable video, signed out: asking again changes nothing
         return "refused";
       } catch {
@@ -105,7 +116,7 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
     const report = async (onTime = false): Promise<void> => {
       if (onTime) holding = false;
       const watchedSec = Math.floor(furthest.current);
-      if (finished.current || holding || watchedSec <= reported.current) return;
+      if (disposed || finished.current || holding || watchedSec <= Math.max(reported.current, leaving)) return;
       if (sending) {
         again = true;
         return;
@@ -121,13 +132,13 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
     };
 
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== origin) return;
+      if (e.origin !== origin || !frame.current || e.source !== frame.current.contentWindow) return;
       const message = readPlayerMessage(e.data);
       if (!message) return;
       if (message.event === "ready") {
         setReady(true);
         setFailed(false);
-        for (const event of PLAYER_EVENTS) frame.current?.contentWindow?.postMessage(playerCommand("addEventListener", event, `mslab-${event}`), origin);
+        for (const event of PLAYER_EVENTS) frame.current.contentWindow?.postMessage(playerCommand("addEventListener", event, `mslab-${event}`), origin);
       } else if (message.event === "timeupdate") {
         const seconds = secondsOf(message.value);
         if (seconds !== null && seconds > furthest.current) furthest.current = Math.min(seconds, video.durationSec);
@@ -139,12 +150,15 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
       }
     };
 
-    // leaving: the last point, sent even as the page goes away (and while another report is still on its way)
+    // leaving: the last point, sent even as the page goes away (and while another report is still on its way: an unloading page
+    // cancels that one)
     const leave = () => {
       const watchedSec = Math.floor(furthest.current);
-      if (finished.current || watchedSec <= Math.max(reported.current, left)) return;
-      left = watchedSec;
-      void send(watchedSec, true);
+      if (finished.current || watchedSec <= Math.max(reported.current, leaving)) return;
+      leaving = watchedSec;
+      void send(watchedSec, true).then(() => {
+        if (leaving === watchedSec) leaving = 0; // answered (then `reported` has it) or failed (then the 15 s report tries again)
+      });
     };
     const onHidden = () => {
       if (document.visibilityState === "hidden") leave();
@@ -158,6 +172,7 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
     setListening(true);
     return () => {
       leave(); // the player goes away inside the site (a link to the next lesson): no pagehide comes
+      disposed = true;
       clearInterval(timer);
       window.removeEventListener("message", onMessage);
       window.removeEventListener("pagehide", leave);
@@ -176,25 +191,40 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
     return () => clearInterval(timer);
   }, []);
 
+  // the browser's fullscreen: entered by our button, left by it or by the browser (Escape); the focus comes back to the button
   useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === wrapper.current);
+    let was = false;
+    const onChange = () => {
+      const now = document.fullscreenElement === wrapper.current;
+      if (was && !now) button.current?.focus();
+      was = now;
+      setFullscreen(now);
+    };
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
-  // the window-filling wrapper (no Fullscreen API): Escape closes it, the page behind does not scroll
+  // The window-filling wrapper (no Fullscreen API): Escape closes it, the page behind does not scroll, the focus stays inside it
+  // (the player's frame and the button) and comes back to the button when it closes.
   useEffect(() => {
     if (!expanded) return;
+    const back = button.current; // the button stays while the wrapper is enlarged
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setExpanded(false);
+    };
+    const onFocus = (e: FocusEvent) => {
+      if (e.target instanceof Node && !wrapper.current?.contains(e.target)) back?.focus();
     };
     const html = document.documentElement;
     const overflow = html.style.overflow;
     html.style.overflow = "hidden";
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
       html.style.overflow = overflow;
+      if (back?.isConnected) back.focus();
     };
   }, [expanded]);
 
@@ -211,30 +241,35 @@ export function LessonPlayer({ slug, lessonId, title, video, watermark, done, t,
 
   return (
     <div ref={wrapper} className={styles.player} data-player="" data-expanded={expanded ? "" : undefined}>
-      <div className={styles.frame}>
-        {listening && (
-          <iframe
-            ref={frame}
-            src={video.embedUrl}
-            title={fill(t.video, { title })}
-            allow="autoplay; encrypted-media"
-            referrerPolicy="strict-origin-when-cross-origin"
-            loading="eager"
-          />
-        )}
-        <span className={styles.mark} data-watermark="" data-corner={corner} aria-hidden="true">
-          {watermark}
-        </span>
-        {broken && (
-          <p className={styles.failed} role="status" data-player-error="">
-            {t.videoError}
-          </p>
-        )}
+      <div className={styles.stage}>
+        <div className={styles.frame} data-player-frame="">
+          {listening && (
+            <iframe
+              ref={frame}
+              src={video.embedUrl}
+              title={fill(t.video, { title })}
+              allow="autoplay; encrypted-media"
+              referrerPolicy="strict-origin-when-cross-origin"
+              loading="eager"
+            />
+          )}
+          <span className={styles.mark} data-watermark="" data-corner={corner} aria-hidden="true">
+            {watermark}
+          </span>
+          {/* in the page from the start, empty: a screen reader announces the sentence when it comes */}
+          <div role="status">
+            {broken && (
+              <p className={styles.failed} data-player-error="">
+                {t.videoError}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
       {/* no "Täisekraan" next to a video that does not load; still the way out when the student is already in it */}
       {(!broken || big) && (
         <div className={styles.bar}>
-          <button type="button" className={ui.btnOutline} onClick={toggle} data-fullscreen="">
+          <button ref={button} type="button" className={ui.btnOutline} onClick={toggle} data-fullscreen="">
             {big ? t.exitFullscreen : t.fullscreen}
           </button>
         </div>

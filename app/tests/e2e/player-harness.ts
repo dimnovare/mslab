@@ -6,7 +6,7 @@ import type { HarnessProps } from "./player-harness-entry";
 
 // The lesson player's e2e harness (lesson-player.spec.ts). The lesson page that holds LessonPlayer comes with Task 9; the player is
 // tested on its own here, also in the cases that page cannot show on demand (Bunny not answering, a browser without the Fullscreen
-// API). player-harness-entry.tsx is bundled with esbuild (already installed with tsx and vite: no new dependency) and served by
+// API). player-harness-entry.tsx is bundled with esbuild (a devDependency, pinned to the version tsx and vite use) and served by
 // Playwright's router at HARNESS_PATH on the site's own origin (the dev server never sees that address), with the site's own
 // stylesheets and fonts, read from the page the browser is on. Everything else is real: the lesson API's signed embed URL and
 // e-mail, the fake Bunny's Player.js page in the iframe (fake-bunny.ts), the progress endpoint with the student's session.
@@ -64,6 +64,11 @@ export async function insertPlayerLesson(email: string): Promise<PlayerLesson> {
     },
     { marksPages: false },
   );
+}
+
+/** A saved point for the student, as earlier reports would have left it (watched `watchedSec`, not done). */
+export async function setProgress(clientId: number, lessonId: number, watchedSec: number): Promise<void> {
+  await onLocalDb((sql) => sql`insert into lesson_progress (client_id, lesson_id, watched_sec) values (${clientId}, ${lessonId}, ${watchedSec})`, { marksPages: false });
 }
 
 /** The student's progress on a lesson: the furthest second stored and whether it is done; null before the first report. */

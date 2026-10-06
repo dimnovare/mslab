@@ -1,6 +1,8 @@
 /* One lesson's video (LessonPlayer.tsx): Bunny's iframe in a 16:9 frame, the student's e-mail as a faint watermark in one of its
    corners, and under it our fullscreen button (ui.btnOutline, 49 px). In fullscreen (the Fullscreen API on the wrapper, or the
-   wrapper over the window where there is none) the frame takes the space above the button. The rounded corners are the frame's
+   wrapper over the window where there is none) the stage takes the space above the button and the frame stays 16:9, as large as
+   fits, in its middle: the size of the picture Bunny shows, so the watermark's corners are on the picture and never on black bars
+   around it (a container query box: 100cqw wide, or 100cqh × 16/9 when the screen is wider). The rounded corners are the frame's
    (not the wrapper's), so the button's focus ring and hover lift are never cut off. No animation and no transition: the watermark
    jumps between the corners, so prefers-reduced-motion has nothing to turn off. Tokens only. */
 
@@ -11,6 +13,7 @@
 
 .frame {
   position: relative;
+  width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: var(--r-card);
@@ -93,11 +96,18 @@
   z-index: 1000;
 }
 
+.player:fullscreen .stage,
+.player[data-expanded] .stage {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-height: 0;
+  container-type: size;
+}
+
 .player:fullscreen .frame,
 .player[data-expanded] .frame {
-  flex: 1;
-  min-height: 0;
-  aspect-ratio: auto;
+  width: min(100cqw, 100cqh * 16 / 9);
   border-radius: 0;
 }
 
