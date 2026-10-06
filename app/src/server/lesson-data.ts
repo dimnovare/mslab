@@ -36,8 +36,11 @@ export type ProgressResult = { kind: "saved"; done: boolean; next: number | null
 export type DoneResult = { kind: "saved"; next: number | null } | { kind: "video" } | LessonRefusal;
 export type LessonFileRef = { kind: "file"; key: string; name: string; contentType: string };
 
-/** A visible lesson of the course, with its module's title and this client's progress; null when it is not one. */
-async function visibleLesson(db: Db, courseId: number, clientId: number, lessonId: number) {
+/**
+ * A visible lesson of the course, with its module's title and this client's progress; null when it is not one (hidden, unknown, or a
+ * lesson of another course). Exported for its own test only: the endpoints reach it through openLesson.
+ */
+export async function visibleLesson(db: Db, courseId: number, clientId: number, lessonId: number) {
   const [row] = await db
     .select({
       id: lessons.id,
@@ -77,9 +80,11 @@ export async function openLesson(db: Db, clientId: number, slug: string, lessonI
     courseOutline(db, access.course.id, clientId),
     opts.terms ? termsState(db, clientId, access.course.id) : null,
   ]);
-  if (!row) return { kind: "notFound" };
+  // A lesson that is not in this course's outline is not this course's, whatever visibleLesson found: never "open" for lack of a state.
+  const state = outline.lessons.find((l) => l.id === lessonId)?.state;
+  if (!row || !state) return { kind: "notFound" };
   if (terms && !terms.accepted) return { kind: "terms" };
-  if (outline.lessons.find((l) => l.id === lessonId)?.state === "locked") return { kind: "locked", next: outline.progress.next };
+  if (state === "locked") return { kind: "locked", next: outline.progress.next };
   return { kind: "open", access, row, outline };
 }
 

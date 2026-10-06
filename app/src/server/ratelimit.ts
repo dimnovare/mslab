@@ -23,6 +23,13 @@ export async function rateLimit(kv: TextKv, key: string, limit: number, windowSe
 /** KV key of one visitor and form: `rl:<form>:<ip>`. */
 export const rateKey = (form: string, ip: string) => `rl:${form}:${ip}`;
 
+/**
+ * `key` for the fixed window of `windowSec` seconds that `now` falls in: `<key>:<window number>`. rateLimit restarts a key's expiry with
+ * every accepted request, so a steady sender (the lesson player's report every 15 s) never lets a 60 s window end; counting under
+ * this key does, because the next window is another key (give the entry two windows to live: rateLimit(kv, windowKey(…), limit, 2 * windowSec)).
+ */
+export const windowKey = (key: string, now: Date, windowSec: number) => `${key}:${Math.floor(now.getTime() / (windowSec * 1000))}`;
+
 /** The eight 16-bit groups of an IPv6 address (handles "::" and a trailing dotted IPv4); null when it is not one. */
 function ipv6Groups(address: string): number[] | null {
   let a = address;

@@ -25,7 +25,7 @@ import type { FileStore } from "./media";
 import { changeRequestSummary } from "./messages";
 import { adminUrl, notifyMaria, sendMail, type Env } from "./notify";
 import { isPrefetch } from "./prefetch";
-import { clientIp, rateKey, rateLimit } from "./ratelimit";
+import { clientIp, rateKey, rateLimit, windowKey } from "./ratelimit";
 
 // The client account's JSON API (/api/konto/*) without Next.js: app/api/konto/[[...path]]/route.ts builds the dependencies
 // (database, settings, Postgres KV store, after()) and calls handleAccountApi; the tests call it with PGlite and fakes.
@@ -73,7 +73,7 @@ const MAX_BODY_CHARS = 4096;
 const MERGE_BODY_CHARS = LIMITS.mergeSlugs * (LIMITS.slug + 4) + 64;
 /** Change requests a client may send per hour: each one e-mails Maria (and pings her on Telegram). */
 const CHANGE_REQUESTS_PER_HOUR = 5;
-/** Progress reports a student may send per minute (spec 6: it caps the writes; the player sends about 4). */
+/** Progress reports a student may send per clock minute, across lessons (spec 6: it caps the writes; the player sends about 4). */
 const PROGRESS_PER_MINUTE = 12;
 
 const BASE_HEADERS = { "cache-control": "private, no-store", "x-robots-tag": "noindex, nofollow" } as const;
@@ -137,6 +137,20 @@ async function withinRateLimit(request: Request, deps: AccountDeps, form: string
 async function withinClientLimit(deps: AccountDeps, clientId: number, form: string, limit: number, windowSec: number): Promise<boolean> {
   try {
     return await rateLimit(deps.env.KV, rateKey(form, String(clientId)), limit, windowSec);
+  } catch (e) {
+    logFailure("[account] rate limit unavailable, allowing", e);
+    return true;
+  }
+}
+
+/**
+ * A fail-open limit for a signed-in client of `limit` per fixed window of `windowSec` (ratelimit.ts windowKey: the count starts again at
+ * every window). withinClientLimit's window restarts with each accepted request, which for a steady sender (the player's report every
+ * 15 s) means one that never ends; this is for those. Up to twice `limit` can pass across a window's edge.
+ */
+async function withinClientWindow(deps: AccountDeps, clientId: number, form: string, limit: number, windowSec: number): Promise<boolean> {
+  try {
+    return await rateLimit(deps.env.KV, windowKey(rateKey(form, String(clientId)), deps.now, windowSec), limit, 2 * windowSec);
   } catch (e) {
     logFailure("[account] rate limit unavailable, allowing", e);
     return true;
@@ -279,13 +293,14 @@ export const clientResponse = (session: ClientSession, body: unknown, status = 2
  * session go with it, as with clientResponse. null when the store does not have the object.
  */
 async function fileAnswer(session: ClientSession, store: FileStore, file: { key: string; name: string; contentType: string }): Promise<Response | null> {
+  const base = { ...BASE_HEADERS, "referrer-policy": "no-referrer" }; // the lesson's address is not passed on to R2
   let res: Response;
   if (store.signedGetUrl) {
-    res = new Response(null, { status: 302, headers: { ...BASE_HEADERS, location: await store.signedGetUrl(file.key, { expiresSec: FILE_URL_TTL_SEC }) } });
+    res = new Response(null, { status: 302, headers: { ...base, location: await store.signedGetUrl(file.key, { expiresSec: FILE_URL_TTL_SEC }) } });
   } else {
     const object = await store.get(file.key);
     if (!object) return null;
-    res = new Response(object.body, { headers: { ...BASE_HEADERS, "content-type": file.contentType, "content-disposition": attachmentHeader(file.name), "x-content-type-options": "nosniff" } });
+    res = new Response(object.body, { headers: { ...base, "content-type": file.contentType, "content-disposition": attachmentHeader(file.name), "x-content-type-options": "nosniff" } });
   }
   for (const cookie of session.cookies) res.headers.append("set-cookie", cookie);
   return res;
@@ -348,7 +363,7 @@ async function lesson(request: Request, deps: AccountDeps, rawSlug: string, rawL
  * pause and end). Kept at its highest; at 90 % of the length the lesson is done. 200 `{ ok, done, next }`; 400 `{ error: "watchedSec" }`
  * (no number, or past the length + 5 s); 403 locked; 404; 409 `{ error: "video" }` (a text lesson, or a video lesson still waiting for its
  * video: it cannot be completed, so the next lesson stays locked); 429 `{ error: "rate" }` after
- * 12 in a minute.
+ * 12 in one clock minute (a fixed window, so the player's steady report every 15 s always fits).
  */
 async function progress(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
   const session = await requireClient(request, deps);
@@ -357,8 +372,8 @@ async function progress(request: Request, deps: AccountDeps, rawSlug: string, ra
   if (ref === null) return clientResponse(session, { ok: false }, 404);
   const input = parseProgress(await readObject(request));
   if (!input.ok) return badInput(session, input.error);
-  if (!(await withinClientLimit(deps, session.clientId, "client-progress", PROGRESS_PER_MINUTE, 60))) {
-    console.info("[account] progress rate limited");
+  if (!(await withinClientWindow(deps, session.clientId, "client-progress", PROGRESS_PER_MINUTE, 60))) {
+    logNote("[account] progress rate limited");
     return clientResponse(session, { ok: false, error: "rate" }, 429);
   }
   const result = await saveProgress(deps.db, session.clientId, ref.slug, ref.lessonId, input.data.watchedSec, deps.now);
