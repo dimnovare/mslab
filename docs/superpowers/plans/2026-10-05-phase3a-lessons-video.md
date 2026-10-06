@@ -44,7 +44,8 @@
   - Every endpoint behind a session starts with `requireClient(request, deps)` and answers through `clientResponse(session, …)`. Lesson files go through `fileAnswer`, a helper outside the guarded section that carries the session's cookies too.
   - `tests/unit/account-guards.test.ts` lists every handler: extend it.
   - The route uses the app's one pool (`getDb()`); never `end()` it.
-- **Every check runs in this order (spec 6):** session (one device) → active access to the course (not expired or revoked; unpublished courses still work) → the lesson is a visible lesson of that course (404) → terms accepted (lesson page only, 403 `terms`) → lesson order (403 `locked`).
+- **Every check runs in this order (spec 6):** session (one device) → active access to the course (not expired or revoked; unpublished courses still work) → the lesson is a visible lesson of that course (404) → terms accepted (lesson page only, 403 `terms`) → lesson order (403 `locked`). After the session, this order lives in one place: `openLesson` (`lesson-data.ts`, Task 7).
+- **Ids read from text** (form fields, address segments, query values) all go through one parser, `parseRowId` in `src/lib/row-id.ts` (Task 5): digits only, no leading zero, 1 … 2 147 483 647.
 
 ### Simplicity and design
 
@@ -72,7 +73,9 @@
 ### Secrets, logging and the database
 
 - **No PII and no secrets in logs.** Use `logFailure` / `logNote` from `src/server/log.ts`. Never log an e-mail, a Bunny key, a tus signature, an embed token or URL, or a signed R2 URL.
+  - Exception: the Bunny webhook secret travels in the URL query (spec 8 chose a query secret; the webhook sends no header the app checks), so it appears in Vercel request logs — accepted. It only lets someone ask the app to re-read a video's status.
 - **Bunny secrets stay on the server.** `BUNNY_API_KEY` and `BUNNY_TOKEN_KEY` never reach the browser. The browser gets only a tus signature for one video id (6 h) and a signed embed URL (4 h).
+  - The Bunny settings are the three variables `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` (+ the optional `BUNNY_WEBHOOK_SECRET`). There is no `BUNNY_CDN_HOST`: the embed needs only the library and video id (spec 8).
   - `BUNNY_FAKE_URL` exists for the e2e run only and is ignored when `VERCEL` is set.
   - Without the three Bunny settings, the admin shows "Video seadistamata" and students see "Video lisandub peagi".
 - **`courses.modules` stays** in `schema.ts` and in the database through 3a. After Task 1 no code reads or writes it.
@@ -104,6 +107,7 @@ app/
   src/server/media.ts, r2.ts, media-local.ts, media-store.ts   FileStore: delete + presigned GET (Task 4)
   src/server/lesson-files.ts                       lesson file type/size/signature checks, names, addLessonFile (Task 4)
   src/app/api/admin/lesson-file/route.ts           POST one lesson file (withAdmin, Task 4)
+  src/lib/row-id.ts                                parseRowId: the one id parser, client-safe (Task 5)
   src/server/admin-lessons.ts                      modules/lessons/files forms for the admin (DB, Task 5)
   src/server/lesson-media.ts                       removeLessonMedia: Bunny videos + R2 files of a deleted lesson (Task 5)
   src/server/actions/admin-lessons.ts              adminAction exports (Task 5 + 6)
@@ -113,7 +117,7 @@ app/
   src/app/api/bunny/webhook/route.ts               Bunny's webhook: a trigger for refreshLessonVideo (Task 6)
   src/components/admin/LessonVideoField.tsx        tus upload, progress, polling, states (Task 6)
   src/server/lesson-outline.ts                     one student's modules/lessons/states/counts (DB, Task 7)
-  src/server/lesson-data.ts                        loadLesson, saveProgress, markTextLessonDone, lessonFileFor (Task 7)
+  src/server/lesson-data.ts                        openLesson (the checks, in order), loadLesson, saveProgress, markTextLessonDone, lessonFileFor (Task 7)
   src/server/client-data.ts                        EcourseView with modules + lessons + progress; termsState (Task 1 + 7)
   src/server/account-api.ts, account-input.ts      the lesson endpoints (Task 7)
   src/components/account/player-js.ts             the Player.js messages (Task 8)
@@ -127,6 +131,7 @@ app/
   src/app/api/cron/sweep/route.ts                  + stuck uploads (Task 11)
   tests/e2e/fake-bunny.ts, bunny-values.ts         the fake Bunny (API, tus, Player.js embed) for the e2e run (Task 6)
   tests/e2e/lessons.ts                             e2e fixtures: an e-course with lessons, a file and a client (Task 9)
+  tests/e2e/targets.ts                             smallTargets, shared by the admin and account specs (Task 5)
 docs/deploy.md, docs/launch-checklist.md           Bunny setup, env, cron line, launch items (Task 11)
 tools/cache-smoke.mjs                              + the lesson shell in part C (Task 12)
 ```
@@ -649,13 +654,7 @@ describe("completing a lesson: the kind is explicit (controller ruling)", () => 
     for (const videoStatus of ["none", "uploading", "processing", "failed"] as const)
       expect(completion({ ...none, videoId: videoStatus === "none" ? null : "v", videoStatus, kind: "video" }), videoStatus).toBe("wait");
   });
-
-  test("a video lesson with no video yet is never done, so the lesson after it stays locked", () => {
-    // lesson 1 waits for its video: nothing can mark it done
-    expect(completion({ ...none, kind: "video" })).toBe("wait");
-    expect(lessonStates([L(1), L(2), L(3)])).toEqual(["current", "locked", "locked"]);
-    expect(courseProgress([L(1), L(2), L(3)])).toEqual({ done: 0, total: 3, next: 1 });
-  });
+  // That a waiting video lesson keeps the next one locked is checked end to end in Task 7's DB test (the API refuses to complete it).
 });
 ```
 
@@ -844,6 +843,8 @@ Spec sections 4, 5 and 8. The facts below come from bunny.net/docs, checked on 0
 - https://bunny.net/docs/stream/webhooks.
 - The body is `{ VideoLibraryId, VideoGuid, Status }`.
 - Its status numbers differ from the API's. The app ignores them and reads the API.
+
+**Deviation from the original spec 8 (now updated):** there is no `BUNNY_CDN_HOST`. The settings are the three variables `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` (+ the optional `BUNNY_WEBHOOK_SECRET`): the iframe embed needs only the library id and the video id, and 3a uses no thumbnails or direct files on the library's CDN hostname.
 
 **Files:**
 - Create: `app/src/server/bunny.ts`
@@ -1589,16 +1590,23 @@ Spec section 4. This task adds:
 The video field comes in Task 6; until then the drawer has no video section. A new lesson is a video lesson (the column default). Switching a lesson to "Tekst" deletes its Bunny videos through the obsolete-video path (`dropVideo` → `deleteBunnyVideos`), after an inline confirm when it has one.
 
 **Files:**
+- Create: `app/src/lib/row-id.ts` (the one id parser, client-safe), `app/tests/unit/row-id.test.ts`
 - Create: `app/src/server/admin-lessons.ts`, `app/src/server/lesson-media.ts`, `app/src/server/actions/admin-lessons.ts`
 - Create: `app/src/components/admin/LessonsEditor.tsx` (+ `LessonsEditor.module.css`), `app/src/components/admin/LessonDrawer.tsx`, `app/src/components/admin/LessonFiles.tsx`
+- Create: `app/tests/e2e/targets.ts` (`smallTargets`, moved out of `admin-clients.spec.ts`)
 - Modify: `app/src/app/admin/(panel)/koolitused/[id]/page.tsx` (the part below the editor, the drawer for `?oppetund=`)
 - Modify: `app/src/i18n/dict/admin.ts`
   - add `lessons`;
   - remove `courseEditor.sections.modulesE`, `courseEditor.fields.modulesE` and `courseEditor.fields.modulesEHint`;
   - keep `sections.modulesC`, `fields.modulesC` and `fields.modulesCHint`, which the contact course's part uses.
+- Modify: `app/tests/e2e/admin-clients.spec.ts` (imports `smallTargets` from `./targets`)
 - Test: `app/tests/db/admin-lessons.test.ts`, `app/tests/unit/lesson-media.test.ts`, `app/tests/unit/admin-guards.test.ts`, `app/tests/e2e/admin-lessons.spec.ts`
 
 **Interfaces:**
+- Produces, from `src/lib/row-id.ts` (no server imports, so the pages, the routing and the admin's client code can use it too):
+  - `ROW_ID_MAX = 2_147_483_647`
+  - `parseRowId(raw: string): number | null` — digits only, no leading zero, 1 … 2 147 483 647; null for anything else. Every id this phase reads from text goes through it: the admin forms (`admin-lessons.ts`), `courseOf` and the `?oppetund` parse (Task 5), the account API's lesson and file ids (Task 7), the lesson route and shell (Task 9), the read-only course view (Task 10). The private `idSchema` of `admin-clients.ts` (phase 2a) may switch to it later; that is not required here.
+- Produces, from `tests/e2e/targets.ts`: `smallTargets(scope: Locator): Promise<string[]>` (the controls under 44 px; used by `admin-clients.spec.ts`, `admin-lessons.spec.ts` and `account-lessons.spec.ts`).
 - Consumes:
   - `courseModules`, `lessons`, `lessonFiles`, `lessonProgress`, `type VideoStatus`, `type LessonKind` (Task 1);
   - `moveLesson`, `type ModuleLayout`, `dropVideo`, `formatDuration` (Task 2);
@@ -1622,6 +1630,51 @@ The video field comes in Task 6; until then the drawer has no video section. A n
   - `addLesson` (redirects to `?oppetund=<new id>`), `saveLesson`, `moveLessonInList`, `setLessonHidden`, `setLessonKind` (deletes the obsolete Bunny videos);
   - `deleteLesson` (redirects back to the course), `deleteLessonFile`.
 - Form fields: `courseId`, `moduleId`, `id`, `dir` (`up` | `down`), `titleEt`, `titleRu`, `bodyEt`, `bodyRu`, `hidden` (`"1"` | `"0"`), `kind` (`"video"` | `"text"`).
+
+- [ ] **Step 0a: Write the failing test for the id parser** `tests/unit/row-id.test.ts`:
+
+```ts
+import { expect, test } from "vitest";
+import { parseRowId, ROW_ID_MAX } from "@/lib/row-id";
+
+test("a row id: digits only, no leading zero, 1 … 2147483647", () => {
+  expect(ROW_ID_MAX).toBe(2_147_483_647);
+  expect(parseRowId("1")).toBe(1);
+  expect(parseRowId("2147483647")).toBe(2147483647);
+  for (const bad of ["0", "01", "2147483648", "1a", "", "-1", "1.5", " 1", "1 ", "99999999999"]) expect(parseRowId(bad), JSON.stringify(bad)).toBeNull();
+});
+```
+
+- [ ] **Step 0b: Implement** `src/lib/row-id.ts`, then run the test (expect PASS):
+
+```ts
+// One parser for the ids this app reads from text: a form field, an address segment, a query value. Client-safe (no server
+// imports), so the admin forms, the account API, the routing and the pages all read an id the same way.
+
+/** The largest id the database's integer columns (serial) hold. */
+export const ROW_ID_MAX = 2_147_483_647;
+
+/** A row id written as digits, without a leading zero, from 1 to ROW_ID_MAX; null for anything else (a sign, a space, a fraction, letters). */
+export function parseRowId(raw: string): number | null {
+  if (!/^[1-9][0-9]{0,9}$/.test(raw)) return null;
+  const n = Number(raw);
+  return n <= ROW_ID_MAX ? n : null;
+}
+```
+
+- [ ] **Step 0c: Share the touch-target helper.** Move `smallTargets` out of `tests/e2e/admin-clients.spec.ts` (module-private today) into `tests/e2e/targets.ts`, unchanged in behaviour:
+
+```ts
+import type { Locator } from "@playwright/test";
+
+/** The controls in `scope` less than 44 px tall (the touch target rule): the start of each one's HTML, for the failure message. */
+export const smallTargets = (scope: Locator): Promise<string[]> =>
+  scope
+    .locator("a:visible, button:visible, input:visible, select:visible")
+    .evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height < 44).map((e) => e.outerHTML.slice(0, 120)));
+```
+
+  In `admin-clients.spec.ts`, delete the local `smallTargets` and add `import { smallTargets } from "./targets";`. Run `npx playwright test admin-clients` once: unchanged results.
 
 - [ ] **Step 1: Write the failing DB tests** `tests/db/admin-lessons.test.ts`:
 
@@ -1793,11 +1846,11 @@ test("without Bunny or a store nothing is tried, and nothing throws", async () =
 
 ```ts
 import { asc, count, eq, inArray, sql } from "drizzle-orm";
-import { z } from "zod";
 import type { Db } from "@/db/client";
 import { courseModules, courses, lessonFiles, lessonProgress, lessons, type LessonKind, type VideoStatus } from "@/db/schema";
 import { dropVideo, moveLesson, type ModuleLayout } from "@/domain/lessons";
 import type { I18n } from "@/i18n/field";
+import { parseRowId } from "@/lib/row-id";
 import { Check, field, invalid, type EditResult } from "./edit-check";
 
 // "Moodulid ja õppetunnid" (spec 3a section 4): a course's modules (a contact course's programme too) and an e-course's lessons
@@ -1807,11 +1860,8 @@ import { Check, field, invalid, type EditResult } from "./edit-check";
 
 export const LESSON_LIMITS = { title: 120, body: 5000 } as const;
 
-const idSchema = z.coerce.number().int().positive().max(2_147_483_647);
-const idOf = (value: string | null): number | null => {
-  const r = idSchema.safeParse(value);
-  return r.success ? r.data : null;
-};
+/** A form field's row id (lib/row-id.ts parseRowId), or null when it is missing or not one. */
+const idOf = (value: string | null): number | null => (value === null ? null : parseRowId(value));
 const i18nOf = (fd: FormData, prefix: string): I18n => ({ et: field(fd, `${prefix}Et`) ?? "", ru: field(fd, `${prefix}Ru`) ?? "" });
 
 export type AdminLessonFile = { id: number; name: string; size: number; contentType: string };
@@ -2103,6 +2153,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import type { Db } from "@/db/client";
+import { parseRowId } from "@/lib/row-id";
 import {
   addLessonForm, addModuleForm, deleteLessonFileForm, deleteLessonForm, deleteModuleForm, moveLessonForm, moveModuleForm, renameModuleForm, saveLessonForm,
   setLessonHiddenForm, setLessonKindForm, type LessonCleanup,
@@ -2133,11 +2184,8 @@ async function run(what: string, publicChange: boolean, work: (db: Db) => Promis
   }
 }
 
-/** The course id a form names (the address to go back to); null when it is not one. */
-const courseOf = (fd: FormData): string | null => {
-  const raw = String(fd.get("courseId") ?? "");
-  return /^[1-9][0-9]{0,9}$/.test(raw) ? raw : null;
-};
+/** The course id a form names (the address to go back to; lib/row-id.ts parseRowId); null when it is not one. */
+const courseOf = (fd: FormData): number | null => parseRowId(String(fd.get("courseId") ?? ""));
 
 const media = () => {
   const config = bunnyConfig();
@@ -2299,7 +2347,7 @@ export const deleteLessonFile = adminAction(async (_admin, _prev: EditResult | n
 - [ ] **Step 9: Build the UI.** The behaviour below is binding. Copy the markup patterns from `ClientForms.tsx` (`useActionState`, `submitWith`, the inline confirm of `RevokeAccess`) and `Drawer.tsx`. The client components take `AdminModule` / `AdminLesson` with `import type` only, so no server module enters the browser bundle.
   - **`app/admin/(panel)/koolitused/[id]/page.tsx`:**
     - Below `<CourseEditor …/>`, render `<LessonsEditor courseId={course?.id ?? null} online={course?.type === "e_learning"} modules={course ? await listCourseLessons(db, course.id) : []} />`.
-    - When `sp.oppetund` parses (as `/^[1-9][0-9]{0,9}$/`) to the id of a lesson in those modules, also render `<Drawer label={fill(adminEt.lessons.drawer.label, { title: pick(lesson.title, "et") })} closeHref={`/admin/koolitused/${course.id}`} closeLabel={adminEt.lessons.drawer.close} returnFocus={`edit-lesson-${lesson.id}`}><LessonDrawer courseId={course.id} lesson={lesson} bunnyReady={bunnyConfig() !== null} /></Drawer>`.
+    - When `typeof sp.oppetund === "string"` and `parseRowId(sp.oppetund)` (`src/lib/row-id.ts`) is the id of a lesson in those modules, also render `<Drawer label={fill(adminEt.lessons.drawer.label, { title: pick(lesson.title, "et") })} closeHref={`/admin/koolitused/${course.id}`} closeLabel={adminEt.lessons.drawer.close} returnFocus={`edit-lesson-${lesson.id}`}><LessonDrawer courseId={course.id} lesson={lesson} bunnyReady={bunnyConfig() !== null} /></Drawer>`.
     - Any other `oppetund` shows no drawer and no error.
     - `bunnyReady` is only used from Task 6 on.
   - **`LessonsEditor`** (`"use client"`; `<section className={ui.card} data-lessons-editor="">`):
@@ -2360,7 +2408,7 @@ export const deleteLessonFile = adminAction(async (_admin, _prev: EditResult | n
     7. Add a second lesson; "↑" on it moves it before "Tere tulemast". In its drawer, "Kustuta õppetund" → confirm → the drawer closes and the lesson is gone.
     8. "Kustuta moodul" is offered on "Praktika" (empty) and not on "Sissejuhatus"; delete "Praktika".
     9. Set the course to `contact` by SQL and reload → the heading reads "Programm", there is no `[data-lessons]` and no "Lisa õppetund", and the add button reads "Lisa punkt".
-    10. At 390 px: no horizontal overflow, and every visible control of `[data-lessons-editor]` and the drawer is ≥ 44 px (the `smallTargets` helper of `admin-clients.spec.ts`).
+    10. At 390 px: no horizontal overflow, and every visible control of `[data-lessons-editor]` and the drawer is ≥ 44 px: `expect(await smallTargets(page.locator("[data-lessons-editor], dialog[data-drawer]"))).toEqual([])` (`import { smallTargets } from "./targets"`, step 0c).
 
 - [ ] **Step 11: Run** unit + DB, `tsc`, lint, the new e2e (both projects, under `next dev` and with `E2E_PROD_BUILD=1`), the whole e2e suite, and `next build`.
 
@@ -3124,12 +3172,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Spec sections 3, 5, 6 and 7. The account API gains the lesson endpoints. The e-course view gains its lessons, their states and the counts.
 
-The order of the checks is binding: session → active access (404) → a visible lesson of that course (404) → terms (the lesson page only; 403 `terms`) → lesson order (403 `locked`).
+The order of the checks is binding: session → active access (404) → a visible lesson of that course (404) → terms (the lesson page only; 403 `terms`) → lesson order (403 `locked`). After the session (`requireClient`), it lives in one place, `openLesson` in `lesson-data.ts`. All four lesson functions start with it; only `loadLesson` asks it for the terms check.
 
 **Files:**
 - Create: `app/src/server/lesson-outline.ts`, `app/src/server/lesson-data.ts`
 - Modify: `app/src/server/client-data.ts` (`activeAccess` exported, `termsState`, `EcourseView` with modules + lessons + progress)
-- Modify: `app/src/server/account-input.ts` (`parseRowId`, `parseProgress`), `app/src/server/account-api.ts` (deps, `fileAnswer`, four handlers, the router)
+- Modify: `app/src/server/account-input.ts` (`parseProgress`), `app/src/server/account-api.ts` (deps, `fileAnswer`, `lessonRef`, four handlers, the router)
 - Modify: `app/src/app/api/konto/[[...path]]/route.ts` (deps `files`, `bunny`)
 - Modify: `app/src/components/account/EcourseView.tsx` (compiles against the new shape; Task 9 rebuilds it)
 - Test: `app/tests/db/lesson-api.test.ts` (new), `app/tests/unit/account-input.test.ts`, `app/tests/unit/account-guards.test.ts`
@@ -3141,6 +3189,7 @@ The order of the checks is binding: session → active access (404) → a visibl
   - `lessonStates`, `courseProgress`, `nextLessonAfter`, `isWatched`, `resumeAt`, `playableVideo`, `completion`, `type CourseProgress`, `type LessonState` (Task 2);
   - `signedEmbedUrl`, `EMBED_TTL_SEC`, `type BunnyConfig`, `bunnyConfig` (Task 3);
   - `type FileStore`, `mediaStore`, `attachmentHeader`, `FILE_URL_TTL_SEC` (Task 4);
+  - `parseRowId(raw: string): number | null` (`src/lib/row-id.ts`, Task 5);
   - `requireClient`, `clientResponse`, `badInput`, `withinClientLimit`, `readObject`, `parseSlug` (`account-api.ts` / `account-input.ts`).
 - Produces, from `src/server/lesson-outline.ts`:
   - `type OutlineLesson = { id: number; moduleId: number; title: I18n; state: LessonState }`
@@ -3154,15 +3203,19 @@ The order of the checks is binding: session → active access (404) → a visibl
 - Produces, from `src/server/lesson-data.ts`:
   - `type LessonVideo = { state: "ready"; embedUrl: string; expires: number; resumeAt: number; durationSec: number } | { state: "soon" }`
   - `type LessonView = { course: { slug: string; title: I18n }; module: { title: I18n }; lesson: { id: number; title: I18n; body: I18n | null; done: boolean; textOnly: boolean }; video: LessonVideo | null; files: { id: number; name: string; size: number }[]; next: number | null; watermark: string }`
-  - `type LessonResult = { kind: "lesson"; view: LessonView } | { kind: "notFound" } | { kind: "terms" } | { kind: "locked"; next: number | null }`
+  - `type LessonRefusal = { kind: "notFound" } | { kind: "terms" } | { kind: "locked"; next: number | null }` (`terms` only when asked for)
+  - `type LessonRow` (the visible lesson with its module's title and the client's progress) and `type OpenedLesson = { kind: "open"; access: Access; row: LessonRow; outline: CourseOutline }`, where `Access` is `activeAccess`'s non-null result
+  - `openLesson(db: Db, clientId: number, slug: string, lessonId: number, now: Date, opts?: { terms?: boolean }): Promise<OpenedLesson | LessonRefusal>` — the binding order in one place
+  - `type LessonResult = { kind: "lesson"; view: LessonView } | LessonRefusal`
   - `loadLesson(db: Db, bunny: BunnyConfig | null, clientId: number, slug: string, lessonId: number, now: Date): Promise<LessonResult>`
-  - `type ProgressResult = { kind: "saved"; done: boolean; next: number | null } | { kind: "notFound" } | { kind: "locked"; next: number | null } | { kind: "video" } | { kind: "range" }`
+  - `type ProgressResult = { kind: "saved"; done: boolean; next: number | null } | { kind: "video" } | { kind: "range" } | LessonRefusal`
   - `saveProgress(db: Db, clientId: number, slug: string, lessonId: number, watchedSec: number, now: Date): Promise<ProgressResult>`
-  - `type DoneResult = { kind: "saved"; next: number | null } | { kind: "notFound" } | { kind: "locked"; next: number | null } | { kind: "video" }`
+  - `type DoneResult = { kind: "saved"; next: number | null } | { kind: "video" } | LessonRefusal`
   - `markTextLessonDone(db: Db, clientId: number, slug: string, lessonId: number, now: Date): Promise<DoneResult>`
-  - `type LessonFileRef = { key: string; name: string; contentType: string }`
-  - `lessonFileFor(db: Db, clientId: number, slug: string, lessonId: number, fileId: number, now: Date): Promise<LessonFileRef | "notFound" | "locked">`
-- Produces, from `account-input.ts`: `parseRowId(raw: string): number | null`; `parseProgress(body: unknown): Input<{ watchedSec: number }>`; `LIMITS.watchedSec = 172_800`.
+  - `type LessonFileRef = { kind: "file"; key: string; name: string; contentType: string }`
+  - `lessonFileFor(db: Db, clientId: number, slug: string, lessonId: number, fileId: number, now: Date): Promise<LessonFileRef | LessonRefusal>`
+- Produces, from `account-input.ts`: `parseProgress(body: unknown): Input<{ watchedSec: number }>`; `LIMITS.watchedSec = 172_800`. Ids are parsed with `parseRowId` from `src/lib/row-id.ts` (Task 5), not here.
+- Produces, in `account-api.ts` (module-private): `lessonRef(rawSlug: string, rawLesson: string): { slug: string; lessonId: number } | null` — the one slug + lesson id parse step of the four handlers.
 - Produces, from `account-api.ts`: `AccountDeps` gains `files?: FileStore | null` and `bunny?: BunnyConfig | null`. The endpoints are:
 
 | Method + path | Body | Success | Errors |
@@ -3401,6 +3454,17 @@ test("terms not accepted: the lesson answers 403 terms; once accepted it opens",
   expect((await call(deps(), w.cookie, lessonPath(w.l1.id))).status).toBe(200);
 });
 
+test("one order of checks (openLesson): a hidden lesson is 404 before anything; terms come before the lock, on the lesson page only", async () => {
+  const w = await world();
+  await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
+  const d = deps();
+  expect((await call(d, w.cookie, lessonPath(w.hidden.id))).status).toBe(404);
+  expect(await (await call(d, w.cookie, lessonPath(w.l3.id))).json()).toEqual({ ok: false, error: "terms" }); // locked too, but terms first
+  expect(await (await call(d, w.cookie, lessonPath(w.l3.id, "/progress"), { watchedSec: 1 })).json()).toEqual({ ok: false, error: "locked", next: w.l1.id });
+  expect(await (await call(d, w.cookie, lessonPath(w.l2.id, "/tehtud"), {})).json()).toEqual({ ok: false, error: "locked", next: w.l1.id });
+  expect(await (await call(d, w.cookie, lessonPath(w.l3.id, `/fail/${w.file.id}`))).json()).toEqual({ ok: false, error: "locked" });
+});
+
 test("progress: at most 12 reports a minute per student (429 after)", async () => {
   const w = await world();
   const d = deps();
@@ -3427,15 +3491,9 @@ test("ids that cannot be ids are 404; a GET of …/progress or a POST of a lesso
 });
 ```
 
-  Extend `tests/unit/account-input.test.ts` (import `parseProgress`, `parseRowId`):
+  Extend `tests/unit/account-input.test.ts` (import `parseProgress`; the id parser has its own test, `tests/unit/row-id.test.ts`, Task 5):
 
 ```ts
-test("a lesson or file id of a path: digits only, 1 … 2147483647", () => {
-  expect(parseRowId("12")).toBe(12);
-  expect(parseRowId("2147483647")).toBe(2147483647);
-  for (const bad of ["0", "012", "-1", "1.5", "x", "", "2147483648", "99999999999"]) expect(parseRowId(bad), bad).toBeNull();
-});
-
 test("progress: a number of seconds, 0 … two days", () => {
   expect(parseProgress({ watchedSec: 12.5 })).toEqual({ ok: true, data: { watchedSec: 12.5 } });
   expect(parseProgress({ watchedSec: "x" })).toEqual({ ok: false, error: "watchedSec" });
@@ -3556,8 +3614,9 @@ import { activeAccess, termsState } from "./client-data";
 import { courseOutline, type CourseOutline } from "./lesson-outline";
 
 // The lesson endpoints' work (spec 3a sections 5 and 6), for account-api.ts: one lesson, progress, "Märgi tehtuks", a file. The
-// client is always the session's. Each starts with the same checks, in this order: active access to the course (none: notFound) →
-// a visible lesson of that course (else notFound) → (the lesson page only) the terms accepted → the lesson order (locked).
+// client is always the session's. Each starts with openLesson, the one place of the checks' binding order: active access to the
+// course (none: notFound) → a visible lesson of that course (else notFound) → (the lesson page only) the terms accepted → the lesson
+// order (locked).
 // How a lesson is completed follows its kind (domain/lessons.ts completion): a text lesson by "Märgi tehtuks", a video lesson only
 // by watching 90 % of a playable video — a video lesson waiting for its video cannot be completed, so the next one stays locked.
 
@@ -3575,10 +3634,13 @@ export type LessonView = {
   /** The student's e-mail, for the watermark over the video. */
   watermark: string;
 };
-export type LessonResult = { kind: "lesson"; view: LessonView } | { kind: "notFound" } | { kind: "terms" } | { kind: "locked"; next: number | null };
-export type ProgressResult = { kind: "saved"; done: boolean; next: number | null } | { kind: "notFound" } | { kind: "locked"; next: number | null } | { kind: "video" } | { kind: "range" };
-export type DoneResult = { kind: "saved"; next: number | null } | { kind: "notFound" } | { kind: "locked"; next: number | null } | { kind: "video" };
-export type LessonFileRef = { key: string; name: string; contentType: string };
+/** Why a lesson cannot be opened: not this client's (no access, no such visible lesson), terms to accept (asked for), not open yet. */
+export type LessonRefusal = { kind: "notFound" } | { kind: "terms" } | { kind: "locked"; next: number | null };
+export type LessonResult = { kind: "lesson"; view: LessonView } | LessonRefusal;
+/** `terms` never comes back here: only the lesson page asks openLesson for the terms check. */
+export type ProgressResult = { kind: "saved"; done: boolean; next: number | null } | { kind: "video" } | { kind: "range" } | LessonRefusal;
+export type DoneResult = { kind: "saved"; next: number | null } | { kind: "video" } | LessonRefusal;
+export type LessonFileRef = { kind: "file"; key: string; name: string; contentType: string };
 
 /** A visible lesson of the course, with its module's title and this client's progress; null when it is not one. */
 async function visibleLesson(db: Db, courseId: number, clientId: number, lessonId: number) {
@@ -3604,12 +3666,31 @@ async function visibleLesson(db: Db, courseId: number, clientId: number, lessonI
   return row ? { ...row, done: Boolean(row.done) } : null;
 }
 
-type Row = NonNullable<Awaited<ReturnType<typeof visibleLesson>>>;
+export type LessonRow = NonNullable<Awaited<ReturnType<typeof visibleLesson>>>;
+type Access = NonNullable<Awaited<ReturnType<typeof activeAccess>>>;
+export type OpenedLesson = { kind: "open"; access: Access; row: LessonRow; outline: CourseOutline };
 
-const isLocked = (outline: CourseOutline, lessonId: number) => outline.lessons.find((l) => l.id === lessonId)?.state === "locked";
+/**
+ * The checks of every lesson endpoint, in the binding order (Global Constraints; spec 6), in this one place: active access to the course
+ * → a visible lesson of that course → with `terms: true` (the lesson page only) the course's terms accepted → the lesson order. Answers
+ * the course access, the lesson row and the client's outline of the course, or the refusal.
+ */
+export async function openLesson(db: Db, clientId: number, slug: string, lessonId: number, now: Date, opts: { terms?: boolean } = {}): Promise<OpenedLesson | LessonRefusal> {
+  const access = await activeAccess(db, clientId, slug, now);
+  if (!access) return { kind: "notFound" };
+  const [row, outline, terms] = await Promise.all([
+    visibleLesson(db, access.course.id, clientId, lessonId),
+    courseOutline(db, access.course.id, clientId),
+    opts.terms ? termsState(db, clientId, access.course.id) : null,
+  ]);
+  if (!row) return { kind: "notFound" };
+  if (terms && !terms.accepted) return { kind: "terms" };
+  if (outline.lessons.find((l) => l.id === lessonId)?.state === "locked") return { kind: "locked", next: outline.progress.next };
+  return { kind: "open", access, row, outline };
+}
 
 /** The video part of a lesson: null for a text lesson; ready with a URL signed for 4 hours (from the resume point); else soon. */
-async function videoOf(row: Row, bunny: BunnyConfig | null, now: Date): Promise<LessonVideo | null> {
+async function videoOf(row: LessonRow, bunny: BunnyConfig | null, now: Date): Promise<LessonVideo | null> {
   if (row.kind === "text") return null;
   const videoId = playableVideo(row);
   if (!videoId || !bunny || !row.durationSec) return { state: "soon" };
@@ -3618,21 +3699,16 @@ async function videoOf(row: Row, bunny: BunnyConfig | null, now: Date): Promise<
   return { state: "ready", embedUrl: await signedEmbedUrl(bunny, videoId, expires, start), expires, resumeAt: start, durationSec: row.durationSec };
 }
 
-/** GET a lesson (spec 6). */
+/** GET a lesson (spec 6): the only endpoint with the terms check. */
 export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: number, slug: string, lessonId: number, now: Date): Promise<LessonResult> {
-  const access = await activeAccess(db, clientId, slug, now);
-  if (!access) return { kind: "notFound" };
-  const courseId = access.course.id;
-  const [row, outline, terms, files, [client]] = await Promise.all([
-    visibleLesson(db, courseId, clientId, lessonId),
-    courseOutline(db, courseId, clientId),
-    termsState(db, clientId, courseId),
+  const opened = await openLesson(db, clientId, slug, lessonId, now, { terms: true });
+  if (opened.kind !== "open") return opened;
+  const { access, row, outline } = opened;
+  const [files, [client]] = await Promise.all([
     db.select({ id: lessonFiles.id, name: lessonFiles.name, size: lessonFiles.size }).from(lessonFiles).where(eq(lessonFiles.lessonId, lessonId)).orderBy(asc(lessonFiles.position), asc(lessonFiles.id)),
     db.select({ email: clients.email }).from(clients).where(eq(clients.id, clientId)).limit(1),
   ]);
-  if (!row || !client) return { kind: "notFound" };
-  if (!terms.accepted) return { kind: "terms" };
-  if (isLocked(outline, lessonId)) return { kind: "locked", next: outline.progress.next };
+  if (!client) return { kind: "notFound" };
   return {
     kind: "lesson",
     view: {
@@ -3652,11 +3728,9 @@ export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: nu
  * only ("watch"): a text lesson, and a video lesson still waiting for its video, are "video" (409).
  */
 export async function saveProgress(db: Db, clientId: number, slug: string, lessonId: number, watchedSec: number, now: Date): Promise<ProgressResult> {
-  const access = await activeAccess(db, clientId, slug, now);
-  if (!access) return { kind: "notFound" };
-  const [row, outline] = await Promise.all([visibleLesson(db, access.course.id, clientId, lessonId), courseOutline(db, access.course.id, clientId)]);
-  if (!row) return { kind: "notFound" };
-  if (isLocked(outline, lessonId)) return { kind: "locked", next: outline.progress.next };
+  const opened = await openLesson(db, clientId, slug, lessonId, now);
+  if (opened.kind !== "open") return opened;
+  const { row, outline } = opened;
   if (completion(row) !== "watch" || row.durationSec === null) return { kind: "video" };
   if (watchedSec > row.durationSec + 5) return { kind: "range" };
   const watched = Math.floor(watchedSec);
@@ -3677,11 +3751,9 @@ export async function saveProgress(db: Db, clientId: number, slug: string, lesso
 
 /** POST tehtud ("Märgi tehtuks"): a text lesson (kind "text") only — any video lesson is "video" (409); done once (a second time changes nothing). */
 export async function markTextLessonDone(db: Db, clientId: number, slug: string, lessonId: number, now: Date): Promise<DoneResult> {
-  const access = await activeAccess(db, clientId, slug, now);
-  if (!access) return { kind: "notFound" };
-  const [row, outline] = await Promise.all([visibleLesson(db, access.course.id, clientId, lessonId), courseOutline(db, access.course.id, clientId)]);
-  if (!row) return { kind: "notFound" };
-  if (isLocked(outline, lessonId)) return { kind: "locked", next: outline.progress.next };
+  const opened = await openLesson(db, clientId, slug, lessonId, now);
+  if (opened.kind !== "open") return opened;
+  const { row, outline } = opened;
   if (completion(row) !== "mark") return { kind: "video" };
   await db
     .insert(lessonProgress)
@@ -3690,17 +3762,16 @@ export async function markTextLessonDone(db: Db, clientId: number, slug: string,
   return { kind: "saved", next: nextLessonAfter(outline.lessons, lessonId) };
 }
 
-/** GET a file: the store key, name and type of a file of an open lesson; "locked" before the lesson opens. */
-export async function lessonFileFor(db: Db, clientId: number, slug: string, lessonId: number, fileId: number, now: Date): Promise<LessonFileRef | "notFound" | "locked"> {
-  const access = await activeAccess(db, clientId, slug, now);
-  if (!access) return "notFound";
-  const [row, outline, [file]] = await Promise.all([
-    visibleLesson(db, access.course.id, clientId, lessonId),
-    courseOutline(db, access.course.id, clientId),
-    db.select({ key: lessonFiles.r2Key, name: lessonFiles.name, contentType: lessonFiles.contentType }).from(lessonFiles).where(and(eq(lessonFiles.id, fileId), eq(lessonFiles.lessonId, lessonId))).limit(1),
-  ]);
-  if (!row || !file) return "notFound";
-  return isLocked(outline, lessonId) ? "locked" : file;
+/** GET a file: the store key, name and type of a file of an open lesson (a file of another lesson is notFound); locked before the lesson opens. */
+export async function lessonFileFor(db: Db, clientId: number, slug: string, lessonId: number, fileId: number, now: Date): Promise<LessonFileRef | LessonRefusal> {
+  const opened = await openLesson(db, clientId, slug, lessonId, now);
+  if (opened.kind !== "open") return opened;
+  const [file] = await db
+    .select({ key: lessonFiles.r2Key, name: lessonFiles.name, contentType: lessonFiles.contentType })
+    .from(lessonFiles)
+    .where(and(eq(lessonFiles.id, fileId), eq(lessonFiles.lessonId, lessonId)))
+    .limit(1);
+  return file ? { kind: "file", ...file } : { kind: "notFound" };
 }
 ```
 
@@ -3710,19 +3781,14 @@ export async function lessonFileFor(db: Db, clientId: number, slug: string, less
 const progress = z.object({ watchedSec: z.number().min(0).max(LIMITS.watchedSec) });
 export type ProgressInput = z.infer<typeof progress>;
 export const parseProgress = (body: unknown) => parse(progress, body);
-
-/** A lesson's or file's id in a request path ("12"), or null for anything else (not digits, a leading 0, past the database's integer). */
-export function parseRowId(raw: string): number | null {
-  if (!/^[1-9][0-9]{0,9}$/.test(raw)) return null;
-  const n = Number(raw);
-  return n <= 2_147_483_647 ? n : null;
-}
 ```
+
+  (No id parser here: a path's lesson and file ids go through `parseRowId` of `src/lib/row-id.ts`.)
 
   Extend the file's top comment: watchedSec is 0 … 172 800 (the real bound is the video's length + 5 s, checked with the lesson).
 
 - [ ] **Step 7: Change `account-api.ts`.**
-  1. **Imports:** `parseProgress`, `parseRowId` from `./account-input`; `type BunnyConfig` from `./bunny`; `attachmentHeader`, `FILE_URL_TTL_SEC` from `./lesson-files`; `loadLesson`, `lessonFileFor`, `markTextLessonDone`, `saveProgress` from `./lesson-data`; `type FileStore` from `./media`.
+  1. **Imports:** `parseProgress` from `./account-input`; `parseRowId` from `@/lib/row-id`; `type BunnyConfig` from `./bunny`; `attachmentHeader`, `FILE_URL_TTL_SEC` from `./lesson-files`; `loadLesson`, `lessonFileFor`, `markTextLessonDone`, `saveProgress` from `./lesson-data`; `type FileStore` from `./media`.
   2. **`AccountDeps`** gains:
 
 ```ts
@@ -3753,7 +3819,16 @@ async function fileAnswer(session: ClientSession, store: FileStore, file: { key:
   for (const cookie of session.cookies) res.headers.append("set-cookie", cookie);
   return res;
 }
+
+/** The slug and lesson id of a lesson path (the one parse step of the four lesson handlers); null when either cannot be one (404). */
+const lessonRef = (rawSlug: string, rawLesson: string): { slug: string; lessonId: number } | null => {
+  const slug = parseSlug(rawSlug);
+  const lessonId = parseRowId(rawLesson);
+  return slug === null || lessonId === null ? null : { slug, lessonId };
+};
 ```
+
+     Put `lessonRef` next to `fileAnswer`, also outside the guarded section.
 
   5. **The handlers.** Add these right after `ecourse` (inside the section; each with its doc comment directly above `async function`, as the guard test splits on that):
 
@@ -3767,9 +3842,8 @@ async function fileAnswer(session: ClientSession, store: FileStore, file: { key:
 async function lesson(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
-  const slug = parseSlug(rawSlug);
-  const lessonId = parseRowId(rawLesson);
-  const result = slug === null || lessonId === null ? null : await loadLesson(deps.db, deps.bunny ?? null, session.clientId, slug, lessonId, deps.now);
+  const ref = lessonRef(rawSlug, rawLesson);
+  const result = ref ? await loadLesson(deps.db, deps.bunny ?? null, session.clientId, ref.slug, ref.lessonId, deps.now) : null;
   if (result?.kind === "lesson") return clientResponse(session, result.view);
   if (result?.kind === "terms") return clientResponse(session, { ok: false, error: "terms" }, 403);
   if (result?.kind === "locked") return clientResponse(session, { ok: false, error: "locked", next: result.next }, 403);
@@ -3786,30 +3860,28 @@ async function lesson(request: Request, deps: AccountDeps, rawSlug: string, rawL
 async function progress(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
-  const slug = parseSlug(rawSlug);
-  const lessonId = parseRowId(rawLesson);
-  if (slug === null || lessonId === null) return clientResponse(session, { ok: false }, 404);
+  const ref = lessonRef(rawSlug, rawLesson);
+  if (ref === null) return clientResponse(session, { ok: false }, 404);
   const input = parseProgress(await readObject(request));
   if (!input.ok) return badInput(session, input.error);
   if (!(await withinClientLimit(deps, session.clientId, "client-progress", PROGRESS_PER_MINUTE, 60))) {
     console.info("[account] progress rate limited");
     return clientResponse(session, { ok: false, error: "rate" }, 429);
   }
-  const result = await saveProgress(deps.db, session.clientId, slug, lessonId, input.data.watchedSec, deps.now);
+  const result = await saveProgress(deps.db, session.clientId, ref.slug, ref.lessonId, input.data.watchedSec, deps.now);
   if (result.kind === "saved") return clientResponse(session, { ok: true, done: result.done, next: result.next });
   if (result.kind === "locked") return clientResponse(session, { ok: false, error: "locked", next: result.next }, 403);
   if (result.kind === "video") return clientResponse(session, { ok: false, error: "video" }, 409);
   if (result.kind === "range") return badInput(session, "watchedSec");
-  return clientResponse(session, { ok: false }, 404);
+  return clientResponse(session, { ok: false }, 404); // notFound (terms is never asked for here)
 }
 
 /** POST /kursus/:slug/:lesson/tehtud: "Märgi tehtuks" for a text lesson (kind "text"). 200 `{ ok, done: true, next }`; 403 locked; 404; 409 `{ error: "video" }` (a video lesson). */
 async function lessonDone(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
-  const slug = parseSlug(rawSlug);
-  const lessonId = parseRowId(rawLesson);
-  const result = slug === null || lessonId === null ? null : await markTextLessonDone(deps.db, session.clientId, slug, lessonId, deps.now);
+  const ref = lessonRef(rawSlug, rawLesson);
+  const result = ref ? await markTextLessonDone(deps.db, session.clientId, ref.slug, ref.lessonId, deps.now) : null;
   if (result?.kind === "saved") return clientResponse(session, { ok: true, done: true, next: result.next });
   if (result?.kind === "locked") return clientResponse(session, { ok: false, error: "locked", next: result.next }, 403);
   if (result?.kind === "video") return clientResponse(session, { ok: false, error: "video" }, 409);
@@ -3820,12 +3892,11 @@ async function lessonDone(request: Request, deps: AccountDeps, rawSlug: string, 
 async function lessonFile(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string, rawFile: string): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
-  const slug = parseSlug(rawSlug);
-  const lessonId = parseRowId(rawLesson);
+  const ref = lessonRef(rawSlug, rawLesson);
   const fileId = parseRowId(rawFile);
-  const file = slug === null || lessonId === null || fileId === null ? "notFound" : await lessonFileFor(deps.db, session.clientId, slug, lessonId, fileId, deps.now);
-  if (file === "locked") return clientResponse(session, { ok: false, error: "locked" }, 403);
-  const answer = file === "notFound" || !deps.files ? null : await fileAnswer(session, deps.files, file);
+  const file = ref && fileId !== null ? await lessonFileFor(deps.db, session.clientId, ref.slug, ref.lessonId, fileId, deps.now) : null;
+  if (file?.kind === "locked") return clientResponse(session, { ok: false, error: "locked" }, 403);
+  const answer = file?.kind === "file" && deps.files ? await fileAnswer(session, deps.files, file) : null;
   return answer ?? clientResponse(session, { ok: false }, 404);
 }
 ```
@@ -4436,13 +4507,13 @@ A locked lesson shows the lock sentence with "Jätka".
 **Files:**
 - Modify: `app/src/components/account/EcourseView.tsx` (+ `EcourseView.module.css`; `"use client"`, `readOnly`), `app/src/components/account/useAccount.ts` (the `forbidden` state), `app/src/components/account/AccountLoader.tsx` (the `forbidden` prop), `app/src/components/account/texts.ts` (`EcourseTexts` unchanged in form; it gains the new keys through the dictionary)
 - Create: `app/src/components/account/LessonPage.tsx` (+ `LessonPage.module.css`), `app/src/app/[locale]/(site)/konto/kursus/[slug]/[lesson]/page.tsx`
-- Modify: `app/src/lib/site-routing.ts` (the lesson page; `isLessonId`), `app/src/i18n/format.ts` (`formatSize`), `app/src/i18n/dict/et.ts`, `ru.ts` (`account.ecourse` keys), `app/src/components/admin/LessonFiles.tsx` (use `formatSize`)
+- Modify: `app/src/lib/site-routing.ts` (the lesson page, its id through `parseRowId`), `app/src/i18n/format.ts` (`formatSize`), `app/src/i18n/dict/et.ts`, `ru.ts` (`account.ecourse` keys), `app/src/components/admin/LessonFiles.tsx` (use `formatSize`)
 - Modify: `app/tests/unit/colour-tokens.test.ts` (+ `LessonPage.module.css`)
 - Create: `app/tests/e2e/lessons.ts` (fixtures), `app/tests/e2e/account-lessons.spec.ts`
 - Test: `app/tests/unit/site-routing.test.ts`, `app/tests/unit/use-account.test.ts`, `app/tests/unit/account-ecourse.test.ts`, `app/tests/unit/account-lesson.test.ts` (new, happy-dom), `app/tests/unit/i18n.test.ts` (`formatSize`), `app/tests/e2e/account-ecourse.spec.ts`, `app/tests/e2e/cache.spec.ts`
 
 **Interfaces:**
-- Consumes: `EcourseView`, `LessonView`, the endpoints (Task 7); `LessonPlayer`, `lessonTexts`, `account.lesson` (Task 8); `paragraphs(text)` (`domain/catalogue.ts`); `ModuleList`'s look (`CourseLists.module.css`); `Icon` (`check`, `play`, `lock`, `arrow`).
+- Consumes: `EcourseView`, `LessonView`, the endpoints (Task 7); `LessonPlayer`, `lessonTexts`, `account.lesson` (Task 8); `parseRowId` (`src/lib/row-id.ts`) and `smallTargets` (`tests/e2e/targets.ts`), both Task 5; `paragraphs(text)` (`domain/catalogue.ts`); `ModuleList`'s look (`CourseLists.module.css`); `Icon` (`check`, `play`, `lock`, `arrow`).
 - Produces, from `useAccount.ts`:
   - `AccountState` gains `"forbidden"`;
   - `type Refusal = { error: string; next: number | null }`;
@@ -4451,7 +4522,7 @@ A locked lesson shows the lock sentence with "Jätka".
 - Produces, from `AccountLoader`: the prop `forbidden?: (refusal: Refusal) => React.ReactNode`.
 - Produces, from `EcourseView`: the props `{ data: EcourseView; locale: Locale; t: EcourseTexts; focusHeading?: boolean; readOnly?: boolean }` (Task 10 renders it read-only).
 - Produces, from `LessonPage`: `LessonPage({ slug, lessonId, locale, t }: { slug: string; lessonId: number; locale: Locale; t: LessonTexts })`.
-- Produces, from `site-routing.ts`: `isLessonId(raw: string): boolean` (`/^[1-9][0-9]{0,9}$/`). `isKnownPage` knows `/konto/kursus/<slug>/<lessonId>`.
+- Produces, from `site-routing.ts`: `isKnownPage` knows `/konto/kursus/<slug>/<lessonId>`, where the id passes `parseRowId` (Task 5, `src/lib/row-id.ts`): the route pattern stays a regex, and the id's ≤ 2 147 483 647 rule comes from the one parser. The shell page parses the id with `parseRowId` too (no separate `isLessonId`).
 - Produces, from `i18n/format.ts`: `formatSize(bytes: number, l: Locale): string` ("820 kB", "1,4 MB"; RU "820 КБ", "1,4 МБ").
 - Produces, from `tests/e2e/lessons.ts`:
   - `type LessonCourse = { clientId: number; slug: string; lessons: { video: number; text: number; last: number }; fileId: number; fileName: string }`
@@ -4520,13 +4591,19 @@ test("formatSize: kB under a megabyte (at least 1), MB with one decimal, in the 
 - [ ] **Step 3: Routing.** In `src/lib/site-routing.ts`:
 
 ```ts
-/** A lesson's id in an address: digits, no leading 0 (the page and the API read the same; anything else is a 404). */
-export const isLessonId = (raw: string): boolean => /^[1-9][0-9]{0,9}$/.test(raw);
-/** One lesson of an e-course in the account (phase 3a): /konto/kursus/<slug>/<lesson id>. */
-const LESSON_PAGE = /^\/konto\/kursus\/[a-z0-9]+(?:-[a-z0-9]+)*\/[1-9][0-9]{0,9}$/;
+import { parseRowId } from "./row-id";
+
+/** One lesson of an e-course in the account (phase 3a): /konto/kursus/<slug>/<lesson id>; the id is checked by parseRowId (lib/row-id.ts). */
+const LESSON_PAGE = /^\/konto\/kursus\/[a-z0-9]+(?:-[a-z0-9]+)*\/([1-9][0-9]{0,9})$/;
+
+/** Is `rest` (a page without its locale) one lesson's address, with an id the database can hold (≤ 2 147 483 647)? */
+const isLessonPage = (rest: string): boolean => {
+  const m = LESSON_PAGE.exec(rest);
+  return m !== null && parseRowId(m[1]) !== null;
+};
 ```
 
-  `isKnownPage` also accepts `LESSON_PAGE.test(rest)`. `ACCOUNT_SHELL` already covers the path, so a query on it gets the 303 into the fragment. Extend the `STATIC_PAGES` comment.
+  `isKnownPage` also accepts `isLessonPage(rest)`. `ACCOUNT_SHELL` already covers the path, so a query on it gets the 303 into the fragment. Extend the `STATIC_PAGES` comment. In `tests/unit/site-routing.test.ts` (step 1) also expect `/et/konto/kursus/x/2147483648` to be unknown, and `/et/konto/kursus/x/2147483647` known.
 
 - [ ] **Step 4: `formatSize`** in `src/i18n/format.ts`:
 
@@ -4635,7 +4712,7 @@ import { AccountShell } from "@/components/account/AccountShell";
 import { LessonPage } from "@/components/account/LessonPage";
 import { lessonTexts, shellTexts } from "@/components/account/texts";
 import { getDict, isLocale } from "@/i18n/locales";
-import { isLessonId } from "@/lib/site-routing";
+import { parseRowId } from "@/lib/row-id";
 import { isSlug } from "@/lib/slug";
 
 type Props = { params: Promise<{ locale: string; slug: string; lesson: string }> };
@@ -4660,11 +4737,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  */
 export default async function LessonShellPage({ params }: Props) {
   const { locale, slug, lesson } = await params;
-  if (!isLocale(locale) || !isSlug(slug) || !isLessonId(lesson)) notFound();
+  const lessonId = parseRowId(lesson);
+  if (!isLocale(locale) || !isSlug(slug) || lessonId === null) notFound();
   const d = getDict(locale);
   return (
     <AccountShell tab="courses" locale={locale} t={shellTexts(d)}>
-      <LessonPage slug={slug} lessonId={Number(lesson)} locale={locale} t={lessonTexts(d)} />
+      <LessonPage slug={slug} lessonId={lessonId} locale={locale} t={lessonTexts(d)} />
     </AccountShell>
   );
 }
@@ -4750,7 +4828,7 @@ export const FAKE_PLAYER_ORIGIN = E2E_BUNNY.url;
        - lesson 2's address shows the lock notice, and the course page still says "0 / 3 õppetundi tehtud" with lesson 2 `locked`.
     4. **Phone (390 px).**
        - Module "Alustame" (with the current lesson) is open and "Edasi" closed; tapping its summary opens it.
-       - No horizontal overflow; every visible control ≥ 44 px.
+       - No horizontal overflow; every visible control ≥ 44 px: `expect(await smallTargets(page.locator("main"))).toEqual([])` (`import { smallTargets } from "./targets"`) on the course page and on a lesson page.
        - The fullscreen button of the player puts the wrapper over the page (`[data-expanded]` or `document.fullscreenElement`), with the watermark still inside it.
     5. **RU.** `/ru/konto/kursus/<slug>` shows "Пройдено уроков: 0 / 3" and "Начать".
   - **`tests/e2e/account-ecourse.spec.ts`.** Update the course-view test: the own course has two modules and no lessons, so assert `[data-module]` count = `c.modules.length` with their titles, `[data-ecourse-soon]` "Sisu lisandub peagi.", and no `[data-ecourse-progress]` or `[data-ecourse-next]`. Drop the `[data-modules] [data-locked]` assertions.
@@ -4783,7 +4861,7 @@ Spec section 4 ("Student panel"):
 - Test: `app/tests/db/admin-progress.test.ts` (new), `app/tests/unit/admin-guards.test.ts`, `app/tests/e2e/admin-clients.spec.ts` (extend)
 
 **Interfaces:**
-- Consumes: `courseOutline` (Task 7); `lessonProgress` (Task 1); `loadEcourse`, `EcourseView` (Task 7); `EcourseView` component with `readOnly` (Task 9); `AccountShell` with `readOnly` / `banner`; `ecourseTexts`, `shellTexts`; `requireAdmin`, `adminAction`.
+- Consumes: `courseOutline` (Task 7); `lessonProgress` (Task 1); `loadEcourse`, `EcourseView` (Task 7); `EcourseView` component with `readOnly` (Task 9); `parseRowId(raw: string): number | null` (`src/lib/row-id.ts`, Task 5); `smallTargets` (`tests/e2e/targets.ts`, Task 5); `AccountShell` with `readOnly` / `banner`; `ecourseTexts`, `shellTexts`; `requireAdmin`, `adminAction`.
 - Produces, from `admin-clients.ts`:
   - `ClientAccessRow` gains `progress: { done: number; total: number }` and `nextLocked: { id: number; title: I18n } | null`;
   - `unlockNext(db: Db, input: { clientId: number; courseId: number; lessonId: number; by: string; now: Date }): Promise<ClientResult>`;
@@ -4954,7 +5032,7 @@ export const unlockNextLesson = adminAction(async ({ email }, _prev: ClientResul
 - [ ] **Step 6: The drawer and the view.**
   - **`ClientDetailView`.** In each access row, after the state tag and when `a.progress.total > 0`:
     - `<p className={styles.meta} data-access-progress="">{fill(t.progress, a.progress)}</p>`;
-    - `<Link className={ui.link} href={`/admin/opilased/${c.id}/vaade/${a.slug}`} aria-label={fill(t.viewCourseLabel, { course: title })} data-view-course={a.courseId}>{t.viewCourse}</Link>`;
+    - only when `a.state === "active"` (the view page answers 404 without active access, as her own page does): `<Link className={ui.link} href={`/admin/opilased/${c.id}/vaade/${a.slug}`} aria-label={fill(t.viewCourseLabel, { course: title })} data-view-course={a.courseId}>{t.viewCourse}</Link>`;
     - when `a.state === "active" && a.nextLocked`: `<UnlockNextLesson clientId={c.id} courseId={a.courseId} lesson={{ id: a.nextLocked.id, title: pick(a.nextLocked.title, "et") }} t={{ ...adminEt.clients.unlock, saving: adminEt.common.saving, error: adminEt.common.saveError }} />`.
   - **`UnlockNextLesson`** in `ClientForms.tsx` follows `RevokeAccess` exactly:
     - a `ui.btn ui.secondary ui.smallBtn` button `t.button` (`data-unlock-next`);
@@ -4964,7 +5042,7 @@ export const unlockNextLesson = adminAction(async ({ email }, _prev: ClientResul
     - after an error: `t.error` (`role="alert"`).
   - **The page `app/admin/(panel)/opilased/[id]/vaade/[slug]/page.tsx`.** It follows the existing `vaade/page.tsx`:
     - `export const dynamic = "force-dynamic"`; metadata title `adminTitle(adminEt.viewAs.courseTitle)`;
-    - `const email = await requireAdmin()`; the id is parsed as there, and the slug must pass `isSlug`, else `notFound()`;
+    - `const email = await requireAdmin()`; the id is parsed with `parseRowId` (`src/lib/row-id.ts`, Task 5) and the slug must pass `isSlug`, else `notFound()`;
     - `const [data, info] = await Promise.all([loadEcourse(getDb(), id, slug, now), clientViewInfo(getDb(), id)])`; a missing one → `notFound()` (no active access is a 404 too, as for her);
     - it renders `<Shell email={email} active="clients">` with the back link to `/admin/opilased?id=${id}` (`adminEt.viewAs.back` / `backLabel`), and `<div className={view.preview} lang={info.locale} data-view-as={id}>` (import `view` from `../view.module.css`);
     - inside that, `<AccountShell tab="courses" locale={info.locale} t={shellTexts(d)} readOnly banner={<span lang="et">{fill(adminEt.viewAs.banner, { nimi: info.label })}</span>}>`, wrapping `<EcourseView data={data} locale={info.locale} t={ecourseTexts(d)} readOnly />`;
@@ -4976,7 +5054,8 @@ export const unlockNextLesson = adminAction(async ({ email }, _prev: ClientResul
   2. "Ava järgmine õppetund" → "Kas avan õpilasele õppetunni „Kolmas tund“? Ta saab selle kohe vaadata." → "Jah, ava" → "Õppetund „Kolmas tund“ on avatud.". The `lesson_progress` row of lesson 3 has `unlocked_by` = the admin's address.
   3. In the student's own browser (`studentBrowser`), `/konto/kursus/<slug>` shows lesson 3 `data-state="current"`.
   4. In the drawer, "Vaata tema vaadet" for the course → the read-only course: the banner, "1 / 3 õppetundi tehtud", the states, no link inside `[data-ecourse]`, the button `aria-disabled`. Afterwards the student's session still works (her next `/api/konto/me` is 200).
-  5. At 1440 and 390 px, the access row's controls are ≥ 44 px.
+  5. "Lõpeta ligipääs" on that course → the row still reads "1/3 tehtud", but `[data-view-course]` and "Ava järgmine õppetund" are gone from it.
+  6. At 1440 and 390 px, the access row's controls are ≥ 44 px (`smallTargets` from `tests/e2e/targets.ts`).
 
 - [ ] **Step 8: Run** unit + DB, `tsc`, lint, `npx playwright test admin-clients` (dev and `E2E_PROD_BUILD=1`), the whole e2e suite, and `next build`.
 
@@ -5074,7 +5153,7 @@ Spec sections 7, 8 and 10. The daily cron also gives up Bunny uploads stuck for 
         - **Direct play** off (`AllowDirectPlay`).
         - Leave **early play** (`AllowEarlyPlay`), **JIT encoding** and **DRM** off: the app treats a video as ready at status 4 (Finished).
      4. **Webhook URL** of the library: `https://mslab.diipsolutions.eu/api/bunny/webhook?secret=<BUNNY_WEBHOOK_SECRET>`, where the secret is a long random string (`openssl rand -hex 32`). The URL with its secret ends up in Vercel's request logs; it only lets someone ask the app to re-read a video's status.
-     5. Vercel → Settings → Environment Variables → **Production**: the four `BUNNY_*` variables (never `BUNNY_FAKE_URL`). They reach the site with the next deployment.
+     5. Vercel → Settings → Environment Variables → **Production**: the three variables `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` (+ the optional `BUNNY_WEBHOOK_SECRET`; never `BUNNY_FAKE_URL`). They reach the site with the next deployment.
      6. Check after the deployment: admin → an e-course → a lesson → the video field offers "Vali video" (not "Video seadistamata").
 
      Then add:
@@ -5084,7 +5163,7 @@ Spec sections 7, 8 and 10. The daily cron also gives up Bunny uploads stuck for 
 - [ ] **Step 6: `docs/launch-checklist.md`.** Add `## 8. Phase 3a (lessons and video)`:
 
 ```
-- [ ] Dim creates the Bunny Stream library and sets BUNNY_LIBRARY_ID, BUNNY_API_KEY, BUNNY_TOKEN_KEY and BUNNY_WEBHOOK_SECRET in Vercel (deploy.md §10) before the 3a deploy.
+- [ ] Dim creates the Bunny Stream library and sets the three variables BUNNY_LIBRARY_ID, BUNNY_API_KEY, BUNNY_TOKEN_KEY (+ the optional BUNNY_WEBHOOK_SECRET) in Vercel (deploy.md §10) before the 3a deploy.
 - [ ] mslab.ee launch: add mslab.ee to the Bunny library's allowed domains (deploy.md §10) and the webhook URL's host.
 - [ ] Migration 0004 (drop courses.modules) after 3a has run without a rollback for a few days — code first, then the migration (plan 2026-10-05-phase3a, Task 12).
 - [ ] Watch the Bunny bill monthly, and Vercel's function invocations (progress reports: about 240 an hour of watching).
@@ -5121,25 +5200,36 @@ Spec section 10. This task is run by the controller, not a subagent. It is the f
   - `next build`: `/[locale]/konto/kursus/[slug]/[lesson]` is prerendered;
   - e2e under `next dev` and with `E2E_PROD_BUILD=1`, and visual;
   - the `tools/cache-smoke.mjs` change committed.
-- [ ] **Step 3: Bunny (Dim).** Dim creates the library and sets the four variables in Vercel Production, following `docs/deploy.md` section 10. Check with `vercel env ls production` that the four names are there (no values printed).
-- [ ] **Step 4: Migration 0003 on Railway.** Migrate first, then deploy. 0003 is additive, so the live code is unaffected:
+- [ ] **Step 3: Bunny (Dim).** Dim creates the library and sets the three variables `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` (+ the optional `BUNNY_WEBHOOK_SECRET`, which Dim sets too) in Vercel Production, following `docs/deploy.md` section 10. Check with `vercel env ls production` that the names are there (no values printed).
+- [ ] **Step 4: Migration 0003 on Railway.** Before it, Dim tells Maria (and himself) not to edit any course's modules or programme in the admin from now until step 7 is done. Migrate first, then deploy. 0003 is additive, so the live code is unaffected:
   1. `DATABASE_URL='…?sslmode=require' npm run db:migrate` (from `app/`).
   2. Check that `count(*)` of the migrations table is 4, and `select count(*) from course_modules` = N from step 1.
   3. Check that `select c.slug from courses c where c.modules <> coalesce((select jsonb_agg(m.title order by m.position, m.id) from course_modules m where m.course_id = c.id), '[]'::jsonb)` returns no rows.
 - [ ] **Step 5: Deploy.** Merge `feat/phase3a-lessons` into `main` and push `main`: that push is the production deployment. Do not push the feature branch itself.
 - [ ] **Step 6: READY.** Confirm the deployment is READY and holds the production alias (`vercel ls mslab` / `vercel inspect <url>`).
-- [ ] **Step 7: The titles edited between steps 4 and 6.** Run the drift query of step 4 again. For each slug it lists, the module titles were edited in the old editor during the window (spec 10). Copy that course's titles again; it has no lessons yet. Replace `<slug>`:
+- [ ] **Step 7: The titles edited between steps 4 and 6.** Run this right after step 6 reports READY, and **before anyone opens the new "Moodulid ja õppetunnid" editor**: until it is done, Dim and Maria do not edit modules (step 4).
+  1. Run the drift query of step 4 again. Each slug it lists had its module titles edited in the old editor during the window (spec 10).
+  2. For each listed slug, copy that course's titles again with the block below (replace `<slug>`, both places). It is one statement, so it runs as one transaction: it raises, and changes nothing, if the course has any lesson. Only a course with no lessons is re-copied. A course that has lessons by then is left as it is; Dim compares its titles by hand.
 
 ```sql
-begin;
-delete from course_modules where course_id = (select id from courses where slug = '<slug>')
-  and not exists (select 1 from lessons l where l.module_id = course_modules.id);
-insert into course_modules (course_id, position, title)
-select c.id, m.ord::int, m.value from courses c
-cross join lateral jsonb_array_elements(c.modules) with ordinality as m(value, ord)
-where c.slug = '<slug>' and not exists (select 1 from course_modules x where x.course_id = c.id);
-commit;
+do $$
+declare
+  cid integer;
+begin
+  select id into strict cid from courses where slug = '<slug>';
+  if exists (select 1 from lessons l join course_modules m on m.id = l.module_id where m.course_id = cid) then
+    raise exception 'course <slug> has lessons: module titles not re-copied';
+  end if;
+  delete from course_modules where course_id = cid;
+  insert into course_modules (course_id, position, title)
+  select c.id, m.ord::int, m.value
+  from courses c
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(c.modules) = 'array' then c.modules else '[]'::jsonb end) with ordinality as m(value, ord)
+  where c.id = cid;
+end $$;
 ```
+
+  3. Run the drift query once more: it must return no rows (except a course left by hand in 2).
 
 - [ ] **Step 8: Read-only acceptance on https://mslab.diipsolutions.eu.**
   - `node tools/cache-smoke.mjs` passes parts A, B and C, the lesson shell included.

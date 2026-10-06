@@ -73,7 +73,7 @@ Upload interrupted → resumable; closing the page leaves "Üleslaadimine katkes
 
 ## 8. Configuration and costs
 
-New Vercel env vars (production): `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY`, `BUNNY_CDN_HOST`; optional `BUNNY_WEBHOOK_SECRET` (a query secret on the webhook URL, checked before the status fetch). `serverEnv()` treats them as optional: without them the admin video field says "Video seadistamata" and students see "Video lisandub peagi". Bunny library settings: token authentication on, allowed referrers = mslab domains, MP4 fallback/download off. No change to Vercel/Railway plans; Bunny is pay-as-you-go (~€5–15/month at ~500 h).
+New Vercel env vars (production): `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY`; optional `BUNNY_WEBHOOK_SECRET` (a query secret on the webhook URL, checked before the status fetch). The embed needs only the library id and the video id, so the library's CDN hostname is not needed. `serverEnv()` treats them as optional: without them the admin video field says "Video seadistamata" and students see "Video lisandub peagi". Bunny library settings: token authentication on, allowed referrers = mslab domains, MP4 fallback/download off. No change to Vercel/Railway plans; Bunny is pay-as-you-go (~€5–15/month at ~500 h).
 
 ## 9. Testing
 
