@@ -1,15 +1,18 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
-import { clientLoginTokens, clients, clientSessions, kvEntries, mailQuota } from "@/db/schema";
+import { clientLoginTokens, clients, clientSessions, courseModules, courses, kvEntries, lessons, mailQuota } from "@/db/schema";
 import { sweepClientRows } from "@/server/client-auth";
 import { PgKv, sweepExpired } from "@/server/kv";
+import { stubFetch } from "../fakes";
 import { makeTestDb } from "./helpers";
 
 // The daily cron (vercel.json → GET /api/cron/sweep): deletes the expired kv_entries rows, and the client accounts' old rows (login
-// codes past their 30 minutes, sessions over for 30 days, the mail counters of days more than a week ago), only when Vercel calls it
-// with the project's CRON_SECRET.
+// codes past their 30 minutes, sessions over for 30 days, the mail counters of days more than a week ago) and, with Bunny set up, gives
+// up the lesson videos left unfinished for a day (uploads, videos stuck in processing), only when Vercel calls it with the project's
+// CRON_SECRET.
 
 const state = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("@/db/client", () => ({ getDb: () => state.db }));
@@ -18,6 +21,7 @@ import { GET } from "@/app/api/cron/sweep/route";
 
 const SECRET = "cron-secret-for-tests-0123456789";
 const call = (authorization?: string) => GET(new Request("https://mslab.example/api/cron/sweep", { headers: authorization ? { authorization } : {} }));
+const NO_VIDEOS = { uploads: 0, processingReady: 0, processingFailed: 0 };
 const keys = async (db: Db) => (await db.select().from(kvEntries)).map((r) => r.key).sort();
 
 /** Three rows: one expired an hour ago, one expiring in an hour, one without expiry. */
@@ -38,6 +42,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -48,18 +53,18 @@ describe("GET /api/cron/sweep", () => {
     const res = await call(`Bearer ${SECRET}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0 });
+    expect(await res.json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, ...NO_VIDEOS });
     expect(await keys(db)).toEqual(["rl:contact:203.0.113.8", "tg:chat"]);
     // nothing left to delete: 0
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0, ...NO_VIDEOS });
   });
 
   test("the same call sweeps the client accounts' old rows and answers their counts (one invocation a day)", async () => {
     vi.stubEnv("CRON_SECRET", SECRET);
     vi.spyOn(console, "info").mockImplementation(() => {});
     await accountRows(db, new Date());
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 1, sessions: 2, mailDays: 1 });
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 1, sessions: 2, mailDays: 1, ...NO_VIDEOS });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0, ...NO_VIDEOS });
   });
 
   test("401 and nothing deleted without the header, with a wrong secret, or another scheme", async () => {
@@ -148,5 +153,116 @@ describe("vercel.json", () => {
   test("functions in Frankfurt (the database is in Europe); the sweep once a day (Vercel Hobby allows daily crons)", () => {
     expect(config.regions).toEqual(["fra1"]);
     expect(config.crons).toEqual([{ path: "/api/cron/sweep", schedule: "0 3 * * *" }]);
+  });
+});
+
+describe("GET /api/cron/sweep: the lesson videos", () => {
+  const [A, B, C, REPLACED, KEPT] = ["11111111-2222-4333-8444-555555555551", "11111111-2222-4333-8444-555555555552", "11111111-2222-4333-8444-555555555553", "11111111-2222-4333-8444-555555555554", "11111111-2222-4333-8444-555555555555"];
+  const HOURS = 3600_000;
+  const ago = (hours: number) => new Date(Date.now() - hours * HOURS);
+  const bunnyOn = () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    vi.stubEnv("BUNNY_LIBRARY_ID", "12345");
+    vi.stubEnv("BUNNY_API_KEY", "test-api-key");
+    vi.stubEnv("BUNNY_TOKEN_KEY", "test-token-key");
+  };
+  /** A Bunny that holds `videos` (id → what GET answers): GET answers a held video, 404 otherwise; DELETE forgets it. */
+  const fakeBunny = (videos: Record<string, { status: number; length: number; width?: number; height?: number }>) =>
+    stubFetch((url, init) => {
+      const id = url.split("/").pop()!;
+      if (init?.method === "DELETE") {
+        delete videos[id];
+        return Response.json({ success: true });
+      }
+      return videos[id] ? Response.json({ guid: id, ...videos[id] }) : new Response(null, { status: 404 });
+    });
+  /** An e-course with one module; `lesson` adds a lesson to it. */
+  async function course() {
+    const [c] = await db.insert(courses).values({ slug: "veeb", type: "e_learning", level: "basic", title: { et: "V" }, summary: { et: "" }, body: { et: "" } }).returning();
+    const [m] = await db.insert(courseModules).values({ courseId: c.id, position: 1, title: { et: "M" } }).returning();
+    let position = 0;
+    return async (values: Partial<typeof lessons.$inferInsert>) => (await db.insert(lessons).values({ moduleId: m.id, position: ++position, title: { et: `L${position}` }, ...values }).returning())[0];
+  }
+  const row = async (id: number) => (await db.select().from(lessons).where(eq(lessons.id, id)))[0];
+
+  test("with Bunny set up, an upload stuck for more than a day is deleted from Bunny and the lesson has no video again (uploads: 1)", async () => {
+    bunnyOn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = fakeBunny({ [A]: { status: 0, length: 0 } }); // Bunny has it as created: nothing ever arrived
+    const lesson = await course();
+    const l = await lesson({ videoId: A, videoStatus: "uploading", videoStartedAt: ago(25) });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 1, processingReady: 0, processingFailed: 0 });
+    expect(f.calls.map((c) => [c.method, c.url])).toEqual([
+      ["GET", `https://video.bunnycdn.com/library/12345/videos/${A}`],
+      ["DELETE", `https://video.bunnycdn.com/library/12345/videos/${A}`],
+    ]);
+    expect(await row(l.id)).toMatchObject({ videoId: null, videoStatus: "none", videoStartedAt: null });
+    expect(info).toHaveBeenCalledWith(
+      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 1 stuck video uploads deleted, 0 stuck processing videos found ready, 0 marked failed",
+    );
+  });
+
+  test("a video stuck in processing for more than a day is asked about: ready is kept (its replaced video goes), one still processing is failed (its replaced video plays on); younger and ready ones are left alone", async () => {
+    bunnyOn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = fakeBunny({ [A]: { status: 4, length: 125, width: 1280, height: 720 }, [B]: { status: 3, length: 0 }, [C]: { status: 4, length: 60 }, [REPLACED]: { status: 4, length: 300 }, [KEPT]: { status: 4, length: 300 } });
+    const lesson = await course();
+    const ready = await lesson({ videoId: A, videoStatus: "processing", videoStartedAt: ago(30), replacedVideoId: REPLACED, durationSec: 300 });
+    const hung = await lesson({ videoId: B, videoStatus: "processing", videoStartedAt: ago(26), replacedVideoId: KEPT, durationSec: 300 });
+    const young = await lesson({ videoId: C, videoStatus: "processing", videoStartedAt: ago(5) });
+    const playing = await lesson({ videoId: "11111111-2222-4333-8444-5555555555ff", videoStatus: "ready", durationSec: 90 });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 0, processingReady: 1, processingFailed: 1 });
+    expect(f.calls.map((c) => [c.method, c.url.split("/").pop()])).toEqual([
+      ["GET", A],
+      ["DELETE", REPLACED], // the new video is ready: the old one is deleted
+      ["GET", B], // (still processing after a day: failed, with no Bunny call and no delete: KEPT plays on)
+    ]);
+    expect(await row(ready.id)).toMatchObject({ videoId: A, videoStatus: "ready", durationSec: 125, videoWidth: 1280, videoHeight: 720, replacedVideoId: null, videoStartedAt: null });
+    expect(await row(hung.id)).toMatchObject({ videoId: B, videoStatus: "failed", replacedVideoId: KEPT, durationSec: 300, videoStartedAt: null });
+    expect(await row(young.id)).toMatchObject({ videoStatus: "processing" });
+    expect(await row(playing.id)).toMatchObject({ videoStatus: "ready", durationSec: 90 });
+    expect(info).toHaveBeenCalledWith(
+      "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 0 stuck video uploads deleted, 1 stuck processing videos found ready, 1 marked failed",
+    );
+    // the next day there is nothing more
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toMatchObject({ uploads: 0, processingReady: 0, processingFailed: 0 });
+  });
+
+  test("without Bunny's settings the video rows are not touched and Bunny is never called", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    vi.stubEnv("BUNNY_LIBRARY_ID", "12345"); // (one or two of the three are no setup)
+    const f = fakeBunny({});
+    const lesson = await course();
+    const up = await lesson({ videoId: A, videoStatus: "uploading", videoStartedAt: ago(30) });
+    const processing = await lesson({ videoId: B, videoStatus: "processing", videoStartedAt: ago(30) });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, ...NO_VIDEOS });
+    expect(f.calls).toEqual([]);
+    expect(await row(up.id)).toMatchObject({ videoId: A, videoStatus: "uploading" });
+    expect(await row(processing.id)).toMatchObject({ videoId: B, videoStatus: "processing" });
+  });
+
+  test("Bunny failing or not answering: the rows stay for the next day, the cron still answers 200, and the log has no ids", async () => {
+    bunnyOn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = stubFetch((url) => {
+      if (url.endsWith(A)) return new Response("down", { status: 503 });
+      throw new DOMException("Bunny did not answer in time", "TimeoutError");
+    });
+    const lesson = await course();
+    const up = await lesson({ videoId: A, videoStatus: "uploading", videoStartedAt: ago(30) });
+    const processing = await lesson({ videoId: B, videoStatus: "processing", videoStartedAt: ago(30) });
+    const res = await call(`Bearer ${SECRET}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, ...NO_VIDEOS });
+    expect(f.calls.every((c) => c.method === "GET")).toBe(true);
+    expect(await row(up.id)).toMatchObject({ videoStatus: "uploading" });
+    expect(await row(processing.id)).toMatchObject({ videoStatus: "processing" });
+    expect(info).toHaveBeenCalledTimes(1);
+    const logged = [...error.mock.calls, ...info.mock.calls].map(String).join("\n");
+    expect(logged).toContain("[video] stuck upload not swept: BunnyError (status 503)");
+    expect(logged).toContain("[video] stuck processing video not swept: TimeoutError");
+    for (const secret of [A, B, "test-api-key", "test-token-key", "12345"]) expect(logged).not.toContain(secret);
   });
 });

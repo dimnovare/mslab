@@ -85,3 +85,16 @@ From the final review of phase 2a (04.10.2026); the merge-blocking items were fi
 - [ ] Maria saves the real "E-koolituse tingimused" text in Seaded before the first real "Ava ligipääs" (the seeded one ends "(Näidistekst — Maria täiendab.)").
 - [ ] Before renaming `middleware` to `proxy` (a Next 16 build warning): the 303 shell defence lives there; rerun the task-11 probes after any rename.
 - [ ] Watch the logs for `[account] login request rate limited`: the per-IP login limits (10 and 20 per 10 minutes) may bite students behind a mobile carrier's shared address (CGNAT).
+
+## 8. Phase 3a (lessons and video)
+- [ ] Dim creates the Bunny Stream library and sets `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` (and `BUNNY_WEBHOOK_SECRET`) in Vercel Production before the 3a deploy (`docs/deploy.md` section 10); without them the admin says "Video seadistamata" and students "Video lisandub peagi".
+- [ ] First live uploads: the four first-use checks of `docs/deploy.md` section 10 (the browser console during the first upload, R2 keeping the file name on a signed download, the player address answering without a redirect, the shape of an upright phone clip).
+- [ ] mslab.ee launch: add `mslab.ee` and `www.mslab.ee` to the Bunny library's allowed domains and change the host of the webhook URL (`docs/deploy.md` section 10).
+- [ ] Maria's own Bunny account later: a new library, new variables, the videos uploaded again; the `lessons.video_id` values change (`docs/deploy.md` section 10).
+- [ ] Maria writes the real "E-koolituse tingimused" text in Seaded before the first real "Ava ligipääs" (the seeded one is a sample).
+- [ ] After the first month read Bunny's bill (the estimate is about €5–15 a month at 500 hours watched) and Vercel's function invocations (a watching student makes about 240 progress calls an hour).
+- [ ] Migration 0005 (drops `courses.modules`) only after 3a has run for a few days with no rollback planned: the code first, then the migration (plan 2026-10-05-phase3a, Task 12 step 11).
+- [ ] Accepted limit: the iPhone's own full-screen video player shows no watermark (the page's "Täisekraan" keeps it).
+- [ ] Accepted limit: a student can fake her progress (a script can report a video as watched); it only opens her own next lessons.
+- [ ] Accepted limit: the player's height is capped to leave room for the buttons below it (about 400 px reserved, 240 to 540 px high), so on a small laptop screen, with a 4:3 video or a lesson title that runs to two lines, "Täisekraan" can sit below the fold.
+- [ ] Bunny's embed host is `player.mediadelivery.net` (the old `iframe.mediadelivery.net` player goes in early 2027): nothing to do, noted.
