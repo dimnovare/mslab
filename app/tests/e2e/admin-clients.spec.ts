@@ -1,9 +1,10 @@
 import type { Browser, Locator, Page } from "@playwright/test";
 import { addMonths, defaultExpiryDate, tallinnToday } from "../../src/domain/client-access";
 import { formatDate, formatTime } from "../../src/i18n/format";
-import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, TEST_PREPAYMENT, type AccountCardKind } from "./account";
+import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, takeTerms, TEST_PREPAYMENT, type AccountCardKind } from "./account";
 import { ADMIN, adminReady, signInAsAdmin, type CreatedRows } from "./admin-login";
 import { accountCourseSlug, holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
+import { insertLessonCourse, markDone, removeLessonFile } from "./lessons";
 import { LOCAL_URL, TARGET } from "./target";
 import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
@@ -12,17 +13,22 @@ import { submitsForms, test, expect } from "./test";
 // read-only "Vaata tema vaadet" (her session untouched), a change request in Päringud in words with a working link, and the
 // prepayment instructions in Seaded reaching the student's card. The admin signs in as Dim through the devLink (dev server
 // only, admin-login.ts); every student is a sample address (`e2e-client-adm-…@example.test`, never mailed) removed after each
-// test. The student uses a browser of her own (another context), as she would.
+// test. The student uses a browser of her own (another context), as she would. Phase 3a Task 10 adds her lessons: "5/24 tehtud" in
+// the drawer, "Ava järgmine õppetund", and the read-only page of her course.
 
 /** The addresses this worker's tests made rows for: removed after each test. */
 const made = new Set<string>();
 const created: CreatedRows = { tokens: new Set(), sessions: new Set() };
+/** The lesson files this worker's tests stored: removed after each test. */
+const keys = new Set<string>();
 
 test.beforeEach(() => submitsForms());
 
 test.afterEach(async () => {
   for (const email of made) await removeClientRows(email);
   made.clear();
+  for (const key of keys) await removeLessonFile(key);
+  keys.clear();
   await removeAdminRows(created).catch(() => {});
   created.tokens.clear();
   created.sessions.clear();
@@ -67,7 +73,7 @@ async function openStudent(page: Page, email: string): Promise<Locator> {
 }
 
 test("guard: Õpilased and the student's view need an admin session", async ({ request }) => {
-  for (const path of ["/admin/opilased", "/admin/opilased?id=1", "/admin/opilased/1/vaade"]) {
+  for (const path of ["/admin/opilased", "/admin/opilased?id=1", "/admin/opilased/1/vaade", "/admin/opilased/1/vaade/e-koolitus"]) {
     const res = await request.get(path, { maxRedirects: 0 });
     expect([303, 307, 308], path).toContain(res.status());
     expect(res.headers().location, path).toMatch(/\/admin\/login$/);
@@ -383,6 +389,127 @@ test("Vaata tema vaadet: her cards, every action disabled and doing nothing; her
   } finally {
     await restore();
     await release();
+  }
+});
+
+test("her lessons in the drawer: 1/3 tehtud, Ava järgmine õppetund (the student then has it), Vaata tema vaadet (read-only, her session untouched), nothing of it after the access ends", async ({ page, context, browser, visitorIp }, info) => {
+  // the lesson API checks the course terms, shared by every client: the test takes them (and the wait is not taken from its own time)
+  info.setTimeout(info.timeout + LOCK_WAIT_MS);
+  const restoreTerms = await takeTerms();
+  try {
+    const email = await fresh("prog", info.project.name);
+    const course = await insertLessonCourse(email);
+    keys.add(course.fileKey);
+    await markDone(course.clientId, course.lessons.video); // lesson 1 done, 2 open, 3 locked
+    const student = await studentBrowser(browser, email, visitorIp);
+    try {
+      const studentLesson = (id: number) => student.page.locator(`[data-lesson="${id}"]`);
+      await student.page.goto(`/konto/kursus/${course.slug}`);
+      await expect(studentLesson(course.lessons.last)).toHaveAttribute("data-state", "locked");
+
+      // the admin's drawer: done of all, her page of the course, and the button for the first locked lesson
+      await signInAsAdmin(page, context, visitorIp, created);
+      const d = await openStudent(page, email);
+      const row = d.locator("[data-access]");
+      await expect(row).toHaveCount(1);
+      await expect(row.locator("[data-access-progress]")).toHaveText("1/3 tehtud");
+      const viewLink = row.locator("[data-view-course]");
+      await expect(viewLink).toHaveText("Vaata tema vaadet");
+      await expect(viewLink).toHaveAttribute("href", `/admin/opilased/${course.clientId}/vaade/${course.slug}`);
+      await expect(viewLink).toHaveAccessibleName("Vaata tema vaadet: E2E õppetunnid");
+      const unlock = row.getByRole("button", { name: "Ava järgmine õppetund" });
+      await expect(unlock).toBeVisible();
+      expect(await smallTargets(row)).toEqual([]);
+
+      // one confirming step ("Ei" goes back), then exactly that lesson is open: the line says so, and she has it
+      await unlock.click();
+      const confirm = row.locator("[data-unlock-confirm]");
+      await expect(confirm.getByText("Kas avan õpilasele õppetunni „Kolmas tund“? Ta saab selle kohe vaadata.")).toBeFocused();
+      expect(await smallTargets(row)).toEqual([]);
+      await confirm.getByRole("button", { name: "Ei" }).click();
+      await expect(confirm).toHaveCount(0);
+      await expect(unlock).toBeFocused();
+      await unlock.click();
+      await confirm.getByRole("button", { name: "Jah, ava" }).click();
+      const done = row.locator("[data-unlock-done]");
+      await expect(done).toHaveText("Õppetund „Kolmas tund“ on avatud.");
+      await expect(done).toHaveAttribute("role", "status");
+      await expect(done).toBeFocused();
+      await expect(confirm).toHaveCount(0);
+      await expect(unlock).toHaveCount(0); // nothing is locked now
+      await expect(row.locator("[data-access-progress]")).toHaveText("1/3 tehtud"); // opened, not done
+      const lastRow = (id: number) =>
+        onLocalDb(
+          (sql) => sql<{ unlockedBy: string | null; doneAt: Date | null; watchedSec: number }[]>`select unlocked_by as "unlockedBy", done_at as "doneAt", watched_sec as "watchedSec" from lesson_progress where client_id = ${course.clientId} and lesson_id = ${id}`,
+          { marksPages: false },
+        );
+      expect(await lastRow(course.lessons.last)).toEqual([{ unlockedBy: ADMIN, doneAt: null, watchedSec: 0 }]);
+      await student.page.reload();
+      await expect(studentLesson(course.lessons.last)).toHaveAttribute("data-state", "current");
+      await expect(studentLesson(course.lessons.text)).toHaveAttribute("data-state", "current");
+
+      // her page of the course as she sees it: every action aria-disabled and doing nothing, nothing asked of her account, her session as it was
+      const before = await sessions(course.clientId);
+      expect(before).toHaveLength(1);
+      expect(before[0].endedAt).toBeNull();
+      const asked: string[] = [];
+      page.on("request", (r) => {
+        if (new URL(r.url()).pathname.startsWith("/api/konto")) asked.push(r.url());
+      });
+      await viewLink.click();
+      const viewPath = `/admin/opilased/${course.clientId}/vaade/${course.slug}`;
+      await expect(page).toHaveURL(new RegExp(`${viewPath}$`));
+      await adminReady(page);
+      const view = page.locator("[data-view-as]");
+      await expect(view.locator("[data-account-banner]")).toHaveText(`Vaatad kliendi ${email} vaadet — muuta ei saa`);
+      await expect(view.getByRole("heading", { level: 1 })).toHaveText("E2E õppetunnid");
+      await expect(view.locator("[data-ecourse-progress]")).toHaveText("1 / 3 õppetundi tehtud");
+      expect(await view.locator("[data-lesson]").evaluateAll((els) => els.map((e) => e.getAttribute("data-state")))).toEqual(["done", "current", "current"]);
+      await expect(view.locator("[data-terms-gate]")).toHaveCount(0); // the admin looks; nothing is accepted
+      await expect(view.locator("[data-ecourse] a")).toHaveCount(0);
+      await expect(view.locator("[data-ecourse-next]")).toHaveText("Jätka");
+      const actions = view.locator("[data-account-shell] a, [data-account-shell] button, [data-ecourse-next], [data-lesson] [aria-disabled]");
+      const n = await actions.count();
+      expect(n).toBeGreaterThanOrEqual(5);
+      for (let i = 0; i < n; i++) await expect(actions.nth(i)).toHaveAttribute("aria-disabled", "true");
+      await view.locator("[data-ecourse-next]").click({ force: true });
+      await view.locator(`[data-lesson="${course.lessons.text}"] [aria-disabled]`).click({ force: true });
+      await expect(page).toHaveURL(new RegExp(`${viewPath}$`));
+      expect(asked, "the view asks the account API nothing").toEqual([]);
+      expect(await noOverflow(page)).toBe(true);
+      expect(await sessions(course.clientId)).toEqual(before);
+      expect((await student.page.request.get("/api/konto/me")).status()).toBe(200);
+      await student.page.reload();
+      await expect(student.page.locator("[data-ecourse]")).toBeVisible(); // she is still signed in, on her own page of the course
+      expect((await sessions(course.clientId)).map((s) => s.endedAt)).toEqual([null]);
+      expect(await lastRow(course.lessons.last)).toHaveLength(1); // looking changed no progress
+      // a bad address, a course she does not have or a student who is not there: 404 (as her own page answers)
+      for (const bad of [`/admin/opilased/${course.clientId}/vaade/${course.slug}-x`, `/admin/opilased/${course.clientId}/vaade/BAD_slug`, `/admin/opilased/2147483646/vaade/${course.slug}`, `/admin/opilased/0${course.clientId}/vaade/${course.slug}`])
+        expect((await page.goto(bad))?.status(), bad).toBe(404);
+
+      // "Tagasi" goes back to her drawer; lesson 3 locked again by hand gives the button back, and ending the access takes it and the link away
+      await page.goto(viewPath);
+      await page.getByRole("link", { name: "Tagasi õpilase juurde" }).click();
+      await expect(page).toHaveURL(new RegExp(`/admin/opilased\\?id=${course.clientId}$`));
+      await expect(drawer(page)).toBeVisible();
+      await onLocalDb((sql) => sql`delete from lesson_progress where client_id = ${course.clientId} and lesson_id = ${course.lessons.last}`, { marksPages: false });
+      await page.reload();
+      await adminReady(page);
+      await expect(row.getByRole("button", { name: "Ava järgmine õppetund" })).toBeVisible();
+      await expect(viewLink).toBeVisible();
+      await row.getByRole("button", { name: "Lõpeta ligipääs" }).click();
+      await row.getByRole("button", { name: "Jah, lõpeta" }).click();
+      await expect(row).toHaveAttribute("data-access-state", "revoked");
+      await expect(row.locator("[data-access-progress]")).toHaveText("1/3 tehtud");
+      await expect(row.locator("[data-view-course]")).toHaveCount(0);
+      await expect(row.getByRole("button", { name: "Ava järgmine õppetund" })).toHaveCount(0);
+      expect((await page.goto(viewPath))?.status()).toBe(404); // no active access: as for her
+      expect(await noOverflow(page)).toBe(true);
+    } finally {
+      await student.close();
+    }
+  } finally {
+    await restoreTerms();
   }
 });
 

@@ -308,6 +308,10 @@ export const adminEt = {
       locale: "Keel",
       viewAs: "Vaata tema vaadet",
       access: "E-koolitused",
+      // one e-course's row: her lessons done of all, and her page of that course (read-only)
+      progress: "{done}/{total} tehtud",
+      viewCourse: "Vaata tema vaadet",
+      viewCourseLabel: "Vaata tema vaadet: {course}",
       noAccess: "E-koolitusi pole avatud.",
       state: { active: "Avatud kuni {date}", expired: "Lõppes {date}", revoked: "Lõpetatud {date}" },
       grantedBy: "Avas {who}, {date}",
@@ -343,11 +347,20 @@ export const adminEt = {
       yes: "Jah, lõpeta",
       no: "Ei",
     },
+    // "Ava järgmine õppetund": the student's first lesson she cannot open yet, opened for her
+    unlock: {
+      button: "Ava järgmine õppetund",
+      confirm: "Kas avan õpilasele õppetunni „{lesson}“? Ta saab selle kohe vaadata.",
+      yes: "Jah, ava",
+      no: "Ei",
+      done: "Õppetund „{lesson}“ on avatud.",
+    },
   },
 
   // /admin/opilased/<id>/vaade: the student's own "Minu koolitused", read-only
   viewAs: {
     title: "Õpilase vaade",
+    courseTitle: "Õpilase vaade: e-koolitus",
     banner: "Vaatad kliendi {nimi} vaadet — muuta ei saa",
     back: "Tagasi",
     backLabel: "Tagasi õpilase juurde",

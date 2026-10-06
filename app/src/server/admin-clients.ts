@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db/client";
 import { listRegistrations, paged, type Paged, type RegistrationRow } from "@/db/queries/admin";
-import { clients, courseAccess, courses, practicePackages, registrations, requests, termsAcceptances } from "@/db/schema";
+import { clients, courseAccess, courses, lessonProgress, practicePackages, registrations, requests, termsAcceptances } from "@/db/schema";
 import { accessState, defaultExpiryDate, grantExpiry, type AccessState } from "@/domain/client-access";
 import { isEmail, normalizeEmail } from "@/domain/email";
 import { containsPattern, PAGE_SIZE } from "@/domain/paging";
@@ -11,6 +11,7 @@ import { pick, type I18n } from "@/i18n/field";
 import { getDict } from "@/i18n/locales";
 import { linkClientRecords, lockAddress } from "./client-auth";
 import { field } from "./edit-check";
+import { courseOutline } from "./lesson-outline";
 
 // The admin's Õpilased (students): the list, one student's drawer, adding a student by e-mail, and e-course access
 // ("Ava ligipääs" / "Lõpeta ligipääs"). Callers have already checked the admin session (server/actions/admin-clients.ts
@@ -73,6 +74,10 @@ export type ClientAccessRow = {
   expiresAt: Date;
   revokedAt: Date | null;
   state: AccessState;
+  /** Her lessons of this e-course: done of total (hidden lessons not counted), as the course page counts them. */
+  progress: { done: number; total: number };
+  /** The first lesson she cannot open yet ("Ava järgmine õppetund"), or null when none is locked. */
+  nextLocked: { id: number; title: I18n } | null;
 };
 /**
  * One of her requests as Päringud names it: `interest` (a contact request from the e-learning cart: "E-õppe huvi"), `wish`
@@ -130,11 +135,21 @@ export async function clientDetail(db: Db, id: number, now: Date = new Date()): 
       .orderBy(desc(termsAcceptances.acceptedAt)),
   ]);
   if (!client) return null;
+  // each e-course's lessons for her: done of total, and the first lesson she cannot open yet ("Ava järgmine õppetund")
+  const outlines = await Promise.all(access.map((a) => courseOutline(db, a.courseId, id)));
   return {
     client,
     registrations: regs,
     requests: await requestRows(db, reqs),
-    access: access.map((a) => ({ ...a, state: accessState(a, now) })),
+    access: access.map((a, i) => {
+      const locked = outlines[i].lessons.find((l) => l.state === "locked");
+      return {
+        ...a,
+        state: accessState(a, now),
+        progress: { done: outlines[i].progress.done, total: outlines[i].progress.total },
+        nextLocked: locked ? { id: locked.id, title: locked.title } : null,
+      };
+    }),
     terms,
   };
 }
@@ -183,6 +198,12 @@ async function requestRows(db: Db, rows: (typeof requests.$inferSelect)[]): Prom
 export async function clientLabel(db: Db, id: number): Promise<string | null> {
   const [row] = await db.select({ email: clients.email, name: NAME }).from(clients).where(eq(clients.id, id)).limit(1);
   return row ? row.name.trim() || row.email : null;
+}
+
+/** A student's name for the read-only course view's banner (as clientLabel) and her language (the page's), or null. */
+export async function clientViewInfo(db: Db, id: number): Promise<{ label: string; locale: "et" | "ru" } | null> {
+  const [row] = await db.select({ email: clients.email, name: NAME, locale: clients.locale }).from(clients).where(eq(clients.id, id)).limit(1);
+  return row ? { label: row.name.trim() || row.email, locale: row.locale } : null;
 }
 
 export type EcourseOption = { id: number; title: I18n; published: boolean; accessMonths: number | null; until: string };
@@ -297,4 +318,37 @@ export async function revokeAccessForm(db: Db, formData: FormData, now: Date): P
   const accessId = idSchema.safeParse(field(formData, "accessId"));
   if (!clientId.success || !accessId.success) return fail("invalid");
   return revokeAccess(db, { clientId: clientId.data, accessId: accessId.data, now });
+}
+
+/**
+ * "Ava järgmine õppetund" (spec 3a section 4): opens one lesson the student cannot open yet — the drawer's first locked lesson of that
+ * e-course, sent back as `lessonId` — by recording the admin on her progress row (lesson_progress.unlocked_by). Only that lesson
+ * opens, not the ones after it. Whether it is locked is decided by the student side's own rule (courseOutline, domain/lessons.ts
+ * lessonStates), not a copy of it. A lesson that is open or done by now changes nothing (ok). notFound: no such student, or not a
+ * visible lesson of the course; course: not an e-course.
+ */
+export async function unlockNext(db: Db, input: { clientId: number; courseId: number; lessonId: number; by: string; now: Date }): Promise<ClientResult> {
+  const [[client], [course]] = await Promise.all([
+    db.select({ id: clients.id }).from(clients).where(eq(clients.id, input.clientId)).limit(1),
+    db.select({ type: courses.type }).from(courses).where(eq(courses.id, input.courseId)).limit(1),
+  ]);
+  if (!client) return fail("notFound");
+  if (course?.type !== "e_learning") return fail("course");
+  const target = (await courseOutline(db, input.courseId, input.clientId)).lessons.find((l) => l.id === input.lessonId);
+  if (!target) return fail("notFound");
+  if (target.state !== "locked") return { ok: true };
+  await db
+    .insert(lessonProgress)
+    .values({ clientId: input.clientId, lessonId: input.lessonId, unlockedBy: input.by, updatedAt: input.now })
+    .onConflictDoUpdate({ target: [lessonProgress.clientId, lessonProgress.lessonId], set: { unlockedBy: input.by, updatedAt: input.now } });
+  return { ok: true };
+}
+
+/** Fields: clientId, courseId, lessonId. `by`: the signed-in admin's e-mail. */
+export async function unlockNextForm(db: Db, formData: FormData, by: string, now: Date): Promise<ClientResult> {
+  const clientId = idSchema.safeParse(field(formData, "clientId"));
+  const courseId = idSchema.safeParse(field(formData, "courseId"));
+  const lessonId = idSchema.safeParse(field(formData, "lessonId"));
+  if (!clientId.success || !courseId.success || !lessonId.success) return fail("invalid");
+  return unlockNext(db, { clientId: clientId.data, courseId: courseId.data, lessonId: lessonId.data, by, now });
 }

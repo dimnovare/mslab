@@ -3,14 +3,14 @@
 import { startTransition, useActionState, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { isEmail, normalizeEmail, typoSuggestion } from "@/domain/email";
 import { fill } from "@/i18n/format";
-import { addStudent, grantCourseAccess, revokeCourseAccess } from "@/server/actions/admin-clients";
+import { addStudent, grantCourseAccess, revokeCourseAccess, unlockNextLesson } from "@/server/actions/admin-clients";
 import type { ClientResult } from "@/server/admin-clients";
 import ui from "./ui.module.css";
 import ed from "./editor.module.css";
 import forms from "./RegistrationForms.module.css";
 import styles from "./ClientDrawer.module.css";
 
-// The Õpilased forms: "Lisa õpilane" on the list, "Ava ligipääs" and "Lõpeta ligipääs" in a student's drawer. Submitted
+// The Õpilased forms: "Lisa õpilane" on the list, "Ava ligipääs", "Lõpeta ligipääs" and "Ava järgmine õppetund" in a student's drawer. Submitted
 // through startTransition (React does not reset the fields after an error); while one is on its way its button is
 // aria-disabled (a disabled button would drop the keyboard focus) and a second press does nothing.
 
@@ -300,5 +300,109 @@ export function RevokeAccess({ clientId, accessId, course, active, stateId, t }:
         </p>
       )}
     </form>
+  );
+}
+
+export type UnlockTexts = { button: string; confirm: string; yes: string; no: string; done: string; saving: string; error: string };
+
+/**
+ * "Ava järgmine õppetund" of one active access: opens the lesson she cannot open yet (`lesson`: the first locked one, null when none is
+ * left), with one confirming step in place ("Jah, ava" / "Ei"), as "Lõpeta ligipääs" has. Rendered for every active row, even when no
+ * lesson is locked: once it has opened the last one the page comes back with `lesson` null, and the line that says what was opened
+ * ("Õppetund „…“ on avatud.", kept here, since the page's own data has moved on) must stay. It is a status region from the start (an empty
+ * one is announced when it fills) and takes the focus when it fills, the button and its step being gone.
+ */
+export function UnlockNextLesson({ clientId, courseId, lesson, t }: { clientId: number; courseId: number; lesson: { id: number; title: string } | null; t: UnlockTexts }) {
+  const uid = useId();
+  const [confirming, setConfirming] = useState(false);
+  const [state, action, pending] = useActionState<ClientResult | null, FormData>(unlockNextLesson, null);
+  // the title of the lesson sent, and (once the answer is ok) the one that was opened: the page's `lesson` moves on at once
+  const [sent, setSent] = useState("");
+  const [opened, setOpened] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [seen, setSeen] = useState(state);
+  const question = useRef<HTMLParagraphElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const doneLine = useRef<HTMLParagraphElement>(null);
+  // a new answer: ok closes the step and says what was opened, anything else says so in the step (adjusted while rendering,
+  // as RevokeAccess follows its row)
+  if (state !== seen) {
+    setSeen(state);
+    setFailed(state !== null && !state.ok);
+    if (state?.ok) {
+      setOpened(sent);
+      setConfirming(false);
+    }
+  }
+
+  useEffect(() => {
+    if (confirming) question.current?.focus();
+  }, [confirming]);
+
+  // the button and its step are gone: the focus goes to the line that says what was opened
+  useEffect(() => {
+    if (opened !== null) doneLine.current?.focus();
+  }, [opened]);
+
+  return (
+    <>
+      {lesson && !confirming && (
+        <button
+          ref={opener}
+          type="button"
+          className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`}
+          onClick={() => {
+            setOpened(null);
+            setFailed(false);
+            setConfirming(true);
+          }}
+          data-unlock-next=""
+        >
+          {t.button}
+        </button>
+      )}
+      {lesson && confirming && (
+        <form
+          className={styles.confirm}
+          role="group"
+          aria-labelledby={`${uid}-q`}
+          onSubmit={(e) => {
+            setSent(lesson.title);
+            submitWith(action, pending)(e);
+          }}
+          data-unlock-confirm=""
+        >
+          <input type="hidden" name="clientId" value={clientId} />
+          <input type="hidden" name="courseId" value={courseId} />
+          <input type="hidden" name="lessonId" value={lesson.id} />
+          <p id={`${uid}-q`} ref={question} tabIndex={-1} className={`${ui.notice} ${styles.question}`}>
+            {fill(t.confirm, { lesson: lesson.title })}
+          </p>
+          <div className={forms.actions}>
+            <button type="submit" className={`${ui.btn} ${ui.smallBtn}`} aria-disabled={pending || undefined}>
+              {pending ? t.saving : t.yes}
+            </button>
+            <button
+              type="button"
+              className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`}
+              onClick={() => {
+                setConfirming(false);
+                requestAnimationFrame(() => opener.current?.focus());
+              }}
+            >
+              {t.no}
+            </button>
+          </div>
+          {failed && (
+            <p role="alert" className={ui.error}>
+              {t.error}
+            </p>
+          )}
+        </form>
+      )}
+      <p ref={doneLine} tabIndex={-1} role="status" className={`${ui.success} ${styles.done}`} data-unlock-done="">
+        {opened === null ? "" : fill(t.done, { lesson: opened })}
+      </p>
+    </>
   );
 }

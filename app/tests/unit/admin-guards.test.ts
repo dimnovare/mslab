@@ -88,6 +88,7 @@ describe("admin guards are inherited by every admin entry point", () => {
         // phase 2a Task 9: Õpilased, the read-only "view as client", and their actions
         "app/admin/(panel)/opilased/page.tsx",
         "app/admin/(panel)/opilased/[id]/vaade/page.tsx",
+        "app/admin/(panel)/opilased/[id]/vaade/[slug]/page.tsx",
         "server/actions/admin-clients.ts",
         // phase 3a Task 5: "Moodulid ja õppetunnid"
         "server/actions/admin-lessons.ts",
@@ -128,7 +129,7 @@ describe("admin guards are inherited by every admin entry point", () => {
     expect(violations(site.path, site.source)).toEqual([]);
     const clients = files().find((f) => f.path === "server/actions/admin-clients.ts")!;
     const clientExports = [...strip(clients.source).matchAll(/export\s+const\s+(\w+)\s*=\s*adminAction\(/g)].map((m) => m[1]);
-    expect(clientExports).toEqual(["addStudent", "grantCourseAccess", "revokeCourseAccess"]);
+    expect(clientExports).toEqual(["addStudent", "grantCourseAccess", "revokeCourseAccess", "unlockNextLesson"]);
     expect(violations(clients.path, clients.source)).toEqual([]);
     // every export of the file is one of these (no unguarded helper next to them)
     expect([...strip(clients.source).matchAll(/export\s+(?:const|let|var|async\s+function|function|class|default)\s*(\w*)/g)].map((m) => m[1])).toEqual(clientExports);
