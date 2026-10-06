@@ -2,6 +2,7 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
 import { ADMIN, lockLogin, unlockLogin } from "./admin-login";
 import { authTestEmail, expireAuthToken, removeAdminRows, sessionExists, storedAuthTokens } from "./fixtures";
+import { PROD_BUILD } from "./target";
 
 // Task 11: admin sign-in by magic link. The tests that sign in or ask for a link run against the local dev server only.
 // The only allowed address they ask a link for is Dim's (never Maria's: tests/unit/test-addresses.test.ts); locally the
@@ -26,6 +27,11 @@ test.afterEach(async () => {
 });
 
 const isAdmin = (address: string) => address.trim().toLowerCase() === ADMIN;
+
+/** The link is read from the answer's devLink, which only `next dev` returns (server/login.ts): not on the local production build. */
+function opensDevLink(): void {
+  test.skip(PROD_BUILD, "opens the devLink: next dev only (a production build never returns it)");
+}
 
 const tokenOf = (link: string) => new URL(link).searchParams.get("t")!;
 /** The link's path and query, to open on whatever origin the test runs against (the link carries the site's own origin). */
@@ -178,6 +184,7 @@ test.describe("login page", () => {
 for (const [address, name] of [[` ${ADMIN.toUpperCase()} `, "Dim"]] as const) {
   test(`${name}: the link from the e-mail signs in; the session lasts 30 days; logout ends it`, async ({ page, context, request, baseURL, isMobile }) => {
     submitsForms();
+    opensDevLink();
     const { headers, body } = await requestLink(page, address);
     expect(headers["cache-control"]).toContain("no-store");
     // the neutral confirmation, announced in the status region, replaces the form
@@ -231,6 +238,7 @@ for (const [address, name] of [[` ${ADMIN.toUpperCase()} `, "Dim"]] as const) {
 test.describe("the link", () => {
   test("works once: a second opening, in any browser, is refused", async ({ page, context, browser, baseURL }) => {
     submitsForms();
+    opensDevLink();
     const { devLink, session } = await signIn(page, context, ADMIN);
     expect(await storedAuthTokens(ADMIN)).toContainEqual({ used: true });
     // another browser: the used link gives it no session
@@ -245,6 +253,7 @@ test.describe("the link", () => {
 
   test("a HEAD request (mail scanner) does not use it up", async ({ page, context, request }) => {
     submitsForms();
+    opensDevLink();
     const { body } = await requestLink(page, ADMIN);
     const head = await request.head(pathOf(body.devLink!));
     expect(head.status()).toBe(405);
@@ -255,6 +264,7 @@ test.describe("the link", () => {
 
   test("a prefetch (Sec-Purpose / Purpose) is sent to the login page without using the link up", async ({ page, context, request }) => {
     submitsForms();
+    opensDevLink();
     const { body } = await requestLink(page, ADMIN);
     for (const header of ["sec-purpose", "purpose"]) {
       const res = await request.get(pathOf(body.devLink!), { headers: { [header]: "prefetch" }, maxRedirects: 0 });
@@ -269,6 +279,7 @@ test.describe("the link", () => {
 
   test("expires after 15 minutes", async ({ page }) => {
     submitsForms();
+    opensDevLink();
     const { body } = await requestLink(page, ADMIN);
     await expireAuthToken(tokenOf(body.devLink!));
     unlockLogin(); // an expired link does not count towards the cap
