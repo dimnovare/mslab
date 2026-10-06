@@ -9,6 +9,7 @@ import { containsPattern, PAGE_SIZE } from "@/domain/paging";
 import { registrationHeading } from "@/domain/registration-card";
 import { pick, type I18n } from "@/i18n/field";
 import { getDict } from "@/i18n/locales";
+import { parseRowId } from "@/lib/row-id";
 import { linkClientRecords, lockAddress } from "./client-auth";
 import { field } from "./edit-check";
 import { courseOutline } from "./lesson-outline";
@@ -224,7 +225,12 @@ export async function listEcourses(db: Db, now: Date = new Date()): Promise<Ecou
 export type ClientResult = { ok: true; id?: number } | { ok: false; error: "invalid" | "email" | "notFound" | "course" | "date" | "server" };
 
 const fail = (error: Exclude<ClientResult, { ok: true }>["error"]): ClientResult => ({ ok: false, error });
-const idSchema = z.coerce.number().int().positive().max(2_147_483_647);
+/** An id from a form field, read like every id this app reads from text (lib/row-id.ts): digits only, no zero in front ("1e3", " 7", "007", "0x10" are refused). */
+const idSchema = z.string().transform((raw, ctx) => {
+  const id = parseRowId(raw);
+  if (id === null) ctx.issues.push({ code: "custom", message: "not a row id", input: raw });
+  return id ?? z.NEVER;
+});
 
 /**
  * "Lisa õpilane": the student of this address, created when there is none (no session, no e-mail sent), so an e-course

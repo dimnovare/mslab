@@ -245,12 +245,12 @@ describe("GET /api/cron/sweep: the lesson videos", () => {
     expect(await (await call(`Bearer ${SECRET}`)).json()).toMatchObject({ uploads: 2, videosLeft: 0 });
   });
 
-  test("after about 45 s of the run no new video row is started: a row begun is finished, the rest is left, logged and answered", async () => {
+  test("after 35 s of the run no new video row is started: a row begun is finished (35 + about 20 s stays under maxDuration 60), the rest is left, logged and answered", async () => {
     bunnyOn();
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.useFakeTimers({ toFake: ["Date"] }); // the run's own clock: every Bunny call takes 20 s of it
+    vi.useFakeTimers({ toFake: ["Date"] }); // the run's own clock: every Bunny call takes 10 s of it, the longest the client waits for one
     const f = stubFetch((url, init) => {
-      vi.setSystemTime(Date.now() + 20_000);
+      vi.setSystemTime(Date.now() + 10_000);
       return init?.method === "DELETE" ? Response.json({ success: true }) : Response.json({ guid: url.split("/").pop(), status: 0, length: 0 });
     });
     const lesson = await course();
@@ -259,8 +259,8 @@ describe("GET /api/cron/sweep: the lesson videos", () => {
     const processing = await lesson({ videoId: REPLACED, videoStatus: "processing", videoStartedAt: ago(30) });
     const started = Date.now();
     const answer = await (await call(`Bearer ${SECRET}`)).json();
-    // row 1 runs from 0 to 40 s, row 2 starts at 40 s (before 45) and ends at 80 s, row 3 and the processing row would start after 45 s
-    expect(Date.now() - started).toBe(80_000);
+    // a row is two calls, 20 s: row 1 runs from 0 to 20 s, row 2 starts at 20 s (before 35) and ends at 40 s (past it: a row begun is finished), row 3 and the processing row would start at 40 s, after 35 s (with a 45 s deadline row 3 would run too)
+    expect(Date.now() - started).toBe(40_000);
     expect(answer).toEqual({ ok: true, deleted: 1, logins: 0, sessions: 0, mailDays: 0, uploads: 2, processingReady: 0, processingFailed: 0, videosLeft: 2 });
     expect(f.calls.map((c) => [c.method, c.url.split("/").pop()])).toEqual([["GET", A], ["DELETE", A], ["GET", B], ["DELETE", B]]);
     expect(await row(rows[0].id)).toMatchObject({ videoStatus: "none" });
@@ -269,7 +269,7 @@ describe("GET /api/cron/sweep: the lesson videos", () => {
     expect(await row(processing.id)).toMatchObject({ videoStatus: "processing" });
     expect(info.mock.calls.map(String)).toEqual([
       "[cron] sweep: 1 expired kv entries, 0 login codes, 0 sessions, 0 mail counters, 2 stuck video uploads deleted, 0 stuck processing videos found ready, 0 marked failed, 2 video rows left for the next run",
-      "[cron] sweep: no new video row started after 45 s",
+      "[cron] sweep: no new video row started after 35 s",
     ]);
   });
 

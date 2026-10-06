@@ -8,10 +8,11 @@ import { logFailure } from "@/server/log";
 import { keyMatches } from "@/server/review-key";
 
 export const dynamic = "force-dynamic";
-// Hobby's functions may run up to 300 s; 60 is our own guard. The Bunny part keeps well inside it: SWEEP_BATCH rows of each kind (each
-// one or two calls of at most 10 s), and no new row is started after SWEEP_DEADLINE_MS of the run (a row begun is finished).
+// Hobby's functions may run up to 300 s; 60 is our own guard. The Bunny part stays inside it: no new row is started after
+// SWEEP_DEADLINE_MS (35 s) of the run, and a row begun is finished, which takes at most about 20 s (getVideo 10 s, then one delete
+// 10 s), so 35 s + 20 s is under 60. (SWEEP_BATCH rows of each kind bound the work as well.)
 export const maxDuration = 60;
-const SWEEP_DEADLINE_MS = 45_000;
+const SWEEP_DEADLINE_MS = 35_000;
 
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });

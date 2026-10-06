@@ -58,6 +58,23 @@ test("a lesson that is open by now changes nothing; unknown lesson or student: n
   expect(await unlockNextForm(db, fd, "admin@example.test", NOW)).toEqual({ ok: false, error: "invalid" });
 });
 
+test("the form's ids are read like every id from text (parseRowId): spellings that z.coerce.number() would take for a real id are refused, nothing is opened", async () => {
+  const spelled = (n: number) => [` ${n}`, `${n} `, `0${n}`, `${n}e0`, `0x${n.toString(16)}`, `+${n}`, `${n}.0`, `${n}.`];
+  const ids = { clientId: w.client.id, courseId: w.course.id, lessonId: w.l3.id };
+  for (const name of ["clientId", "courseId", "lessonId"] as const) {
+    for (const bad of spelled(ids[name])) {
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(ids)) fd.set(k, k === name ? bad : String(v));
+      expect(await unlockNextForm(db, fd, "admin@example.test", NOW), `${name} ${bad}`).toEqual({ ok: false, error: "invalid" });
+    }
+  }
+  expect(await rows(w.l3.id)).toHaveLength(0);
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(ids)) fd.set(k, String(v));
+  expect(await unlockNextForm(db, fd, "admin@example.test", NOW)).toEqual({ ok: true }); // the plain digits still open it
+  expect(await rows(w.l3.id)).toHaveLength(1);
+});
+
 test("the read-only course view's banner name and language", async () => {
   expect(await clientViewInfo(db, w.client.id)).toEqual({ label: "Kati", locale: "ru" });
   expect(await clientViewInfo(db, 999999)).toBeNull();

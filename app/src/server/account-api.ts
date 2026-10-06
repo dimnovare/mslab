@@ -293,7 +293,7 @@ export const clientResponse = (session: ClientSession, body: unknown, status = 2
  * session go with it, as with clientResponse. null when the store does not have the object.
  */
 async function fileAnswer(session: ClientSession, store: FileStore, file: { key: string; name: string; contentType: string }): Promise<Response | null> {
-  const base = { ...BASE_HEADERS, "referrer-policy": "no-referrer" }; // the lesson's address is not passed on to R2
+  const base = { ...BASE_HEADERS, "referrer-policy": "no-referrer" }; // the lesson's address is not passed on to R2 (next.config.ts has the same rule for this path: a header set there replaces this one)
   let res: Response;
   if (store.signedGetUrl) {
     res = new Response(null, { status: 302, headers: { ...base, location: await store.signedGetUrl(file.key, { expiresSec: FILE_URL_TTL_SEC }) } });

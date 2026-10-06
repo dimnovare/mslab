@@ -107,7 +107,7 @@ export async function applySeed(db: Db, opts: SeedOptions = {}): Promise<Record<
   await db.insert(settings).values(Object.entries(settingSeeds).map(([key, value]) => ({ key, value }))).onConflictDoNothing({ target: settings.key });
 
   const counts: Record<string, number> = {};
-  for (const table of [courses, courseImages, courseSessions, practicePackages, heroSlides, faq, posts, pages, galleryItems, campaign, settings]) {
+  for (const table of [courses, courseImages, courseModules, courseSessions, practicePackages, heroSlides, faq, posts, pages, galleryItems, campaign, settings]) {
     counts[getTableName(table)] = await total(db, table);
   }
   return counts;

@@ -36,9 +36,10 @@ const Waiting = () => (
  * - 403 locked: "Avaneb, kui eelmine õppetund on tehtud." with "Jätka" to the lesson that is open (or "Tagasi koolitusele" when none is);
  * - 403 terms (not accepted yet): straight to the course page, where the terms notice is;
  * - 404 (no access, no such lesson): "Seda õppetundi ei leitud." with "Tagasi koolitusele".
- * The lesson is never loaded again while the page is open (not on focus, not on a timer): a new answer signs the video's URL again,
+ * The lesson is not loaded again while the page is open (not on focus, not on a timer): a new answer signs the video's URL again,
  * which would reload the video under the student. What changes (done, the next lesson) comes from the player's and "Märgi tehtuks"'s
- * answers.
+ * answers. The one exception is a session that has ended (a 401 to one of those answers): then the page reloads quietly (LessonBody)
+ * to show what is true now.
  */
 export function LessonPage({ slug, lessonId, locale, t }: Props) {
   const course = href(locale, `/konto/kursus/${slug}`);

@@ -17,7 +17,14 @@ afterEach(() => vi.unstubAllEnvs());
 
 /** The value `path`'s answer gets for `key` from the rules (the last matching rule wins; simple sources only). */
 function valueFor(rules: Rule[], path: string, key: string): string | undefined {
-  const matches = (source: string) => (source.endsWith("/:path*") ? path === source.slice(0, -7) || path.startsWith(source.slice(0, -6)) : path === source);
+  const matches = (source: string) => {
+    if (source.endsWith("/:path*")) return path === source.slice(0, -7) || path.startsWith(source.slice(0, -6));
+    if (!source.includes("/:")) return path === source;
+    // a source with named segments (/:slug/…): each names exactly one non-empty segment of the path
+    const want = source.split("/");
+    const got = path.split("/");
+    return want.length === got.length && want.every((segment, i) => (segment.startsWith(":") ? got[i] !== "" : segment === got[i]));
+  };
   let value: string | undefined;
   for (const rule of rules) if (matches(rule.source)) for (const h of rule.headers) if (h.key.toLowerCase() === key.toLowerCase()) value = h.value;
   return value;
@@ -60,6 +67,23 @@ describe("next.config.ts headers()", () => {
       expect(valueFor(rules, path, "referrer-policy"), path).toBe("strict-origin-when-cross-origin");
     for (const path of ["/api/konto/verify", "/api/konto/me"]) expect(valueFor(rules, path, "x-robots-tag"), path).toBe("noindex, nofollow");
     expect(valueFor(rules, "/konto", "cache-control")).toBeUndefined(); // the static shell pages keep the CDN's caching
+  });
+
+  test("a lesson file's redirect sends no Referer to R2 (the global rule would replace the route's own header); the other lesson routes keep the global value", async () => {
+    const rules = (await (await config()).headers!()) as Rule[];
+    const file = "/api/konto/kursus/kulmumeistri-e-koolitus/12/fail/juhend.pdf";
+    expect(valueFor(rules, file, "referrer-policy")).toBe("no-referrer");
+    expect(valueFor(rules, file, "cache-control")).toBe("private, no-store");
+    expect(valueFor(rules, file, "x-robots-tag")).toBe("noindex, nofollow");
+    for (const path of [
+      "/api/konto/kursus/kulmumeistri-e-koolitus",
+      "/api/konto/kursus/kulmumeistri-e-koolitus/12",
+      "/api/konto/kursus/kulmumeistri-e-koolitus/12/progress",
+      "/api/konto/kursus/kulmumeistri-e-koolitus/12/tehtud",
+      "/api/konto/kursus/kulmumeistri-e-koolitus/12/fail",
+      "/api/konto/kursus/kulmumeistri-e-koolitus/12/fail/juhend.pdf/extra",
+    ])
+      expect(valueFor(rules, path, "referrer-policy"), path).toBe("strict-origin-when-cross-origin");
   });
 
   test("the e2e page cache only when the e2e run's production build asks for it (E2E_PAGE_CACHE)", async () => {

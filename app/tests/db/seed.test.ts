@@ -29,6 +29,7 @@ describe("prototype seed", () => {
     expect(first).toEqual({
       courses: 6,
       course_images: 24,
+      course_modules: 25,
       course_sessions: 8,
       practice_packages: 2,
       hero_slides: 5,

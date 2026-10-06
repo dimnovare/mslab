@@ -157,6 +157,24 @@ describe("what the field says", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  test("“Üleslaadimine katkes” is in the error tone like “Töötlemine ebaõnnestus”; “Töötlemisel…” is the quiet hint tone", async () => {
+    actions.checkLessonVideo.mockResolvedValue({ ok: false, error: "server" });
+    const tone = async (v: AdminVideo) => {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await mount(v);
+      await settle();
+      return $("[data-lesson-video] [data-video-status]")?.className;
+    };
+    const interrupted = await tone(video("uploading"));
+    const failed = await tone(video("failed"));
+    const processing = await tone(video("processing"));
+    const ready = await tone(video("ready", { durationSec: 754 }));
+    expect(interrupted).toBeTruthy();
+    expect(interrupted).toBe(failed);
+    expect(new Set([interrupted, processing, ready]).size).toBe(3);
+  });
+
   test("an interrupted upload that did arrive at Bunny meanwhile turns into Töötlemisel… on the first answer, and the list follows", async () => {
     actions.checkLessonVideo.mockResolvedValue({ ok: true, video: video("processing") });
     await mount(video("uploading"));

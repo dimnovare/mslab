@@ -151,7 +151,7 @@ export const createLessonVideo = adminAction(async (_admin, lessonId: number): P
   }
 });
 
-/** The editor's poll (every 5 s while a video is processing): the lesson's video state, read from Bunny for an upload in progress. */
+/** The editor's poll (every 5 s while a video is processing, every 30 s after 10 minutes, paused while the tab is hidden): the lesson's video state, read from Bunny for an upload in progress. */
 export const checkLessonVideo = adminAction(async (_admin, lessonId: number): Promise<VideoCheckResult> => {
   const config = bunnyConfig();
   if (!config) return { ok: false, error: "setup" };

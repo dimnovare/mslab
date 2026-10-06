@@ -31,7 +31,7 @@ describe("signing", () => {
     expect(await t(3600)).toBe("3600");
   });
   test("expires is whole unix seconds: a fraction, NaN, Infinity or an unsafe integer is a TypeError, never a signature", async () => {
-    const bad = [1767225600.5, Date.now() / 1000 + 0.3, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 2 ** 53, Number.MAX_VALUE];
+    const bad = [1767225600.5, 1767225600.25, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 2 ** 53, Number.MAX_VALUE];
     for (const expires of bad) {
       await expect(tusSignature("12345", "test-api-key", expires, VIDEO), String(expires)).rejects.toThrow(TypeError);
       await expect(embedToken("test-token-key", VIDEO, expires), String(expires)).rejects.toThrow(TypeError);

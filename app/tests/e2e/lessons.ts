@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { localStore } from "../../src/server/media-local";
 import { accountCourseSlug, onLocalDb } from "./fixtures";
-import { E2E_BUNNY } from "./bunny-values";
 
 // The student's lesson pages in the e2e run (account-lessons.spec.ts, phase 3a Task 9): a course of lessons written straight to the
 // LOCAL database for one sample address, and its file in the local store of the e2e run's server.
@@ -69,6 +68,3 @@ export async function dropVideo(lessonId: number): Promise<void> {
 export async function setVideoShape(lessonId: number, width: number, height: number): Promise<void> {
   await localDb((sql) => sql`update lessons set video_width = ${width}, video_height = ${height} where id = ${lessonId}`);
 }
-
-/** The fake Bunny's address (the player's frame comes from there). */
-export const FAKE_PLAYER_ORIGIN = E2E_BUNNY.url;

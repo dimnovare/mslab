@@ -251,7 +251,8 @@ export function LessonVideoField({ lessonId, bunnyReady, video: given }: Props) 
           : shown === "failed"
             ? t.failed
             : "";
-  const statusTone = shown === "ready" && !busy ? ui.success : shown === "failed" && !busy ? ui.error : ui.hint;
+  // "Üleslaadimine katkes" (an upload that stopped, with its retry button) is an error state like "Töötlemine ebaõnnestus"
+  const statusTone = shown === "ready" && !busy ? ui.success : (shown === "failed" || shown === "uploading") && !busy ? ui.error : ui.hint;
   // nothing for students to watch (no old video playing meanwhile): they see "Video lisandub peagi" and the next lesson stays locked
   const waiting = shown !== "ready" && !video.replacing;
   const hints = [

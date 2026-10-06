@@ -7,8 +7,9 @@ import { lessonVideoStatus, tusSignature, UPLOAD_TTL_SEC, type BunnyApi, type Bu
 import { deleteBunnyVideos } from "./lesson-media";
 import { logFailure } from "./log";
 
-// A lesson's Bunny video (spec 3a sections 4 and 7): the start of an upload (createLessonVideo), the status read (the editor's poll
-// every 5 s and Bunny's webhook, which is only a trigger), and the daily sweep of uploads and processing left unfinished. What changes is decided
+// A lesson's Bunny video (spec 3a sections 4 and 7): the start of an upload (createLessonVideo), the status read (the editor's poll:
+// every 5 s, then every 30 s after 10 minutes, paused while the tab is hidden; and Bunny's webhook, which is only a trigger), and the
+// daily sweep of uploads and processing left unfinished. What changes is decided
 // by domain/lessons.ts startUpload / settleVideo / abandonUpload; here are the database rows and the Bunny calls.
 //
 // The poll and the webhook can ask about the same video at the same moment, and Bunny takes up to 10 s to answer. So a status is
@@ -135,7 +136,7 @@ export async function refreshLessonVideo(db: Db, api: BunnyApi, target: { lesson
 
 /**
  * What bounds a sweep run: at most `limit` rows (oldest first), and no new row is started after `until` (epoch ms; the cron gives
- * itself about 45 s). A row that was started is finished.
+ * itself 35 s, because a row begun then still takes up to about 20 s to finish and the cron's limit is 60). A row that was started is finished.
  */
 export type SweepBudget = { limit?: number; until?: number };
 
