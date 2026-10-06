@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { lessonFiles, lessons } from "@/db/schema";
 import { storable } from "@/lib/storable";
+import { logFailure } from "./log";
 import { hasImageSignature, MAX_IMAGE_BYTES, UploadError, type FileStore, type ImageType } from "./media";
 
 // A lesson's files (spec 3a section 4): PDF, Word (.docx) or an image, at most 4 MB like the images (Vercel takes request bodies up
@@ -31,11 +32,17 @@ const BY_EXTENSION: Record<string, LessonFileType> = {
 export const FILE_URL_TTL_SEC = 300;
 const NAME_MAX = 120;
 
-/** The type of an uploaded file: the browser's, or the name's extension when the browser sends none. null: not one of ours. */
+/**
+ * The type of an uploaded file: the browser's, or the extension of the name when the browser sends none (a name without a dot
+ * has no extension: "pdf" is a name). null: not one of ours.
+ */
 export function lessonFileType(file: { type: string; name: string }): LessonFileType | null {
   if (Object.hasOwn(LESSON_FILE_TYPES, file.type)) return file.type as LessonFileType;
   if (file.type && file.type !== "application/octet-stream") return null;
-  return BY_EXTENSION[file.name.slice(file.name.lastIndexOf(".") + 1).toLowerCase()] ?? null;
+  const dot = file.name.lastIndexOf(".");
+  if (dot < 0) return null;
+  const ext = file.name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(BY_EXTENSION, ext) ? BY_EXTENSION[ext] : null; // not BY_EXTENSION[ext]: ".constructor" is a property of every object
 }
 
 const startsWith = (head: Uint8Array, sig: number[]) => head.length >= sig.length && sig.every((b, i) => head[i] === b);
@@ -58,7 +65,11 @@ export function cleanFileName(raw: string, ext: string): string {
   if (name.length > NAME_MAX) {
     const dot = name.lastIndexOf(".");
     const tail = dot > 0 && name.length - dot <= 10 ? name.slice(dot) : "";
-    name = name.slice(0, NAME_MAX - tail.length) + tail;
+    let head = name.slice(0, NAME_MAX - tail.length);
+    // a cut between the two halves of a surrogate pair (an emoji) leaves a lone high surrogate, which is not storable
+    const lastUnit = head.charCodeAt(head.length - 1);
+    if (lastUnit >= 0xd800 && lastUnit <= 0xdbff) head = head.slice(0, -1);
+    name = head + tail;
   }
   return name && storable(name) ? name : `fail.${ext}`;
 }
@@ -90,7 +101,18 @@ export async function addLessonFile(db: Db, store: FileStore, lessonId: number, 
   const name = cleanFileName(file.name, ext);
   const key = `lessons/${crypto.randomUUID()}.${ext}`;
   await store.put(key, bytes, type, attachmentHeader(name));
-  const [{ last }] = await db.select({ last: sql<number | null>`max(${lessonFiles.position})` }).from(lessonFiles).where(eq(lessonFiles.lessonId, lessonId));
-  const [row] = await db.insert(lessonFiles).values({ lessonId, position: (last ?? 0) + 1, name, r2Key: key, size: file.size, contentType: type }).returning();
-  return { id: row.id, name: row.name, size: row.size, contentType: type };
+  // The object is stored. When its row cannot be made, it must not stay in the private bucket with nothing pointing at it: it is
+  // removed again, and whatever the removal does, the error that comes out is the database's.
+  try {
+    const [{ last }] = await db.select({ last: sql<number | null>`max(${lessonFiles.position})` }).from(lessonFiles).where(eq(lessonFiles.lessonId, lessonId));
+    const [row] = await db.insert(lessonFiles).values({ lessonId, position: (last ?? 0) + 1, name, r2Key: key, size: file.size, contentType: type }).returning();
+    return { id: row.id, name: row.name, size: row.size, contentType: type };
+  } catch (e) {
+    try {
+      await store.delete(key);
+    } catch (cleanup) {
+      logFailure("[lesson-files] a stored file could not be removed after its row failed", cleanup); // never the key
+    }
+    throw e;
+  }
 }

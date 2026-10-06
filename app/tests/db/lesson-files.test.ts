@@ -1,4 +1,5 @@
-import { beforeEach, expect, test } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { courseModules, courses, lessonFiles, lessons } from "@/db/schema";
 import { addLessonFile } from "@/server/lesson-files";
@@ -68,4 +69,82 @@ test("positions count per lesson", async () => {
   await addLessonFile(db, store, lessonId, pdf());
   const rows = await db.select().from(lessonFiles).orderBy(lessonFiles.lessonId, lessonFiles.position);
   expect(rows.map((r) => [r.lessonId === lessonId, r.position])).toEqual([[true, 1], [true, 2], [false, 1]]);
+});
+
+// The object is put first, the row follows. A row that cannot be made must not leave the private object behind in storage.
+afterEach(() => vi.restoreAllMocks());
+
+/** A store that runs `after` right after each put (to break the database between the put and the row), and records the keys put. */
+const storeThat = (after: () => Promise<unknown>) => {
+  const base = fakeMediaStore();
+  const putKeys: string[] = [];
+  const store = {
+    ...base,
+    async put(key: string, bytes: ArrayBuffer, contentType: string, disposition?: string) {
+      await base.put(key, bytes, contentType, disposition);
+      putKeys.push(key);
+      await after();
+    },
+  };
+  return { store, base, putKeys };
+};
+
+test("the insert fails (the lesson is gone by then): the call rejects with that error, the object is deleted, no row is left", async () => {
+  const { store, base, putKeys } = storeThat(() => db.delete(lessons).where(eq(lessons.id, lessonId)));
+  const err = await addLessonFile(db, store, lessonId, pdf()).catch((e) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(UploadError);
+  expect(putKeys).toHaveLength(1);
+  expect(base.deleted).toEqual(putKeys);
+  expect(base.objects.size).toBe(0);
+  expect(await db.select().from(lessonFiles)).toHaveLength(0);
+});
+
+test("the position select fails: the same, the object is deleted", async () => {
+  const { store, base, putKeys } = storeThat(() => db.execute(sql`drop table lesson_files cascade`));
+  const err = await addLessonFile(db, store, lessonId, pdf()).catch((e) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(putKeys).toHaveLength(1);
+  expect(base.deleted).toEqual(putKeys);
+  expect(base.objects.size).toBe(0);
+});
+
+test("the cleanup itself fails: the original error still comes out (not the delete's), and the failure is logged without the key", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const { store, putKeys } = storeThat(() => db.delete(lessons).where(eq(lessons.id, lessonId)));
+  const failing = { ...store, delete: () => Promise.reject(new Error("R2 says: secret detail")) };
+  const err = await addLessonFile(db, failing, lessonId, pdf()).catch((e) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(String(err.message)).not.toContain("secret detail"); // the database's error, not the delete's
+  expect(log).toHaveBeenCalledTimes(1);
+  expect(String(log.mock.calls[0][0])).not.toContain(putKeys[0]);
+  expect(log.mock.calls.map((c) => c.join(" "))).toEqual(["[lesson-files] a stored file could not be removed after its row failed: Error"]);
+});
+
+test("a delete that throws at once (not a rejected promise) does not hide the error either", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { store } = storeThat(() => db.delete(lessons).where(eq(lessons.id, lessonId)));
+  const failing = {
+    ...store,
+    delete: (): Promise<void> => {
+      throw new Error("sync");
+    },
+  };
+  const err = await addLessonFile(db, failing, lessonId, pdf()).catch((e) => e);
+  expect(String(err.message)).not.toBe("sync");
+});
+
+test("the put fails: the error is the store's own, no row, and nothing is deleted (nothing was stored)", async () => {
+  const base = fakeMediaStore();
+  const store = { ...base, put: () => Promise.reject(new Error("store down")) };
+  await expect(addLessonFile(db, store, lessonId, pdf())).rejects.toThrow("store down");
+  expect(base.deleted).toEqual([]);
+  expect(await db.select().from(lessonFiles)).toHaveLength(0);
+});
+
+test("a file that is stored and listed is never deleted", async () => {
+  const store = fakeMediaStore();
+  await addLessonFile(db, store, lessonId, pdf());
+  expect(store.deleted).toEqual([]);
+  expect(store.objects.size).toBe(1);
 });
