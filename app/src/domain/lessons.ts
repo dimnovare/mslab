@@ -113,22 +113,35 @@ export function dropVideo(v: VideoFields): VideoChange {
   };
 }
 
-/** A new upload of `newVideoId` begins. A ready video becomes the replaced one (it keeps playing); an unfinished or failed one is given up. */
+/** A new upload of `newVideoId` begins. A ready video becomes the replaced one (it keeps playing); an unfinished or failed one is given up. Unchanged if the videoId is the same. */
 export function startUpload(v: VideoFields, newVideoId: string): VideoChange {
-  if (v.videoStatus === "ready" && v.videoId && v.videoId !== newVideoId) return { next: { ...v, videoId: newVideoId, videoStatus: "uploading", replacedVideoId: v.videoId }, obsolete: [] };
-  return { next: { ...v, videoId: newVideoId, videoStatus: "uploading" }, obsolete: v.videoId && v.videoId !== newVideoId ? [v.videoId] : [] };
+  if (v.videoId === newVideoId) return { next: v, obsolete: [] };
+  if (v.videoStatus === "ready" && v.videoId) return { next: { ...v, videoId: newVideoId, videoStatus: "uploading", replacedVideoId: v.videoId }, obsolete: [] };
+  return { next: { ...v, videoId: newVideoId, videoStatus: "uploading" }, obsolete: v.videoId ? [v.videoId] : [] };
 }
 
 /**
- * Bunny's word about `videoId` (the editor's poll, the webhook): null when it is not the lesson's current upload (an older one:
- * nothing changes). Ready: its length is stored and the replaced video becomes obsolete. Never downgrades a ready video.
+ * Bunny's word about `videoId` (the editor's poll, the webhook): null when unchanged (not the current upload, a stale status,
+ * a downgrade, or an unusable length). Ready: its length is stored and the replaced video becomes obsolete. Status moves forward
+ * only: uploading < processing < ready/failed. Allows recovery (failed → ready) but not downgrade (ready → failed).
  */
 export function settleVideo(v: VideoFields, videoId: string, status: "uploading" | "processing" | "ready" | "failed", lengthSec: number): VideoChange | null {
   if (v.videoId !== videoId) return null;
-  if (v.videoStatus === "ready" && status !== "ready") return null;
+
+  // Status rank: uploading=0, processing=1, ready/failed=2
+  const statusRank: Record<VideoStatus, number> = { none: -1, uploading: 0, processing: 1, ready: 2, failed: 2 };
+  const newRank = statusRank[status];
+  const currentRank = statusRank[v.videoStatus];
+
+  // Only move forward (or stay failed → ready recovery)
+  if (newRank < currentRank) return null;
+  // Block downgrade from ready to failed
+  if (v.videoStatus === "ready" && status === "failed") return null;
+
   if (status === "ready") {
-    if (!Number.isFinite(lengthSec) || lengthSec <= 0) return null;
-    return { next: { videoId, videoStatus: "ready", replacedVideoId: null, durationSec: Math.round(lengthSec) }, obsolete: v.replacedVideoId ? [v.replacedVideoId] : [] };
+    const rounded = Math.round(lengthSec);
+    if (!Number.isFinite(lengthSec) || rounded < 1) return null;
+    return { next: { videoId, videoStatus: "ready", replacedVideoId: null, durationSec: rounded }, obsolete: v.replacedVideoId ? [v.replacedVideoId] : [] };
   }
   return { next: { ...v, videoStatus: status }, obsolete: [] };
 }

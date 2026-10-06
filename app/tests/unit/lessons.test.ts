@@ -75,6 +75,9 @@ describe("moveLesson (↑ ↓ within and across modules)", () => {
   test("swaps with its neighbour inside the module", () => {
     expect(moveLesson(layout, 2, -1)).toEqual([{ moduleId: 10, lessonIds: [2, 1] }, { moduleId: 20, lessonIds: [] }, { moduleId: 30, lessonIds: [3] }]);
   });
+  test("in-module ↓ swap", () => {
+    expect(moveLesson([{ moduleId: 10, lessonIds: [1, 2, 3] }], 1, 1)).toEqual([{ moduleId: 10, lessonIds: [2, 1, 3] }]);
+  });
   test("past the end of its module: to the start of the next one (empty or not), or the end of the one before", () => {
     expect(moveLesson(layout, 2, 1)).toEqual([{ moduleId: 10, lessonIds: [1] }, { moduleId: 20, lessonIds: [2] }, { moduleId: 30, lessonIds: [3] }]);
     expect(moveLesson(layout, 3, -1)).toEqual([{ moduleId: 10, lessonIds: [1, 2] }, { moduleId: 20, lessonIds: [3] }, { moduleId: 30, lessonIds: [] }]);
@@ -132,14 +135,27 @@ describe("a lesson's video: upload, replacement, the sweep", () => {
   });
 
   test("settleVideo: ready with bad lengthSec (non-finite or ≤ 0) returns null", () => {
-    expect(settleVideo(none, "v1", "ready", 0)).toBeNull();
-    expect(settleVideo(none, "v1", "ready", -5)).toBeNull();
-    expect(settleVideo(none, "v1", "ready", Infinity)).toBeNull();
-    expect(settleVideo(none, "v1", "ready", NaN)).toBeNull();
+    const uploadingV1: VideoFields = { videoId: "v1", videoStatus: "uploading", replacedVideoId: null, durationSec: null };
+    expect(settleVideo(uploadingV1, "v1", "ready", NaN)).toBeNull();
+    expect(settleVideo(uploadingV1, "v1", "ready", Infinity)).toBeNull();
+    expect(settleVideo(uploadingV1, "v1", "ready", 0)).toBeNull();
+    expect(settleVideo(uploadingV1, "v1", "ready", -5)).toBeNull();
+    expect(settleVideo(uploadingV1, "v1", "ready", 0.3)).toBeNull();
+    expect(settleVideo(uploadingV1, "v1", "ready", 0.6)).toEqual({ next: { videoId: "v1", videoStatus: "ready", replacedVideoId: null, durationSec: 1 }, obsolete: [] });
   });
 
   test("settleVideo: failed status", () => {
     expect(settleVideo({ videoId: "bad", videoStatus: "uploading", replacedVideoId: null, durationSec: null }, "bad", "failed", 0)).toEqual({ next: { videoId: "bad", videoStatus: "failed", replacedVideoId: null, durationSec: null }, obsolete: [] });
+  });
+
+  test("startUpload: same videoId is a no-op", () => {
+    expect(startUpload(ready, "old")).toEqual({ next: ready, obsolete: [] });
+    expect(playableVideo(startUpload(ready, "old").next)).toBe("old");
+  });
+
+  test("settleVideo: forward-only ordering; processing → uploading ignored", () => {
+    const processing: VideoFields = { videoId: "v1", videoStatus: "processing", replacedVideoId: null, durationSec: null };
+    expect(settleVideo(processing, "v1", "uploading", 0)).toBeNull();
   });
 
   test("a retry gives up the unfinished or failed upload but keeps the replaced one", () => {
