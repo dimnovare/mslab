@@ -125,12 +125,14 @@ test("per-visitor addresses share the one cached page, and nothing of the query 
 });
 
 // The client account's pages are static shells (phase 2a): one cached copy for every visitor, whoever is signed in: Minu koolitused,
-// the login page, Lemmikud, Minu andmed (Task 8) and an e-course's shell (/konto/kursus/<slug>, rendered on its first visit, then
-// cached per slug).
+// the login page, Lemmikud, Minu andmed (Task 8), an e-course's shell (/konto/kursus/<slug>, rendered on its first visit, then
+// cached per slug) and (phase 3a) a lesson's shell (/konto/kursus/<slug>/<lesson id>, rendered on its first visit, then cached per
+// address: the shell knows nothing of the lesson, which comes from /api/konto/kursus/<slug>/<lesson> after the page has loaded).
 const ECOURSE_SHELL = `/konto/kursus/${SEED_ECOURSE_SLUG}`;
+const LESSON_SHELL = `${ECOURSE_SHELL}/1`;
 const ACCOUNT_SHELLS = [
   "/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/ru/konto/lemmikud", "/konto/andmed", "/ru/konto/andmed",
-  ECOURSE_SHELL, `/ru${ECOURSE_SHELL}`,
+  ECOURSE_SHELL, `/ru${ECOURSE_SHELL}`, LESSON_SHELL, `/ru${LESSON_SHELL}`,
 ];
 
 test("the account's pages come from the cache with no Set-Cookie, for a signed-in browser too; /api/konto/me never does (phase 2a)", async ({ request }) => {
@@ -147,14 +149,16 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
     expect(rsc.headers()["x-nextjs-cache"], `${path} RSC`).toBe("HIT");
     expect(rsc.headers()["set-cookie"], `${path} RSC`).toBeUndefined();
   }
-  // the dashboard's "Ava koolitus" link is a <Link>: its prefetch (the page's tree and its payload) is answered from the same cache,
-  // with no cookie set, and renders nothing personal (the course comes from /api/konto/kursus/<slug> after the page has loaded)
-  for (const [label, headers] of [["tree", { "Next-Router-Prefetch": "1", "Next-Router-Segment-Prefetch": "/_tree" }], ["payload", { "Next-Router-Prefetch": "1" }]] as const) {
-    const prefetch = await fromCache(request, `${ECOURSE_SHELL}?_rsc=p${label}`, { headers: { RSC: "1", ...headers, ...signedIn } });
-    expect(prefetch.status(), `prefetch ${label}`).toBe(200);
-    expect(prefetch.headers()["x-nextjs-cache"], `prefetch ${label}`).toBe("HIT");
-    expect(prefetch.headers()["set-cookie"], `prefetch ${label}`).toBeUndefined();
-  }
+  // the dashboard's "Ava koolitus" and the course's "Jätka" and lesson titles are <Link>s: their prefetch (the page's tree and its
+  // payload) is answered from the same cache, with no cookie set, and renders nothing personal (the course and the lesson come from
+  // /api/konto/kursus/… after the page has loaded)
+  for (const shell of [ECOURSE_SHELL, LESSON_SHELL])
+    for (const [label, headers] of [["tree", { "Next-Router-Prefetch": "1", "Next-Router-Segment-Prefetch": "/_tree" }], ["payload", { "Next-Router-Prefetch": "1" }]] as const) {
+      const prefetch = await fromCache(request, `${shell}?_rsc=p${label}`, { headers: { RSC: "1", ...headers, ...signedIn } });
+      expect(prefetch.status(), `${shell} prefetch ${label}`).toBe(200);
+      expect(prefetch.headers()["x-nextjs-cache"], `${shell} prefetch ${label}`).toBe("HIT");
+      expect(prefetch.headers()["set-cookie"], `${shell} prefetch ${label}`).toBeUndefined();
+    }
   const me = await request.get("/api/konto/me", { failOnStatusCode: false });
   expect(me.status()).toBe(401);
   expect(await me.json()).toEqual({ ok: false, reason: "none" });
@@ -177,7 +181,7 @@ const leak = (text: string): string => {
 };
 
 test("an account shell asked for with a query is answered with a 303 to the fragment, by every method, and the cached shell never holds the query", async ({ request }) => {
-  test.setTimeout(300_000); // ten shells
+  test.setTimeout(360_000); // twelve shells
   for (const path of ACCOUNT_SHELLS) {
     revalidateLocalPages(); // the first request that reaches a shell now renders it: it must not be one with a query
     for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {

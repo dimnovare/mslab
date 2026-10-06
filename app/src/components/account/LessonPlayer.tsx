@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import ui from "@/components/site/ui.module.css";
-import { validShape, type VideoShape } from "@/domain/lessons";
+import { videoAspect, type VideoShape } from "@/domain/lessons";
 import { fill } from "@/i18n/format";
 import { PLAYER_EVENTS, playerCommand, readPlayerMessage, secondsOf } from "./player-js";
 import type { LessonTexts } from "./texts";
@@ -242,8 +242,7 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }
   };
   const big = fullscreen || expanded;
   const broken = failed && !ready;
-  const shape = validShape(video.shape);
-  const aspect = shape ? shape.width / shape.height : 16 / 9;
+  const aspect = videoAspect(video.shape);
 
   return (
     <div

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import { adminEt } from "@/i18n/dict/admin";
-import { fill } from "@/i18n/format";
+import { fill, formatSize } from "@/i18n/format";
 import { deleteLessonFile } from "@/server/actions/admin-lessons";
 import type { AdminLessonFile } from "@/server/admin-lessons";
 import type { EditResult } from "@/server/edit-check";
@@ -87,7 +87,7 @@ export function LessonFiles({ lessonId, files }: { lessonId: number; files: Admi
           {files.map((f) => (
             <li key={f.id} className={styles.file} data-lesson-file={f.id}>
               <span className={styles.fileName}>
-                <strong>{f.name}</strong> <span className={`${ui.muted} ${ui.small}`}>{Math.ceil(f.size / 1000)} kB</span>
+                <strong>{f.name}</strong> <span className={`${ui.muted} ${ui.small}`}>{formatSize(f.size, "et")}</span>
               </span>
               <button
                 type="button"

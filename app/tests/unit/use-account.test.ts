@@ -17,8 +17,8 @@ type Hook = ReturnType<typeof useAccount<{ email?: string; n?: number }>>;
 /** What the hook returned at the last commit. */
 const probe: { current: Hook | null } = { current: null };
 const hook = (): Hook => probe.current!;
-function Probe({ redirect = true, notFound = false }: { redirect?: boolean; notFound?: boolean }) {
-  const result = useAccount<{ email?: string; n?: number }>("/api/konto", { locale: "et", redirect, notFound });
+function Probe({ redirect = true, notFound = false, forbidden = false }: { redirect?: boolean; notFound?: boolean; forbidden?: boolean }) {
+  const result = useAccount<{ email?: string; n?: number }>("/api/konto", { locale: "et", redirect, notFound, forbidden });
   useEffect(() => {
     probe.current = result;
   });
@@ -38,8 +38,8 @@ const settle = () =>
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
   });
 
-async function mount(redirect = true, notFound = false) {
-  await act(async () => root.render(createElement(Probe, { redirect, notFound })));
+async function mount(redirect = true, notFound = false, forbidden = false) {
+  await act(async () => root.render(createElement(Probe, { redirect, notFound, forbidden })));
   await settle();
 }
 
@@ -232,6 +232,59 @@ describe("useAccount", () => {
       await mount(true, asked);
       expect(hook().state, `asked: ${asked}`).toBe("error");
     }
+  });
+
+  test("a page that asks for it gets the API's 403 as \"forbidden\", with its reason and next lesson (a locked lesson, terms not accepted)", async () => {
+    const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {});
+    const told = vi.fn();
+    window.addEventListener(ACCOUNT_EVENT, told);
+    fetchMock.mockResolvedValueOnce(json(403, { ok: false, error: "locked", next: 9 }));
+    await mount(true, false, true);
+    expect(hook().state).toBe("forbidden");
+    expect(hook().data).toBeNull();
+    expect(hook().refusal).toEqual({ error: "locked", next: 9 });
+    expect(replace).not.toHaveBeenCalled();
+    expect(told).not.toHaveBeenCalled();
+    window.removeEventListener(ACCOUNT_EVENT, told);
+
+    // a `next` that is no number is null
+    for (const next of [null, "9", undefined, {}]) {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValueOnce(json(403, { ok: false, error: "terms", ...(next === undefined ? {} : { next }) }));
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await mount(true, false, true);
+      expect(hook().state, JSON.stringify(next)).toBe("forbidden");
+      expect(hook().refusal, JSON.stringify(next)).toEqual({ error: "terms", next: null });
+    }
+  });
+
+  test("a 403 is an error for a page that did not ask, and without the API's JSON either way; the refusal is null outside \"forbidden\"", async () => {
+    for (const [asked, answer] of [
+      [false, () => json(403, { ok: false, error: "locked", next: 9 })],
+      [true, () => text(403, "<html>403 Forbidden</html>")],
+      [false, () => text(403, "<html>403 Forbidden</html>")],
+      [true, () => text(403, "")],
+      [true, () => json(403, { ok: false })],
+      [true, () => json(403, { ok: true, error: "locked" })],
+      [true, () => json(403, { ok: false, error: 3 })],
+      [true, () => json(403, [])],
+    ] as const) {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValueOnce(answer());
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await mount(true, false, asked);
+      expect(hook().state, `asked: ${asked}`).toBe("error");
+      expect(hook().refusal).toBeNull();
+    }
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(json(200, { n: 1 }));
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await mount(true, false, true);
+    expect(hook().state).toBe("ready");
+    expect(hook().refusal).toBeNull();
   });
 
   test("a quiet reload: the API's 404 moves a page that asked for it to \"notFound\"; for any other 404 it keeps the page as it is", async () => {

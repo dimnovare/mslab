@@ -7,7 +7,7 @@ import ui from "@/components/site/ui.module.css";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import type { LoaderTexts } from "./texts";
-import { useAccount } from "./useAccount";
+import { useAccount, type Refusal } from "./useAccount";
 import styles from "./AccountLoader.module.css";
 
 /** Asks again: `quiet` keeps the page as it is while the new answer comes (useAccount). Answers whether the server answered. */
@@ -38,6 +38,8 @@ export function ReplacedNotice({ locale, t }: { locale: Locale; t: { replaced: s
  * - Another device signed in since (one device only): ReplacedNotice.
  * - A 404 that is the API's own answer (nothing for this client, e.g. an e-course without access): `notFound` when the page gives
  *   one — its own plain sentence, never hidden behind the error. Any other 404, and every 404 for a page without `notFound`, is an error.
+ * - A 403 that is the API's own answer (a lesson not open yet, terms not accepted): `forbidden(refusal)` when the page gives it, with
+ *   the API's reason and the lesson that is open instead. Any other 403, and every 403 for a page without `forbidden`, is an error.
  * - No answer, a server error or a 200 without a JSON object: "Ei õnnestunud laadida." and "Proovi uuesti".
  * - Loaded: `render(data, reload)`; `reload({ quiet: true })` refreshes it in the background.
  */
@@ -48,6 +50,7 @@ export function AccountLoader<T>({
   render,
   skeleton,
   notFound,
+  forbidden,
 }: {
   path: string;
   locale: Locale;
@@ -56,11 +59,14 @@ export function AccountLoader<T>({
   skeleton?: React.ReactNode;
   /** What a 404 shows (nothing: the load error). */
   notFound?: React.ReactNode;
+  /** What the API's 403 shows, from its reason (nothing: the load error). */
+  forbidden?: (refusal: Refusal) => React.ReactNode;
 }) {
-  const { state, data, reload } = useAccount<T>(path, { locale, notFound: notFound !== undefined });
+  const { state, data, refusal, reload } = useAccount<T>(path, { locale, notFound: notFound !== undefined, forbidden: forbidden !== undefined });
   if (state === "ready" && data !== null) return render(data, reload);
   if (state === "replaced") return <ReplacedNotice locale={locale} t={t} />;
   if (state === "notFound" && notFound) return notFound;
+  if (state === "forbidden" && forbidden && refusal) return forbidden(refusal);
   if (state === "error")
     return (
       <div data-account-state="error">

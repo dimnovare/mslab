@@ -95,9 +95,12 @@ function takeLoginMark(): void {
 export const loginPath = (locale?: Locale): string =>
   href(locale ?? (/^\/ru(\/|$)/.test(window.location.pathname) ? "ru" : "et"), "/konto/sisene");
 
-export type AccountState = "loading" | "ready" | "signedOut" | "replaced" | "notFound" | "error";
+export type AccountState = "loading" | "ready" | "signedOut" | "replaced" | "notFound" | "forbidden" | "error";
 
-type Loaded<T> = { state: AccountState; data: T | null };
+/** The API's reason for a 403 (a lesson: "locked", "terms") and the lesson that is open instead ("Jätka"), or null. */
+export type Refusal = { error: string; next: number | null };
+
+type Loaded<T> = { state: AccountState; data: T | null; refusal?: Refusal | null };
 
 /**
  * Loads one account endpoint (`path`, e.g. "/api/konto/me") with the session cookie.
@@ -114,6 +117,9 @@ type Loaded<T> = { state: AccountState; data: T | null };
  *   page asked for it with `notFound: true`: "notFound", for the page to say so; a quiet reload that learns it moves the page there too
  *   (it is an answer, not a failure). Any other 404 (a page of the platform, no JSON) and every 404 for a page that did not ask are
  *   plain failures, as below.
+ * - 403 with the API's own JSON answer (`{ ok: false, error, next? }`: a lesson that is not open yet, "locked", or whose course terms
+ *   are not accepted, "terms"), when the page asked for it with `forbidden: true`: "forbidden", with the API's reason and the lesson
+ *   that is open instead (`refusal`; `next` that is no number is null). Like the 404 above, any other 403 is a plain failure.
  * - anything else, no answer, or a 200 without a JSON object: "error"; `reload()` asks again.
  * A 401 has cleared the hint cookie, so the header is told to show "Logi sisse" again, and this browser's copy of the favourites is forgotten.
  * `reload({ quiet: true })` asks again in the background: the page keeps showing what it has ("ready" and the old data)
@@ -124,11 +130,12 @@ type Loaded<T> = { state: AccountState; data: T | null };
  */
 export function useAccount<T>(
   path: string,
-  options: { redirect?: boolean; locale?: Locale; notFound?: boolean } = {},
-): { state: AccountState; data: T | null; reload(options?: { quiet?: boolean }): Promise<boolean> } {
+  options: { redirect?: boolean; locale?: Locale; notFound?: boolean; forbidden?: boolean } = {},
+): { state: AccountState; data: T | null; refusal: Refusal | null; reload(options?: { quiet?: boolean }): Promise<boolean> } {
   const redirect = options.redirect ?? true;
   const locale = options.locale;
   const wantsNotFound = options.notFound === true;
+  const wantsForbidden = options.forbidden === true;
   const [loaded, setLoaded] = useState<Loaded<T>>({ state: "loading", data: null });
   const [round, setRound] = useState({ n: 0, quiet: false });
   /**
@@ -192,11 +199,16 @@ export function useAccount<T>(
         setLoaded({ state: "notFound", data: null });
         return settle(n, true);
       }
+      if (res.status === 403 && wantsForbidden && isObject && (body as { ok?: unknown }).ok === false && typeof (body as { error?: unknown }).error === "string") {
+        const { error, next } = body as { error: string; next?: unknown };
+        setLoaded({ state: "forbidden", data: null, refusal: { error, next: typeof next === "number" ? next : null } });
+        return settle(n, true);
+      }
       if (!quiet) setLoaded({ state: "error", data: null });
       settle(n, false);
     })();
     return () => abort.abort();
-  }, [path, redirect, locale, wantsNotFound, round, settle]);
+  }, [path, redirect, locale, wantsNotFound, wantsForbidden, round, settle]);
 
   const reload = useCallback((opts: { quiet?: boolean } = {}): Promise<boolean> => {
     const quiet = opts.quiet === true;
@@ -210,5 +222,5 @@ export function useAccount<T>(
     return answered;
   }, []);
 
-  return { state: loaded.state, data: loaded.data, reload };
+  return { state: loaded.state, data: loaded.data, refusal: loaded.refusal ?? null, reload };
 }

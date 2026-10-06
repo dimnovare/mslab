@@ -550,7 +550,10 @@ export const et = {
       retry: "Proovi uuesti",
     },
     // The e-course page /konto/kursus/<slug> (components/account/EcoursePage.tsx, TermsGate.tsx, EcourseView.tsx). {date} is the last
-    // day of access. The terms text itself is the admin's (Seaded, "E-koolituse tingimused"). A module's lock label is `course.locked`.
+    // day of access. The terms text itself is the admin's (Seaded, "E-koolituse tingimused"). A locked lesson's label is `course.locked`.
+    // The course's one button is "Jätka" ("Alusta" before the first lesson), to the next open lesson that is not done; {done} and
+    // {total} count the lessons. Each lesson's state is an icon (✓ done, ▶ open, lock) with these words for screen readers, and the
+    // lock sentence stands under the first locked lesson (and on a locked lesson's page, with "Jätka").
     ecourse: {
       noAccess: "Sul ei ole sellele koolitusele ligipääsu.",
       viewCourse: "Vaata koolitust",
@@ -563,6 +566,10 @@ export const et = {
       soon: "Sisu lisandub peagi.",
       resume: "Jätka",
       lockedHint: "Avaneb, kui eelmine õppetund on tehtud.",
+      begin: "Alusta",
+      progress: "{done} / {total} õppetundi tehtud",
+      stateDone: "Tehtud",
+      stateCurrent: "Avatud",
     },
     // one lesson /konto/kursus/<slug>/<lesson> (components/account/LessonPage.tsx, LessonPlayer.tsx): one button, "Järgmine õppetund"
     // (or "Märgi tehtuks" in its place while a text lesson is not done), and a quiet way back. {name} is a file's name, {title} the lesson's.

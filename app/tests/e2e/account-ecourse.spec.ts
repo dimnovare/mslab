@@ -158,7 +158,7 @@ test("the notice in Russian shows the Russian text", async ({ page }, info) => {
   await expect(gate(page).getByRole("button", { name: "Начать обучение" })).toBeDisabled();
 });
 
-test("accepting shows the course: title, access end, the modules with locks, one sentence; the focus is on the title; the next visit skips the notice", async ({ page }, info) => {
+test("accepting shows the course: title, access end, the modules, one sentence (no lessons yet); the focus is on the title; the next visit skips the notice", async ({ page }, info) => {
   const c = await signedIn(page, "accept", info.project.name);
   await openFromDashboard(page, c.slug);
   const answer = await accept(page);
@@ -170,11 +170,12 @@ test("accepting shows the course: title, access end, the modules with locks, one
   await expect(heading).toHaveText(c.title.et);
   await expect(heading).toBeFocused();
   await expect(page.locator("[data-ecourse-access]")).toHaveText(`Ligipääs kuni ${formatDate(c.expiresAt!, "et")}`);
-  const modules = page.locator("[data-modules] li");
-  await expect(modules).toHaveCount(c.modules.length);
-  for (const [i, m] of c.modules.entries()) await expect(modules.nth(i)).toContainText(m.et);
-  await expect(page.locator("[data-modules] [data-locked]")).toHaveCount(c.modules.length);
+  // the seed e-course has modules and no lessons yet (phase 3a): the module titles, no progress line and no button
+  await expect(page.locator("[data-module]")).toHaveCount(c.modules.length);
+  await expect(page.locator("[data-module] [data-module-title]")).toHaveText(c.modules.map((m) => m.et));
   await expect(page.locator("[data-ecourse-soon]")).toHaveText("Sisu lisandub peagi.");
+  await expect(page.locator("[data-ecourse-progress]")).toHaveCount(0);
+  await expect(page.locator("[data-ecourse-next]")).toHaveCount(0);
   // nothing else on the page: the title, the line, the modules, the sentence
   await expect(courseView(page).locator(":scope > *")).toHaveCount(4);
   await expect(courseView(page).getByRole("button")).toHaveCount(0);
@@ -203,7 +204,10 @@ test("an unpublished course with active access still opens: the notice, then the
   await expect(gate(page).getByRole("heading", { level: 1 })).toHaveText("Enne alustamist");
   await accept(page);
   await expect(courseView(page).getByRole("heading", { level: 1 })).toHaveText("E2E e-koolitus");
-  await expect(page.locator("[data-modules] li")).toHaveText([/Sissejuhatus/, /Praktika/]);
+  // its own course: two modules and no lessons
+  await expect(page.locator("[data-module] [data-module-title]")).toHaveText(["Sissejuhatus", "Praktika"]);
+  await expect(page.locator("[data-ecourse-soon]")).toHaveText("Sisu lisandub peagi.");
+  await expect(page.locator("[data-ecourse-progress], [data-ecourse-next]")).toHaveCount(0);
   await expect(page.locator("[data-ecourse-access]")).toHaveText(`Ligipääs kuni ${formatDate(c.expiresAt!, "et")}`);
 });
 

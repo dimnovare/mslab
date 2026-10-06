@@ -1,0 +1,134 @@
+/* One lesson's page (LessonPage.tsx), in the e-course page's width and spacing (EcoursePage.module.css .page and .title): the module's
+   title as the eyebrow, the lesson's title, the video, the short text in a readable column, the files, the done line with the one
+   button, and the quiet way back. Tokens only. */
+
+.module {
+  color: var(--muted);
+}
+
+.title {
+  margin-top: 12px;
+}
+
+/* The player's column. The frame is at most as tall as the window leaves under the titles with the "Täisekraan" button below it
+   (the window's height less 400 px: the site's header, the account's tabs and the titles), and between 240 and 540 px; its width
+   follows the video's shape (--aspect, width / height, set here from the lesson's answer as on the player). So a wide or 4:3 video
+   and its button fit a 1440 × 900 window (16:9: 889 × 500, not 1280 × 720), and on a phone the frame is the column's width. An
+   upright video keeps the player's own cap inside this column. No transform, filter or containment here or above: the player's
+   window-filling wrapper (position: fixed) must stay relative to the window. vh first for browsers without svh (where the second
+   line, holding a var(), falls back to the full column width, as before). */
+.video {
+  width: min(100%, calc(clamp(240px, 100vh - 400px, 540px) * var(--aspect)));
+  width: min(100%, calc(clamp(240px, 100svh - 400px, 540px) * var(--aspect)));
+  margin-top: clamp(20px, 2.5vw, 32px);
+}
+
+.soon {
+  max-width: 750px;
+  margin: clamp(20px, 2.5vw, 32px) 0 0;
+  padding: 18px 20px;
+  border-radius: var(--r-card);
+  background: var(--canvas);
+  color: var(--ink-soft);
+  font: 500 16px/1.5 var(--font-body);
+}
+
+.text {
+  max-width: 680px;
+  margin-top: clamp(20px, 2.5vw, 28px);
+}
+
+.text p {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font: 400 17px/1.65 var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.text p:last-child {
+  margin-bottom: 0;
+}
+
+.files {
+  max-width: 750px;
+  margin-top: clamp(28px, 3.5vw, 40px);
+}
+
+.filesTitle {
+  margin: 0 0 6px;
+  font: 400 22px/1.3 var(--font-display);
+}
+
+.fileList {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fileName {
+  min-width: 0;
+  font: 500 16px/1.4 var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.size {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin-top: clamp(28px, 3.5vw, 40px);
+}
+
+.done {
+  margin: 0;
+  color: var(--ok);
+  font: 600 16px/1.4 var(--font-body);
+}
+
+.done:focus {
+  outline: none;
+}
+
+.done:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 4px;
+}
+
+/* "Järgmine õppetund" before the lesson is done: shown, does nothing yet (not the busy cursor of a disabled .btn) */
+.notYet[aria-disabled="true"] {
+  cursor: default;
+}
+
+.failed {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--bad);
+  font: 500 14px/1.4 var(--font-body);
+}
+
+/* empty, it stays in the page (a live region) but takes no room in the row */
+.failed:empty {
+  position: absolute;
+}
+
+.back {
+  margin: 20px 0 0;
+}

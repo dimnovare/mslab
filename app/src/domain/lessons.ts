@@ -95,6 +95,12 @@ export function validShape(shape: { width: number; height: number } | null | und
   return fine(width) && fine(height) ? { width, height } : null;
 }
 
+/** The shape of a video's frame as one number, width / height: 16 / 9 when the shape is unknown or unusable. */
+export function videoAspect(shape: { width: number; height: number } | null | undefined): number {
+  const valid = validShape(shape);
+  return valid ? valid.width / valid.height : 16 / 9;
+}
+
 /**
  * A lesson's video columns (schema `lessons`). `videoWidth` / `videoHeight` are the picture size of the video that PLAYS (the ready
  * one, or the replaced one while a replacement uploads): both numbers or both null (unknown: the player assumes 16:9).

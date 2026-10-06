@@ -313,9 +313,10 @@ export async function removeClientRows(email?: string): Promise<number> {
   }
 }
 
-/** How long a test waits for a lock another test holds, and how often it asks (holdLocalLock). */
+/** How long a test waits for a lock another test holds (holdLocalLock). */
 export const LOCK_WAIT_MS = 60_000;
-const LOCK_POLL_MS = 200;
+/** Postgres's error code for a lock not granted within lock_timeout. */
+const LOCK_NOT_AVAILABLE = "55P03";
 
 /**
  * Holds a lock that every worker process shares (a Postgres advisory lock on a connection of its own) until the returned
@@ -323,23 +324,22 @@ const LOCK_POLL_MS = 200;
  * other tests of the same kind read (the dashboard's prepayment setting, the e-course terms): the desktop and phone projects
  * run side by side.
  *
- * The lock is asked for with pg_try_advisory_lock every 200 ms for at most `waitMs` (a minute), then this fails saying so. A
- * waiting request is never left in Postgres (pg_advisory_lock would queue one): a wait that has given up cannot be granted
- * the lock later and hold it for a worker that has moved on. A caller whose own timeout is shorter than `waitMs` should
- * lengthen it (test.setTimeout), or the wait would run on after the test has failed.
+ * The lock is asked for with pg_advisory_lock, so the waiting tests are served in Postgres's own queue, first come first served
+ * (asking again and again with pg_try_advisory_lock let a test wait in vain while the tests of another file took the lock back
+ * at once, one after the other). The wait is `waitMs` at most (a minute: lock_timeout on this connection), then Postgres drops
+ * the request and this fails saying so: a wait that has given up is never granted the lock later. A caller whose own timeout is
+ * shorter than `waitMs` should lengthen it (test.setTimeout); a test that fails anyway ends its worker, and the connection
+ * with the lock or the request goes with it.
  */
 export async function holdLocalLock(name: string, waitMs = LOCK_WAIT_MS): Promise<() => Promise<void>> {
-  const sql = connect(false); // a lock changes no public page
-  const giveUpAt = Date.now() + waitMs;
+  const sql = connect(false); // a lock changes no public page (one connection: the lock, the timeout and the unlock share it)
   try {
-    for (;;) {
-      const [{ got }] = await sql<{ got: boolean }[]>`select pg_try_advisory_lock(hashtext(${name})) as got`;
-      if (got) break;
-      if (Date.now() >= giveUpAt) throw new Error(`e2e: the lock "${name}" was not free within ${Math.round(waitMs / 1000)} s: another test holds it, or a worker that died has not let go yet`);
-      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
-    }
+    await sql`select set_config('lock_timeout', ${`${Math.max(1, Math.round(waitMs))}ms`}, false)`;
+    await sql`select pg_advisory_lock(hashtext(${name}))`;
   } catch (e) {
     await sql.end();
+    if ((e as { code?: unknown }).code === LOCK_NOT_AVAILABLE)
+      throw new Error(`e2e: the lock "${name}" was not free within ${Math.round(waitMs / 1000)} s: another test holds it, or a worker that died has not let go yet`);
     throw e;
   }
   return async () => {

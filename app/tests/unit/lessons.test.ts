@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   abandonUpload, completion, courseProgress, dropVideo, formatDuration, isWatched, lessonStates, moveLesson, nextLessonAfter, playableVideo, resumeAt,
-  settleVideo, startUpload, validShape, type OrderedLesson, type VideoFields,
+  settleVideo, startUpload, validShape, videoAspect, type OrderedLesson, type VideoFields,
 } from "@/domain/lessons";
 
 // Phase 3a (spec 3 and 5): visible lessons in course order; lesson k opens when it is the first, the one before it is done, or
@@ -221,6 +221,13 @@ describe("a video's shape (its width and height in pixels)", () => {
     expect(validShape({ width: 1, height: 0 })).toBeNull();
     expect(validShape(null)).toBeNull();
     expect(validShape({ width: 1080, height: 1920 })).toEqual({ width: 1080, height: 1920 });
+  });
+
+  test("videoAspect: width / height of a usable shape, else 16 / 9 (the player's frame and the lesson page's column)", () => {
+    expect(videoAspect({ width: 1080, height: 1920 })).toBe(0.5625);
+    expect(videoAspect({ width: 1440, height: 1080 })).toBe(4 / 3);
+    expect(videoAspect({ width: 1000, height: 1000 })).toBe(1);
+    for (const bad of [null, undefined, { width: 0, height: 1080 }, { width: 1920.5, height: 1080 }, { width: 20_000, height: 1080 }]) expect(videoAspect(bad), JSON.stringify(bad)).toBe(16 / 9);
   });
 
   test("a status that is not ready leaves the stored shape alone, whatever shape comes with it", () => {

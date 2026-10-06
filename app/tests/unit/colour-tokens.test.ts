@@ -35,6 +35,8 @@ const COURSE_CSS = [
   "src/components/account/DetailsTab.module.css",
   // the lesson's player (phase 3a Task 8)
   "src/components/account/LessonPlayer.module.css",
+  // the lesson's page (phase 3a Task 9)
+  "src/components/account/LessonPage.module.css",
   // the admin's Õpilased and its read-only "view as client" (phase 2a Task 9)
   "src/components/admin/ClientDrawer.module.css",
   "src/components/admin/list-table.module.css",

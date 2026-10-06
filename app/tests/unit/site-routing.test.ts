@@ -35,7 +35,7 @@ describe("routeSitePath", () => {
     };
     walk(root, "");
     expect(pages.sort()).toEqual(
-      ["", "/[...rest]", "/kontakt", "/konto", "/konto/andmed", "/konto/kursus/[slug]", "/konto/lemmikud", "/konto/sisene", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
+      ["", "/[...rest]", "/kontakt", "/konto", "/konto/andmed", "/konto/kursus/[slug]", "/konto/kursus/[slug]/[lesson]", "/konto/lemmikud", "/konto/sisene", "/koolitaja", "/koolitused", "/koolitused/[slug]", "/koolituskalender", "/ostukorv", "/ostukorv/[kursus]", "/praktika", "/privaatsus", "/tingimused", "/uudised", "/uudised/[slug]"].sort(),
     );
     for (const p of pages.filter((x) => !x.includes("["))) expect(isKnownPage(`/et${p}`), p).toBe(true);
     for (const p of ["/koolitused/x", "/uudised/y-2", "/ostukorv/whatever"]) expect(isKnownPage(`/ru${p}`), p).toBe(true);
@@ -44,10 +44,22 @@ describe("routeSitePath", () => {
 
   test("the client account's pages are known, in both locales; nothing deeper is (phase 2a Task 5)", () => {
     for (const locale of ["et", "ru"])
-      for (const p of ["/konto", "/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/kulmude-lami", "/konto/kursus/e-koolitus-2"])
+      for (const p of ["/konto", "/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/kulmude-lami", "/konto/kursus/e-koolitus-2", "/konto/kursus/kulmude-lami/12"])
         expect(isKnownPage(`/${locale}${p}`), `/${locale}${p}`).toBe(true);
-    for (const p of ["/et/konto/x/y", "/et/konto/x", "/et/konto/kursus", "/et/konto/kursus/A", "/et/konto/kursus/x/y", "/ru/konto/sisene/x", "/et/konto/lemmikud/x"])
+    for (const p of [
+      "/et/konto/x/y", "/et/konto/x", "/et/konto/kursus", "/et/konto/kursus/A", "/et/konto/kursus/x/y", "/ru/konto/sisene/x", "/et/konto/lemmikud/x",
+      // a lesson's id is parseRowId's (lib/row-id.ts): digits, no leading zero, at most 2 147 483 647; nothing below a lesson
+      "/et/konto/kursus/x/0", "/et/konto/kursus/x/012", "/et/konto/kursus/x/12/y", "/et/konto/kursus/X/12", "/et/konto/kursus/x/2147483648",
+      "/et/konto/kursus/x/-1", "/et/konto/kursus/x/1e3", "/et/konto/kursus/x/12345678901", "/et/konto/kursus/x/12/",
+    ])
       expect(isKnownPage(p), p).toBe(false);
+    expect(isKnownPage("/et/konto/kursus/x/2147483647")).toBe(true);
+    // a lesson's shell with a query: the same 303 into the fragment
+    expect(route("/konto/kursus/kulmude-lami/12?viga=1")).toEqual({ kind: "shellRedirect", location: "/konto/kursus/kulmude-lami/12#viga=1" });
+    expect(route("/ru/konto/kursus/kulmude-lami/12")).toEqual({ kind: "page", page: "/ru/konto/kursus/kulmude-lami/12", rewritten: false });
+    expect(route("/konto/kursus/kulmude-lami/12")).toEqual({ kind: "page", page: "/et/konto/kursus/kulmude-lami/12", rewritten: true });
+    // an id the database cannot hold is the 404 page, also with a query (no redirect to an unknown page)
+    expect(route("/konto/kursus/kulmude-lami/2147483648?viga=1")).toEqual({ kind: "page", page: "/et/leidmata", rewritten: true });
     // a shell asked for with a query is not rendered: a redirect to the same path with the known parameters in the fragment
     expect(route("/konto/sisene?viga=link")).toEqual({ kind: "shellRedirect", location: "/konto/sisene#viga=link" });
     expect(route("/ru/konto/sisene?korda=1")).toEqual({ kind: "shellRedirect", location: "/ru/konto/sisene#korda=1" });
@@ -57,8 +69,8 @@ describe("routeSitePath", () => {
   });
 
   test("only the account's shells answer a query with a redirect: not the public pages, the cart, an unknown address under /konto", () => {
-    for (const p of ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/x", "/ru/konto/kursus/x"]) expect(route(p + "?a=1"), p).toMatchObject({ kind: "shellRedirect" });
-    for (const p of ["/", "/ru", "/koolitused", "/koolitused/x?sessioon=1", "/kontakt", "/ru/kontakt", "/ostukorv?kursus=x", "/konto/x/y", "/konto/kursus", "/kontoo"])
+    for (const p of ["/konto", "/ru/konto", "/konto/sisene", "/ru/konto/sisene", "/konto/lemmikud", "/konto/andmed", "/konto/kursus/x", "/ru/konto/kursus/x", "/konto/kursus/x/1", "/ru/konto/kursus/x/1"]) expect(route(p + "?a=1"), p).toMatchObject({ kind: "shellRedirect" });
+    for (const p of ["/", "/ru", "/koolitused", "/koolitused/x?sessioon=1", "/kontakt", "/ru/kontakt", "/ostukorv?kursus=x", "/konto/x/y", "/konto/kursus", "/kontoo", "/konto/kursus/x/0", "/konto/kursus/x/1/y"])
       expect(route(p.includes("?") ? p : p + "?a=1"), p).not.toMatchObject({ kind: "shellRedirect" });
   });
 

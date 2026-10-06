@@ -501,6 +501,10 @@ export const ru: Dict = {
       soon: "Материалы скоро появятся.",
       resume: "Продолжить",
       lockedHint: "Откроется, когда предыдущий урок будет пройден.",
+      begin: "Начать",
+      progress: "Пройдено уроков: {done} / {total}",
+      stateDone: "Пройден",
+      stateCurrent: "Открыт",
     },
     lesson: {
       back: "Назад к\u00a0курсу",
