@@ -334,6 +334,9 @@ export function UnlockNextLesson({ clientId, courseId, lesson, t }: { clientId: 
       setConfirming(false);
     }
   }
+  // the page came back with no locked lesson (opened elsewhere, or hidden): a step left open ends with it, and must not come back by
+  // itself, already asking, when a lesson is locked again
+  if (!lesson && confirming) setConfirming(false);
 
   useEffect(() => {
     if (confirming) question.current?.focus();

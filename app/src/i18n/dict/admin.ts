@@ -365,6 +365,8 @@ export const adminEt = {
     back: "Tagasi",
     backLabel: "Tagasi õpilase juurde",
     notFound: "Seda õpilast ei leitud.",
+    // one e-course's view: the student may exist, but have no open access to that course (ended, run out, never given)
+    courseNotFound: "Seda vaadet ei leitud.",
     toList: "Õpilaste juurde",
   },
 

@@ -324,8 +324,9 @@ export async function revokeAccessForm(db: Db, formData: FormData, now: Date): P
  * "Ava järgmine õppetund" (spec 3a section 4): opens one lesson the student cannot open yet — the drawer's first locked lesson of that
  * e-course, sent back as `lessonId` — by recording the admin on her progress row (lesson_progress.unlocked_by). Only that lesson
  * opens, not the ones after it. Whether it is locked is decided by the student side's own rule (courseOutline, domain/lessons.ts
- * lessonStates), not a copy of it. A lesson that is open or done by now changes nothing (ok). notFound: no such student, or not a
- * visible lesson of the course; course: not an e-course.
+ * lessonStates), not a copy of it. A lesson that is open or done by now changes nothing (ok). notFound: no such student, no ACTIVE
+ * access of hers to the course (none, ended by an admin, or run out: a row written then would silently apply after a later grant), or
+ * not a visible lesson of the course; course: not an e-course. The course need not be published (access to a draft works).
  */
 export async function unlockNext(db: Db, input: { clientId: number; courseId: number; lessonId: number; by: string; now: Date }): Promise<ClientResult> {
   const [[client], [course]] = await Promise.all([
@@ -334,6 +335,12 @@ export async function unlockNext(db: Db, input: { clientId: number; courseId: nu
   ]);
   if (!client) return fail("notFound");
   if (course?.type !== "e_learning") return fail("course");
+  const [held] = await db
+    .select({ expiresAt: courseAccess.expiresAt, revokedAt: courseAccess.revokedAt })
+    .from(courseAccess)
+    .where(and(eq(courseAccess.clientId, input.clientId), eq(courseAccess.courseId, input.courseId)))
+    .limit(1);
+  if (!held || accessState(held, input.now) !== "active") return fail("notFound");
   const target = (await courseOutline(db, input.courseId, input.clientId)).lessons.find((l) => l.id === input.lessonId);
   if (!target) return fail("notFound");
   if (target.state !== "locked") return { ok: true };

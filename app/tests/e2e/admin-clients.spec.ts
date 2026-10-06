@@ -333,7 +333,7 @@ test("Vaata tema vaadet: her cards, every action disabled and doing nothing; her
       page.on("request", (r) => {
         if (new URL(r.url()).pathname.startsWith("/api/konto")) asked.push(r.url());
       });
-      await d.getByRole("link", { name: "Vaata tema vaadet" }).click();
+      await d.getByRole("link", { name: "Vaata tema vaadet", exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`/admin/opilased/${f.clientId}/vaade$`));
       await adminReady(page);
       const view = page.locator("[data-view-as]");
@@ -477,6 +477,12 @@ test("her lessons in the drawer: 1/3 tehtud, Ava järgmine õppetund (the studen
       await expect(page).toHaveURL(new RegExp(`${viewPath}$`));
       expect(asked, "the view asks the account API nothing").toEqual([]);
       expect(await noOverflow(page)).toBe(true);
+      // an admin page: never stored by a shared cache (next.config.ts sends no-store for /admin; `next dev` answers no-cache), and no cookie of hers is set
+      const answer = await page.request.get(viewPath);
+      expect(answer.status()).toBe(200);
+      expect(answer.headers()["cache-control"]).toMatch(/no-store|no-cache/);
+      expect(answer.headers()["cache-control"]).not.toMatch(/public|s-maxage/);
+      expect(answer.headers()["set-cookie"] ?? "").not.toMatch(/mslab_client|mslab_in/);
       expect(await sessions(course.clientId)).toEqual(before);
       expect((await student.page.request.get("/api/konto/me")).status()).toBe(200);
       await student.page.reload();
@@ -484,8 +490,13 @@ test("her lessons in the drawer: 1/3 tehtud, Ava järgmine õppetund (the studen
       expect((await sessions(course.clientId)).map((s) => s.endedAt)).toEqual([null]);
       expect(await lastRow(course.lessons.last)).toHaveLength(1); // looking changed no progress
       // a bad address, a course she does not have or a student who is not there: 404 (as her own page answers)
-      for (const bad of [`/admin/opilased/${course.clientId}/vaade/${course.slug}-x`, `/admin/opilased/${course.clientId}/vaade/BAD_slug`, `/admin/opilased/2147483646/vaade/${course.slug}`, `/admin/opilased/0${course.clientId}/vaade/${course.slug}`])
+      for (const bad of [`/admin/opilased/${course.clientId}/vaade/${course.slug}-x`, `/admin/opilased/${course.clientId}/vaade/BAD_slug`, `/admin/opilased/2147483646/vaade/${course.slug}`, `/admin/opilased/0${course.clientId}/vaade/${course.slug}`]) {
         expect((await page.goto(bad))?.status(), bad).toBe(404);
+        // the wording does not blame the student: she is there, this view is not (the way back goes to the list)
+        await expect(page.getByText("Seda vaadet ei leitud.")).toBeVisible();
+        await expect(page.getByText("Seda õpilast ei leitud.")).toHaveCount(0);
+        await expect(page.getByRole("link", { name: "Õpilaste juurde" })).toHaveAttribute("href", "/admin/opilased");
+      }
 
       // "Tagasi" goes back to her drawer; lesson 3 locked again by hand gives the button back, and ending the access takes it and the link away
       await page.goto(viewPath);
@@ -504,6 +515,7 @@ test("her lessons in the drawer: 1/3 tehtud, Ava järgmine õppetund (the studen
       await expect(row.locator("[data-view-course]")).toHaveCount(0);
       await expect(row.getByRole("button", { name: "Ava järgmine õppetund" })).toHaveCount(0);
       expect((await page.goto(viewPath))?.status()).toBe(404); // no active access: as for her
+      await expect(page.getByText("Seda vaadet ei leitud.")).toBeVisible();
       expect(await noOverflow(page)).toBe(true);
     } finally {
       await student.close();
