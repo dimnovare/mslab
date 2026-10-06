@@ -1,7 +1,7 @@
 import { ModuleList } from "@/components/site/ModuleList";
 import ui from "@/components/site/ui.module.css";
 import { fill, formatDate } from "@/i18n/format";
-import { pick, pickList } from "@/i18n/field";
+import { pick } from "@/i18n/field";
 import type { Locale } from "@/i18n/locales";
 import type { EcourseView as EcourseData } from "@/server/client-data";
 import type { EcourseTexts } from "./texts";
@@ -17,7 +17,7 @@ const focusOnMount = (el: HTMLElement | null) => el?.focus();
  * else (the lessons come in a later phase). `focusHeading`: the notice has just been accepted, so the title takes the focus.
  */
 export function EcourseView({ data, locale, t, focusHeading = false }: { data: EcourseData; locale: Locale; t: EcourseTexts; focusHeading?: boolean }) {
-  const modules = pickList(data.course.modules, locale);
+  const modules = data.course.modules.map((m) => pick(m.title, locale));
   return (
     <div className={`${ui.wrap} ${page.page}`} data-ecourse="">
       <h1 ref={focusHeading ? focusOnMount : undefined} className={page.title} tabIndex={-1}>

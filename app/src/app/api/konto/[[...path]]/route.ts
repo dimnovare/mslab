@@ -1,9 +1,11 @@
 import { after } from "next/server";
 import { getDb } from "@/db/client";
 import { accountResponse, handleAccountApi, type AccountDeps } from "@/server/account-api";
+import { bunnyConfig } from "@/server/bunny";
 import { serverEnv } from "@/server/env";
 import { serverKv } from "@/server/kv";
 import { logFailure } from "@/server/log";
+import { mediaStore } from "@/server/media-store";
 import { hostOrigin, isLocalHost, linkBase } from "@/server/site";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,9 @@ function deps(request: Request): AccountDeps {
     // E-mails and notifications go out after the response.
     later: (task) => after(() => task().catch((e) => logFailure("[account] background task failed", e))),
     dev: process.env.NODE_ENV !== "production" && isLocalHost(h.get("host")),
+    // The lesson files' store (R2, or the local folder) and Bunny Stream (null without its three settings).
+    files: mediaStore(),
+    bunny: bunnyConfig(env),
   };
 }
 

@@ -20,10 +20,10 @@ describe("the data endpoints of the account API", () => {
   test("the section and its handlers are found", () => {
     expect(SOURCE.indexOf(START)).toBeGreaterThan(0);
     expect(SOURCE.indexOf(END)).toBeGreaterThan(SOURCE.indexOf(START));
-    expect(handlers.map(nameOf)).toEqual(["dashboard", "ecourse", "favouriteCourses", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"]);
+    expect(handlers.map(nameOf)).toEqual(["dashboard", "ecourse", "lesson", "progress", "lessonDone", "lessonFile", "favouriteCourses", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"]);
   });
 
-  test.each(["dashboard", "ecourse", "favouriteCourses", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"])(
+  test.each(["dashboard", "ecourse", "lesson", "progress", "lessonDone", "lessonFile", "favouriteCourses", "favourite", "mergeFavouriteList", "profile", "newsletter", "changeRequest", "terms", "deleteAccount"])(
     "%s starts with requireClient and hands a refusal back unchanged",
     (name) => {
       const body = handlers.find((h) => nameOf(h) === name)!.split("{\n").slice(1).join("{\n");
@@ -54,7 +54,7 @@ describe("the data endpoints of the account API", () => {
     expect(section.slice(0, section.indexOf("\n\n"))).toContain("clientResponse(session, { ok: false, error: field }, 400)");
   });
 
-  test("the router sends every known path to a handler, and only GET /kursus/:slug is matched by pattern", () => {
+  test("the router sends every known path to a handler, and only GET /kursus/:slug and the lesson paths are matched by pattern", () => {
     const router = SOURCE.slice(SOURCE.indexOf(END), SOURCE.indexOf("/** The router: `null`"));
     const cases = [...router.matchAll(/case "(\w+) ([^"]+)": return (\w+)\(request, deps\);/g)].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
     expect(cases).toEqual([
@@ -62,6 +62,7 @@ describe("the data endpoints of the account API", () => {
       "POST /muutmine changeRequest", "POST /tingimused terms", "POST /kustuta deleteAccount",
     ]);
     expect(router).toContain('request.method === "GET" ? COURSE_PATH.exec(path) : null');
+    expect(router).toContain("LESSON_PATH.exec(path)");
   });
 });
 

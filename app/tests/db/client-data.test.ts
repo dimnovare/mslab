@@ -444,9 +444,14 @@ describe("e-course and terms", () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toEqual({
-      course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika", ru: "Практика" }] },
+      course: {
+        slug: "veebikursus",
+        title: { et: "Veebikursus" },
+        modules: [{ id: expect.any(Number), title: { et: "Sissejuhatus" }, lessons: [] }, { id: expect.any(Number), title: { et: "Praktika", ru: "Практика" }, lessons: [] }],
+      },
       access: { expiresAt: at(170).toISOString() },
       terms: { version: "1", accepted: false, text: TERMS.body },
+      progress: { done: 0, total: 0, next: null },
     });
     await setting("courseTermsVersion", V2);
     expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.version).toBe(V2);

@@ -21,9 +21,14 @@ const EXPIRES = "2027-03-22T08:00:00.000Z";
 const V1 = "2026-10-01T09:00:00.000Z";
 const V2 = "2026-10-03T09:30:00.000Z";
 const view = (over: { accepted?: boolean; version?: string; text?: EcourseView["terms"]["text"] } = {}): EcourseView => ({
-  course: { slug: "veebikursus", title: { et: "Veebikursus", ru: "Онлайн-курс" }, modules: [{ et: "Sissejuhatus", ru: "Введение" }, { et: "Praktika" }] },
+  course: {
+    slug: "veebikursus",
+    title: { et: "Veebikursus", ru: "Онлайн-курс" },
+    modules: [{ id: 1, title: { et: "Sissejuhatus", ru: "Введение" }, lessons: [] }, { id: 2, title: { et: "Praktika" }, lessons: [] }],
+  },
   access: { expiresAt: EXPIRES },
   terms: { version: over.version ?? V1, accepted: over.accepted ?? false, text: over.accepted ? null : "text" in over ? (over.text ?? null) : { et: "Esimene lõik.\n\nTeine lõik.", ru: "Первый абзац." } },
+  progress: { done: 0, total: 0, next: null },
 });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

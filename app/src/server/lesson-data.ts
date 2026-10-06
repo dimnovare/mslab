@@ -1,0 +1,169 @@
+import { and, asc, eq, sql } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import { clients, courseModules, lessonFiles, lessonProgress, lessons } from "@/db/schema";
+import { completion, isWatched, nextLessonAfter, playableVideo, resumeAt } from "@/domain/lessons";
+import type { I18n } from "@/i18n/field";
+import { EMBED_TTL_SEC, signedEmbedUrl, type BunnyConfig } from "./bunny";
+import { activeAccess, termsState } from "./client-data";
+import { courseOutline, type CourseOutline } from "./lesson-outline";
+
+// The lesson endpoints' work (spec 3a sections 5 and 6), for account-api.ts: one lesson, progress, "Märgi tehtuks", a file. The
+// client is always the session's. Each starts with openLesson, the one place of the checks' binding order: active access to the
+// course (none: notFound) → a visible lesson of that course (else notFound) → (the lesson page only) the terms accepted → the lesson
+// order (locked).
+// How a lesson is completed follows its kind (domain/lessons.ts completion): a text lesson by "Märgi tehtuks", a video lesson only
+// by watching 90 % of a playable video — a video lesson waiting for its video cannot be completed, so the next one stays locked.
+
+export type LessonVideo = { state: "ready"; embedUrl: string; expires: number; resumeAt: number; durationSec: number } | { state: "soon" };
+export type LessonView = {
+  course: { slug: string; title: I18n };
+  module: { title: I18n };
+  /** `textOnly`: a text lesson (kind "text"), done with "Märgi tehtuks". */
+  lesson: { id: number; title: I18n; body: I18n | null; done: boolean; textOnly: boolean };
+  /** null: a text lesson; "soon": a video lesson whose video is not ready yet, or Bunny not set up ("Video lisandub peagi"). */
+  video: LessonVideo | null;
+  files: { id: number; name: string; size: number }[];
+  /** The next visible lesson ("Järgmine õppetund", open once this one is done); null after the last. */
+  next: number | null;
+  /** The student's e-mail, for the watermark over the video. */
+  watermark: string;
+};
+/** Why a lesson cannot be opened: not this client's (no access, no such visible lesson), terms to accept (asked for), not open yet. */
+export type LessonRefusal = { kind: "notFound" } | { kind: "terms" } | { kind: "locked"; next: number | null };
+export type LessonResult = { kind: "lesson"; view: LessonView } | LessonRefusal;
+/** `terms` never comes back here: only the lesson page asks openLesson for the terms check. */
+export type ProgressResult = { kind: "saved"; done: boolean; next: number | null } | { kind: "video" } | { kind: "range" } | LessonRefusal;
+export type DoneResult = { kind: "saved"; next: number | null } | { kind: "video" } | LessonRefusal;
+export type LessonFileRef = { kind: "file"; key: string; name: string; contentType: string };
+
+/** A visible lesson of the course, with its module's title and this client's progress; null when it is not one. */
+async function visibleLesson(db: Db, courseId: number, clientId: number, lessonId: number) {
+  const [row] = await db
+    .select({
+      id: lessons.id,
+      title: lessons.title,
+      body: lessons.body,
+      kind: lessons.kind,
+      moduleTitle: courseModules.title,
+      videoId: lessons.videoId,
+      videoStatus: lessons.videoStatus,
+      replacedVideoId: lessons.replacedVideoId,
+      durationSec: lessons.durationSec,
+      watchedSec: sql<number>`coalesce(${lessonProgress.watchedSec}, 0)`.mapWith(Number),
+      done: sql<boolean>`${lessonProgress.doneAt} is not null`,
+    })
+    .from(lessons)
+    .innerJoin(courseModules, eq(lessons.moduleId, courseModules.id))
+    .leftJoin(lessonProgress, and(eq(lessonProgress.lessonId, lessons.id), eq(lessonProgress.clientId, clientId)))
+    .where(and(eq(lessons.id, lessonId), eq(courseModules.courseId, courseId), eq(lessons.hidden, false)))
+    .limit(1);
+  return row ? { ...row, done: Boolean(row.done) } : null;
+}
+
+export type LessonRow = NonNullable<Awaited<ReturnType<typeof visibleLesson>>>;
+type Access = NonNullable<Awaited<ReturnType<typeof activeAccess>>>;
+export type OpenedLesson = { kind: "open"; access: Access; row: LessonRow; outline: CourseOutline };
+
+/**
+ * The checks of every lesson endpoint, in the binding order (Global Constraints; spec 6), in this one place: active access to the course
+ * → a visible lesson of that course → with `terms: true` (the lesson page only) the course's terms accepted → the lesson order. Answers
+ * the course access, the lesson row and the client's outline of the course, or the refusal.
+ */
+export async function openLesson(db: Db, clientId: number, slug: string, lessonId: number, now: Date, opts: { terms?: boolean } = {}): Promise<OpenedLesson | LessonRefusal> {
+  const access = await activeAccess(db, clientId, slug, now);
+  if (!access) return { kind: "notFound" };
+  const [row, outline, terms] = await Promise.all([
+    visibleLesson(db, access.course.id, clientId, lessonId),
+    courseOutline(db, access.course.id, clientId),
+    opts.terms ? termsState(db, clientId, access.course.id) : null,
+  ]);
+  if (!row) return { kind: "notFound" };
+  if (terms && !terms.accepted) return { kind: "terms" };
+  if (outline.lessons.find((l) => l.id === lessonId)?.state === "locked") return { kind: "locked", next: outline.progress.next };
+  return { kind: "open", access, row, outline };
+}
+
+/** The video part of a lesson: null for a text lesson; ready with a URL signed for 4 hours (from the resume point); else soon. */
+async function videoOf(row: LessonRow, bunny: BunnyConfig | null, now: Date): Promise<LessonVideo | null> {
+  if (row.kind === "text") return null;
+  const videoId = playableVideo(row);
+  if (!videoId || !bunny || !row.durationSec) return { state: "soon" };
+  const expires = Math.floor(now.getTime() / 1000) + EMBED_TTL_SEC;
+  const start = resumeAt(row.watchedSec, row.durationSec, row.done);
+  return { state: "ready", embedUrl: await signedEmbedUrl(bunny, videoId, expires, start), expires, resumeAt: start, durationSec: row.durationSec };
+}
+
+/** GET a lesson (spec 6): the only endpoint with the terms check. */
+export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: number, slug: string, lessonId: number, now: Date): Promise<LessonResult> {
+  const opened = await openLesson(db, clientId, slug, lessonId, now, { terms: true });
+  if (opened.kind !== "open") return opened;
+  const { access, row, outline } = opened;
+  const [files, [client]] = await Promise.all([
+    db.select({ id: lessonFiles.id, name: lessonFiles.name, size: lessonFiles.size }).from(lessonFiles).where(eq(lessonFiles.lessonId, lessonId)).orderBy(asc(lessonFiles.position), asc(lessonFiles.id)),
+    db.select({ email: clients.email }).from(clients).where(eq(clients.id, clientId)).limit(1),
+  ]);
+  if (!client) return { kind: "notFound" };
+  return {
+    kind: "lesson",
+    view: {
+      course: { slug: access.course.slug, title: access.course.title },
+      module: { title: row.moduleTitle },
+      lesson: { id: row.id, title: row.title, body: row.body, done: row.done, textOnly: row.kind === "text" },
+      video: await videoOf(row, bunny, now),
+      files,
+      next: nextLessonAfter(outline.lessons, lessonId),
+      watermark: client.email,
+    },
+  };
+}
+
+/**
+ * POST progress: kept at its highest (one upsert); done once it reaches 90 % of the length. A video lesson with a playable video
+ * only ("watch"): a text lesson, and a video lesson still waiting for its video, are "video" (409).
+ */
+export async function saveProgress(db: Db, clientId: number, slug: string, lessonId: number, watchedSec: number, now: Date): Promise<ProgressResult> {
+  const opened = await openLesson(db, clientId, slug, lessonId, now);
+  if (opened.kind !== "open") return opened;
+  const { row, outline } = opened;
+  if (completion(row) !== "watch" || row.durationSec === null) return { kind: "video" };
+  if (watchedSec > row.durationSec + 5) return { kind: "range" };
+  const watched = Math.floor(watchedSec);
+  const [saved] = await db
+    .insert(lessonProgress)
+    .values({ clientId, lessonId, watchedSec: watched, doneAt: isWatched(watched, row.durationSec) ? now : null, updatedAt: now })
+    .onConflictDoUpdate({
+      target: [lessonProgress.clientId, lessonProgress.lessonId],
+      set: {
+        watchedSec: sql`greatest(${lessonProgress.watchedSec}, excluded.watched_sec)`,
+        doneAt: sql`coalesce(${lessonProgress.doneAt}, excluded.done_at)`,
+        updatedAt: now,
+      },
+    })
+    .returning(); // (returning(fields) has no common overload on the Db union: the whole row)
+  return { kind: "saved", done: saved.doneAt !== null, next: nextLessonAfter(outline.lessons, lessonId) };
+}
+
+/** POST tehtud ("Märgi tehtuks"): a text lesson (kind "text") only — any video lesson is "video" (409); done once (a second time changes nothing). */
+export async function markTextLessonDone(db: Db, clientId: number, slug: string, lessonId: number, now: Date): Promise<DoneResult> {
+  const opened = await openLesson(db, clientId, slug, lessonId, now);
+  if (opened.kind !== "open") return opened;
+  const { row, outline } = opened;
+  if (completion(row) !== "mark") return { kind: "video" };
+  await db
+    .insert(lessonProgress)
+    .values({ clientId, lessonId, doneAt: now, updatedAt: now })
+    .onConflictDoUpdate({ target: [lessonProgress.clientId, lessonProgress.lessonId], set: { doneAt: sql`coalesce(${lessonProgress.doneAt}, excluded.done_at)`, updatedAt: now } });
+  return { kind: "saved", next: nextLessonAfter(outline.lessons, lessonId) };
+}
+
+/** GET a file: the store key, name and type of a file of an open lesson (a file of another lesson is notFound); locked before the lesson opens. */
+export async function lessonFileFor(db: Db, clientId: number, slug: string, lessonId: number, fileId: number, now: Date): Promise<LessonFileRef | LessonRefusal> {
+  const opened = await openLesson(db, clientId, slug, lessonId, now);
+  if (opened.kind !== "open") return opened;
+  const [file] = await db
+    .select({ key: lessonFiles.r2Key, name: lessonFiles.name, contentType: lessonFiles.contentType })
+    .from(lessonFiles)
+    .where(and(eq(lessonFiles.id, fileId), eq(lessonFiles.lessonId, lessonId)))
+    .limit(1);
+  return file ? { kind: "file", ...file } : { kind: "notFound" };
+}

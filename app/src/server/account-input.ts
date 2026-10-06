@@ -4,11 +4,12 @@ import { storable } from "@/lib/storable"; // Postgres rejects a NUL in text and
 // The bodies of the client account's data endpoints (account-api.ts), parsed without trusting anything: a wrong type, a value
 // that is too long or text the database cannot store gives `{ ok: false, error: "<field>" }` (the endpoint's 400), never an
 // exception and never a database error. The limits are the endpoints' contract:
-// name 120, phone 40, message 1000, slugs 200 (at most 100 in a merge), language et or ru, kind cancel or change.
+// name 120, phone 40, message 1000, slugs 200 (at most 100 in a merge), language et or ru, kind cancel or change, watchedSec 0 … 172 800
+// (two days; the real bound is the video's length + 5 s, checked with the lesson). Ids in a path are not parsed here: parseRowId (lib/row-id.ts).
 
 export type Input<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100, version: 64 } as const;
+export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100, version: 64, watchedSec: 172_800 } as const;
 
 /** One line: inner whitespace (newlines too) becomes single spaces, the ends are trimmed. May be empty. */
 const line = (max: number) =>
@@ -28,6 +29,7 @@ const newsletter = z.object({ on: z.boolean() });
 const changeRequest = z.object({ registrationId: rowId, kind: z.enum(["cancel", "change"]), message: text(LIMITS.message).optional().transform((m) => m ?? "") });
 const terms = z.object({ slug, version: z.string().min(1).max(LIMITS.version).refine(storable) });
 const deletion = z.object({ confirm: z.literal(true) });
+const progress = z.object({ watchedSec: z.number().min(0).max(LIMITS.watchedSec) });
 
 export type FavouriteInput = z.infer<typeof favourite>;
 export type MergeInput = z.infer<typeof merge>;
@@ -35,6 +37,7 @@ export type ProfileInput = z.infer<typeof profile>;
 export type NewsletterInput = z.infer<typeof newsletter>;
 export type ChangeRequestInput = z.infer<typeof changeRequest>;
 export type TermsInput = z.infer<typeof terms>;
+export type ProgressInput = z.infer<typeof progress>;
 
 /** `body` (the parsed JSON, or null when it was not an object) against `schema`; the first wrong field is the error ("body" when it is not an object at all). */
 function parse<S extends z.ZodType>(schema: S, body: unknown): Input<z.infer<S>> {
@@ -51,6 +54,7 @@ export const parseNewsletter = (body: unknown) => parse(newsletter, body);
 export const parseChangeRequest = (body: unknown) => parse(changeRequest, body);
 export const parseTerms = (body: unknown) => parse(terms, body);
 export const parseDeletion = (body: unknown) => parse(deletion, body);
+export const parseProgress = (body: unknown) => parse(progress, body);
 
 /** The course slug of a request path (still percent-encoded), or null when it cannot be a slug (not decodable, empty, too long, text the database cannot hold). */
 export function parseSlug(raw: string): string | null {

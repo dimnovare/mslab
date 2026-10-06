@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseSlug, parseTerms,
+  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseProgress, parseSlug, parseTerms,
 } from "@/server/account-input";
 
 // The bodies of the account's data endpoints, parsed without a database: a wrong shape, a wrong type, a value over its limit
@@ -158,4 +158,10 @@ describe("parseSlug (the path of an e-course)", () => {
   test("not decodable, empty, too long, or text the database cannot hold: null", () => {
     for (const raw of ["%E0%A4%A", "%", "", "a".repeat(LIMITS.slug + 1), "a%00b", "%01", "%ED%A0%80"]) expect(parseSlug(raw), raw).toBeNull();
   });
+});
+
+test("progress: a number of seconds, 0 … two days", () => {
+  expect(parseProgress({ watchedSec: 12.5 })).toEqual({ ok: true, data: { watchedSec: 12.5 } });
+  expect(parseProgress({ watchedSec: "x" })).toEqual({ ok: false, error: "watchedSec" });
+  for (const bad of [{ watchedSec: "12" }, { watchedSec: -1 }, { watchedSec: 172_801 }, {}, null]) expect(parseProgress(bad).ok, JSON.stringify(bad)).toBe(false);
 });

@@ -1,0 +1,258 @@
+import { eq } from "drizzle-orm";
+import { beforeEach, expect, test, vi } from "vitest";
+import type { Db } from "@/db/client";
+import { clients, clientSessions, courseAccess, courseModules, courses, lessonFiles, lessonProgress, lessons, pages, termsAcceptances } from "@/db/schema";
+import { handleAccountApi, type AccountDeps } from "@/server/account-api";
+import { bunnyConfig } from "@/server/bunny";
+import { CLIENT_SESSION_TTL_MS } from "@/server/client-auth";
+import { newToken, sha256 } from "@/server/token";
+import { fakeKv, fakeMediaStore } from "../fakes";
+import { makeTestDb } from "./helpers";
+
+// Phase 3a (spec section 6): the lesson endpoints of the account API — the course with its lessons and their states, one lesson
+// (a signed embed URL for an open lesson with a ready video, 403 locked or terms, 404 without access), progress (kept at its highest,
+// done at 90 %, 12 a minute), "tehtud" for a text lesson, and the file download (the bytes, or a 302 to a signed address).
+
+const NOW = new Date("2026-10-06T10:00:00Z");
+const SITE = "https://mslab.example";
+const BUNNY = bunnyConfig({ BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "test-api-key", BUNNY_TOKEN_KEY: "test-token-key" }, false)!;
+const VIDEO_1 = "11111111-1111-4111-8111-111111111111";
+const VIDEO_3 = "33333333-3333-4333-8333-333333333333";
+const FILE_KEY = "lessons/0f8b6c2e-3d4a-4b5c-8d9e-0a1b2c3d4e5f.pdf";
+const PDF = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
+let db: Db;
+beforeEach(async () => {
+  db = await makeTestDb();
+  for (const method of ["info", "error"] as const) vi.spyOn(console, method).mockImplementation(() => {});
+});
+
+/**
+ * An e-course of two modules: "Video" (lesson 1, a video lesson with a ready video of 100 s; a hidden lesson; lesson 2, a text lesson)
+ * and "Lõpp" (lesson 3, a video lesson with a ready video of 200 s, with a PDF); a client signed in (one live session) with six
+ * months of access; no terms text stored. Lessons are video lessons unless they say `kind: "text"` (the column default).
+ */
+async function world(access: Partial<typeof courseAccess.$inferInsert> = {}) {
+  const [course] = await db.insert(courses).values({ slug: "veebikursus", type: "e_learning", level: "basic", title: { et: "Veebikursus" }, summary: { et: "" }, body: { et: "" }, published: true, price: 9500 }).returning();
+  const [m1] = await db.insert(courseModules).values({ courseId: course.id, position: 1, title: { et: "Video" } }).returning();
+  const [m2] = await db.insert(courseModules).values({ courseId: course.id, position: 2, title: { et: "Lõpp" } }).returning();
+  const [l1] = await db.insert(lessons).values({ moduleId: m1.id, position: 1, title: { et: "Esimene" }, videoId: VIDEO_1, videoStatus: "ready", durationSec: 100 }).returning();
+  const [hidden] = await db.insert(lessons).values({ moduleId: m1.id, position: 2, title: { et: "Peidus" }, hidden: true }).returning();
+  const [l2] = await db.insert(lessons).values({ moduleId: m1.id, position: 3, title: { et: "Tekst" }, body: { et: "Loe see läbi." }, kind: "text" }).returning();
+  const [l3] = await db.insert(lessons).values({ moduleId: m2.id, position: 1, title: { et: "Kolmas" }, videoId: VIDEO_3, videoStatus: "ready", durationSec: 200 }).returning();
+  const [file] = await db.insert(lessonFiles).values({ lessonId: l3.id, position: 1, name: "Juhend.pdf", r2Key: FILE_KEY, size: 5, contentType: "application/pdf" }).returning();
+  const [client] = await db.insert(clients).values({ email: "kati@example.test" }).returning();
+  await db.insert(courseAccess).values({ clientId: client.id, courseId: course.id, grantedBy: "admin@example.test", expiresAt: new Date(NOW.getTime() + 180 * 86_400_000), ...access });
+  const raw = newToken();
+  await db.insert(clientSessions).values({ idHash: await sha256(raw), clientId: client.id, createdAt: NOW, expiresAt: new Date(NOW.getTime() + CLIENT_SESSION_TTL_MS) });
+  return { course, l1, l2, l3, hidden, file, client, cookie: `__Host-mslab_client=${raw}` };
+}
+
+function deps(over: Partial<AccountDeps> = {}): AccountDeps {
+  return {
+    db,
+    env: { KV: fakeKv(), MAIL_FROM: "MS LAB <info@send.example>", MARIA_EMAIL: "maria@example.test", SITE_URL: SITE },
+    now: NOW,
+    siteUrl: SITE,
+    later: () => {},
+    dev: false,
+    files: fakeMediaStore({ [FILE_KEY]: { bytes: PDF, contentType: "application/pdf" } }),
+    bunny: BUNNY,
+    ...over,
+  };
+}
+
+/** GET (no body) or POST (a JSON body) to /api/konto<path> with the session cookie. */
+const call = async (d: AccountDeps, cookie: string, path: string, body?: unknown) =>
+  (await handleAccountApi(new Request(`${SITE}/api/konto${path}`, { method: body === undefined ? "GET" : "POST", headers: { cookie }, body: body === undefined ? undefined : JSON.stringify(body) }), d))!;
+const lessonPath = (id: number, rest = "") => `/kursus/veebikursus/${id}${rest}`;
+
+test("the e-course lists its modules with the visible lessons and their states, the counts and where Jätka goes", async () => {
+  const w = await world();
+  const res = await call(deps(), w.cookie, "/kursus/veebikursus");
+  expect(res.status).toBe(200);
+  const view = await res.json();
+  expect(view.progress).toEqual({ done: 0, total: 3, next: w.l1.id });
+  expect(view.course.modules.map((m: { title: { et: string }; lessons: { title: { et: string }; state: string }[] }) => [m.title.et, m.lessons.map((l) => [l.title.et, l.state])])).toEqual([
+    ["Video", [["Esimene", "current"], ["Tekst", "locked"]]],
+    ["Lõpp", [["Kolmas", "locked"]]],
+  ]);
+});
+
+test("an open lesson with a ready video: Bunny's URL signed for 4 hours, from the start, the e-mail as watermark; the next one is 403 locked", async () => {
+  const w = await world();
+  const res = await call(deps(), w.cookie, lessonPath(w.l1.id));
+  expect(res.status).toBe(200);
+  expect(res.headers.get("cache-control")).toBe("private, no-store");
+  const view = await res.json();
+  const expires = Math.floor(NOW.getTime() / 1000) + 4 * 3600;
+  expect(view.video).toEqual({
+    state: "ready",
+    embedUrl: expect.stringMatching(new RegExp(`^https://player\\.mediadelivery\\.net/embed/12345/${VIDEO_1}\\?token=[0-9a-f]{64}&expires=${expires}&autoplay=false$`)),
+    expires,
+    resumeAt: 0,
+    durationSec: 100,
+  });
+  expect(view).toMatchObject({
+    course: { slug: "veebikursus", title: { et: "Veebikursus" } },
+    module: { title: { et: "Video" } },
+    lesson: { id: w.l1.id, title: { et: "Esimene" }, body: null, done: false, textOnly: false },
+    files: [],
+    next: w.l2.id,
+    watermark: "kati@example.test",
+  });
+  const locked = await call(deps(), w.cookie, lessonPath(w.l2.id));
+  expect(locked.status).toBe(403);
+  expect(await locked.json()).toEqual({ ok: false, error: "locked", next: w.l1.id });
+});
+
+test("progress is kept at its highest; at 90 % the lesson is done and the next one opens; a done lesson starts from the beginning", async () => {
+  const w = await world();
+  const d = deps();
+  const post = (watchedSec: unknown) => call(d, w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec });
+  expect(await (await post(50)).json()).toEqual({ ok: true, done: false, next: w.l2.id });
+  expect(await (await post(20)).json()).toEqual({ ok: true, done: false, next: w.l2.id });
+  expect((await db.select().from(lessonProgress))[0].watchedSec).toBe(50);
+  expect(await (await post(89.9)).json()).toMatchObject({ done: false });
+  expect(await (await post(90)).json()).toEqual({ ok: true, done: true, next: w.l2.id });
+  expect((await call(d, w.cookie, lessonPath(w.l2.id))).status).toBe(200);
+  expect((await (await call(d, w.cookie, lessonPath(w.l1.id))).json()).video.resumeAt).toBe(0);
+});
+
+test("a lesson begun: the player starts at the saved second (t=…)", async () => {
+  const w = await world();
+  await db.insert(lessonProgress).values({ clientId: w.client.id, lessonId: w.l1.id, watchedSec: 42 });
+  const view = await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json();
+  expect(view.video.resumeAt).toBe(42);
+  expect(new URL(view.video.embedUrl).searchParams.get("t")).toBe("42");
+});
+
+test("progress refuses: no number (400), past the length + 5 s (400), a locked lesson (403), a hidden or unknown one (404), a text lesson (kind 'text', 409)", async () => {
+  const w = await world();
+  const d = deps();
+  const post = (id: number, body: unknown) => call(d, w.cookie, lessonPath(id, "/progress"), body);
+  expect(await (await post(w.l1.id, { watchedSec: "50" })).json()).toEqual({ ok: false, error: "watchedSec" });
+  const tooFar = await post(w.l1.id, { watchedSec: 106 });
+  expect(tooFar.status).toBe(400);
+  expect(await tooFar.json()).toEqual({ ok: false, error: "watchedSec" });
+  const locked = await post(w.l3.id, { watchedSec: 1 });
+  expect([locked.status, await locked.json()]).toEqual([403, { ok: false, error: "locked", next: w.l1.id }]);
+  expect((await post(w.hidden.id, { watchedSec: 1 })).status).toBe(404);
+  expect((await post(999999, { watchedSec: 1 })).status).toBe(404);
+  expect((await post(w.l1.id, { watchedSec: 105 })).status).toBe(200); // the length + 5 s is fine (and done)
+  const text = await post(w.l2.id, { watchedSec: 1 });
+  expect([text.status, await text.json()]).toEqual([409, { ok: false, error: "video" }]);
+});
+
+test("“Märgi tehtuks” is for a text lesson (kind 'text') only; it opens the next one", async () => {
+  const w = await world();
+  await db.insert(lessonProgress).values({ clientId: w.client.id, lessonId: w.l1.id, watchedSec: 100, doneAt: NOW });
+  const d = deps();
+  expect((await call(d, w.cookie, lessonPath(w.l1.id, "/tehtud"), {})).status).toBe(409);
+  expect((await (await call(d, w.cookie, lessonPath(w.l2.id))).json()).lesson).toMatchObject({ textOnly: true, done: false });
+  expect((await (await call(d, w.cookie, lessonPath(w.l2.id))).json()).video).toBeNull();
+  expect(await (await call(d, w.cookie, lessonPath(w.l2.id, "/tehtud"), {})).json()).toEqual({ ok: true, done: true, next: w.l3.id });
+  expect((await (await call(d, w.cookie, "/kursus/veebikursus")).json()).progress).toEqual({ done: 2, total: 3, next: w.l3.id });
+  expect((await call(d, w.cookie, lessonPath(w.l3.id, "/tehtud"), {})).status).toBe(409); // a video lesson is done by watching
+});
+
+test("a video lesson whose video is not uploaded or not ready: 'Video lisandub peagi'; progress and “tehtud” are 409; the next lesson stays locked", async () => {
+  const w = await world();
+  const d = deps();
+  for (const videoStatus of ["none", "uploading", "processing", "failed"] as const) {
+    await db.update(lessons).set({ videoStatus, videoId: videoStatus === "none" ? null : VIDEO_1, durationSec: null }).where(eq(lessons.id, w.l1.id));
+    const view = await (await call(d, w.cookie, lessonPath(w.l1.id))).json();
+    expect([view.video, view.lesson.textOnly], videoStatus).toEqual([{ state: "soon" }, false]);
+    expect((await call(d, w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 1 })).status, videoStatus).toBe(409);
+    expect((await call(d, w.cookie, lessonPath(w.l1.id, "/tehtud"), {})).status, videoStatus).toBe(409);
+    expect((await call(d, w.cookie, lessonPath(w.l2.id))).status, videoStatus).toBe(403);
+  }
+  expect(await db.select().from(lessonProgress)).toHaveLength(0);
+  expect((await (await call(d, w.cookie, "/kursus/veebikursus")).json()).progress).toEqual({ done: 0, total: 3, next: w.l1.id });
+});
+
+test("a lesson an admin opened is open without the one before; a hidden lesson neither counts nor blocks, and is 404", async () => {
+  const w = await world();
+  await db.insert(lessonProgress).values({ clientId: w.client.id, lessonId: w.l3.id, unlockedBy: "admin@example.test" });
+  const view = await (await call(deps(), w.cookie, "/kursus/veebikursus")).json();
+  expect(view.course.modules.flatMap((m: { lessons: { state: string }[] }) => m.lessons.map((l) => l.state))).toEqual(["current", "locked", "current"]);
+  expect((await call(deps(), w.cookie, lessonPath(w.l3.id))).status).toBe(200);
+  expect((await call(deps(), w.cookie, lessonPath(w.hidden.id))).status).toBe(404);
+});
+
+test.each([
+  ["ended", { expiresAt: new Date(NOW.getTime() - 1000) }],
+  ["revoked", { revokedAt: NOW }],
+])("access %s: every lesson endpoint answers 404", async (_, access) => {
+  const w = await world(access);
+  const d = deps();
+  expect((await call(d, w.cookie, lessonPath(w.l1.id))).status).toBe(404);
+  expect((await call(d, w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 1 })).status).toBe(404);
+  expect((await call(d, w.cookie, lessonPath(w.l2.id, "/tehtud"), {})).status).toBe(404);
+  expect((await call(d, w.cookie, lessonPath(w.l3.id, `/fail/${w.file.id}`))).status).toBe(404);
+});
+
+test("a file: 403 while its lesson is locked; open → the bytes as a download (local store) or a 302 to a 5-minute signed address (R2); another lesson's file → 404", async () => {
+  const w = await world();
+  const path = lessonPath(w.l3.id, `/fail/${w.file.id}`);
+  expect((await call(deps(), w.cookie, path)).status).toBe(403);
+  await db.insert(lessonProgress).values({ clientId: w.client.id, lessonId: w.l3.id, unlockedBy: "admin@example.test" });
+  const local = await call(deps(), w.cookie, path);
+  expect(local.status).toBe(200);
+  expect(local.headers.get("content-type")).toBe("application/pdf");
+  expect(local.headers.get("content-disposition")).toBe(`attachment; filename="Juhend.pdf"; filename*=UTF-8''Juhend.pdf`);
+  expect(local.headers.get("cache-control")).toBe("private, no-store");
+  expect([...new Uint8Array(await local.arrayBuffer())]).toEqual(PDF);
+  const signedGetUrl = vi.fn(async () => "https://r2.example/signed");
+  const r2 = await call(deps({ files: { ...fakeMediaStore(), signedGetUrl } }), w.cookie, path);
+  expect(r2.status).toBe(302);
+  expect(r2.headers.get("location")).toBe("https://r2.example/signed");
+  expect(signedGetUrl).toHaveBeenCalledWith(FILE_KEY, { expiresSec: 300 });
+  expect((await call(deps(), w.cookie, lessonPath(w.l1.id, `/fail/${w.file.id}`))).status).toBe(404);
+  expect((await call(deps({ files: null }), w.cookie, path)).status).toBe(404);
+});
+
+test("terms not accepted: the lesson answers 403 terms; once accepted it opens", async () => {
+  const w = await world();
+  await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
+  const res = await call(deps(), w.cookie, lessonPath(w.l1.id));
+  expect([res.status, await res.json()]).toEqual([403, { ok: false, error: "terms" }]);
+  await db.insert(termsAcceptances).values({ clientId: w.client.id, courseId: w.course.id, termsVersion: "1" });
+  expect((await call(deps(), w.cookie, lessonPath(w.l1.id))).status).toBe(200);
+});
+
+test("one order of checks (openLesson): a hidden lesson is 404 before anything; terms come before the lock, on the lesson page only", async () => {
+  const w = await world();
+  await db.insert(pages).values({ key: "course_terms", title: { et: "Tingimused" }, body: { et: "Ligipääs on isiklik." } });
+  const d = deps();
+  expect((await call(d, w.cookie, lessonPath(w.hidden.id))).status).toBe(404);
+  expect(await (await call(d, w.cookie, lessonPath(w.l3.id))).json()).toEqual({ ok: false, error: "terms" }); // locked too, but terms first
+  expect(await (await call(d, w.cookie, lessonPath(w.l3.id, "/progress"), { watchedSec: 1 })).json()).toEqual({ ok: false, error: "locked", next: w.l1.id });
+  expect(await (await call(d, w.cookie, lessonPath(w.l2.id, "/tehtud"), {})).json()).toEqual({ ok: false, error: "locked", next: w.l1.id });
+  expect(await (await call(d, w.cookie, lessonPath(w.l3.id, `/fail/${w.file.id}`))).json()).toEqual({ ok: false, error: "locked" });
+});
+
+test("progress: at most 12 reports a minute per student (429 after)", async () => {
+  const w = await world();
+  const d = deps();
+  for (let i = 1; i <= 12; i++) expect((await call(d, w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: i })).status).toBe(200);
+  const res = await call(d, w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 13 });
+  expect([res.status, await res.json()]).toEqual([429, { ok: false, error: "rate" }]);
+});
+
+test("no video to play yet ('Video lisandub peagi'): an upload on its way, or Bunny not set up; during a replacement the old video plays", async () => {
+  const w = await world();
+  await db.update(lessons).set({ videoStatus: "processing" }).where(eq(lessons.id, w.l1.id));
+  expect((await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json()).video).toEqual({ state: "soon" });
+  expect((await call(deps(), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 1 })).status).toBe(409);
+  await db.update(lessons).set({ videoId: "44444444-4444-4444-8444-444444444444", videoStatus: "uploading", replacedVideoId: VIDEO_1 }).where(eq(lessons.id, w.l1.id));
+  expect((await (await call(deps(), w.cookie, lessonPath(w.l1.id))).json()).video.embedUrl).toContain(`/embed/12345/${VIDEO_1}?`);
+  expect((await (await call(deps({ bunny: null }), w.cookie, lessonPath(w.l1.id))).json()).video).toEqual({ state: "soon" });
+});
+
+test("ids that cannot be ids are 404; a GET of …/progress or a POST of a lesson is 404", async () => {
+  const w = await world();
+  for (const path of ["/kursus/veebikursus/0", "/kursus/veebikursus/01", "/kursus/veebikursus/abc", `/kursus/veebikursus/${w.l1.id}/fail/x`, `/kursus/veebikursus/${w.l1.id}/progress`])
+    expect((await call(deps(), w.cookie, path)).status, path).toBe(404);
+  expect((await call(deps(), w.cookie, lessonPath(w.l1.id), {})).status).toBe(404);
+});

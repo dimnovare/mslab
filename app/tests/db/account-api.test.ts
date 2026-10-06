@@ -803,9 +803,14 @@ describe("GET /api/konto/kursus/:slug: an e-course", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.json()).toEqual({
-      course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika" }] },
+      course: {
+        slug: "veebikursus",
+        title: { et: "Veebikursus" },
+        modules: [{ id: expect.any(Number), title: { et: "Sissejuhatus" }, lessons: [] }, { id: expect.any(Number), title: { et: "Praktika" }, lessons: [] }],
+      },
       access: { expiresAt: at(180).toISOString() },
       terms: { version: "1", accepted: false, text: { et: "Ligipääs on isiklik." } },
+      progress: { done: 0, total: 0, next: null },
     });
   });
 
