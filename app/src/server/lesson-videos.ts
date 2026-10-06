@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lt, type SQL } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { courseModules, courses, lessons, type VideoStatus } from "@/db/schema";
 import { abandonUpload, settleVideo, startUpload, type VideoFields } from "@/domain/lessons";
@@ -8,7 +8,7 @@ import { deleteBunnyVideos } from "./lesson-media";
 import { logFailure } from "./log";
 
 // A lesson's Bunny video (spec 3a sections 4 and 7): the start of an upload (createLessonVideo), the status read (the editor's poll
-// every 5 s and Bunny's webhook, which is only a trigger), and the daily sweep of uploads left unfinished. What changes is decided
+// every 5 s and Bunny's webhook, which is only a trigger), and the daily sweep of uploads and processing left unfinished. What changes is decided
 // by domain/lessons.ts startUpload / settleVideo / abandonUpload; here are the database rows and the Bunny calls.
 //
 // The poll and the webhook can ask about the same video at the same moment, and Bunny takes up to 10 s to answer. So a status is
@@ -21,8 +21,13 @@ export type AdminVideo = { status: VideoStatus; durationSec: number | null; repl
 export type VideoTicketResult = { ok: true; ticket: UploadTicket } | { ok: false; error: "setup" | "notFound" | "server" };
 export type VideoCheckResult = { ok: true; video: AdminVideo } | { ok: false; error: "setup" | "notFound" | "server" };
 
-/** An upload this old is given up by the daily sweep (spec 7). */
+/** An upload (or processing) this old is given up by the daily sweep (spec 7). */
 const STUCK_MS = 24 * 3600_000;
+/**
+ * The most rows of each kind one sweep takes: the cron is one invocation a day (Vercel Hobby) with a time limit, and every row
+ * costs one or two Bunny calls of up to 10 s each. What is left waits for the next day.
+ */
+export const SWEEP_BATCH = 20;
 
 const VIDEO_COLUMNS = {
   videoId: lessons.videoId,
@@ -90,12 +95,13 @@ type VideoRow = VideoFields & { id: number };
  * Stores Bunny's answer about the row's current upload (null: Bunny does not know the video, which counts as failed), by
  * compare-and-set against `row` as it was read before Bunny was asked. Ready or failed ends the upload (its start time is cleared); ready
  * also stores the video's picture size (the two columns are in the same write, so a stale write cannot change them either).
- * The lesson's video as it is now: the new state, the row unchanged, or (another write came first) the row read again.
+ * The lesson's video as it is now: the new state, the row unchanged, or (another write came first) the row read again; `wrote` says
+ * whether this call's write is the one that changed the row.
  */
-async function storeAnswer(db: Db, api: BunnyApi, row: VideoRow, videoId: string, bunny: BunnyVideo | null): Promise<AdminVideo | null> {
+async function applyAnswer(db: Db, api: BunnyApi, row: VideoRow, videoId: string, bunny: BunnyVideo | null): Promise<{ video: AdminVideo | null; wrote: boolean }> {
   const status = bunny ? lessonVideoStatus(bunny.status) : "failed";
   const settled = settleVideo(row, videoId, status, bunny?.length ?? 0, bunny && { width: bunny.width, height: bunny.height });
-  if (!settled || sameVideo(settled.next, row)) return adminVideo(row); // nothing new (a stale or repeated answer): no write
+  if (!settled || sameVideo(settled.next, row)) return { video: adminVideo(row), wrote: false }; // nothing new (a stale or repeated answer): no write
   const done = settled.next.videoStatus === "ready" || settled.next.videoStatus === "failed";
   const written = await db
     .update(lessons)
@@ -105,11 +111,13 @@ async function storeAnswer(db: Db, api: BunnyApi, row: VideoRow, videoId: string
   if (!written.length) {
     // another write came first (the webhook and the poll at once, a new upload, Tekst): it stands, and it did the deleting
     const [now] = await db.select(VIDEO_COLUMNS).from(lessons).where(eq(lessons.id, row.id)).limit(1);
-    return now ? adminVideo(now) : null;
+    return { video: now ? adminVideo(now) : null, wrote: false };
   }
   await deleteBunnyVideos(api, settled.obsolete);
-  return adminVideo(settled.next);
+  return { video: adminVideo(settled.next), wrote: true };
 }
+
+const storeAnswer = async (db: Db, api: BunnyApi, row: VideoRow, videoId: string, bunny: BunnyVideo | null) => (await applyAnswer(db, api, row, videoId, bunny)).video;
 
 /**
  * Reads the status of a lesson's current upload from Bunny's API and stores it. The lesson is named by its id (the editor's poll)
@@ -129,14 +137,15 @@ export async function refreshLessonVideo(db: Db, api: BunnyApi, target: { lesson
  * The daily cron's part (spec 7): uploads still "uploading" more than 24 h after they began. Bunny is asked first: an upload that
  * did arrive (nobody asked since: the editor was closed at once and no webhook came) is settled like any status read. One that never
  * arrived is deleted from Bunny, and the lesson gets its replaced video back, or has none again. A Bunny failure leaves the row for
- * the next day. Answers the number of lessons reset.
+ * the next day. At most SWEEP_BATCH rows a run. Answers the number of lessons reset.
  */
 export async function sweepStuckUploads(db: Db, api: BunnyApi, now: Date): Promise<number> {
   const stuck = await db
     .select({ id: lessons.id, ...VIDEO_COLUMNS })
     .from(lessons)
     .where(and(eq(lessons.videoStatus, "uploading"), lt(lessons.videoStartedAt, new Date(now.getTime() - STUCK_MS))))
-    .orderBy(asc(lessons.id));
+    .orderBy(asc(lessons.id))
+    .limit(SWEEP_BATCH);
   let swept = 0;
   for (const row of stuck) {
     try {
@@ -155,6 +164,43 @@ export async function sweepStuckUploads(db: Db, api: BunnyApi, now: Date): Promi
       swept += reset.length;
     } catch (e) {
       logFailure("[video] stuck upload not swept", e);
+    }
+  }
+  return swept;
+}
+
+/** What the sweep of stuck processing did: videos found ready (or in Bunny's own error state, counted under failed), and videos given up. */
+export type ProcessingSweep = { ready: number; failed: number };
+
+/**
+ * The daily cron's second part: videos still "processing" more than 24 h after their upload began (spec 7). Nobody asked Bunny
+ * since (the editor was closed, no webhook came), or Bunny's encoding hangs; either way the editor has no replace button while a
+ * video is processing, so without this the lesson would wait for ever. Bunny is asked first and its answer is stored like any
+ * status read (settleVideo, compare-and-set): ready is kept (its replaced video is deleted, as on any ready), Bunny's own error or
+ * a video it does not know is failed. A video Bunny still has as processing after a day (or one it calls ready but without a
+ * usable length) is given up as failed: the editor then offers "Lae uuesti üles", and the retry deletes the stale video from Bunny.
+ * A failed upload never deletes a replaced video: it keeps playing. A ready video is never touched (only "processing" rows are read,
+ * and a write only goes through while the row is as it was read). A Bunny failure leaves the row for the next day. At most `limit`
+ * rows a run, the oldest first. The counts are of the rows THIS run changed.
+ */
+export async function sweepStuckProcessing(db: Db, api: BunnyApi, now: Date, limit: number = SWEEP_BATCH): Promise<ProcessingSweep> {
+  const stuck = await db
+    .select({ id: lessons.id, ...VIDEO_COLUMNS })
+    .from(lessons)
+    .where(and(eq(lessons.videoStatus, "processing"), isNotNull(lessons.videoId), lt(lessons.videoStartedAt, new Date(now.getTime() - STUCK_MS))))
+    .orderBy(asc(lessons.videoStartedAt), asc(lessons.id))
+    .limit(limit);
+  const swept: ProcessingSweep = { ready: 0, failed: 0 };
+  for (const row of stuck) {
+    if (!row.videoId) continue; // (never: the query asks for a video id)
+    try {
+      let answer = await applyAnswer(db, api, row, row.videoId, await api.getVideo(row.videoId));
+      // still processing a day on, or an answer that is no use: given up (the same write as for a video Bunny does not know)
+      if (answer.video?.status === "processing") answer = await applyAnswer(db, api, row, row.videoId, null);
+      if (answer.wrote && answer.video?.status === "ready") swept.ready += 1;
+      else if (answer.wrote && answer.video?.status === "failed") swept.failed += 1;
+    } catch (e) {
+      logFailure("[video] stuck processing video not swept", e);
     }
   }
   return swept;
