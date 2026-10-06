@@ -561,6 +561,27 @@ export const et = {
       termsFailed: "Ei õnnestunud salvestada. Proovi uuesti.",
       access: "Ligipääs kuni {date}",
       soon: "Sisu lisandub peagi.",
+      resume: "Jätka",
+      lockedHint: "Avaneb, kui eelmine õppetund on tehtud.",
+    },
+    // one lesson /konto/kursus/<slug>/<lesson> (components/account/LessonPage.tsx, LessonPlayer.tsx): one button, "Järgmine õppetund"
+    // (or "Märgi tehtuks" in its place while a text lesson is not done), and a quiet way back. {name} is a file's name, {title} the lesson's.
+    lesson: {
+      back: "Tagasi koolitusele",
+      next: "Järgmine õppetund",
+      files: "Failid",
+      download: "Lae alla",
+      downloadFile: "Lae alla: {name}",
+      soon: "Video lisandub peagi",
+      videoError: "Video ei lae. Proovi hiljem uuesti.",
+      done: "Õppetund tehtud ✓",
+      markDone: "Märgi tehtuks",
+      saving: "Salvestan…",
+      failed: "Ei õnnestunud salvestada. Proovi uuesti.",
+      notFound: "Seda õppetundi ei leitud.",
+      fullscreen: "Täisekraan",
+      exitFullscreen: "Välju täisekraanist",
+      video: "Video: {title}",
     },
     // "Lemmikud" /konto/lemmikud (components/account/FavouritesTab.tsx): the hearted courses as the catalogue's cards, each with ♡ to
     // take it off. {title} is a course's title (the button's name for a screen reader, and what was taken off).
