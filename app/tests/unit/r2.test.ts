@@ -197,6 +197,15 @@ describe("a body that never finishes cancelling does not hold the answer back", 
     expect(err.status).toBe(403);
   });
 
+  test("delete: a 2xx and a 404 are done and a 403 an R2Error, at once (a 204 has no body: any 2xx stands for it)", async () => {
+    await within(r2Store(CONFIG, fakeFetch(() => stuck(200)).fetch).delete(KEY));
+    await within(r2Store(CONFIG, fakeFetch(() => stuck(404)).fetch).delete(KEY));
+    const err = await within(r2Store(CONFIG, fakeFetch(() => stuck(403)).fetch).delete(KEY).catch((e) => e));
+    expect(err).toBeInstanceOf(R2Error);
+    expect(err.status).toBe(403);
+    expect(errorSummary(err)).toBe("R2Error (status 403)");
+  });
+
   test("a body that refuses to cancel (a rejected cancel) is no failure either", async () => {
     const body = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new Uint8Array([1])), cancel: () => Promise.reject(new Error("no")) });
     expect(await within(r2Store(CONFIG, fakeFetch(() => new Response(body, { status: 404 })).fetch).get(KEY))).toBeNull();
@@ -287,6 +296,34 @@ describe("inside Next.js's fetch (a route handler)", () => {
     expect(errorSummary(err)).toBe("R2Error (status 403)");
   });
 
+  test("a DELETE (R2's 204, or 404 for a key that is gone) is done at once: a signed request with the time limit", async () => {
+    for (const status of [204, 404]) {
+      const { seen, fetch } = fakeFetch(() => new Response(status === 404 ? "<Error><Code>NoSuchKey</Code></Error>" : null, { status }));
+      await within(inRoute(() => r2Store(CONFIG, nextFetch(fetch)).delete(KEY)));
+      expect(seen).toHaveLength(1);
+      const { request, signal } = seen[0];
+      expect(request.method).toBe("DELETE");
+      expect(request.url).toBe(URL_OF_KEY);
+      expect(signatureIsValid(request, CONFIG.secretAccessKey)).toBe(true);
+      expect(signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  test("a DELETE refused (R2's 403) is an R2Error at once", async () => {
+    const { fetch } = fakeFetch(() => new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403 }));
+    const err = await within(inRoute(() => r2Store(CONFIG, nextFetch(fetch)).delete(KEY)).catch((e) => e));
+    expect(err).toBeInstanceOf(R2Error);
+    expect(err.status).toBe(403);
+    expect(errorSummary(err)).toBe("R2Error (status 403)");
+  });
+
+  test("a PUT with a Content-Disposition (a lesson file) still reaches R2 with its header, signed", async () => {
+    const { seen, fetch } = fakeFetch(() => new Response(null, { status: 200 }));
+    await within(inRoute(() => r2Store(CONFIG, nextFetch(fetch)).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "application/pdf", 'attachment; filename="a.pdf"')));
+    expect(seen[0].request.headers.get("content-disposition")).toBe('attachment; filename="a.pdf"');
+    expect(signatureIsValid(seen[0].request, CONFIG.secretAccessKey)).toBe(true);
+  });
+
   test("an R2 that never answers is given up after 10 s (an AbortError: the route's 500)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
@@ -328,3 +365,89 @@ describe("inside Next.js's fetch (a route handler)", () => {
     ).toBe(true);
   });
 });
+
+describe("delete and the signed address of one object (lesson files)", () => {
+  test("delete: a signed DELETE of the key; 204 and 404 are fine, 403 is an R2Error", async () => {
+    const { seen, fetch } = fakeFetch(() => new Response(null, { status: 204 }));
+    await r2Store(CONFIG, fetch).delete(KEY);
+    expect(seen[0].request.method).toBe("DELETE");
+    expect(seen[0].request.url).toBe(URL_OF_KEY);
+    expect(seen[0].request.headers.get("authorization")).toMatch(/^AWS4-HMAC-SHA256 Credential=/);
+    await r2Store(CONFIG, fakeFetch(() => new Response(null, { status: 404 })).fetch).delete(KEY);
+    await expect(r2Store(CONFIG, fakeFetch(() => new Response(null, { status: 403 })).fetch).delete(KEY)).rejects.toThrow(new R2Error("delete", 403));
+  });
+
+  test("put with a disposition sends it as Content-Disposition (kept with the object; the signed GET answers with it)", async () => {
+    const { seen, fetch } = fakeFetch();
+    await r2Store(CONFIG, fetch).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "application/pdf", 'attachment; filename="a.pdf"');
+    expect(seen[0].request.headers.get("content-disposition")).toBe('attachment; filename="a.pdf"');
+  });
+
+  test("the disposition is signed with the request (the signature fails without it), and without one no such header is sent", async () => {
+    const withDisposition = fakeFetch();
+    await r2Store(CONFIG, withDisposition.fetch).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "application/pdf", 'attachment; filename="a.pdf"');
+    const { request, body } = withDisposition.seen[0];
+    expect(signatureIsValid(request, CONFIG.secretAccessKey)).toBe(true);
+    expect(/SignedHeaders=([^,]+)/.exec(request.headers.get("authorization")!)![1].split(";")).toContain("content-disposition");
+    const headers = new Headers(request.headers);
+    headers.set("content-disposition", "attachment; filename=\"other.pdf\"");
+    expect(signatureIsValid(new Request(request.url, { method: "PUT", headers, body }), CONFIG.secretAccessKey)).toBe(false);
+    const without = fakeFetch();
+    await r2Store(CONFIG, without.fetch).put(KEY, JPEG.buffer.slice(0) as ArrayBuffer, "image/jpeg");
+    expect(without.seen[0].request.headers.get("content-disposition")).toBeNull();
+  });
+
+  test("delete is signed like the other calls (valid for its secret and no other)", async () => {
+    const { seen, fetch } = fakeFetch(() => new Response(null, { status: 204 }));
+    await r2Store(CONFIG, fetch).delete(KEY);
+    expect(signatureIsValid(seen[0].request, CONFIG.secretAccessKey)).toBe(true);
+    expect(signatureIsValid(seen[0].request, "another-secret")).toBe(false);
+  });
+
+  test("signedGetUrl: a presigned GET for 300 s (query signature over the host), made without any request", async () => {
+    const { seen, fetch } = fakeFetch();
+    const href = await r2Store(CONFIG, fetch).signedGetUrl!(KEY, { expiresSec: 300 });
+    expect(seen).toHaveLength(0);
+    const url = new URL(href);
+    expect(`${url.origin}${url.pathname}`).toBe(URL_OF_KEY);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("300");
+    expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+    expect(url.searchParams.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
+    expect(presignIsValid(href, CONFIG.secretAccessKey)).toBe(true);
+    expect(presignIsValid(href, "another-secret")).toBe(false);
+  });
+
+  test("signedGetUrl: any key is encoded per segment, the expiry is the one asked for, the secret is not in the address, and it is not valid for another path", async () => {
+    const { fetch } = fakeFetch();
+    const href = await r2Store(CONFIG, fetch).signedGetUrl!("lessons/a b.pdf", { expiresSec: 60 });
+    const url = new URL(href);
+    expect(url.pathname).toBe(`/${CONFIG.bucket}/lessons/a%20b.pdf`);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("60");
+    expect(href).not.toContain(CONFIG.secretAccessKey);
+    expect(presignIsValid(href, CONFIG.secretAccessKey)).toBe(true);
+    const other = new URL(href);
+    other.pathname = `/${CONFIG.bucket}/lessons/other.pdf`;
+    expect(presignIsValid(other.toString(), CONFIG.secretAccessKey)).toBe(false);
+  });
+});
+
+/** RFC 3986 encoding as SigV4 wants it. */
+const enc = (s: string) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+
+/** An independent check of a presigned (query-signed) GET, written from the AWS SigV4 documentation, not aws4fetch. */
+function presignIsValid(href: string, secret: string): boolean {
+  const url = new URL(href);
+  const q = url.searchParams;
+  const m = /^[^/]+\/(\d{8})\/auto\/s3\/aws4_request$/.exec(q.get("X-Amz-Credential") ?? "");
+  if (!m) return false;
+  const canonicalQuery = [...q]
+    .filter(([k]) => k !== "X-Amz-Signature")
+    .map(([k, v]) => [enc(k), enc(v)])
+    .sort(([a, x], [b, y]) => (a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+  const canonicalRequest = ["GET", url.pathname, canonicalQuery, `host:${url.host}\n`, "host", "UNSIGNED-PAYLOAD"].join("\n");
+  const stringToSign = ["AWS4-HMAC-SHA256", q.get("X-Amz-Date"), `${m[1]}/auto/s3/aws4_request`, sha256hex(canonicalRequest)].join("\n");
+  const signingKey = ["auto", "s3", "aws4_request"].reduce((key, part) => hmac(key, part), hmac(`AWS4${secret}`, m[1]));
+  return hmac(signingKey, stringToSign).toString("hex") === q.get("X-Amz-Signature");
+}

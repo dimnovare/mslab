@@ -1,10 +1,11 @@
 import { AwsV4Signer } from "aws4fetch";
-import type { MediaStore } from "./media";
+import type { FileStore } from "./media";
 
 // Cloudflare R2 through its S3-compatible API: signed requests (AWS Signature V4, region "auto", service "s3") to
 // https://<account id>.r2.cloudflarestorage.com/<bucket>/<key>, made with aws4fetch (a small signer that needs no AWS
 // SDK, and uses the platform's fetch). The credentials are an R2 API token's access key id and secret (server/env.ts:
-// R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET). The bucket is private: /media is its only reader.
+// R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET). The bucket is private: /media (img/ keys) and the signed
+// addresses of the lesson files (lessons/ keys, server/lesson-files.ts) are its only readers.
 
 export type R2Config = { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string };
 
@@ -15,7 +16,7 @@ export type R2Config = { accountId: string; accessKeyId: string; secretAccessKey
  */
 export class R2Error extends Error {
   constructor(
-    readonly op: "put" | "get",
+    readonly op: "put" | "get" | "delete",
     readonly status: number,
   ) {
     super(`R2 ${op} answered ${status}`);
@@ -45,10 +46,10 @@ function discard(res: Response): void {
 }
 
 /**
- * The image store on R2. `fetchImpl` is the platform's fetch (it is looked up at each call); tests pass a fake that
- * records the signed request.
+ * The file store on R2: the images and the lesson files. `fetchImpl` is the platform's fetch (it is looked up at each call);
+ * tests pass a fake that records the signed request.
  */
-export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init) => fetch(input, init)): MediaStore {
+export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init) => fetch(input, init)): FileStore {
   const urlOf = (key: string) => `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
   // Only aws4fetch's signer is used: its AwsClient.fetch() would retry up to 10 times with growing pauses, far longer than
@@ -60,7 +61,7 @@ export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init
   // other branch, so it never finished and /media never answered. A signal in the init is Next.js's opt-out of that
   // deduplication. The bodies that are only thrown away are not awaited either (discard): no tee or wrapper can hold an
   // answer back again.
-  async function send(key: string, init: { method: "GET" | "PUT"; headers?: Record<string, string>; body?: ArrayBuffer }): Promise<Response> {
+  async function send(key: string, init: { method: "GET" | "PUT" | "DELETE"; headers?: Record<string, string>; body?: ArrayBuffer }): Promise<Response> {
     if (signingKeys.size > MAX_SIGNING_KEYS) signingKeys.clear();
     const signer = new AwsV4Signer({ ...init, url: urlOf(key), accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, service: "s3", region: "auto", cache: signingKeys });
     const signed = await signer.sign();
@@ -74,11 +75,11 @@ export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init
   }
 
   return {
-    async put(key, bytes, contentType) {
+    async put(key, bytes, contentType, disposition) {
       // aws4fetch signs an S3 request without its body ("UNSIGNED-PAYLOAD") unless it is given the hash; with it the
       // signature covers the bytes, and R2 refuses an upload whose bytes do not match.
       const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
-      const res = await send(key, { method: "PUT", body: bytes, headers: { "content-type": contentType, "x-amz-content-sha256": sha256 } });
+      const res = await send(key, { method: "PUT", body: bytes, headers: { "content-type": contentType, "x-amz-content-sha256": sha256, ...(disposition ? { "content-disposition": disposition } : {}) } });
       discard(res);
       if (!res.ok) throw new R2Error("put", res.status);
     },
@@ -89,6 +90,22 @@ export function r2Store(config: R2Config, fetchImpl: typeof fetch = (input, init
       discard(res);
       if (res.status === 404) return null; // NoSuchKey
       throw new R2Error("get", res.status);
+    },
+
+    async delete(key) {
+      const res = await send(key, { method: "DELETE" });
+      discard(res);
+      if (!res.ok && res.status !== 404) throw new R2Error("delete", res.status);
+    },
+
+    // A presigned GET (query signature, X-Amz-Expires): made here, no request. R2 answers it with the object's stored type and
+    // Content-Disposition.
+    async signedGetUrl(key, { expiresSec }) {
+      if (signingKeys.size > MAX_SIGNING_KEYS) signingKeys.clear();
+      const url = new URL(urlOf(key));
+      url.searchParams.set("X-Amz-Expires", String(expiresSec));
+      const signer = new AwsV4Signer({ method: "GET", url: url.toString(), accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, service: "s3", region: "auto", signQuery: true, cache: signingKeys });
+      return (await signer.sign()).url.toString();
     },
   };
 }

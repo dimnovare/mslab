@@ -129,6 +129,18 @@ describe("GET /media/<key>", () => {
     expect(fake.requested).toEqual([]);
   });
 
+  test("a lesson file (lessons/<uuid>.<ext>) is private: 404 from /media though the object exists, and the store is not asked", async () => {
+    const fake = fakeMediaStore({ [`lessons/${ID}.pdf`]: { bytes: JPEG, contentType: "application/pdf" }, [`lessons/${ID}.jpg`]: { bytes: JPEG, contentType: "image/jpeg" } });
+    store.current = fake;
+    for (const key of [`lessons/${ID}.pdf`, `lessons/${ID}.jpg`]) {
+      const res = await media(key);
+      expect(res.status, key).toBe(404);
+      expect(res.headers.get("cache-control"), key).toBe("no-store");
+      expect(await res.text(), key).toBe("Not found");
+    }
+    expect(fake.requested).toEqual([]);
+  });
+
   test("no store (production without R2): 404 for everything, not an error page", async () => {
     store.current = null;
     const res = await media(`img/${ID}.jpg`);

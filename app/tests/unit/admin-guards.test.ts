@@ -80,6 +80,7 @@ describe("admin guards are inherited by every admin entry point", () => {
         // Task 13: the course editor page, the image upload and the content editors' actions
         "app/admin/(panel)/koolitused/[id]/page.tsx",
         "app/api/admin/upload/route.ts",
+        "app/api/admin/lesson-file/route.ts",
         "server/actions/admin-content.ts",
         // Task 13B: the post editor and the site content editors' actions
         "app/admin/(panel)/uudised/[id]/page.tsx",
@@ -103,7 +104,7 @@ describe("admin guards are inherited by every admin entry point", () => {
 
   test("every route under app/api/admin and app/admin is wrapped (the CSV export, and the future ones)", () => {
     const routes = files().filter((f) => /^app\/(api\/)?admin\/(.*\/)?route\.tsx?$/.test(f.path));
-    expect(routes.map((r) => r.path)).toEqual(expect.arrayContaining(["app/api/admin/subscribers.csv/route.ts", "app/api/admin/upload/route.ts"]));
+    expect(routes.map((r) => r.path)).toEqual(expect.arrayContaining(["app/api/admin/subscribers.csv/route.ts", "app/api/admin/upload/route.ts", "app/api/admin/lesson-file/route.ts"]));
     for (const r of routes) expect(violations(r.path, r.source), r.path).toEqual([]);
   });
 
@@ -131,9 +132,11 @@ describe("admin guards are inherited by every admin entry point", () => {
     expect([...strip(clients.source).matchAll(/export\s+(?:const|let|var|async\s+function|function|class|default)\s*(\w*)/g)].map((m) => m[1])).toEqual(clientExports);
   });
 
-  test("the image upload is an admin route; /media only reads (anyone may see a published image)", () => {
+  test("the image and lesson file uploads are admin routes; /media only reads (anyone may see a published image)", () => {
     const upload = files().find((f) => f.path === "app/api/admin/upload/route.ts")!;
     expect(strip(upload.source)).toMatch(/export\s+const\s+POST\s*=\s*withAdmin\(/);
+    const lessonFile = files().find((f) => f.path === "app/api/admin/lesson-file/route.ts")!;
+    expect(strip(lessonFile.source)).toMatch(/export\s+const\s+POST\s*=\s*withAdmin\(/);
     const media = files().find((f) => f.path === "app/media/[...key]/route.ts")!;
     expect(strip(media.source)).toMatch(/serveMedia\(/);
     expect(strip(media.source)).not.toMatch(/\.put\(|putImage|POST|DELETE/);

@@ -1,5 +1,5 @@
 import { serverEnv, type ServerEnv } from "./env";
-import type { MediaStore } from "./media";
+import type { FileStore } from "./media";
 import { localStore } from "./media-local";
 import { r2Store } from "./r2";
 
@@ -22,7 +22,7 @@ const R2_VARIABLES = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY
 const shared = globalThis as typeof globalThis & { __mslabMediaNotes?: Set<string> };
 
 /** The store to use, or null when there is none. `env`, `production` and `localDir` are for the tests. */
-export function mediaStore(env: R2Env = serverEnv(), production: boolean = process.env.NODE_ENV === "production", localDir?: string): MediaStore | null {
+export function mediaStore(env: R2Env = serverEnv(), production: boolean = process.env.NODE_ENV === "production", localDir?: string): FileStore | null {
   const missing = R2_VARIABLES.filter((name) => !env[name]);
   if (missing.length === 0) return r2Store({ accountId: env.R2_ACCOUNT_ID!, accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY!, bucket: env.R2_BUCKET! });
   if (missing.length < R2_VARIABLES.length) {
