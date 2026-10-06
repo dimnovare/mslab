@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Icon, type IconName } from "@/components/site/Icon";
 import lists from "@/components/site/CourseLists.module.css";
 import ui from "@/components/site/ui.module.css";
@@ -51,6 +51,7 @@ export function EcourseView({
 }) {
   // read once: the page does not fold or unfold modules under the student's hand when the window changes
   const [wide] = useState(() => readOnly || (typeof window !== "undefined" && window.matchMedia(WIDE).matches));
+  const progressId = useId();
   const { slug } = data.course;
   const { done, total, next } = data.progress;
   const lessonHref = (id: number) => href(locale, `/konto/kursus/${slug}/${id}`);
@@ -73,10 +74,11 @@ export function EcourseView({
       </p>
       {total > 0 && (
         <div className={styles.progress}>
-          <p className={styles.count} data-ecourse-progress="">
+          <p id={progressId} className={styles.count} data-ecourse-progress="">
             {progressText}
           </p>
-          <div className={styles.bar} role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label={progressText}>
+          {/* named by the line above (not a second copy of its text) */}
+          <div className={styles.bar} role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-labelledby={progressId}>
             <span style={{ width: `${(done / total) * 100}%` }} />
           </div>
           {next !== null &&
@@ -114,9 +116,10 @@ export function EcourseView({
                 <details className={styles.fold} open={wide || m.lessons.some((l) => l.id === next)}>
                   <summary className={`${styles.head} ${styles.summary}`}>
                     {head}
-                    <span className={styles.tally}>
+                    <span className={styles.tally} aria-hidden="true">
                       {doneHere}/{m.lessons.length}
                     </span>
+                    <span className={ui.srOnly}>{fill(t.moduleProgress, { done: doneHere, total: m.lessons.length })}</span>
                   </summary>
                   <ol className={styles.lessons}>
                     {m.lessons.map((l) => {

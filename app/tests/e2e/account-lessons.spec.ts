@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
-import { clientEmail, insertClient, signInAsClient, takeTerms } from "./account";
+import { clientEmail, endClientSessions, insertClient, signInAsClient, takeTerms } from "./account";
 import { E2E_BUNNY } from "./bunny-values";
-import { LOCK_WAIT_MS, removeClientRows } from "./fixtures";
+import { LOCK_WAIT_MS, onLocalDb, removeClientRows } from "./fixtures";
 import { dropVideo, insertLessonCourse, markDone, removeLessonFile, setVideoShape, type LessonCourse } from "./lessons";
 import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
@@ -10,7 +10,7 @@ import { submitsForms, test, expect } from "./test";
 // in the frame): the course page with its progress, "Alusta" / "Jätka", the lessons' states and the lock sentence; a locked lesson's
 // page; a video lesson played to the end (done, "Järgmine õppetund"), with the e-mail over the picture and the lesson never loaded
 // again meanwhile; a text lesson with its file ("Lae alla": the student's own, nobody else's) and "Märgi tehtuks"; a video lesson
-// whose video is not uploaded yet, which nothing can complete; the phone (folded modules, 44 px targets, the player's window-filling
+// whose video is not uploaded yet, which nothing can complete; a session ended by another device while a lesson is open; the phone (folded modules, 44 px targets, the player's window-filling
 // fallback inside the account's frame); the player and its "Täisekraan" button within the window; Russian. Clients are sample
 // addresses (`e2e-client-…@example.test`, never mailed) with rows written straight to the local database (lessons.ts). The lesson
 // API checks the course terms, shared by every client, so each test takes them (takeTerms: version "1") and gives them back.
@@ -227,6 +227,31 @@ test("a text lesson and its file: 'Lae alla' downloads Juhend.pdf for her and no
   await expect(page).toHaveURL(new RegExp(`${lessonPath(c, c.lessons.last)}$`));
   await expect(page.locator("[data-lesson-module]")).toHaveText("Edasi");
   await expect(lessonPage(page).getByRole("heading", { level: 1 })).toHaveText("Kolmas tund");
+});
+
+test("another device signs in while a lesson is open: 'Märgi tehtuks', or the video's report, ends in 'Sinu konto avati teises seadmes', not an endless 'Proovi uuesti'", async ({ page }, info) => {
+  const c = await student(page, "les-ended", info.project.name);
+  await markDone(c.clientId, c.lessons.video);
+  const replaced = page.locator("[data-account-state='replaced']");
+
+  // the text lesson: the press is answered 401, the page asks again and says so
+  await page.goto(lessonPath(c, c.lessons.text));
+  await expect(page.locator("[data-mark-done]")).toBeVisible();
+  await endClientSessions(c.clientId);
+  await page.locator("[data-mark-done]").click();
+  await expect(replaced.getByRole("heading", { level: 1 })).toHaveText("Sinu konto avati teises seadmes");
+  await expect(replaced.getByRole("link")).toHaveText(["Saada uus kood"]);
+  await expect(page.getByText("Ei õnnestunud salvestada. Proovi uuesti.")).toHaveCount(0);
+
+  // the video lesson: the player's report is answered 401, the page says the same
+  await signInAsClient(page, c.email);
+  await onLocalDb((sql) => sql`delete from lesson_progress where client_id = ${c.clientId}`, { marksPages: false });
+  await page.goto(lessonPath(c, c.lessons.video));
+  await playerListens(page);
+  await endClientSessions(c.clientId);
+  await page.frameLocator("[data-player] iframe").getByRole("button", { name: "Mängi lõpuni" }).click();
+  await expect(replaced.getByRole("heading", { level: 1 })).toHaveText("Sinu konto avati teises seadmes");
+  await expect(page.locator("[data-player]")).toHaveCount(0);
 });
 
 test("a video lesson whose video is not uploaded yet: 'Video lisandub peagi', no button, nothing completes it, and the next lesson stays locked", async ({ page }, info) => {

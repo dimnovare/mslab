@@ -505,6 +505,7 @@ export const ru: Dict = {
       progress: "Пройдено уроков: {done} / {total}",
       stateDone: "Пройден",
       stateCurrent: "Открыт",
+      moduleProgress: "Пройдено: {done} / {total}",
     },
     lesson: {
       back: "Назад к\u00a0курсу",

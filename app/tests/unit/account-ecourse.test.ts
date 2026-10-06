@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
@@ -394,6 +396,12 @@ describe("accepting", () => {
 });
 
 describe("the course view (phase 3a: progress and lessons)", () => {
+  test("the module's round mark is a picture only: its alternative text is empty (after the plain fallback line)", () => {
+    const css = readFileSync(join(process.cwd(), "src/components/account/EcourseView.module.css"), "utf8");
+    expect(css).toMatch(/content: "\+";\s*content: "\+" \/ "";/);
+    expect(css).toMatch(/content: "−";\s*content: "−" \/ "";/);
+  });
+
   /** The page with the terms accepted and this course data. */
   const open = async (over: Parameters<typeof view>[0] = {}, locale: Locale = "et") => {
     fetchMock.mockImplementation(async () => json(200, view({ accepted: true, ...over })));
@@ -414,7 +422,11 @@ describe("the course view (phase 3a: progress and lessons)", () => {
     expect(bar.getAttribute("aria-valuenow")).toBe("1");
     expect(bar.getAttribute("aria-valuemin")).toBe("0");
     expect(bar.getAttribute("aria-valuemax")).toBe("4");
-    expect(bar.getAttribute("aria-label")).toBe("1 / 4 õppetundi tehtud");
+    // named by the visible line (no second copy of its text for a screen reader)
+    const line = $("[data-ecourse-progress]")!;
+    expect(line.id).not.toBe("");
+    expect(bar.getAttribute("aria-labelledby")).toBe(line.id);
+    expect(bar.hasAttribute("aria-label")).toBe(false);
     expect((bar.firstElementChild as HTMLElement).style.width).toBe("25%");
     const next = $("[data-ecourse-next]")!;
     expect(next.tagName).toBe("A");
@@ -473,6 +485,11 @@ describe("the course view (phase 3a: progress and lessons)", () => {
     expect(details(2).open).toBe(false);
     expect(details(1).querySelector("summary")?.textContent).toContain("1/2");
     expect(details(2).querySelector("summary")?.textContent).toContain("0/2");
+    // the count as words for a screen reader; the short "1/2" is for the eye only
+    const tally = (id: number) => [...details(id).querySelectorAll("summary span")];
+    expect(tally(1).find((s) => s.textContent === "1/2")?.getAttribute("aria-hidden")).toBe("true");
+    expect(tally(1).map((s) => s.textContent)).toContain("1 / 2 tehtud");
+    expect(tally(2).map((s) => s.textContent)).toContain("0 / 2 tehtud");
     await act(async () => root.unmount());
     root = createRoot(container);
     screen(true);
@@ -528,6 +545,7 @@ describe("the course view (phase 3a: progress and lessons)", () => {
     expect($("[data-ecourse-next]")?.getAttribute("href")).toBe("/ru/konto/kursus/veebikursus/12");
     expect(lesson(12)?.querySelector("a")?.getAttribute("href")).toBe("/ru/konto/kursus/veebikursus/12");
     expect($("[data-locked-hint]")?.textContent).toBe("Откроется, когда предыдущий урок будет пройден.");
+    expect([...document.querySelectorAll("[data-module='1'] summary span")].map((s) => s.textContent)).toContain("Пройдено: 1 / 2");
     await act(async () => root.unmount());
     root = createRoot(container);
     await open({ progress: { ...PROGRESS, done: 0 } }, "ru");

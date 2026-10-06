@@ -18,7 +18,7 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-type PlayerProps = { video: { embedUrl: string }; done: boolean; onProgress(answer: { done: boolean; next: number | null }): void };
+type PlayerProps = { video: { embedUrl: string }; done: boolean; onProgress(answer: { done: boolean; next: number | null }): void; onSessionEnd?(): void };
 /** The props of the player stand-in at its last render, and how many times one was mounted. */
 const player = vi.hoisted(() => ({ props: null as PlayerProps | null, mounts: 0 }));
 
@@ -134,7 +134,8 @@ describe("a video lesson", () => {
     await mount();
     const done = $("[data-lesson-done]")!;
     expect(done.textContent).toBe("Õppetund tehtud ✓");
-    expect(done.getAttribute("role")).toBe("status");
+    expect(done.parentElement?.getAttribute("role")).toBe("status"); // inside the status region
+    expect(done.parentElement?.hasAttribute("data-lesson-status")).toBe(true);
     expect(player.props?.done).toBe(true);
     const next = nextButton()!;
     expect(next.tagName).toBe("A");
@@ -162,11 +163,18 @@ describe("a video lesson", () => {
     answer(view());
     await mount();
     expect(player.mounts).toBe(1);
+    // the status region is in the page before the lesson is done, empty; the done line comes into it
+    const status = $("[data-lesson-actions] [role=status]")!;
+    expect(status).not.toBeNull();
+    expect(status.textContent).toBe("");
     await act(async () => player.props!.onProgress({ done: false, next: 8 }));
     expect($("[data-lesson-done]")).toBeNull();
     expect(nextButton()?.getAttribute("aria-disabled")).toBe("true");
     await act(async () => player.props!.onProgress({ done: true, next: 9 }));
     expect($("[data-lesson-done]")?.textContent).toBe("Õppetund tehtud ✓");
+    expect($("[data-lesson-actions] [role=status]")).toBe(status); // the same region, now holding the line
+    expect(status.textContent).toBe("Õppetund tehtud ✓");
+    expect(document.activeElement).not.toBe($("[data-lesson-done]")); // she is watching: the focus stays where it was
     expect(nextButton()?.getAttribute("href")).toBe("/konto/kursus/veebikursus/9");
     expect(player.props?.done).toBe(true);
     // a later answer without a next lesson keeps the one the page knows
@@ -175,6 +183,19 @@ describe("a video lesson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // the lesson was not asked for again
     expect(player.mounts).toBe(1); // the same player: the video plays on
     expect($("[data-player-mock]")?.getAttribute("data-player-mock")).toBe(EMBED);
+  });
+
+  test("the session ended while she watches (a report answered 401): the page asks again and says another device signed in", async () => {
+    let loads = 0;
+    fetchMock.mockImplementation(async () => (++loads === 1 ? json(200, view()) : json(401, { ok: false, reason: "replaced" })));
+    await mount();
+    expect(player.props?.onSessionEnd).toBeTypeOf("function");
+    await act(async () => player.props!.onSessionEnd!());
+    await settle();
+    expect(loads).toBe(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/konto/kursus/veebikursus/7");
+    expect($("[data-account-state='replaced'] h1")?.textContent).toBe("Sinu konto avati teises seadmes");
+    expect($("[data-lesson-page]")).toBeNull();
   });
 
   test("no lesson is asked for again when the tab comes back into view", async () => {
@@ -280,6 +301,35 @@ describe("a text lesson", () => {
     expect($("[data-lesson-done]")?.textContent).toBe("Õppetund tehtud ✓");
     expect($("[data-lesson-actions] [role=alert]")?.textContent ?? "").toBe("");
     expect(nextButton()?.getAttribute("href")).toBe("/konto/kursus/veebikursus/8"); // an answer without a next lesson keeps the page's
+  });
+
+  test("'Märgi tehtuks' answered 401 (another device signed in meanwhile): the page asks again and says so, not 'Proovi uuesti'", async () => {
+    let loads = 0;
+    fetchMock.mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") return json(401, { ok: false, reason: "replaced" });
+      return ++loads === 1 ? json(200, textLesson()) : json(401, { ok: false, reason: "replaced" });
+    });
+    await mount();
+    await act(async () => markDone()!.click());
+    await settle();
+    expect(posts()).toHaveLength(1);
+    expect(loads).toBe(2); // the page's data asked for again
+    expect($("[data-account-state='replaced'] h1")?.textContent).toBe("Sinu konto avati teises seadmes");
+    expect(document.body.textContent).not.toContain("Ei õnnestunud salvestada");
+  });
+
+  test("'Märgi tehtuks' answered 401 when signed out: off to the login page", async () => {
+    const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {});
+    let loads = 0;
+    fetchMock.mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") return json(401, { ok: false, reason: "none" });
+      return ++loads === 1 ? json(200, textLesson()) : json(401, { ok: false, reason: "none" });
+    });
+    await mount();
+    await act(async () => markDone()!.click());
+    await settle();
+    expect(replace).toHaveBeenCalledWith("/konto/sisene#valja=1");
+    expect($("[data-lesson-actions] [role=alert]")?.textContent ?? "").toBe("");
   });
 
   test("a text lesson already done: the done line and the 'Järgmine õppetund' link, no 'Märgi tehtuks'", async () => {

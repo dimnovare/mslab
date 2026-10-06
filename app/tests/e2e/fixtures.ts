@@ -313,8 +313,11 @@ export async function removeClientRows(email?: string): Promise<number> {
   }
 }
 
-/** How long a test waits for a lock another test holds (holdLocalLock). */
-export const LOCK_WAIT_MS = 60_000;
+/**
+ * How long a test waits for a lock other tests hold (holdLocalLock): three minutes, room for a queue of several whole tests (the
+ * e-course and lesson tests of both projects hold the course terms for a whole test each). Every caller adds it to its own timeout.
+ */
+export const LOCK_WAIT_MS = 180_000;
 /** Postgres's error code for a lock not granted within lock_timeout. */
 const LOCK_NOT_AVAILABLE = "55P03";
 
@@ -326,7 +329,7 @@ const LOCK_NOT_AVAILABLE = "55P03";
  *
  * The lock is asked for with pg_advisory_lock, so the waiting tests are served in Postgres's own queue, first come first served
  * (asking again and again with pg_try_advisory_lock let a test wait in vain while the tests of another file took the lock back
- * at once, one after the other). The wait is `waitMs` at most (a minute: lock_timeout on this connection), then Postgres drops
+ * at once, one after the other). The wait is `waitMs` at most (LOCK_WAIT_MS: lock_timeout on this connection), then Postgres drops
  * the request and this fails saying so: a wait that has given up is never granted the lock later. A caller whose own timeout is
  * shorter than `waitMs` should lengthen it (test.setTimeout); a test that fails anyway ends its worker, and the connection
  * with the lock or the request goes with it.

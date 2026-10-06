@@ -27,6 +27,11 @@ type Props = {
   t: LessonTexts;
   /** The server's answer to a report: done (the page shows "Õppetund tehtud ✓") and the next lesson. */
   onProgress(answer: { done: boolean; next: number | null }): void;
+  /**
+   * A report was answered 401: the session has ended (signed out, or another device signed in). Called once, as the reports stop;
+   * the page then asks for its data again and shows what is true now ("Sinu konto avati teises seadmes", or the login page).
+   */
+  onSessionEnd?(): void;
 };
 
 /** What became of one report: taken, worth trying again later (408, 429, 5xx, no answer), or refused for good (the rest). */
@@ -45,7 +50,8 @@ type Sent = "taken" | "later" | "refused";
  *
  * The reports never trouble the student. A report the server cannot take now (408, 429, 5xx) or that gets no answer keeps the
  * furthest second, which goes with the next 15 s report (no retry in between, not even at pause or end); one refused for good (403
- * locked, 404, 409 no playable video, 401 signed out) ends the reports for this lesson. Leaving (the tab hidden, the page closed, or
+ * locked, 404, 409 no playable video, 401 signed out) ends the reports for this lesson. A 401 also tells the page, once
+ * (`onSessionEnd`), so that it does not go on as if the student were still signed in. Leaving (the tab hidden, the page closed, or
  * the player gone by a link inside the site) sends the last point with `fetch(…, { keepalive: true })`: same-origin, with the session
  * cookie and the page's Origin like any other report (account-api's isCrossSite check passes it), where sendBeacon could set no
  * headers. Once the player is gone, nothing it started reaches the page any more.
@@ -56,7 +62,7 @@ export function LessonPlayer(props: Props) {
   return <Player key={`${props.slug}/${props.lessonId}/${props.video.embedUrl}`} {...props} />;
 }
 
-function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }: Props) {
+function Player({ slug, lessonId, title, video, watermark, done, t, onProgress, onSessionEnd }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -65,6 +71,7 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }
   /** Nothing more to report: the lesson is done, or the server refused this lesson for good. */
   const finished = useRef(done);
   const answered = useRef(onProgress);
+  const sessionEnded = useRef(onSessionEnd);
   const [listening, setListening] = useState(false);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -78,6 +85,7 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }
 
   useEffect(() => {
     answered.current = onProgress;
+    sessionEnded.current = onSessionEnd;
     if (done) finished.current = true;
   });
 
@@ -91,6 +99,8 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }
     let leaving = 0;
     /** The player is gone: no new report (but the leaving one), and no answer reaches the page. */
     let disposed = false;
+    /** The page has been told that the session ended (a 401): once. */
+    let sessionTold = false;
 
     const send = async (watchedSec: number, keepalive: boolean): Promise<Sent> => {
       try {
@@ -111,6 +121,11 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress }
         }
         if (res.status === 408 || res.status === 429 || res.status >= 500) return "later";
         finished.current = true; // locked, not found, no playable video, signed out: asking again changes nothing
+        // signed out or replaced: the page is told, once (a leaving report already on its way may be answered 401 too)
+        if (res.status === 401 && !sessionTold && !disposed) {
+          sessionTold = true;
+          sessionEnded.current?.();
+        }
         return "refused";
       } catch {
         return "later"; // no answer (offline, a dropped connection): the next 15 s report carries the point

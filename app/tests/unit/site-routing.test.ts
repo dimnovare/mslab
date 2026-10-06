@@ -54,6 +54,10 @@ describe("routeSitePath", () => {
     ])
       expect(isKnownPage(p), p).toBe(false);
     expect(isKnownPage("/et/konto/kursus/x/2147483647")).toBe(true);
+    // the slug as lib/slug.ts isSlug reads it: at most 80 characters, single dashes between letters and digits
+    expect(isKnownPage(`/et/konto/kursus/${"a".repeat(80)}/12`)).toBe(true);
+    expect(isKnownPage(`/et/konto/kursus/${"a".repeat(81)}/12`)).toBe(false);
+    for (const slug of ["-x", "x-", "x--y", "x_y", "x%20y", "õ"]) expect(isKnownPage(`/et/konto/kursus/${slug}/12`), slug).toBe(false);
     // a lesson's shell with a query: the same 303 into the fragment
     expect(route("/konto/kursus/kulmude-lami/12?viga=1")).toEqual({ kind: "shellRedirect", location: "/konto/kursus/kulmude-lami/12#viga=1" });
     expect(route("/ru/konto/kursus/kulmude-lami/12")).toEqual({ kind: "page", page: "/ru/konto/kursus/kulmude-lami/12", rewritten: false });

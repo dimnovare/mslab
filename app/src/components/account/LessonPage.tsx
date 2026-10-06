@@ -12,7 +12,7 @@ import { pick } from "@/i18n/field";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import type { LessonView } from "@/server/lesson-data";
-import { AccountLoader } from "./AccountLoader";
+import { AccountLoader, type Reload } from "./AccountLoader";
 import { GreetingSkeleton } from "./CardSkeleton";
 import { LessonPlayer } from "./LessonPlayer";
 import type { LessonTexts } from "./texts";
@@ -77,7 +77,7 @@ export function LessonPage({ slug, lessonId, locale, t }: Props) {
           </div>
         )
       }
-      render={(view) => <LessonBody key={view.lesson.id} view={view} slug={slug} locale={locale} t={t} />}
+      render={(view, reload) => <LessonBody key={view.lesson.id} view={view} slug={slug} locale={locale} t={t} reload={reload} />}
     />
   );
 }
@@ -101,8 +101,11 @@ function GoToCourse({ to }: { to: string }) {
  * The one button is the first that applies: "Märgi tehtuks" for a text lesson not done yet; nothing for a video lesson not done whose
  * video is not ready (nothing can complete it yet); else "Järgmine õppetund" when there is a next lesson — a link once this one is
  * done, before that a button that does nothing yet (aria-disabled).
+ * "Õppetund tehtud ✓" comes into a status region that is in the page from the start, so a screen reader announces it when it comes.
+ * A session that has ended meanwhile (a 401 to "Märgi tehtuks" or to the player's report: signed out, or another device signed in)
+ * loads the page again quietly, which then shows what is true now ("Sinu konto avati teises seadmes", or the login page).
  */
-function LessonBody({ view, slug, locale, t }: { view: LessonView; slug: string; locale: Locale; t: LessonTexts }) {
+function LessonBody({ view, slug, locale, t, reload }: { view: LessonView; slug: string; locale: Locale; t: LessonTexts; reload: Reload }) {
   const [done, setDone] = useState(view.lesson.done);
   const [next, setNext] = useState(view.next);
   const [saving, setSaving] = useState(false);
@@ -130,6 +133,7 @@ function LessonBody({ view, slug, locale, t }: { view: LessonView; slug: string;
     setFailed(false);
     try {
       const res = await fetch(`${api}/tehtud`, { method: "POST", credentials: "same-origin", headers: { accept: "application/json" } });
+      if (res.status === 401) return void reload({ quiet: true }); // signed out meanwhile: the page shows what is true now
       const answer = res.ok ? ((await res.json().catch(() => null)) as { ok?: unknown; next?: unknown } | null) : null;
       if (answer?.ok !== true) throw new Error("not saved");
       marked.current = true;
@@ -185,6 +189,7 @@ function LessonBody({ view, slug, locale, t }: { view: LessonView; slug: string;
               if (a.done) setDone(true);
               setNext((n) => a.next ?? n);
             }}
+            onSessionEnd={() => void reload({ quiet: true })}
           />
         </div>
       )}
@@ -221,11 +226,14 @@ function LessonBody({ view, slug, locale, t }: { view: LessonView; slug: string;
       )}
 
       <div className={styles.actions} data-lesson-actions="">
-        {done && (
-          <p ref={doneLine} className={styles.done} role="status" tabIndex={-1} data-lesson-done="">
-            {t.done}
-          </p>
-        )}
+        {/* in the page from the start, empty until the lesson is done: a screen reader announces the line when it comes */}
+        <div className={styles.status} role="status" data-lesson-status="">
+          {done && (
+            <p ref={doneLine} className={styles.done} tabIndex={-1} data-lesson-done="">
+              {t.done}
+            </p>
+          )}
+        </div>
         {button}
         {/* in the page from the start for a text lesson, empty: a screen reader announces the sentence when it comes */}
         {lesson.textOnly && (

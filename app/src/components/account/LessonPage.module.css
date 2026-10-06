@@ -97,6 +97,11 @@
   margin-top: clamp(28px, 3.5vw, 40px);
 }
 
+/* the status region of the done line: empty, it stays in the page but takes no room in the row */
+.status:empty {
+  position: absolute;
+}
+
 .done {
   margin: 0;
   color: var(--ok);

@@ -74,9 +74,11 @@
   display: none;
 }
 
-/* the FAQ's round "+"; "−" while open (not the FAQ's turned "×", which could read as "remove" here) */
+/* the FAQ's round "+"; "−" while open (not the FAQ's turned "×", which could read as "remove" here). A picture only: its
+   alternative text is empty (the second line; a browser without alternative text keeps the first) */
 .summary::after {
   content: "+";
+  content: "+" / "";
   display: grid;
   place-items: center;
   width: 32px;
@@ -88,6 +90,7 @@
 
 .fold[open] > .summary::after {
   content: "−";
+  content: "−" / "";
 }
 
 .summary:focus-visible {

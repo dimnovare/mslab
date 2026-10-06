@@ -2,6 +2,7 @@
 // ET lives at "/", RU at "/ru"; internally both render app/[locale]/…
 
 import { parseRowId } from "./row-id";
+import { isSlug } from "./slug";
 
 // Paths the app serves as they are (no "/et" rewrite). The hub (guide, p/…) and /api are handled before this list.
 // Every entry ends at a path boundary or is one exact file: "/admin.php", "/administrator" or "/media.php" are unknown
@@ -57,13 +58,16 @@ const STATIC_PAGES = new Set([
 /** Pages with a slug of ours (lowercase letters, digits, dashes), an e-course in the account too; the cart takes whatever ?kursus= says (its own 404). */
 const SLUG_PAGE = /^\/(koolitused|uudised|konto\/kursus)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CART_PAGE = /^\/ostukorv\/[^/]+$/;
-/** One lesson of an e-course in the account (phase 3a): /konto/kursus/<slug>/<lesson id>; the id is checked by parseRowId (lib/row-id.ts). */
-const LESSON_PAGE = /^\/konto\/kursus\/[a-z0-9]+(?:-[a-z0-9]+)*\/([1-9][0-9]{0,9})$/;
+/**
+ * One lesson of an e-course in the account (phase 3a): /konto/kursus/<slug>/<lesson id>. The slug is checked by isSlug (lib/slug.ts:
+ * also at most 80 characters) and the id by parseRowId (lib/row-id.ts), the rules the page and the API read them with.
+ */
+const LESSON_PAGE = /^\/konto\/kursus\/([^/]+)\/([1-9][0-9]{0,9})$/;
 
-/** Is `rest` (a page without its locale) one lesson's address, with an id the database can hold (≤ 2 147 483 647)? */
+/** Is `rest` (a page without its locale) one lesson's address: a slug of ours and an id the database can hold (≤ 2 147 483 647)? */
 const isLessonPage = (rest: string): boolean => {
   const m = LESSON_PAGE.exec(rest);
-  return m !== null && parseRowId(m[1]) !== null;
+  return m !== null && isSlug(m[1]) && parseRowId(m[2]) !== null;
 };
 
 /**

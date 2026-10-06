@@ -18,6 +18,7 @@ let root: Root;
 const posted: { method?: string; value?: unknown; context?: string; version?: string }[] = [];
 const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>();
 const onProgress = vi.fn();
+const onSessionEnd = vi.fn();
 
 /** The player's window (the iframe's contentWindow): what the page posts to it is kept in `posted`. */
 const playerWindow = { postMessage: (m: unknown) => posted.push(JSON.parse(String(m))) };
@@ -43,11 +44,12 @@ beforeEach(async () => {
   posted.length = 0;
   Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => playerWindow });
   onProgress.mockReset();
+  onSessionEnd.mockReset();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () =>
-    root.render(createElement(LessonPlayer, { slug: "veebikursus", lessonId: 7, title: "Esimene", video: VIDEO, watermark: "kati@example.test", done: false, t: lessonTexts(getDict("et")), onProgress })),
+    root.render(createElement(LessonPlayer, { slug: "veebikursus", lessonId: 7, title: "Esimene", video: VIDEO, watermark: "kati@example.test", done: false, t: lessonTexts(getDict("et")), onProgress, onSessionEnd })),
   );
 });
 
@@ -234,6 +236,44 @@ test.each([
   expect(progressPosts()).toHaveLength(1);
   expect(onProgress).not.toHaveBeenCalled();
   expect(container.querySelector("[data-player-error], [role=alert]")).toBeNull();
+  // only a 401 (signed out, another device) tells the page that the session has ended, once
+  expect(onSessionEnd).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+});
+
+test("a 401 to a report tells the page once, even when the leaving report on its way is answered 401 too; 429 and 5xx never do", async () => {
+  const answers: ((r: Response) => void)[] = [];
+  fetchMock.mockImplementation(() => new Promise<Response>((resolve) => answers.push(resolve)));
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 30, duration: 100 });
+  await fromPlayer("pause"); // on its way
+  await fromPlayer("timeupdate", { seconds: 40, duration: 100 });
+  await act(async () => {
+    window.dispatchEvent(new Event("pagehide")); // the leaving report, sent alongside
+  });
+  expect(progressPosts()).toEqual([{ watchedSec: 30 }, { watchedSec: 40 }]);
+  expect(onSessionEnd).not.toHaveBeenCalled();
+  await act(async () => {
+    answers[0](Response.json({ ok: false, reason: "replaced" }, { status: 401 }));
+    answers[1](Response.json({ ok: false, reason: "replaced" }, { status: 401 }));
+  });
+  await tick(0);
+  expect(onSessionEnd).toHaveBeenCalledTimes(1);
+  expect(onProgress).not.toHaveBeenCalled();
+  await fromPlayer("timeupdate", { seconds: 70, duration: 100 });
+  await fromPlayer("pause");
+  await tick(30_000);
+  expect(progressPosts()).toHaveLength(2); // the reports have stopped
+  expect(onSessionEnd).toHaveBeenCalledTimes(1);
+});
+
+test.each([429, 500, 503, 408])("a report answered %i is tried again later and does not end the session", async (status) => {
+  fetchMock.mockImplementationOnce(json({ ok: false }, status));
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 20, duration: 100 });
+  await fromPlayer("pause");
+  await tick(15_000);
+  expect(progressPosts()).toEqual([{ watchedSec: 20 }, { watchedSec: 20 }]);
+  expect(onSessionEnd).not.toHaveBeenCalled();
 });
 
 test("leaving the page (the tab hidden, or pagehide): the last point at once, with keepalive, once; nothing when there is nothing new", async () => {
