@@ -52,9 +52,12 @@ export const EMBED_TTL_SEC = 4 * 3600;
 /** How long one tus upload may go on (Bunny checks the expiry on every request and advises an hour at least). */
 export const UPLOAD_TTL_SEC = 6 * 3600;
 
-/** `expires` is unix seconds: a whole, safe integer. A fraction (Date.now() / 1000) or a mix-up would sign a value Bunny never accepts. */
+/** From here a unix timestamp is in milliseconds (Date.now() is about 1.8e12), not seconds: seconds stay below it until the year 5138. */
+const MS_THRESHOLD = 1e11;
+
+/** `expires` is unix seconds: a whole, safe integer, below 1e11. A fraction (Date.now() / 1000) or milliseconds would sign a value Bunny never accepts. */
 function checkExpires(expires: number): void {
-  if (!Number.isSafeInteger(expires)) throw new TypeError("expires must be a whole number of unix seconds");
+  if (!Number.isSafeInteger(expires) || expires >= MS_THRESHOLD) throw new TypeError("expires must be a whole number of unix seconds");
 }
 
 export async function tusSignature(libraryId: string, apiKey: string, expires: number, videoId: string): Promise<string> {

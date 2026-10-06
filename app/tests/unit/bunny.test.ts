@@ -42,6 +42,21 @@ describe("signing", () => {
     expect(String(err.message)).not.toContain("test-api-key");
     expect(await tusSignature("12345", "test-api-key", 0, VIDEO)).toBe(sha(`12345test-api-key0${VIDEO}`));
   });
+  test("expires in milliseconds (1e11 and up, Date.now()) is a TypeError; seconds, such as now + one hour, sign", async () => {
+    const inSeconds = Math.floor(Date.now() / 1000) + 3600;
+    expect(inSeconds).toBeLessThan(1e11);
+    for (const expires of [Date.now(), Date.now() + 3600_000, 1e11, 1767225600000]) {
+      await expect(tusSignature("12345", "test-api-key", expires, VIDEO), String(expires)).rejects.toThrow(TypeError);
+      await expect(embedToken("test-token-key", VIDEO, expires), String(expires)).rejects.toThrow(TypeError);
+      await expect(signedEmbedUrl(CONFIG, VIDEO, expires), String(expires)).rejects.toThrow(TypeError);
+    }
+    // seconds are fine, up to the last one below the limit
+    for (const expires of [inSeconds, 1767225600, 1e11 - 1]) {
+      expect(await tusSignature("12345", "test-api-key", expires, VIDEO), String(expires)).toBe(sha(`12345test-api-key${expires}${VIDEO}`));
+      expect(await embedToken("test-token-key", VIDEO, expires), String(expires)).toBe(sha(`test-token-key${VIDEO}${expires}`));
+      expect(new URL(await signedEmbedUrl(CONFIG, VIDEO, expires)).searchParams.get("expires"), String(expires)).toBe(String(expires));
+    }
+  });
 });
 
 describe("bunnyConfig", () => {
