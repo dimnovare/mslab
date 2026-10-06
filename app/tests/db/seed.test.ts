@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, test } from "vitest";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
-import { courseSessions, courses, registrations } from "@/db/schema";
+import { clients, courseAccess, courseModules, courseSessions, courses, lessonProgress, lessons, registrations } from "@/db/schema";
 import { applySeed } from "@/db/seed-apply";
 import * as seedData from "@/db/seed-data";
 import { SEEDED_AT } from "@/db/seed-data";
@@ -243,5 +244,63 @@ describe("seed modes", () => {
     const counts = await applySeed(db, { reset: true, force: true });
     expect(counts.courses).toBe(6);
     expect(await db.select().from(registrations)).toHaveLength(0);
+  });
+
+  describe("--reset refuses to wipe students' lessons, with or without --force", () => {
+    /** The seeded courses, a client, and (the parts asked for) an access, a progress row and a Bunny video on a lesson. */
+    async function world(parts: { access?: boolean; progress?: boolean; video?: "current" | "replaced" }) {
+      const db = await makeTestDb();
+      await applySeed(db);
+      const [course] = await db.select().from(courses).limit(1);
+      const [m] = await db.insert(courseModules).values({ courseId: course.id, position: 90, title: { et: "M" } }).returning();
+      const [lesson] = await db.insert(lessons).values({ moduleId: m.id, position: 1, title: { et: "L" } }).returning();
+      const [client] = await db.insert(clients).values({ email: "kati@example.test" }).returning();
+      if (parts.access) await db.insert(courseAccess).values({ clientId: client.id, courseId: course.id, grantedBy: "admin@example.test", expiresAt: new Date(Date.now() + 86_400_000) });
+      if (parts.progress) await db.insert(lessonProgress).values({ clientId: client.id, lessonId: lesson.id, watchedSec: 30 });
+      if (parts.video === "current") await db.update(lessons).set({ videoId: "11111111-2222-4333-8444-555555555555", videoStatus: "ready", durationSec: 60 }).where(eq(lessons.id, lesson.id));
+      if (parts.video === "replaced") await db.update(lessons).set({ replacedVideoId: "11111111-2222-4333-8444-555555555555" }).where(eq(lessons.id, lesson.id));
+      return { db, lesson };
+    }
+
+    test.each([
+      ["a course access row", { access: true }, /1 course access row\(s\)/],
+      ["a lesson progress row", { progress: true }, /1 lesson progress row\(s\)/],
+      ["a lesson with a Bunny video", { video: "current" as const }, /1 lesson video\(s\).*stay on Bunny/],
+      ["a lesson whose replaced video is still on Bunny", { video: "replaced" as const }, /1 lesson video\(s\)/],
+    ])("%s: refused, also with force; nothing deleted", async (_name, parts, message) => {
+      const { db } = await world(parts);
+      const before = (await db.select().from(courses)).length;
+      await expect(applySeed(db, { reset: true })).rejects.toThrow(message);
+      await expect(applySeed(db, { reset: true, force: true })).rejects.toThrow(/--force does not override this/);
+      expect(await db.select().from(courses)).toHaveLength(before);
+      expect(await db.select().from(lessons)).toHaveLength(1);
+      expect((await db.select().from(courseModules).where(eq(courseModules.position, 90))).length).toBe(1);
+    });
+
+    test("names every kind that is there, and says nothing of Bunny when there is no video", async () => {
+      const { db } = await world({ access: true, progress: true });
+      const error = await applySeed(db, { reset: true, force: true }).catch((e: Error) => e.message);
+      expect(error).toMatch(/^Refusing to reset: 1 lesson progress row\(s\), 1 course access row\(s\) would be deleted with their courses\./);
+      expect(error).not.toMatch(/Bunny/);
+      const all = await world({ access: true, progress: true, video: "current" });
+      await expect(applySeed(all.db, { reset: true })).rejects.toThrow(/1 lesson progress row\(s\), 1 course access row\(s\), 1 lesson video\(s\) would be deleted/);
+    });
+
+    test("without those rows the reset works, and the refusal comes first when registrations exist too", async () => {
+      const { db } = await world({});
+      const counts = await applySeed(db, { reset: true });
+      expect(counts.courses).toBe(6);
+
+      const both = await world({ access: true });
+      const [course] = await both.db.select().from(courses).limit(1);
+      await both.db.insert(registrations).values({ courseId: course.id, kind: "individual", name: "A", email: "a@example.test", paymentChoice: "full" });
+      await expect(applySeed(both.db, { reset: true, force: true })).rejects.toThrow(/course access row/);
+      expect(await both.db.select().from(registrations)).toHaveLength(1);
+    });
+
+    test("a plain seed (no reset) is never refused by them", async () => {
+      const { db } = await world({ access: true, progress: true, video: "current" });
+      await expect(applySeed(db)).resolves.toMatchObject({ courses: 6 });
+    });
   });
 });

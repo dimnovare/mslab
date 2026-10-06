@@ -4,6 +4,8 @@
 // --target says which database is meant, and the address must agree (as in fill-ru.ts): "local" only on this machine,
 // "railway" only on a Railway host. It is required for --reset (which deletes the content and the registrations), and
 // for any database that is not on this machine. Only adding the missing rows to a local database works without it.
+// --reset also refuses (--force does not help) while any lesson progress, course access or lesson video exists: the cascade would
+// delete the students' progress, and the Bunny videos would be left behind with nobody able to delete them.
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
