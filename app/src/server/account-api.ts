@@ -4,9 +4,13 @@ import { clients } from "@/db/schema";
 import { isEmail, isSampleAddress, normalizeEmail } from "@/domain/email";
 import type { Locale } from "@/i18n/locales";
 import { LOGIN_MARK } from "@/lib/account-marks";
+import { parseRowId } from "@/lib/row-id";
 import { deletionMail, loginMail, verifyLink } from "./account-mail";
-import { LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseSlug, parseTerms } from "./account-input";
+import {
+  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseProgress, parseSlug, parseTerms,
+} from "./account-input";
 import { isCrossSite } from "./auth";
+import type { BunnyConfig } from "./bunny";
 import {
   CLIENT_COOKIE, CLIENT_SESSION_TTL_MS, HINT_COOKIE, endClientSession, getClientSession, issueClientLogin, redeemClientCode,
   redeemClientLink, reserveLoginMail,
@@ -14,11 +18,14 @@ import {
 import {
   acceptTerms, createChangeRequest, deleteClient, loadDashboard, loadEcourse, loadFavouriteCards, mergeFavourites, setFavourite, setNewsletter, updateProfile,
 } from "./client-data";
+import { lessonFileFor, loadLesson, markTextLessonDone, saveProgress } from "./lesson-data";
+import { attachmentHeader, FILE_URL_TTL_SEC } from "./lesson-files";
 import { logFailure, logNote } from "./log";
+import type { FileStore } from "./media";
 import { changeRequestSummary } from "./messages";
 import { adminUrl, notifyMaria, sendMail, type Env } from "./notify";
 import { isPrefetch } from "./prefetch";
-import { clientIp, rateKey, rateLimit } from "./ratelimit";
+import { clientIp, rateKey, rateLimit, windowKey } from "./ratelimit";
 
 // The client account's JSON API (/api/konto/*) without Next.js: app/api/konto/[[...path]]/route.ts builds the dependencies
 // (database, settings, Postgres KV store, after()) and calls handleAccountApi; the tests call it with PGlite and fakes.
@@ -30,7 +37,9 @@ import { clientIp, rateKey, rateLimit } from "./ratelimit";
 // read to show "Minu konto" instead of "Logi sisse" (it grants nothing). The login answer is the same for every address.
 // Every answer is `private, no-store`: it is one visitor's data, never kept by a CDN or a shared cache.
 //
-// Behind a session (the data endpoints, at the bottom): GET / the dashboard, GET /kursus/:slug an e-course, GET /lemmikud the
+// Behind a session (the data endpoints, at the bottom): GET / the dashboard, GET /kursus/:slug an e-course with its lessons and their states,
+// GET /kursus/:slug/:lesson one lesson (an open one with a signed video URL; 403 terms or locked), POST …/:lesson/progress how far a video has
+// been watched, POST …/:lesson/tehtud "Märgi tehtuks" for a text lesson, GET …/:lesson/fail/:file a lesson file, GET /lemmikud the
 // favourites as course cards, POST /lemmikud and /lemmikud/merge favourites, PATCH /andmed the profile, POST /uudiskiri the newsletter, POST /muutmine a request to cancel or
 // move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion.
 // Each one starts with requireClient and answers through clientResponse (a renewed session's cookies reach the browser); the
@@ -48,6 +57,10 @@ export type AccountDeps = {
   later: (task: () => Promise<unknown>) => void;
   /** A local development request (non-production build and a local Host): the login code and link come back in the answer and nothing is mailed. */
   dev: boolean;
+  /** The store of the lesson files (media-store.ts mediaStore()); absent or null: no downloads (404). */
+  files?: FileStore | null;
+  /** Bunny Stream (bunny.ts bunnyConfig()); absent or null: a lesson's video is "soon" ("Video lisandub peagi"). */
+  bunny?: BunnyConfig | null;
 };
 
 const SESSION_MAX_AGE = CLIENT_SESSION_TTL_MS / 1000;
@@ -60,6 +73,8 @@ const MAX_BODY_CHARS = 4096;
 const MERGE_BODY_CHARS = LIMITS.mergeSlugs * (LIMITS.slug + 4) + 64;
 /** Change requests a client may send per hour: each one e-mails Maria (and pings her on Telegram). */
 const CHANGE_REQUESTS_PER_HOUR = 5;
+/** Progress reports a student may send per clock minute, across lessons (spec 6: it caps the writes; the player sends about 4). */
+const PROGRESS_PER_MINUTE = 12;
 
 const BASE_HEADERS = { "cache-control": "private, no-store", "x-robots-tag": "noindex, nofollow" } as const;
 
@@ -122,6 +137,20 @@ async function withinRateLimit(request: Request, deps: AccountDeps, form: string
 async function withinClientLimit(deps: AccountDeps, clientId: number, form: string, limit: number, windowSec: number): Promise<boolean> {
   try {
     return await rateLimit(deps.env.KV, rateKey(form, String(clientId)), limit, windowSec);
+  } catch (e) {
+    logFailure("[account] rate limit unavailable, allowing", e);
+    return true;
+  }
+}
+
+/**
+ * A fail-open limit for a signed-in client of `limit` per fixed window of `windowSec` (ratelimit.ts windowKey: the count starts again at
+ * every window). withinClientLimit's window restarts with each accepted request, which for a steady sender (the player's report every
+ * 15 s) means one that never ends; this is for those. Up to twice `limit` can pass across a window's edge.
+ */
+async function withinClientWindow(deps: AccountDeps, clientId: number, form: string, limit: number, windowSec: number): Promise<boolean> {
+  try {
+    return await rateLimit(deps.env.KV, windowKey(rateKey(form, String(clientId)), deps.now, windowSec), limit, 2 * windowSec);
   } catch (e) {
     logFailure("[account] rate limit unavailable, allowing", e);
     return true;
@@ -258,6 +287,32 @@ export async function requireClient(request: Request, deps: AccountDeps): Promis
 /** The answer for a signed-in client: `body` plus the cookies of a renewed session (see requireClient). */
 export const clientResponse = (session: ClientSession, body: unknown, status = 200): Response => accountResponse(body, status, session.cookies);
 
+/**
+ * A lesson file for the signed-in client: a 302 to a 5-minute signed R2 address (R2 answers with the name and type the file was
+ * stored with), or, from the local folder of `next dev` and the e2e run, the bytes themselves as a download. The cookies of a renewed
+ * session go with it, as with clientResponse. null when the store does not have the object.
+ */
+async function fileAnswer(session: ClientSession, store: FileStore, file: { key: string; name: string; contentType: string }): Promise<Response | null> {
+  const base = { ...BASE_HEADERS, "referrer-policy": "no-referrer" }; // the lesson's address is not passed on to R2 (next.config.ts has the same rule for this path: a header set there replaces this one)
+  let res: Response;
+  if (store.signedGetUrl) {
+    res = new Response(null, { status: 302, headers: { ...base, location: await store.signedGetUrl(file.key, { expiresSec: FILE_URL_TTL_SEC }) } });
+  } else {
+    const object = await store.get(file.key);
+    if (!object) return null;
+    res = new Response(object.body, { headers: { ...base, "content-type": file.contentType, "content-disposition": attachmentHeader(file.name), "x-content-type-options": "nosniff" } });
+  }
+  for (const cookie of session.cookies) res.headers.append("set-cookie", cookie);
+  return res;
+}
+
+/** The slug and lesson id of a lesson path (the one parse step of the four lesson handlers); null when either cannot be one (404). */
+const lessonRef = (rawSlug: string, rawLesson: string): { slug: string; lessonId: number } | null => {
+  const slug = parseSlug(rawSlug);
+  const lessonId = parseRowId(rawLesson);
+  return slug === null || lessonId === null ? null : { slug, lessonId };
+};
+
 /** GET /me: `{ ok: true, email, name }` of the signed-in client. */
 async function me(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
@@ -284,6 +339,73 @@ async function ecourse(request: Request, deps: AccountDeps, rawSlug: string): Pr
   const slug = parseSlug(rawSlug);
   const view = slug === null ? null : await loadEcourse(deps.db, session.clientId, slug, deps.now);
   return view ? clientResponse(session, view) : clientResponse(session, { ok: false }, 404);
+}
+
+/**
+ * GET /kursus/:slug/:lesson: one lesson (lesson-data.ts LessonView) — the embed URL of a ready video (signed for 4 hours, from the
+ * saved second), the short text, the files, the next lesson, the e-mail for the watermark. 403 `{ error: "terms" }` while the course's
+ * terms are not accepted (the page sends the student to the notice); 403 `{ error: "locked", next }` for a lesson not open yet
+ * (`next`: where "Jätka" goes); 404 without active access, or for anything that is not a visible lesson of that course.
+ */
+async function lesson(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const ref = lessonRef(rawSlug, rawLesson);
+  const result = ref ? await loadLesson(deps.db, deps.bunny ?? null, session.clientId, ref.slug, ref.lessonId, deps.now) : null;
+  if (result?.kind === "lesson") return clientResponse(session, result.view);
+  if (result?.kind === "terms") return clientResponse(session, { ok: false, error: "terms" }, 403);
+  if (result?.kind === "locked") return clientResponse(session, { ok: false, error: "locked", next: result.next }, 403);
+  return clientResponse(session, { ok: false }, 404);
+}
+
+/**
+ * POST /kursus/:slug/:lesson/progress `{ watchedSec }`: how far the student has watched (the player sends it about every 15 s and at
+ * pause and end). Kept at its highest; at 90 % of the length the lesson is done. 200 `{ ok, done, next }`; 400 `{ error: "watchedSec" }`
+ * (no number, or past the length + 5 s); 403 locked; 404; 409 `{ error: "video" }` (a text lesson, or a video lesson still waiting for its
+ * video: it cannot be completed, so the next lesson stays locked); 429 `{ error: "rate" }` after
+ * 12 in one clock minute (a fixed window, so the player's steady report every 15 s always fits).
+ */
+async function progress(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const ref = lessonRef(rawSlug, rawLesson);
+  if (ref === null) return clientResponse(session, { ok: false }, 404);
+  const input = parseProgress(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  if (!(await withinClientWindow(deps, session.clientId, "client-progress", PROGRESS_PER_MINUTE, 60))) {
+    logNote("[account] progress rate limited");
+    return clientResponse(session, { ok: false, error: "rate" }, 429);
+  }
+  const result = await saveProgress(deps.db, session.clientId, ref.slug, ref.lessonId, input.data.watchedSec, deps.now);
+  if (result.kind === "saved") return clientResponse(session, { ok: true, done: result.done, next: result.next });
+  if (result.kind === "locked") return clientResponse(session, { ok: false, error: "locked", next: result.next }, 403);
+  if (result.kind === "video") return clientResponse(session, { ok: false, error: "video" }, 409);
+  if (result.kind === "range") return badInput(session, "watchedSec");
+  return clientResponse(session, { ok: false }, 404); // notFound (terms is never asked for here)
+}
+
+/** POST /kursus/:slug/:lesson/tehtud: "Märgi tehtuks" for a text lesson (kind "text"). 200 `{ ok, done: true, next }`; 403 locked; 404; 409 `{ error: "video" }` (a video lesson). */
+async function lessonDone(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const ref = lessonRef(rawSlug, rawLesson);
+  const result = ref ? await markTextLessonDone(deps.db, session.clientId, ref.slug, ref.lessonId, deps.now) : null;
+  if (result?.kind === "saved") return clientResponse(session, { ok: true, done: true, next: result.next });
+  if (result?.kind === "locked") return clientResponse(session, { ok: false, error: "locked", next: result.next }, 403);
+  if (result?.kind === "video") return clientResponse(session, { ok: false, error: "video" }, 409);
+  return clientResponse(session, { ok: false }, 404);
+}
+
+/** GET /kursus/:slug/:lesson/fail/:file: a file of an open lesson (fileAnswer: a signed R2 address or the bytes). 403 `{ error: "locked" }`; 404. */
+async function lessonFile(request: Request, deps: AccountDeps, rawSlug: string, rawLesson: string, rawFile: string): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const ref = lessonRef(rawSlug, rawLesson);
+  const fileId = parseRowId(rawFile);
+  const file = ref && fileId !== null ? await lessonFileFor(deps.db, session.clientId, ref.slug, ref.lessonId, fileId, deps.now) : null;
+  if (file?.kind === "locked") return clientResponse(session, { ok: false, error: "locked" }, 403);
+  const answer = file?.kind === "file" && deps.files ? await fileAnswer(session, deps.files, file) : null;
+  return answer ?? clientResponse(session, { ok: false }, 404);
 }
 
 /**
@@ -391,6 +513,8 @@ async function deleteAccount(request: Request, deps: AccountDeps): Promise<Respo
 
 /** The path of one e-course: /kursus/<slug>. */
 const COURSE_PATH = /^\/kursus\/([^/]+)$/;
+/** A lesson's paths: /kursus/<slug>/<lesson>, …/progress, …/tehtud, …/fail/<file>. */
+const LESSON_PATH = /^\/kursus\/([^/]+)\/([^/]+)(?:\/(progress|tehtud)|\/fail\/([^/]+))?$/;
 
 /** The endpoints behind a session; any other method and path is unknown (404, with or without a session). */
 async function dataRoute(request: Request, path: string, deps: AccountDeps): Promise<Response> {
@@ -406,7 +530,16 @@ async function dataRoute(request: Request, path: string, deps: AccountDeps): Pro
     case "POST /kustuta": return deleteAccount(request, deps);
   }
   const course = request.method === "GET" ? COURSE_PATH.exec(path) : null;
-  return course ? ecourse(request, deps, course[1]) : accountResponse({ ok: false }, 404);
+  if (course) return ecourse(request, deps, course[1]);
+  const lessonPath = LESSON_PATH.exec(path);
+  if (lessonPath) {
+    const [, slug, id, action, file] = lessonPath;
+    if (request.method === "GET" && action === undefined && file === undefined) return lesson(request, deps, slug, id);
+    if (request.method === "POST" && action === "progress") return progress(request, deps, slug, id);
+    if (request.method === "POST" && action === "tehtud") return lessonDone(request, deps, slug, id);
+    if (request.method === "GET" && file !== undefined) return lessonFile(request, deps, slug, id, file);
+  }
+  return accountResponse({ ok: false }, 404);
 }
 
 /** The router: `null` when the path is not `/api/konto/…`. Every failure is a JSON answer; nothing it throws reaches the framework. */

@@ -11,7 +11,7 @@ import { sha256 } from "@/server/token";
 import { formatEUR } from "@/domain/money";
 import { formatDayMonth } from "@/i18n/format";
 import { fakeKv, stubFetch } from "../fakes";
-import { makeTestDb } from "./helpers";
+import { addModules, makeTestDb } from "./helpers";
 
 // The client account's API without Next.js (sign-in, then the data endpoints at the end): PGlite database, in-memory KV (the rate-limit store), stubbed fetch
 // for Resend. `later` collects what production runs after the response (the e-mail); `flush()` awaits it.
@@ -694,8 +694,9 @@ async function seedCourses() {
   const base = { level: "basic" as const, summary: { et: "" }, body: { et: "" } };
   const [lami] = await db.insert(courses).values({ ...base, slug: "kulmude-lami", type: "contact", title: { et: "Kulmude lamineerimine" }, published: true, priceGroup: 35000 }).returning();
   const [online] = await db.insert(courses).values({
-    ...base, slug: "veebikursus", type: "e_learning", title: { et: "Veebikursus" }, published: true, price: 9500, modules: [{ et: "Sissejuhatus" }, { et: "Praktika" }],
+    ...base, slug: "veebikursus", type: "e_learning", title: { et: "Veebikursus" }, published: true, price: 9500,
   }).returning();
+  await addModules(db, online.id, [{ et: "Sissejuhatus" }, { et: "Praktika" }]);
   const [hidden] = await db.insert(courses).values({ ...base, slug: "peidus-kursus", type: "e_learning", title: { et: "Peidus" }, published: false, price: 100 }).returning();
   const [session] = await db.insert(courseSessions).values({ courseId: lami.id, startsAt: at(30), city: "Pärnu", venue: "Salong" }).returning();
   return { lami, online, hidden, session };
@@ -802,9 +803,14 @@ describe("GET /api/konto/kursus/:slug: an e-course", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.json()).toEqual({
-      course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika" }] },
+      course: {
+        slug: "veebikursus",
+        title: { et: "Veebikursus" },
+        modules: [{ id: expect.any(Number), title: { et: "Sissejuhatus" }, lessons: [] }, { id: expect.any(Number), title: { et: "Praktika" }, lessons: [] }],
+      },
       access: { expiresAt: at(180).toISOString() },
       terms: { version: "1", accepted: false, text: { et: "Ligipääs on isiklik." } },
+      progress: { done: 0, total: 0, next: null },
     });
   });
 

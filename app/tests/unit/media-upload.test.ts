@@ -159,6 +159,15 @@ describe("serveMedia (GET /media/<key>)", () => {
     expect(store.requested).toEqual([]);
   });
 
+  test("a lesson file is never public: lessons/<uuid>.<any lesson file extension> is a 404 and the store is not even asked", async () => {
+    const lesson = (ext: string) => `lessons/${id}.${ext}`;
+    const exts = ["pdf", "docx", "jpg", "png", "webp"]; // jpg, png and webp are image extensions too: only the img/ prefix keeps them private
+    const store = fakeMediaStore(Object.fromEntries(exts.map((ext) => [lesson(ext), { bytes: JPEG, contentType: ext === "jpg" ? "image/jpeg" : "application/octet-stream" }])));
+    for (const ext of exts) expect((await serveMedia(store, lesson(ext))).status, ext).toBe(404);
+    for (const key of [`img/../lessons/${id}.jpg`, `img/lessons/${id}.jpg`, `lessons/img/${id}.jpg`, `/lessons/${id}.jpg`, `lessons/${id}.jpg/..`]) expect((await serveMedia(store, key)).status, key).toBe(404);
+    expect(store.requested).toEqual([]);
+  });
+
   test("NO_MEDIA (production without R2) is a store with nothing in it: every key is a 404", async () => {
     const res = await serveMedia(NO_MEDIA, `img/${id}.jpg`);
     expect(res.status).toBe(404);
@@ -178,6 +187,8 @@ describe("isMediaKey (what /media serves)", () => {
       `img/${id.toUpperCase()}.jpg`,
       `img/${id}.jpg/x`,
       `x/${id}.jpg`,
+      `lessons/${id}.jpg`,
+      `lessons/${id}.pdf`,
       `img/../${id}.jpg`,
       `img/${id}`,
       `img/abc.jpg`,

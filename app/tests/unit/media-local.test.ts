@@ -1,5 +1,5 @@
 import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -73,6 +73,16 @@ describe("localStore", () => {
       await expect(store.get(key), `get ${key}`).rejects.toThrow();
     }
     expect(await readdir(dir)).toEqual([]);
+  });
+
+  test("delete removes the file and its type; a key that is not there is fine; a key outside the folder is refused", async () => {
+    const store = localStore(dir);
+    await store.put("lessons/x.pdf", new Uint8Array([1, 2]).buffer, "application/pdf");
+    await store.delete("lessons/x.pdf");
+    expect(await store.get("lessons/x.pdf")).toBeNull();
+    expect(existsSync(join(dir, "lessons", "x.pdf.type"))).toBe(false);
+    await store.delete("lessons/never.pdf");
+    await expect(store.delete("../escape.pdf")).rejects.toThrow();
   });
 });
 

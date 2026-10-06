@@ -11,6 +11,7 @@ import { getDb } from "@/db/client";
 import { adminEt } from "@/i18n/dict/admin";
 import { fill } from "@/i18n/format";
 import { getDict } from "@/i18n/locales";
+import { parseRowId } from "@/lib/row-id";
 import { clientLabel } from "@/server/admin-clients";
 import { requireAdmin } from "@/server/auth";
 import { loadDashboard } from "@/server/client-data";
@@ -22,8 +23,6 @@ export const metadata: Metadata = { title: adminTitle(adminEt.viewAs.title) };
 
 type Props = { params: Promise<{ id: string }> };
 
-const parseId = (raw: string): number | null => (/^\d{1,10}$/.test(raw) && Number(raw) > 0 && Number(raw) <= 2_147_483_647 ? Number(raw) : null);
-
 /**
  * "Vaata tema vaadet" (spec 7): the student's own "Minu koolitused", as she sees it — her cards, in her language, with the
  * dashboard loader of her account (/api/konto) — rendered here on the server with every button and link aria-disabled and
@@ -33,7 +32,7 @@ const parseId = (raw: string): number | null => (/^\d{1,10}$/.test(raw) && Numbe
  */
 export default async function ViewAsPage({ params }: Props) {
   const email = await requireAdmin();
-  const id = parseId((await params).id);
+  const id = parseRowId((await params).id);
   if (id === null) notFound();
   const db = getDb();
   const now = new Date();

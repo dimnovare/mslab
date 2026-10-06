@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { pick, pickList } from "@/i18n/field";
 import { href, publicPath, switchLocaleHref } from "@/i18n/href";
-import { fill } from "@/i18n/format";
+import { fill, formatSize } from "@/i18n/format";
 import { LOCALES, getDict } from "@/i18n/locales";
 import { et } from "@/i18n/dict/et";
 import { ru } from "@/i18n/dict/ru";
@@ -72,6 +72,24 @@ describe("fill", () => {
     expect(fill("© {year} MS LAB", { year: 2026 })).toBe("© 2026 MS LAB");
     expect(fill("{a}-{b}", { a: "x" })).toBe("x-{b}");
     expect(fill("no placeholders", {})).toBe("no placeholders");
+  });
+});
+
+describe("formatSize", () => {
+  test("formatSize: kB under a megabyte (at least 1), MB with one decimal, in the page's language", () => {
+    expect(formatSize(820_000, "et")).toBe("820 kB");
+    expect(formatSize(12, "et")).toBe("1 kB");
+    expect(formatSize(1_400_000, "et")).toBe("1,4 MB");
+    expect(formatSize(1_400_000, "ru")).toBe("1,4 МБ");
+    expect(formatSize(820_000, "ru")).toBe("820 КБ");
+  });
+
+  test("the edges: nothing is 1 kB, a size that rounds to 1000 kB is 1 MB, whole megabytes have no decimal", () => {
+    expect(formatSize(0, "et")).toBe("1 kB");
+    expect(formatSize(999_499, "et")).toBe("999 kB");
+    expect(formatSize(999_600, "et")).toBe("1 MB");
+    expect(formatSize(4_000_000, "ru")).toBe("4 МБ");
+    expect(formatSize(3_960_000, "et")).toBe("4 MB");
   });
 });
 

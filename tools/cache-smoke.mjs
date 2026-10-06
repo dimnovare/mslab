@@ -7,7 +7,7 @@
 // A request fails when it ends with anything but 2xx or 3xx (redirects are not followed: /guide -> /guide/ is fine) or
 // does not answer within 20 s. Every fifth request is a HEAD, the others GET. The script also counts how Vercel served
 // each answer (the x-vercel-cache header: HIT, MISS, STALE, PRERENDER, BYPASS, or "-" when the header is missing).
-// C. The client account (phase 2a), 17 GETs, every miss an error:
+// C. The client account (phase 2a, with a lesson's shell from phase 3a), 19 GETs, every miss an error:
 //    - each /konto… shell twice: 200, no set-cookie, and the second answer from the cache (HIT, PRERENDER or STALE);
 //    - /api/konto/me twice without a cookie: 401, cache-control "private, no-store", never answered from the cache (HIT, STALE);
 //    - /konto/sisene?viga=link: a 303 to the same path with the parameter moved into the fragment (#viga=link: nothing left in the
@@ -15,7 +15,7 @@
 //    Against a local `next start` (no Vercel CDN in front) the cache is read from x-nextjs-cache when x-vercel-cache is missing.
 // The script exits with 1 when anything failed.
 //
-// It is a check to run once after a deployment, not a load test: 107 requests in all.
+// It is a check to run once after a deployment, not a load test: 109 requests in all.
 
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith("--only="));
@@ -94,6 +94,8 @@ const SHELLS = [
   "/konto/andmed",
   // the seed's e-course (any slug-shaped address renders the same shell; a real one adds no cache entry of its own)
   "/konto/kursus/kulmumeistri-e-koolitus",
+  // a lesson of it (phase 3a): the same kind of shell, with a lesson id as its second dimension; the content comes from the browser's own API call
+  "/konto/kursus/kulmumeistri-e-koolitus/1",
 ];
 const FROM_CACHE = new Set(["HIT", "PRERENDER", "STALE"]);
 

@@ -37,16 +37,30 @@ export type MediaSource = { get(key: string): Promise<MediaObject | null> };
 
 /**
  * Where images are kept. `put` stores the bytes under the key with their content type (a second put of a key replaces
- * the first); `get` is null when there is no such key, and throws when the store cannot be reached.
+ * the first) and, when given, the `disposition`: the Content-Disposition kept with the object, a lesson file's download
+ * name. `get` is null when there is no such key, and throws when the store cannot be reached.
  */
-export type MediaStore = MediaSource & { put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void> };
+export type MediaStore = MediaSource & { put(key: string, bytes: ArrayBuffer, contentType: string, disposition?: string): Promise<void> };
+
+/**
+ * A store that can also remove an object and, on R2, give a short-lived signed address of one (the lesson files,
+ * server/lesson-files.ts): the browser fetches the object from R2 itself, with the type and Content-Disposition it was stored
+ * with. `delete` of a key that is not there is fine. The local folder has no addresses: the account API sends its bytes itself.
+ */
+export type FileStore = MediaStore & {
+  delete(key: string): Promise<void>;
+  signedGetUrl?(key: string, opts: { expiresSec: number }): Promise<string>;
+};
 
 /** A store with nothing in it: /media answers 404 for every key (production without R2 variables). */
 export const NO_MEDIA: MediaSource = { get: async () => null };
 
 const MEDIA_KEY = /^img\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/;
 
-/** Is this a key putImage could have made? The only keys /media serves. */
+/**
+ * Is this a key putImage could have made? The only keys /media serves. A lesson file (lessons/<uuid>.<ext>,
+ * server/lesson-files.ts) is not one, though its extension may be an image's: the img/ prefix keeps it private.
+ */
 export function isMediaKey(key: string): boolean {
   return MEDIA_KEY.test(key);
 }

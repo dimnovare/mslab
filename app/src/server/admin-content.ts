@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Db } from "@/db/client";
 import { courses } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { courseUsage, deleteUnusedSession, getCourseForEdit, getSession, isSlugTaken, moveCourse, saveCourseWithImages, upsertSession, type CourseFields } from "@/db/queries/admin";
+import { courseUsage, typeLocked, deleteUnusedSession, getCourseForEdit, getSession, isSlugTaken, moveCourse, saveCourseWithImages, upsertSession, type CourseFields } from "@/db/queries/admin";
 import { tallinnInstant } from "@/domain/calendar";
 import { BADGE_MAX, badgeOf, COURSE_LANGUAGES, LIMITS, swatchOf, type CourseDraft } from "@/domain/course-editor";
 import type { I18n } from "@/i18n/field";
@@ -34,7 +34,6 @@ const draftSchema = z.object({
   summary: i18n,
   body: i18n,
   outcomes: z.array(i18n).max(200),
-  modules: z.array(i18n).max(200),
   includes: z.array(i18n).max(200),
   price: z.string().max(40),
   priceGroup: z.string().max(40),
@@ -72,16 +71,16 @@ export async function saveCourseForm(db: Db, formData: FormData): Promise<EditRe
 
   const c = new Check();
   // A course with sessions or registrations keeps its type: an e-learning course with dated sessions would put them in
-  // the public calendar (K1/K2), and the sessions could no longer be edited under a contact course.
+  // the public calendar (K1/K2), and the sessions could no longer be edited under a contact course. An e-course with lessons
+  // or anyone's access keeps its type too: its lessons and its students' access belong to an e-course (db/queries/admin.ts typeLocked).
   if (d.id != null) {
     const usage = await courseUsage(db, d.id);
-    if (usage && usage.type !== d.type && (usage.sessions > 0 || usage.registrations > 0)) c.fail("type", "typeLocked");
+    if (usage && usage.type !== d.type && typeLocked(usage)) c.fail("type", "typeLocked");
   }
   const title = c.text("title", d.title, LIMITS.title, { required: true });
   const summary = c.text("summary", d.summary, LIMITS.summary) ?? { et: "" };
   const body = c.text("body", d.body, LIMITS.body) ?? { et: "" };
   const outcomes = c.list("outcomes", d.outcomes);
-  const modules = c.list("modules", d.modules);
   const online = d.type === "e_learning";
 
   // the slug: typed, or made from the Estonian title
@@ -140,7 +139,6 @@ export async function saveCourseForm(db: Db, formData: FormData): Promise<EditRe
     summary,
     body,
     outcomes,
-    modules,
     includes,
     price,
     priceGroup,

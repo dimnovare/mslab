@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import type { Db, Q } from "../client";
-import { campaign, courseImages, courseSessions, courses, faq, galleryItems, heroSlides, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
+import { campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessons, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
 import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
 import { pageInfo, PAGE_SIZE, type PageInfo } from "@/domain/paging";
 import { registrationPrice, registrationStatusAfterPayment, type RegStatus } from "@/domain/registration";
@@ -81,14 +81,27 @@ export async function isSlugTaken(db: Db, slug: string, exceptId?: number): Prom
 }
 
 /** A stored course's type and how many sessions and registrations point to it (a type change is refused then). */
-export async function courseUsage(db: Db, id: number): Promise<{ type: Course["type"]; sessions: number; registrations: number } | null> {
-  const [[course], [sessions], [regs]] = await Promise.all([
+export type CourseUsage = { type: Course["type"]; sessions: number; registrations: number; lessons: number; access: number };
+
+export async function courseUsage(db: Db, id: number): Promise<CourseUsage | null> {
+  const [[course], [sessions], [regs], [lessonRows], [accessRows]] = await Promise.all([
     db.select({ type: courses.type }).from(courses).where(eq(courses.id, id)),
     db.select({ n: count() }).from(courseSessions).where(eq(courseSessions.courseId, id)),
     db.select({ n: count() }).from(registrations).where(eq(registrations.courseId, id)),
+    db.select({ n: count() }).from(lessons).innerJoin(courseModules, eq(lessons.moduleId, courseModules.id)).where(eq(courseModules.courseId, id)),
+    db.select({ n: count() }).from(courseAccess).where(eq(courseAccess.courseId, id)),
   ]);
-  return course ? { type: course.type, sessions: Number(sessions.n), registrations: Number(regs.n) } : null;
+  return course
+    ? { type: course.type, sessions: Number(sessions.n), registrations: Number(regs.n), lessons: Number(lessonRows.n), access: Number(accessRows.n) }
+    : null;
 }
+
+/**
+ * The course keeps its type (the editor's type switch is locked, and a save that changes it is refused): a contact course with
+ * sessions or registrations, an e-course with lessons or anyone's access (also an ended one) — the other type would leave
+ * them pointing at a course that no longer has them.
+ */
+export const typeLocked = (u: CourseUsage | null): boolean => Boolean(u && (u.sessions > 0 || u.registrations > 0 || u.lessons > 0 || u.access > 0));
 
 /** The course fields the editor writes (everything but id, sort and updatedAt). */
 export type CourseFields = Omit<CourseInput, "id" | "sort">;

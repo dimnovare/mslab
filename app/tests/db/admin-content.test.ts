@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
-import { courseImages, courses, courseSessions, posts, registrations, requests } from "@/db/schema";
-import { courseUsage, getCourseForEdit, listAdminSessions, listAllCourses, listAllPosts, listContactCourses } from "@/db/queries/admin";
+import { clients, courseAccess, courseImages, courseModules, courses, courseSessions, lessons, posts, registrations, requests } from "@/db/schema";
+import { courseUsage, typeLocked, getCourseForEdit, listAdminSessions, listAllCourses, listAllPosts, listContactCourses } from "@/db/queries/admin";
 import { listUpcomingSessions } from "@/db/queries/public";
 import { draftFromCourse, newCourseDraft, type CourseDraft } from "@/domain/course-editor";
 import { deleteSessionForm, moveCourseForm, saveCourseForm, saveSessionForm, type EditResult } from "@/server/admin-content";
@@ -153,8 +153,8 @@ describe("saveCourseForm: editing", () => {
         { courseId: contact.id, startsAt: new Date("2026-12-14T08:00:00Z"), city: "Tartu" },
       ])
       .returning();
-    expect(await courseUsage(db, contact.id)).toEqual({ type: "contact", sessions: 2, registrations: 0 });
-    expect(await courseUsage(db, online.id)).toEqual({ type: "e_learning", sessions: 0, registrations: 0 });
+    expect(await courseUsage(db, contact.id)).toEqual({ type: "contact", sessions: 2, registrations: 0, lessons: 0, access: 0 });
+    expect(await courseUsage(db, online.id)).toEqual({ type: "e_learning", sessions: 0, registrations: 0, lessons: 0, access: 0 });
     const draft = await load(contact.id);
     expect(await save({ ...draft, type: "e_learning", price: "150" })).toEqual({ ok: false, error: "invalid", fields: { type: "typeLocked" } });
     expect((await getCourseForEdit(db, contact.id))!).toMatchObject({ type: "contact", priceGroup: 22000 }); // nothing changed
@@ -166,6 +166,30 @@ describe("saveCourseForm: editing", () => {
     await db.delete(courseSessions).where(inArray(courseSessions.id, [session.id, other.id]));
     expect(await save({ ...(await load(contact.id)), type: "e_learning", price: "150" })).toMatchObject({ ok: true }); // nothing points to it now
     expect(await courseUsage(db, 999_999)).toBeNull();
+  });
+
+  test("an e-course with lessons, or with anyone's access (an ended one too), keeps its type; its modules alone do not lock it", async () => {
+    const toContact = async () => fieldsOf(await save({ ...(await load(online.id)), type: "contact", priceGroup: "100" }));
+    const [mod] = await db.insert(courseModules).values({ courseId: online.id, position: 1, title: { et: "Sissejuhatus" } }).returning();
+    expect(typeLocked(await courseUsage(db, online.id))).toBe(false);
+    const [lesson] = await db.insert(lessons).values({ moduleId: mod.id, position: 1, title: { et: "Tere" } }).returning();
+    expect(await courseUsage(db, online.id)).toEqual({ type: "e_learning", sessions: 0, registrations: 0, lessons: 1, access: 0 });
+    expect(typeLocked(await courseUsage(db, online.id))).toBe(true);
+    expect(await toContact()).toEqual({ type: "typeLocked" });
+    expect((await getCourseForEdit(db, online.id))!.type).toBe("e_learning");
+
+    // no lessons, but a student's access (ended long ago): still locked
+    await db.delete(lessons).where(eq(lessons.id, lesson.id));
+    const [kati] = await db.insert(clients).values({ email: "kati@example.test" }).returning();
+    await db.insert(courseAccess).values({ clientId: kati.id, courseId: online.id, grantedBy: "admin@example.test", expiresAt: new Date("2025-01-01T00:00:00Z"), revokedAt: new Date("2024-06-01T00:00:00Z") });
+    expect(await courseUsage(db, online.id)).toEqual({ type: "e_learning", sessions: 0, registrations: 0, lessons: 0, access: 1 });
+    expect(await toContact()).toEqual({ type: "typeLocked" });
+
+    // neither: it may change (and the same type always saves)
+    await db.delete(courseAccess).where(eq(courseAccess.courseId, online.id));
+    expect(await save({ ...(await load(online.id)), title: { et: "E-kulm 2" } })).toMatchObject({ ok: true });
+    expect(await toContact()).toEqual({});
+    expect((await getCourseForEdit(db, online.id))!.type).toBe("contact");
   });
 
   test("stale: a save based on an older version changes nothing", async () => {

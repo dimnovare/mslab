@@ -209,7 +209,7 @@ test.describe("course editor", () => {
     await page.goto(`/admin/koolitused/${id}`);
     await adminReady(page);
 
-    // e-learning: price, access, videos, discount, modules — no group / individual price, duration or includes
+    // e-learning: price, access, videos, discount — no group / individual price, duration or includes
     const typeSwitch = page.locator("[data-type-switch]");
     await expect(typeSwitch.getByRole("radio", { name: "E-õpe" })).toBeChecked();
     await expect(page.getByLabel("Hind (€)")).toHaveValue(c.price);
@@ -218,14 +218,12 @@ test.describe("course editor", () => {
     for (const name of ["Ligipääs (kuud)", "Videotunde", /^Soodustus järgmiselt koolituselt/]) await expect(field(name)).toHaveCount(1);
     for (const name of ["Grupikoolituse hind (€)", "Individuaalkoolituse hind (€)", /^Kestus/]) await expect(field(name)).toHaveCount(0);
     await expect(page.locator('[data-list-editor="includes"]')).toHaveCount(0);
-    await expect(page.locator('[data-list-editor="modules"] h3')).toHaveText("Moodulid");
     await expect(page.getByText(/hübriid/i)).toHaveCount(0); // no third type anywhere
 
     await typeSwitch.getByRole("radio", { name: "Kontaktõpe" }).check();
     for (const name of ["Grupikoolituse hind (€)", "Individuaalkoolituse hind (€)", /^Kestus/]) await expect(field(name)).toHaveCount(1);
     for (const name of ["Hind (€)", "Ligipääs (kuud)", "Videotunde", /^Soodustus/]) await expect(field(name)).toHaveCount(0);
     await expect(page.locator('[data-list-editor="includes"] h3')).toHaveText("Koolitus sisaldab");
-    await expect(page.locator('[data-list-editor="modules"] h3')).toHaveText("Programm");
     await typeSwitch.getByRole("radio", { name: "E-õpe" }).check();
     await expect(page.getByLabel("Hind (€)")).toHaveValue(c.price); // switching back keeps what was there
 
@@ -266,36 +264,36 @@ test.describe("course editor", () => {
     await signIn(page, context, visitorIp);
     await page.goto(`/admin/koolitused/${id}`);
     await adminReady(page);
-    const modules = page.locator('[data-list-editor="modules"]');
-    const rows = modules.locator("[data-row]");
+    const outcomes = page.locator('[data-list-editor="outcomes"]');
+    const rows = outcomes.locator("[data-row]");
     const count = await rows.count();
     const first = await rows.nth(0).locator("[data-lang-field]").inputValue();
     const second = await rows.nth(1).locator("[data-lang-field]").inputValue();
     // ↑ is aria-disabled on the first row, ↓ on the last; the focus stays on the moved row's button
-    await expect(modules.getByRole("button", { name: "Liiguta rida 1 üles" })).toHaveAttribute("aria-disabled", "true");
-    await expect(modules.getByRole("button", { name: `Liiguta rida ${count} alla` })).toHaveAttribute("aria-disabled", "true");
-    await modules.getByRole("button", { name: "Liiguta rida 2 üles" }).click();
+    await expect(outcomes.getByRole("button", { name: "Liiguta rida 1 üles" })).toHaveAttribute("aria-disabled", "true");
+    await expect(outcomes.getByRole("button", { name: `Liiguta rida ${count} alla` })).toHaveAttribute("aria-disabled", "true");
+    await outcomes.getByRole("button", { name: "Liiguta rida 2 üles" }).click();
     await expect(rows.nth(0).locator("[data-lang-field]")).toHaveValue(second);
     await expect(rows.nth(1).locator("[data-lang-field]")).toHaveValue(first);
-    await modules.getByRole("button", { name: "Lisa rida" }).click();
+    await outcomes.getByRole("button", { name: "Lisa rida" }).click();
     await expect(rows).toHaveCount(count + 1);
     await expect(rows.nth(count).locator("[data-lang-field]")).toBeFocused();
-    await page.keyboard.type("E2E moodul");
-    await modules.getByRole("button", { name: /^RU/ }).click();
-    await rows.nth(count).locator("[data-lang-field]").fill("E2E модуль");
-    await modules.getByRole("button", { name: "ET", exact: true }).click();
-    await modules.getByRole("button", { name: "Eemalda rida 3" }).click();
+    await page.keyboard.type("E2E õpiväljund");
+    await outcomes.getByRole("button", { name: /^RU/ }).click();
+    await rows.nth(count).locator("[data-lang-field]").fill("E2E результат");
+    await outcomes.getByRole("button", { name: "ET", exact: true }).click();
+    await outcomes.getByRole("button", { name: "Eemalda rida 3" }).click();
     await expect(rows).toHaveCount(count);
     await save(page);
 
     await page.goto(`/koolitused/${c.slug}`);
-    const items = page.locator("[data-modules] li");
+    const items = page.locator("[data-outcomes] li");
     await expect(items).toHaveCount(count);
     await expect(items.nth(0)).toContainText(second);
     await expect(items.nth(1)).toContainText(first);
-    await expect(items.last()).toContainText("E2E moodul");
+    await expect(items.last()).toContainText("E2E õpiväljund");
     await page.goto(`/ru/koolitused/${c.slug}`);
-    await expect(page.locator("[data-modules] li").last()).toContainText("E2E модуль");
+    await expect(page.locator("[data-outcomes] li").last()).toContainText("E2E результат");
   });
 
   test("gallery: upload (resized, without camera data), reorder, describe; the public page and /media show it", async ({ page, context, visitorIp, isMobile }, info) => {

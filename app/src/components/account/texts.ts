@@ -23,6 +23,9 @@ export type DetailsTexts = Dict["account"]["details"] & { loader: LoaderTexts };
 /** The e-course page's: the account.ecourse strings, the modules' lock label (course.locked), AccountLoader's. */
 export type EcourseTexts = Dict["account"]["ecourse"] & { locked: string; loader: LoaderTexts };
 
+/** One lesson's page: the account.lesson strings, "Jätka" and the lock sentence (account.ecourse), AccountLoader's. */
+export type LessonTexts = Dict["account"]["lesson"] & { resume: string; lockedHint: string; loader: LoaderTexts };
+
 export const shellTexts = (d: Dict): ShellTexts => d.account.shell;
 
 export const loaderTexts = (d: Dict): LoaderTexts => d.account.loader;
@@ -34,3 +37,5 @@ export const coursesTexts = (d: Dict): CoursesTexts => ({ ...d.account.dashboard
 export const favouritesTexts = (d: Dict): FavouritesTexts => ({ ...d.account.favourites, loader: loaderTexts(d) });
 
 export const detailsTexts = (d: Dict): DetailsTexts => ({ ...d.account.details, loader: loaderTexts(d) });
+
+export const lessonTexts = (d: Dict): LessonTexts => ({ ...d.account.lesson, resume: d.account.ecourse.resume, lockedHint: d.account.ecourse.lockedHint, loader: loaderTexts(d) });

@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
-import { campaign, courseImages, courses, faq, pages, posts, practicePackages, settings } from "@/db/schema";
+import { campaign, courseImages, courseModules, courses, faq, pages, posts, practicePackages, settings } from "@/db/schema";
+import { listModuleTitles } from "@/db/queries/public";
 import { applySeed } from "@/db/seed-apply";
 import { applyRuFill, fillBadge, fillI18n, fillTrainer, OLD_TRAINER_STATS, planRuFill } from "@/db/ru-fill";
 import { targetMatches } from "@/db/fill-ru";
@@ -59,12 +60,12 @@ describe("plan and apply on a database seeded before round 2", () => {
           title: etOnly(c.title) as never,
           summary: etOnly(c.summary) as never,
           includes: c.includes.map(etOnly) as never,
-          modules: c.modules.map(etOnly) as never,
           durationLabel: (c.durationLabel && etOnly(c.durationLabel)) as never,
           badge: (c.badge && { ...c.badge, label: typeof c.badge.label === "string" ? c.badge.label : c.badge.label.et }) as never,
         })
         .where(eq(courses.id, c.id));
     }
+    for (const m of await db.select().from(courseModules)) await db.update(courseModules).set({ title: etOnly(m.title) as never }).where(eq(courseModules.id, m.id));
     for (const i of await db.select().from(courseImages)) await db.update(courseImages).set({ alt: etOnly(i.alt) as never }).where(eq(courseImages.id, i.id));
     for (const q of await db.select().from(faq)) await db.update(faq).set({ q: etOnly(q.q) as never, a: etOnly(q.a) as never }).where(eq(faq.id, q.id));
     for (const p of await db.select().from(posts)) await db.update(posts).set({ title: etOnly(p.title) as never, excerpt: etOnly(p.excerpt) as never, body: etOnly(p.body) as never }).where(eq(posts.id, p.id));
@@ -85,6 +86,7 @@ describe("plan and apply on a database seeded before round 2", () => {
     expect(plan.counts).toMatchObject({ courses: 6, faq: 6, posts: 6, campaign: 1, settings: 1, practice_packages: 2 });
     expect(plan.counts.pages).toBe(4); // statement, trainer_bio and trainer_journey (one row each), and the new trainer card row
     expect(plan.counts.course_images).toBeGreaterThan(0);
+    expect(plan.counts.course_modules).toBeGreaterThan(0);
     expect((await db.select().from(courses).where(eq(courses.slug, "kulmumeistri-e-koolitus")))[0].title).toEqual({ et: "Kulmumeistri e-koolitus" });
 
     await applyRuFill(db, plan);
@@ -99,6 +101,8 @@ describe("plan and apply on a database seeded before round 2", () => {
     expect(lami.title).toEqual({ et: "Kulmude LAMI (Maria)" });
     expect(lami.summary.ru).toBe("Ламинирование бровей для практикующих мастеров: средства, время выдержки и стойкость формы.");
     expect((await bySlug("lash-lift-botox")).summary).toEqual({ et: "Uus koolitus.", ru: "Мой текст." });
+    const [kuju] = await db.select().from(courses).where(eq(courses.slug, "kulmukuju-ja-summeetria"));
+    expect((await listModuleTitles(db, kuju.id))[0]).toEqual({ et: "Sissejuhatus ja töövahendid", ru: "Введение и инструменты" });
 
     const teaser = (await db.select().from(pages).where(eq(pages.key, "trainer_teaser")))[0];
     expect(teaser).toEqual(pageSeeds.find((p) => p.key === "trainer_teaser"));

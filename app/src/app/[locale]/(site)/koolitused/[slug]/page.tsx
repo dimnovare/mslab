@@ -105,7 +105,7 @@ export default async function CoursePage({ params }: Props) {
   // Right-column facts (P3): only the ones the course has.
   const fact = (label: string, value: React.ReactNode | null | undefined): SummaryItem[] => (value === null || value === undefined || value === "" ? [] : [{ label, value }]);
   const trainerFact: SummaryItem[] = trainerName ? [{ label: c.trainerLabel, value: <TrainerLink trainer={trainer} />, wide: true }] : [];
-  const modules = pickList(course.modules, locale);
+  const modules = pickList(course.moduleTitles, locale);
   const cities = bookableCities(course.sessions);
   const summaryItems: SummaryItem[] = online
     ? [
@@ -284,7 +284,7 @@ export default async function CoursePage({ params }: Props) {
           {outcomes.length > 0 && (
             <div className={styles.block}>
               <h2 className={styles.h2}>{c.outcomesTitle}</h2>
-              <ul className={styles.checkList}>
+              <ul className={styles.checkList} data-outcomes="">
                 {outcomes.map((x) => (
                   <li key={x}>
                     <Icon name="check" size={16} />

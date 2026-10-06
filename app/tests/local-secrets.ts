@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { E2E_BUNNY } from "./e2e/bunny-values";
 
 // The settings of local development and the tests, read from .env.example: placeholders, never a real address (the real
 // ones are Environment Variables of the Vercel project). The Playwright configs hand them to the server they start
@@ -23,7 +24,8 @@ for (const key of ["DATABASE_URL", "SITE_URL", "ADMIN_EMAILS", "ADMIN_NAMES", "M
  * (whose configuration must be complete) starts too: the local database and the admin allow-list the tests sign in with.
  * These win over a .env.local of your own, so a run is the same on every machine. The R2 variables are blank
  * (server/env.ts counts a blank one as not set), so the server keeps uploads in its local folder whatever a .env.local
- * says; global-setup also refuses to run when one is set anywhere (FORBIDDEN_SETTINGS).
+ * says; global-setup also refuses to run when one is set anywhere (FORBIDDEN_SETTINGS). The Bunny settings point at the
+ * fake Bunny on this machine (tests/e2e/fake-bunny.ts, BUNNY_FAKE_URL) with made-up keys, never the real library.
  */
 export const LOCAL_ENV = {
   DATABASE_URL: vars.DATABASE_URL,
@@ -36,11 +38,17 @@ export const LOCAL_ENV = {
   R2_ACCESS_KEY_ID: "",
   R2_SECRET_ACCESS_KEY: "",
   R2_BUCKET: "",
+  BUNNY_LIBRARY_ID: E2E_BUNNY.libraryId,
+  BUNNY_API_KEY: E2E_BUNNY.apiKey,
+  BUNNY_TOKEN_KEY: E2E_BUNNY.tokenKey,
+  BUNNY_WEBHOOK_SECRET: E2E_BUNNY.webhookSecret,
+  BUNNY_FAKE_URL: E2E_BUNNY.url,
 };
 
 /**
- * Settings an e2e run must not have, each with what it would do: the form tests would reach real people, and the upload
- * tests would write to the real image bucket (the server of an e2e run keeps images in a local folder).
+ * Settings an e2e run must not have, each with what it would do: the form tests would reach real people, the upload
+ * tests would write to the real image bucket (the server of an e2e run keeps images in a local folder), and the video
+ * tests would create videos in the real Bunny library (the server of an e2e run talks to the fake Bunny).
  */
 export const FORBIDDEN_SETTINGS: Record<string, string> = {
   RESEND_API_KEY: "the form tests would send real e-mails",
@@ -49,6 +57,7 @@ export const FORBIDDEN_SETTINGS: Record<string, string> = {
   R2_ACCESS_KEY_ID: "the upload tests would write to the real image bucket",
   R2_SECRET_ACCESS_KEY: "the upload tests would write to the real image bucket",
   R2_BUCKET: "the upload tests would write to the real image bucket",
+  BUNNY_API_KEY: "the video tests would create videos in the real Bunny library",
 };
 
 /** The value of a .env line without its quotes: `R2_BUCKET=""` sets nothing. */

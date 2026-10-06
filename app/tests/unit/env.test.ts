@@ -34,16 +34,16 @@ describe("serverEnv in production", () => {
   test("returns the six required values as given; every optional one is undefined when not set", () => {
     const env = serverEnv(FULL, true);
     expect(env).toMatchObject(FULL);
-    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MEDIA_LOCAL", "CRON_SECRET"] as const)
+    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MEDIA_LOCAL", "CRON_SECRET", "BUNNY_LIBRARY_ID", "BUNNY_API_KEY", "BUNNY_TOKEN_KEY", "BUNNY_WEBHOOK_SECRET", "BUNNY_FAKE_URL"] as const)
       expect(env[name], name).toBeUndefined();
   });
 
   test("optional values are passed through; blank ones count as not set", () => {
     const env = serverEnv(
-      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c" },
+      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c", BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "bunny-api-key", BUNNY_TOKEN_KEY: "bunny-token-key", BUNNY_WEBHOOK_SECRET: "bunny-hook", BUNNY_FAKE_URL: "http://localhost:3998" },
       true,
     );
-    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c" });
+    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c", BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "bunny-api-key", BUNNY_TOKEN_KEY: "bunny-token-key", BUNNY_WEBHOOK_SECRET: "bunny-hook", BUNNY_FAKE_URL: "http://localhost:3998" });
     expect(serverEnv({ ...FULL, RESEND_API_KEY: "  ", ADMIN_KEY: "", CRON_SECRET: " " }, true)).toMatchObject({ RESEND_API_KEY: undefined, ADMIN_KEY: undefined, CRON_SECRET: undefined });
   });
 

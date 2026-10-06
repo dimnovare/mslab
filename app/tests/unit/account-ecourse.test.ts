@@ -1,16 +1,21 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { EcoursePage } from "@/components/account/EcoursePage";
+import { EcourseView as CourseView } from "@/components/account/EcourseView";
 import { ecourseTexts } from "@/components/account/texts";
 import { formatDate } from "@/i18n/format";
 import { getDict, type Locale } from "@/i18n/locales";
 import type { EcourseView } from "@/server/client-data";
 
 // The e-course page in a browser-like document (happy-dom), with fetch answered here: no access, the terms notice, accepting
-// (and what is sent), a 409 when the admin saved new terms meanwhile, the other failures, and the course view itself.
+// (and what is sent), a 409 when the admin saved new terms meanwhile, the other failures, and the course view itself (phase 3a
+// Task 9: the progress line and bar, the one button "Jätka" / "Alusta", the lessons with their states, the lock sentence, the
+// modules folded on a phone, and the admin's read-only view).
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -20,10 +25,34 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const EXPIRES = "2027-03-22T08:00:00.000Z";
 const V1 = "2026-10-01T09:00:00.000Z";
 const V2 = "2026-10-03T09:30:00.000Z";
-const view = (over: { accepted?: boolean; version?: string; text?: EcourseView["terms"]["text"] } = {}): EcourseView => ({
-  course: { slug: "veebikursus", title: { et: "Veebikursus", ru: "Онлайн-курс" }, modules: [{ et: "Sissejuhatus", ru: "Введение" }, { et: "Praktika" }] },
+/** Two modules: "Sissejuhatus" with lesson 11 (done) and 12 (current), "Praktika" with 21 and 22 (locked); 1 of 4 done, "Jätka" to 12. */
+const MODULES: EcourseView["course"]["modules"] = [
+  {
+    id: 1,
+    title: { et: "Sissejuhatus", ru: "Введение" },
+    lessons: [
+      { id: 11, moduleId: 1, title: { et: "Tere tulemast", ru: "Добро пожаловать" }, state: "done" },
+      { id: 12, moduleId: 1, title: { et: "Tööriistad", ru: "Инструменты" }, state: "current" },
+    ],
+  },
+  {
+    id: 2,
+    title: { et: "Praktika" },
+    lessons: [
+      { id: 21, moduleId: 2, title: { et: "Esimene harjutus" }, state: "locked" },
+      { id: 22, moduleId: 2, title: { et: "Teine harjutus" }, state: "locked" },
+    ],
+  },
+];
+const PROGRESS: EcourseView["progress"] = { done: 1, total: 4, next: 12 };
+
+const view = (
+  over: { accepted?: boolean; version?: string; text?: EcourseView["terms"]["text"]; modules?: EcourseView["course"]["modules"]; progress?: EcourseView["progress"] } = {},
+): EcourseView => ({
+  course: { slug: "veebikursus", title: { et: "Veebikursus", ru: "Онлайн-курс" }, modules: over.modules ?? MODULES },
   access: { expiresAt: EXPIRES },
   terms: { version: over.version ?? V1, accepted: over.accepted ?? false, text: over.accepted ? null : "text" in over ? (over.text ?? null) : { et: "Esimene lõik.\n\nTeine lõik.", ru: "Первый абзац." } },
+  progress: over.progress ?? PROGRESS,
 });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -48,6 +77,7 @@ const mount = async (locale: Locale = "et") => {
   await settle();
 };
 const tick = (box = $("input[name='terms']")) => click(box);
+const moduleTitles = () => $$("[data-module] [data-module-title]").map((e) => e.textContent);
 const button = () => $("[data-terms-gate] button[type='submit']") as HTMLButtonElement;
 const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 
@@ -189,18 +219,8 @@ describe("accepting", () => {
     expect(document.activeElement).toBe(h1);
     expect($("[data-ecourse-access]")?.textContent).toBe(`Ligipääs kuni ${formatDate(new Date(EXPIRES), "et")}`);
     expect($("[data-ecourse-access]")?.textContent).toBe("Ligipääs kuni 22.03.2027");
-    expect($$("[data-modules] li").map((li) => li.querySelector("span:nth-child(2)")?.textContent)).toEqual(["Sissejuhatus", "Praktika"]);
-    expect($$("[data-modules] [data-locked]")).toHaveLength(2);
-    expect($("[data-ecourse-soon]")?.textContent).toBe("Sisu lisandub peagi.");
-  });
-
-  test("Russian course view: the Russian title, module, date line and sentence", async () => {
-    fetchMock.mockResolvedValue(json(200, view({ accepted: true })));
-    await mount("ru");
-    expect($("[data-ecourse] h1")?.textContent).toBe("Онлайн-курс");
-    expect($("[data-ecourse-access]")?.textContent).toBe("Доступ до 22.03.2027");
-    expect($$("[data-modules] li").map((li) => li.querySelector("span:nth-child(2)")?.textContent)).toEqual(["Введение", "Praktika"]);
-    expect($("[data-ecourse-soon]")?.textContent).toBe("Материалы скоро появятся.");
+    expect(moduleTitles()).toEqual(["Sissejuhatus", "Praktika"]);
+    expect($("[data-ecourse-progress]")?.textContent).toBe("1 / 4 õppetundi tehtud");
   });
 
   test("two quick presses send one request", async () => {
@@ -372,5 +392,163 @@ describe("accepting", () => {
     await tick();
     await click(button());
     expect($("[data-terms-failed]")?.textContent).toBe("Не удалось сохранить. Попробуйте ещё раз.");
+  });
+});
+
+describe("the course view (phase 3a: progress and lessons)", () => {
+  test("the module's round mark is a picture only: its alternative text is empty (after the plain fallback line)", () => {
+    const css = readFileSync(join(process.cwd(), "src/components/account/EcourseView.module.css"), "utf8");
+    expect(css).toMatch(/content: "\+";\s*content: "\+" \/ "";/);
+    expect(css).toMatch(/content: "−";\s*content: "−" \/ "";/);
+  });
+
+  /** The page with the terms accepted and this course data. */
+  const open = async (over: Parameters<typeof view>[0] = {}, locale: Locale = "et") => {
+    fetchMock.mockImplementation(async () => json(200, view({ accepted: true, ...over })));
+    await mount(locale);
+  };
+  /** `window.matchMedia` answering `(min-width: 768px)` with `wide` (a computer or tablet) or not (a phone). */
+  const screen = (wide: boolean) =>
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({ matches: query === "(min-width: 768px)" ? wide : false, media: query, addEventListener() {}, removeEventListener() {} })),
+    );
+  const lesson = (id: number) => $(`[data-lesson="${id}"]`);
+
+  test("the progress line, the thin bar and the one button 'Jätka' to the next lesson", async () => {
+    await open();
+    expect($("[data-ecourse-progress]")?.textContent).toBe("1 / 4 õppetundi tehtud");
+    const bar = $("[data-ecourse] [role=progressbar]")!;
+    expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(bar.getAttribute("aria-valuemin")).toBe("0");
+    expect(bar.getAttribute("aria-valuemax")).toBe("4");
+    // named by the visible line (no second copy of its text for a screen reader)
+    const line = $("[data-ecourse-progress]")!;
+    expect(line.id).not.toBe("");
+    expect(bar.getAttribute("aria-labelledby")).toBe(line.id);
+    expect(bar.hasAttribute("aria-label")).toBe(false);
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe("25%");
+    const next = $("[data-ecourse-next]")!;
+    expect(next.tagName).toBe("A");
+    expect(next.textContent).toBe("Jätka");
+    expect(next.getAttribute("href")).toBe("/konto/kursus/veebikursus/12");
+    // one primary action: besides the lesson titles, the button is the page's only link, and there is no other button
+    expect($$("[data-ecourse] a").filter((a) => !a.closest("[data-lesson]")).map((a) => a.textContent)).toEqual(["Jätka"]);
+    expect($$("[data-ecourse] button")).toHaveLength(0);
+    expect($("[data-ecourse-soon]")).toBeNull();
+  });
+
+  test("before the first lesson the button says 'Alusta'", async () => {
+    await open({
+      modules: [{ ...MODULES[0], lessons: [{ ...MODULES[0].lessons[0], state: "current" }] }],
+      progress: { done: 0, total: 1, next: 11 },
+    });
+    expect($("[data-ecourse-progress]")?.textContent).toBe("0 / 1 õppetundi tehtud");
+    expect($("[data-ecourse-next]")?.textContent).toBe("Alusta");
+    expect($("[data-ecourse-next]")?.getAttribute("href")).toBe("/konto/kursus/veebikursus/11");
+  });
+
+  test("each lesson shows its state: done and open lessons are links to their pages, a locked one is not, with its label for screen readers", async () => {
+    await open();
+    expect(lesson(11)?.getAttribute("data-state")).toBe("done");
+    expect(lesson(12)?.getAttribute("data-state")).toBe("current");
+    expect(lesson(21)?.getAttribute("data-state")).toBe("locked");
+    expect(lesson(22)?.getAttribute("data-state")).toBe("locked");
+    expect(lesson(11)?.querySelector("a")?.getAttribute("href")).toBe("/konto/kursus/veebikursus/11");
+    expect(lesson(11)?.querySelector("a")?.textContent).toBe("Tere tulemast");
+    expect(lesson(12)?.querySelector("a")?.getAttribute("href")).toBe("/konto/kursus/veebikursus/12");
+    expect(lesson(21)?.querySelector("a")).toBeNull();
+    expect(lesson(21)?.textContent).toContain("Esimene harjutus");
+    // the state as a word for a screen reader (the icon is hidden from it)
+    expect(lesson(11)?.textContent).toContain("Tehtud");
+    expect(lesson(12)?.textContent).toContain("Avatud");
+    expect(lesson(21)?.textContent).toContain("Lukustatud");
+    for (const id of [11, 12, 21]) expect(lesson(id)?.querySelector("svg")?.getAttribute("aria-hidden"), String(id)).toBe("true");
+    // the lessons are in their modules, in order
+    expect($$("[data-module='1'] [data-lesson]").map((e) => e.getAttribute("data-lesson"))).toEqual(["11", "12"]);
+    expect($$("[data-module='2'] [data-lesson]").map((e) => e.getAttribute("data-lesson"))).toEqual(["21", "22"]);
+  });
+
+  test("'Avaneb, kui eelmine õppetund on tehtud.' once, under the first locked lesson", async () => {
+    await open();
+    const hints = $$("[data-locked-hint]");
+    expect(hints).toHaveLength(1);
+    expect(hints[0].textContent).toBe("Avaneb, kui eelmine õppetund on tehtud.");
+    expect(hints[0].closest("[data-lesson]")?.getAttribute("data-lesson")).toBe("21");
+  });
+
+  test("a phone: only the module of the next lesson starts open; a wider screen: every module is open; a module counts its done lessons", async () => {
+    const details = (id: number) => $(`[data-module='${id}'] details`) as HTMLDetailsElement;
+    screen(false);
+    await open();
+    expect(details(1).open).toBe(true);
+    expect(details(2).open).toBe(false);
+    expect(details(1).querySelector("summary")?.textContent).toContain("1/2");
+    expect(details(2).querySelector("summary")?.textContent).toContain("0/2");
+    // the count as words for a screen reader; the short "1/2" is for the eye only
+    const tally = (id: number) => [...details(id).querySelectorAll("summary span")];
+    expect(tally(1).find((s) => s.textContent === "1/2")?.getAttribute("aria-hidden")).toBe("true");
+    expect(tally(1).map((s) => s.textContent)).toContain("1 / 2 tehtud");
+    expect(tally(2).map((s) => s.textContent)).toContain("0 / 2 tehtud");
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    screen(true);
+    await mount();
+    expect(details(1).open).toBe(true);
+    expect(details(2).open).toBe(true);
+  });
+
+  test("no lessons yet: the module titles and 'Sisu lisandub peagi.', no progress line and no button", async () => {
+    await open({ modules: MODULES.map((m) => ({ ...m, lessons: [] })), progress: { done: 0, total: 0, next: null } });
+    expect(moduleTitles()).toEqual(["Sissejuhatus", "Praktika"]);
+    expect($("[data-ecourse-soon]")?.textContent).toBe("Sisu lisandub peagi.");
+    expect($("[data-ecourse-progress]")).toBeNull();
+    expect($("[role=progressbar]")).toBeNull();
+    expect($("[data-ecourse-next]")).toBeNull();
+    expect($("[data-ecourse] details")).toBeNull();
+  });
+
+  test("every lesson done: no button, the line says so", async () => {
+    await open({
+      modules: MODULES.map((m) => ({ ...m, lessons: m.lessons.map((l) => ({ ...l, state: "done" as const })) })),
+      progress: { done: 4, total: 4, next: null },
+    });
+    expect($("[data-ecourse-progress]")?.textContent).toBe("4 / 4 õppetundi tehtud");
+    expect($("[data-ecourse-next]")).toBeNull();
+    expect($("[data-locked-hint]")).toBeNull();
+  });
+
+  test("read-only (the admin's view as client): nothing is a link; the button and the lesson titles are aria-disabled", async () => {
+    await act(async () => root.render(createElement(CourseView, { data: view({ accepted: true }), locale: "et", t: ecourseTexts(getDict("et")), readOnly: true })));
+    expect($("[data-ecourse]")).not.toBeNull();
+    expect($$("[data-ecourse] a")).toHaveLength(0);
+    expect($("[data-ecourse-next]")?.getAttribute("aria-disabled")).toBe("true");
+    expect($("[data-ecourse-next]")?.textContent).toBe("Jätka");
+    for (const l of MODULES[0].lessons) expect(lesson(l.id)?.querySelector("[aria-disabled='true']")?.textContent, String(l.id)).toBe(l.title.et);
+    // every module open, whatever the screen
+    expect($$("[data-ecourse] details").every((d) => (d as HTMLDetailsElement).open)).toBe(true);
+  });
+
+  test("the server's markup of the read-only view (a server component renders it) has every module open and no link", () => {
+    const html = renderToStaticMarkup(createElement(CourseView, { data: view({ accepted: true }), locale: "et", t: ecourseTexts(getDict("et")), readOnly: true }));
+    expect(html).not.toContain("<a ");
+    expect(html.match(/<details [^>]*open=""/g)).toHaveLength(2);
+  });
+
+  test("Russian: the title, the date line, the progress line and 'Продолжить'", async () => {
+    await open({}, "ru");
+    expect($("[data-ecourse] h1")?.textContent).toBe("Онлайн-курс");
+    expect($("[data-ecourse-access]")?.textContent).toBe("Доступ до 22.03.2027");
+    expect(moduleTitles()).toEqual(["Введение", "Praktika"]);
+    expect($("[data-ecourse-progress]")?.textContent).toBe("Пройдено уроков: 1 / 4");
+    expect($("[data-ecourse-next]")?.textContent).toBe("Продолжить");
+    expect($("[data-ecourse-next]")?.getAttribute("href")).toBe("/ru/konto/kursus/veebikursus/12");
+    expect(lesson(12)?.querySelector("a")?.getAttribute("href")).toBe("/ru/konto/kursus/veebikursus/12");
+    expect($("[data-locked-hint]")?.textContent).toBe("Откроется, когда предыдущий урок будет пройден.");
+    expect([...document.querySelectorAll("[data-module='1'] summary span")].map((s) => s.textContent)).toContain("Пройдено: 1 / 2");
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await open({ progress: { ...PROGRESS, done: 0 } }, "ru");
+    expect($("[data-ecourse-next]")?.textContent).toBe("Начать");
   });
 });

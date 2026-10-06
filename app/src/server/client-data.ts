@@ -11,12 +11,14 @@ import { PREPAYMENT_KEY, parsePrepayment, sortCards, type AccountCard, type Prep
 import { upcomingFrom } from "@/domain/calendar";
 import { DEFAULT_TERMS_VERSION, TERMS_PAGE_KEY, TERMS_VERSION_KEY } from "@/domain/course-terms";
 import { nextSessionByCourse } from "@/domain/home";
+import type { CourseProgress } from "@/domain/lessons";
 import { registrationPrice } from "@/domain/registration";
 import { normalizeEmail } from "@/domain/email";
 import type { I18n } from "@/i18n/field";
 import { href } from "@/i18n/href";
 import { getDict, type Locale } from "@/i18n/locales";
 import { lockAddress } from "./client-auth";
+import { courseOutline, type OutlineModule } from "./lesson-outline";
 import { newToken } from "./token";
 
 // What a signed-in client sees and may change, for the JSON endpoints under /api/konto (account-api.ts) and the admin's
@@ -39,7 +41,7 @@ export type Dashboard = {
 };
 
 export type EcourseView = {
-  course: { slug: string; title: I18n; modules: I18n[] };
+  course: { slug: string; title: I18n; modules: OutlineModule[] };
   access: { expiresAt: string };
   /**
    * `version`: the current terms version (send it back when accepting, so a student who saw the old text cannot accept a new one unseen).
@@ -48,6 +50,8 @@ export type EcourseView = {
    * and the notice shows). `text`: the terms text, only while `accepted` is false (so never null then).
    */
   terms: { version: string; accepted: boolean; text: I18n | null };
+  /** "5 / 24 õppetundi tehtud" and where "Jätka" goes (domain/lessons.ts courseProgress). */
+  progress: CourseProgress;
 };
 
 const iso = (d: Date): string => d.toISOString();
@@ -192,10 +196,11 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
 /**
  * The e-course the client has access to right now (not revoked, not expired), or null. Whether the course is still published does not
  * matter: access is granted to the client and stays until it ends; only the favourites are limited to published courses.
+ * Also the lesson endpoints' first check (lesson-data.ts).
  */
-async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
+export async function activeAccess(db: Db, clientId: number, slug: string, now: Date) {
   const [row] = await db
-    .select({ course: { id: courses.id, slug: courses.slug, title: courses.title, modules: courses.modules }, expiresAt: courseAccess.expiresAt })
+    .select({ course: { id: courses.id, slug: courses.slug, title: courses.title }, expiresAt: courseAccess.expiresAt })
     .from(courseAccess)
     .innerJoin(courses, eq(courseAccess.courseId, courses.id))
     .where(and(eq(courseAccess.clientId, clientId), eq(courses.slug, slug), isNull(courseAccess.revokedAt), gt(courseAccess.expiresAt, now)))
@@ -217,7 +222,26 @@ export function termsText(body: unknown): I18n | null {
 }
 
 /**
- * The e-course page's data: null without active access (none, revoked or expired). The terms notice shows while `terms.accepted` is false;
+ * The terms notice of an e-course for this client: the current version, whether nothing is left to accept, and the text while
+ * something is. The version is read BEFORE the text (see loadEcourse).
+ */
+export async function termsState(db: Db, clientId: number, courseId: number): Promise<EcourseView["terms"]> {
+  const versionThenText = async () => {
+    const current = await courseTermsVersion(db);
+    return [current, await db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1)] as const;
+  };
+  const [[version, page], accepted] = await Promise.all([
+    versionThenText(),
+    db.select({ version: termsAcceptances.termsVersion }).from(termsAcceptances).where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, courseId))),
+  ]);
+  const text = termsText(page[0]?.body);
+  const isAccepted = text === null || accepted.some((row) => row.version === version);
+  return { version, accepted: isAccepted, text: isAccepted ? null : text };
+}
+
+/**
+ * The e-course page's data: null without active access (none, revoked or expired), with its modules, the visible lessons and their
+ * states, and the counts. The terms notice shows while `terms.accepted` is false;
  * the page then sends back `terms.version` with the acceptance. The version is read BEFORE the text: an admin save that lands
  * in between then pairs the old version with the new text (the next visit shows the notice again), never a new version with
  * text the student did not see. The client's acceptances are read alongside.
@@ -225,20 +249,12 @@ export function termsText(body: unknown): I18n | null {
 export async function loadEcourse(db: Db, clientId: number, slug: string, now: Date): Promise<EcourseView | null> {
   const access = await activeAccess(db, clientId, slug, now);
   if (!access) return null;
-  const versionThenText = async () => {
-    const current = await courseTermsVersion(db);
-    return [current, await db.select({ body: pages.body }).from(pages).where(eq(pages.key, TERMS_PAGE_KEY)).limit(1)] as const;
-  };
-  const [[version, page], accepted] = await Promise.all([
-    versionThenText(),
-    db.select({ version: termsAcceptances.termsVersion }).from(termsAcceptances).where(and(eq(termsAcceptances.clientId, clientId), eq(termsAcceptances.courseId, access.course.id))),
-  ]);
-  const text = termsText(page[0]?.body);
-  const isAccepted = text === null || accepted.some((row) => row.version === version);
+  const [terms, outline] = await Promise.all([termsState(db, clientId, access.course.id), courseOutline(db, access.course.id, clientId)]);
   return {
-    course: { slug: access.course.slug, title: access.course.title, modules: access.course.modules },
+    course: { slug: access.course.slug, title: access.course.title, modules: outline.modules },
     access: { expiresAt: iso(access.expiresAt) },
-    terms: { version, accepted: isAccepted, text: isAccepted ? null : text },
+    terms,
+    progress: outline.progress,
   };
 }
 

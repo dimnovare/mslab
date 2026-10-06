@@ -54,7 +54,10 @@ describe("routing and the cross-site check", () => {
       post("/", {}), req("/lemmikud/merge"), req("/andmed"), post("/andmed", {}), req("/uudiskiri"), req("/muutmine"), req("/tingimused"), req("/kustuta"),
       req("/kustuta", { method: "DELETE" }), req("/lemmikud", { method: "PATCH" }),
       // the e-course path: one slug only, GET only
-      post("/kursus/x", {}), req("/kursus"), req("/kursus/"), req("/kursus/a/b"), req("/kursus/x", { method: "PATCH" }), req("/Kursus/x"), req("/lemmikud/"),
+      post("/kursus/x", {}), req("/kursus"), req("/kursus/"), req("/kursus/x", { method: "PATCH" }), req("/Kursus/x"), req("/lemmikud/"),
+      // the lesson paths: /kursus/<slug>/<lesson>[/progress | /tehtud | /fail/<file>], each with its own method
+      post("/kursus/a/1", {}), req("/kursus/a/1", { method: "PATCH" }), req("/kursus/a/1/progress"), req("/kursus/a/1/tehtud"), post("/kursus/a/1/fail/2", {}),
+      req("/kursus/a/1/other"), req("/kursus/a/1/fail"), req("/kursus/a/1/fail/"), req("/kursus/a/1/fail/2/3"), req("/kursus/a/1/progress/x"), req("/kursus/a/1/", { method: "GET" }),
     ];
     for (const r of unknown)
       for (const headers of [{}, cookie]) {
@@ -184,6 +187,7 @@ describe("the data endpoints without a session", () => {
   // Every one starts with requireClient: no cookie (or one that is not a token) is 401 before anything else, the body is not read and the database is not used.
   const endpoints: [string, string, unknown?][] = [
     ["GET", ""], ["GET", "/"], ["GET", "/kursus/kulmude-lami"], ["GET", "/kursus/%E0%A4%A"], ["GET", "/lemmikud"], ["GET", "/lemmikud?l=ru"],
+    ["GET", "/kursus/kulmude-lami/1"], ["POST", "/kursus/kulmude-lami/1/progress", { watchedSec: 5 }], ["POST", "/kursus/kulmude-lami/1/tehtud", {}], ["GET", "/kursus/kulmude-lami/1/fail/2"],
     ["POST", "/lemmikud", { slug: "kulmude-lami", on: true }], ["POST", "/lemmikud/merge", { slugs: ["kulmude-lami"] }],
     ["PATCH", "/andmed", { name: "Kati", phone: "", locale: "et" }], ["POST", "/uudiskiri", { on: true }],
     ["POST", "/muutmine", { registrationId: 1, kind: "cancel", message: "" }], ["POST", "/tingimused", { slug: "veebikursus" }],

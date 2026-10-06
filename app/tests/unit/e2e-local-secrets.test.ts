@@ -1,15 +1,25 @@
 import { describe, expect, test } from "vitest";
+import { bunnyConfig } from "@/server/bunny";
 import { serverEnv } from "@/server/env";
+import { E2E_BUNNY } from "../e2e/bunny-values";
 import { FORBIDDEN_SETTINGS, forbiddenSettingError, LOCAL_ENV, parseEnvFile } from "../local-secrets";
 
 // What an e2e run refuses to start with (tests/e2e/global-setup.ts reads these files and the environment): anything that
-// would make the form tests reach real people, or the upload tests write to the real R2 bucket. The values here are made up.
+// would make the form tests reach real people, the upload tests write to the real R2 bucket, or the video tests create videos in
+// the real Bunny library. The values here are made up.
 
 const R2 = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"];
 
 describe("forbiddenSettingError", () => {
-  test("the forbidden settings are the two mail secrets and all four R2 variables", () => {
-    expect(Object.keys(FORBIDDEN_SETTINGS).sort()).toEqual(["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", ...R2].sort());
+  test("the forbidden settings are the two mail secrets, all four R2 variables and the Bunny API key", () => {
+    expect(Object.keys(FORBIDDEN_SETTINGS).sort()).toEqual(["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", ...R2, "BUNNY_API_KEY"].sort());
+  });
+
+  test("a Bunny API key in an env file or in the run's environment stops it, without its value", () => {
+    const message = forbiddenSettingError({ ".env.local": "BUNNY_API_KEY=fake-bunny-key-123\n" }, {})!;
+    expect(message).toMatch(/\.env\.local sets BUNNY_API_KEY.*real Bunny library/);
+    expect(message).not.toContain("fake-bunny-key-123");
+    expect(forbiddenSettingError({}, { BUNNY_API_KEY: "fake-bunny-key-123" })).toMatch(/BUNNY_API_KEY is set in the environment/);
   });
 
   test("nothing set: the run may go on", () => {
@@ -61,5 +71,15 @@ describe("the dev server's environment (LOCAL_ENV)", () => {
   test("and the server reads blank as not set: with them uploads use the local folder (media-store)", () => {
     const env = serverEnv(LOCAL_ENV, false);
     for (const name of R2) expect(env[name as keyof typeof env], name).toBeUndefined();
+  });
+
+  test("the Bunny settings point at the fake on this machine (never the real library)", () => {
+    expect(LOCAL_ENV.BUNNY_FAKE_URL).toBe(`http://localhost:${E2E_BUNNY.port}`);
+    expect(bunnyConfig(serverEnv(LOCAL_ENV, false), false)).toMatchObject({ apiBase: E2E_BUNNY.url, tusEndpoint: `${E2E_BUNNY.url}/tusupload`, embedBase: `${E2E_BUNNY.url}/embed` });
+  });
+
+  test("the fake's port is 3998 unless E2E_BUNNY_PORT names another", () => {
+    if (!process.env.E2E_BUNNY_PORT) expect(LOCAL_ENV.BUNNY_FAKE_URL).toBe("http://localhost:3998");
+    expect(E2E_BUNNY.port).toBe(process.env.E2E_BUNNY_PORT ? Number(process.env.E2E_BUNNY_PORT) : 3998);
   });
 });

@@ -173,3 +173,19 @@
     flex-basis: 100%;
   }
 }
+
+/* "Ava järgmine õppetund": the line that says which lesson was opened. It is a status region from the start, so while it is
+   empty it takes no room (the row's gap is taken back) and when it fills the focus comes to it. */
+.done {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.done:empty {
+  margin-top: -4px;
+}
+
+.done:focus {
+  outline: 2px solid var(--rose);
+  outline-offset: 2px;
+}

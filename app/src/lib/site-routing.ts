@@ -1,6 +1,9 @@
 // Where a request path goes: the decisions of src/middleware.ts as plain functions, without Next.js (tested on their own).
 // ET lives at "/", RU at "/ru"; internally both render app/[locale]/…
 
+import { parseRowId } from "./row-id";
+import { isSlug } from "./slug";
+
 // Paths the app serves as they are (no "/et" rewrite). The hub (guide, p/…) and /api are handled before this list.
 // Every entry ends at a path boundary or is one exact file: "/admin.php", "/administrator" or "/media.php" are unknown
 // addresses (the cached 404 page), not the admin or /media.
@@ -40,12 +43,13 @@ export function cartPage(pathname: string, search: URLSearchParams): string | nu
   return `/${m[1] ? "ru" : "et"}/ostukorv/${encodeURIComponent(course)}`;
 }
 
-/** The client account's shells (/konto…, /ru/konto…) as pages of the app, with their locale: "/et/konto/sisene", "/ru/konto/kursus/x". */
+/** The client account's shells (/konto…, /ru/konto…) as pages of the app, with their locale: "/et/konto/sisene", "/ru/konto/kursus/x", "/et/konto/kursus/x/12". */
 const ACCOUNT_SHELL = /^\/(et|ru)\/konto(\/|$)/;
 
 /**
  * The pages of app/[locale]/(site) without their locale (tests/unit/site-routing.test.ts checks them against the app),
- * with the client account's shells (/konto…, phase 2a: the login page, favourites and my details).
+ * with the client account's shells (/konto…, phase 2a: the login page, favourites and my details). The pages with a slug or an
+ * id are the patterns below: a course, a news item, an e-course in the account and (phase 3a) one lesson of it, a course's cart.
  */
 const STATIC_PAGES = new Set([
   "", "/kontakt", "/konto", "/konto/andmed", "/konto/lemmikud", "/konto/sisene", "/koolitaja", "/koolitused", "/koolituskalender", "/ostukorv",
@@ -54,6 +58,17 @@ const STATIC_PAGES = new Set([
 /** Pages with a slug of ours (lowercase letters, digits, dashes), an e-course in the account too; the cart takes whatever ?kursus= says (its own 404). */
 const SLUG_PAGE = /^\/(koolitused|uudised|konto\/kursus)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CART_PAGE = /^\/ostukorv\/[^/]+$/;
+/**
+ * One lesson of an e-course in the account (phase 3a): /konto/kursus/<slug>/<lesson id>. The slug is checked by isSlug (lib/slug.ts:
+ * also at most 80 characters) and the id by parseRowId (lib/row-id.ts), the rules the page and the API read them with.
+ */
+const LESSON_PAGE = /^\/konto\/kursus\/([^/]+)\/([1-9][0-9]{0,9})$/;
+
+/** Is `rest` (a page without its locale) one lesson's address: a slug of ours and an id the database can hold (≤ 2 147 483 647)? */
+const isLessonPage = (rest: string): boolean => {
+  const m = LESSON_PAGE.exec(rest);
+  return m !== null && isSlug(m[1]) && parseRowId(m[2]) !== null;
+};
 
 /**
  * Every address without a page of its own is served from this one page per locale (app/[locale]/(site)/[...rest] →
@@ -65,7 +80,7 @@ export const NOT_FOUND_SEGMENT = "leidmata";
 /** Does `page` ("/et/koolitused/x") name a page of the site? false: it is served from the locale's 404 page. */
 export function isKnownPage(page: string): boolean {
   const rest = page.replace(/^\/(et|ru)(?=\/|$)/, "");
-  return STATIC_PAGES.has(rest) || SLUG_PAGE.test(rest) || CART_PAGE.test(rest);
+  return STATIC_PAGES.has(rest) || SLUG_PAGE.test(rest) || CART_PAGE.test(rest) || isLessonPage(rest);
 }
 
 /** The 404 page of a locale ("/et/leidmata"). */

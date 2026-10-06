@@ -37,7 +37,7 @@ const nextConfig: NextConfig = {
   // - links to other sites carry the origin only.
   // A redirect made by src/middleware.ts sets its own X-Robots-Tag. The admin area and the login endpoints answer per
   // visitor and are never cached (by the browser or a CDN); the client account's API is private to the visitor too, and
-  // its login link keeps its token out of the Referer. /_next/static files get Next.js's own year-long immutable
+  // its login link keeps its token out of the Referer, and so does a lesson file's redirect (the lesson's address). /_next/static files get Next.js's own year-long immutable
   // Cache-Control.
   // A header given here replaces the one a route sets itself, and of two rules for the same path and header the later
   // one wins: so the routes with a stricter value of their own get it here again, after the rule for every path.
@@ -63,6 +63,8 @@ const nextConfig: NextConfig = {
       { source: "/api/auth/verify", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
       // the client login link: its token is in the address, so it is never sent on as a Referer
       { source: "/api/konto/verify", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+      // a lesson file: the 302 to R2 (server/account-api.ts fileAnswer) must not pass the lesson's address on as a Referer
+      { source: "/api/konto/kursus/:slug/:lesson/fail/:file", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
     ];
   },
 };

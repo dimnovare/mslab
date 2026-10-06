@@ -28,6 +28,17 @@ export function formatDayMonth(d: Date, l: Locale): string {
   return `${get("day")}.${get("month")}`;
 }
 
+/**
+ * A file's size for people: "820 kB" under a megabyte (at least 1), else "1,4 MB" (one decimal, none when it is whole); Russian
+ * units in Russian. A size that rounds to 1000 kB is "1 MB".
+ */
+export function formatSize(bytes: number, l: Locale): string {
+  const number = (n: number, digits: number) => new Intl.NumberFormat(INTL_LOCALE[l], { maximumFractionDigits: digits }).format(n);
+  const [kb, mb] = l === "ru" ? ["КБ", "МБ"] : ["kB", "MB"];
+  const kilobytes = Math.max(1, Math.round(bytes / 1000));
+  return kilobytes < 1000 ? `${number(kilobytes, 0)} ${kb}` : `${number(bytes / 1_000_000, 1)} ${mb}`;
+}
+
 /** "22.09.2026" */
 export function formatDate(d: Date, l: Locale): string {
   const parts = fmt(l, { day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(d);

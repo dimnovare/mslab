@@ -33,12 +33,18 @@ const COURSE_CSS = [
   "src/components/account/EcoursePage.module.css",
   "src/components/account/FavouritesTab.module.css",
   "src/components/account/DetailsTab.module.css",
+  // the lesson's player (phase 3a Task 8)
+  "src/components/account/LessonPlayer.module.css",
+  // the lesson's page (phase 3a Task 9)
+  "src/components/account/LessonPage.module.css",
   // the admin's Õpilased and its read-only "view as client" (phase 2a Task 9)
   "src/components/admin/ClientDrawer.module.css",
   "src/components/admin/list-table.module.css",
   "src/app/admin/(panel)/registreerimised/registrations.module.css",
   "src/app/admin/(panel)/opilased/clients.module.css",
   "src/app/admin/(panel)/opilased/[id]/vaade/view.module.css",
+  // the course editor's "Moodulid ja õppetunnid" and the lesson drawer (phase 3a Task 5)
+  "src/components/admin/LessonsEditor.module.css",
   // the site's modal dialog (the campaign popup and the account's change request)
   "src/components/ui/modal.module.css",
   "src/components/site/CampaignPopup.module.css",

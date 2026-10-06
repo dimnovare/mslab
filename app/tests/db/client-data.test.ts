@@ -12,7 +12,7 @@ import {
 } from "@/server/client-data";
 import { issueClientLogin, redeemClientCode, redeemClientLink } from "@/server/client-auth";
 import { loadSettings, saveSettingsForm } from "@/server/admin-site";
-import { makeTestDb } from "./helpers";
+import { addModules, makeTestDb } from "./helpers";
 
 // What a client sees and may change (server/client-data.ts) against a real (PGlite) database. Every address is `@example.test`.
 
@@ -40,8 +40,8 @@ async function seed() {
   const [draft] = await db.insert(courses).values({ ...base, slug: "ootel", type: "contact", title: { et: "Veel peidus" }, published: false, priceGroup: 10000 }).returning();
   const [online] = await db.insert(courses).values({
     ...base, slug: "veebikursus", type: "e_learning", title: { et: "Veebikursus" }, published: true, price: 9500, accessMonths: 6,
-    modules: [{ et: "Sissejuhatus" }, { et: "Praktika", ru: "Практика" }],
   }).returning();
+  await addModules(db, online.id, [{ et: "Sissejuhatus" }, { et: "Praktika", ru: "Практика" }]);
   const [hiddenOnline] = await db.insert(courses).values({ ...base, slug: "peidus-kursus", type: "e_learning", title: { et: "Peidus kursus" }, published: false, price: 5000 }).returning();
   const session = async (courseId: number, startsAt: Date, over: Partial<typeof courseSessions.$inferInsert> = {}) =>
     (await db.insert(courseSessions).values({ courseId, startsAt, city: "Pärnu", venue: "Salong", ...over }).returning())[0];
@@ -444,9 +444,14 @@ describe("e-course and terms", () => {
     const kati = await client();
     await grant(kati.id, f.online.id);
     expect(await loadEcourse(db, kati.id, "veebikursus", NOW)).toEqual({
-      course: { slug: "veebikursus", title: { et: "Veebikursus" }, modules: [{ et: "Sissejuhatus" }, { et: "Praktika", ru: "Практика" }] },
+      course: {
+        slug: "veebikursus",
+        title: { et: "Veebikursus" },
+        modules: [{ id: expect.any(Number), title: { et: "Sissejuhatus" }, lessons: [] }, { id: expect.any(Number), title: { et: "Praktika", ru: "Практика" }, lessons: [] }],
+      },
       access: { expiresAt: at(170).toISOString() },
       terms: { version: "1", accepted: false, text: TERMS.body },
+      progress: { done: 0, total: 0, next: null },
     });
     await setting("courseTermsVersion", V2);
     expect((await loadEcourse(db, kati.id, "veebikursus", NOW))!.terms.version).toBe(V2);

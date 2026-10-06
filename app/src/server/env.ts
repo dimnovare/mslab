@@ -31,6 +31,14 @@ export type ServerEnv = {
   MEDIA_LOCAL?: string;
   /** The daily cron's secret: Vercel sends `Authorization: Bearer <it>` (app/api/cron/sweep). Unset, the cron is refused. */
   CRON_SECRET?: string;
+  /** Bunny Stream (lesson videos): the library's id, its API key (server only), its embed token authentication key (server only). All three or no video. */
+  BUNNY_LIBRARY_ID?: string;
+  BUNNY_API_KEY?: string;
+  BUNNY_TOKEN_KEY?: string;
+  /** The query secret of the webhook URL (/api/bunny/webhook?secret=…). Optional: the webhook only triggers a status read. */
+  BUNNY_WEBHOOK_SECRET?: string;
+  /** The e2e run's fake Bunny server (tests/e2e/fake-bunny.ts). Ignored on Vercel (server/bunny.ts). */
+  BUNNY_FAKE_URL?: string;
 };
 
 type Source = Record<string, string | undefined>;
@@ -78,6 +86,11 @@ const OPTIONAL = [
   "R2_BUCKET",
   "MEDIA_LOCAL",
   "CRON_SECRET",
+  "BUNNY_LIBRARY_ID",
+  "BUNNY_API_KEY",
+  "BUNNY_TOKEN_KEY",
+  "BUNNY_WEBHOOK_SECRET",
+  "BUNNY_FAKE_URL",
 ] as const;
 
 /**

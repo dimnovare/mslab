@@ -1,6 +1,9 @@
-/* The e-course page after the terms are accepted: one muted line for the end of the access, the numbered module list (the public
-   course page's, CourseLists.module.css) in a column of the readable width, and the one sentence under it. The page and its title
-   are EcoursePage.module.css's. Tokens only. */
+/* The e-course page after the terms are accepted: one muted line for the end of the access; the progress line, a thin bar (4 px,
+   the line colour with the ink filling it) and the one button; the numbered modules of the public course page (CourseLists.module.css:
+   the rows between thin lines, the number in mono, the title in Jost), each folding open to its lessons (a native details element
+   with the FAQ's round "+" mark), and the lessons indented under the module's title: a state icon, the title (a link while open or
+   done) and, under the first locked one, the lock sentence. Every row is at least 44 px tall and long titles wrap. The page and its
+   title are EcoursePage.module.css's. Tokens only. */
 
 .access {
   margin: 10px 0 0;
@@ -8,9 +11,156 @@
   font: 400 16px/1.55 var(--font-body);
 }
 
+.progress {
+  max-width: 750px;
+  margin-top: clamp(24px, 3vw, 36px);
+}
+
+.count {
+  margin: 0;
+  color: var(--ink-soft);
+  font: 500 15px/1.5 var(--font-body);
+}
+
+.bar {
+  height: 4px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--line);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink);
+}
+
+.next {
+  margin-top: clamp(20px, 2.5vw, 28px);
+}
+
 .modules {
   max-width: 750px;
-  margin-top: clamp(24px, 3vw, 40px);
+  margin: clamp(28px, 3.5vw, 44px) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.module {
+  border-bottom: 1px solid var(--line);
+}
+
+/* CourseLists' module row: the number, the title, and (folding) the done count and the round mark */
+.head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  min-height: 44px;
+  padding: 18px 0;
+}
+
+.summary {
+  grid-template-columns: 44px minmax(0, 1fr) auto 32px;
+  align-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+/* the FAQ's round "+"; "−" while open (not the FAQ's turned "×", which could read as "remove" here). A picture only: its
+   alternative text is empty (the second line; a browser without alternative text keeps the first) */
+.summary::after {
+  content: "+";
+  content: "+" / "";
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font: 400 20px/1 var(--font-body);
+}
+
+.fold[open] > .summary::after {
+  content: "−";
+  content: "−" / "";
+}
+
+.summary:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 4px;
+}
+
+.tally {
+  color: var(--muted-2);
+  font: 400 13px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.lessons {
+  margin: -6px 0 0;
+  padding: 0 0 14px 58px; /* under the module's title: the number's column and the gap */
+  list-style: none;
+}
+
+.lesson {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: center;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  color: var(--muted-2);
+}
+
+.lesson[data-state="current"] .icon {
+  color: var(--ink);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font: 400 16px/1.4 var(--font-body);
+  text-decoration: none;
+}
+
+a.title {
+  text-decoration: underline;
+  text-decoration-color: var(--fog);
+  text-underline-offset: 4px;
+}
+
+a.title:hover {
+  text-decoration-color: currentColor;
+}
+
+.lesson[data-state="current"] .title {
+  font-weight: 600;
+}
+
+.lesson[data-state="locked"] .title {
+  color: var(--muted);
+}
+
+.hint {
+  grid-column: 2;
+  margin: -4px 0 8px;
+  color: var(--muted);
+  font: 400 14px/1.5 var(--font-body);
 }
 
 .soon {
@@ -18,4 +168,19 @@
   margin: clamp(20px, 3vw, 32px) 0 0;
   color: var(--ink-soft);
   font: 400 17px/1.6 var(--font-body);
+}
+
+@media (max-width: 640px) {
+  .lessons {
+    padding-left: 40px;
+  }
+
+  .head {
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .summary {
+    grid-template-columns: 30px minmax(0, 1fr) auto 32px;
+  }
 }

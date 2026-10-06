@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { MediaStore } from "./media";
+import type { FileStore } from "./media";
 
 // The image store of local development: a folder instead of R2, so `next dev` and the e2e run need no bucket and no
 // credentials. Used by server/media-store.ts when no R2 variable is set and NODE_ENV is not "production". The folder is
@@ -20,13 +20,14 @@ const isSafeKey = (key: string) => SAFE_KEY.test(key) && key.split("/").every((p
 const absent = (e: unknown) => ["ENOENT", "ENOTDIR", "EISDIR"].includes((e as NodeJS.ErrnoException)?.code ?? "");
 
 /** The store in `dir`: each object is the file <dir>/<key>, and its content type is kept next to it in <key>.type. */
-export function localStore(dir: string = LOCAL_MEDIA_DIR): MediaStore {
+export function localStore(dir: string = LOCAL_MEDIA_DIR): FileStore {
   const pathOf = (key: string) => {
     if (!isSafeKey(key)) throw new Error("media key outside the media folder");
     return join(dir, ...key.split("/"));
   };
 
   return {
+    // The Content-Disposition is not kept: the account API sets the header on the local bytes itself.
     async put(key, bytes, contentType) {
       const path = pathOf(key);
       await mkdir(dirname(path), { recursive: true });
@@ -52,6 +53,12 @@ export function localStore(dir: string = LOCAL_MEDIA_DIR): MediaStore {
         contentType,
         etag: `"${createHash("sha256").update(file).digest("hex").slice(0, 32)}"`,
       };
+    },
+
+    async delete(key) {
+      const path = pathOf(key);
+      await rm(path, { force: true });
+      await rm(`${path}.type`, { force: true });
     },
   };
 }

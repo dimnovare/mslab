@@ -44,20 +44,26 @@ export function stubFetch(respond: (url: string, init: RequestInit | undefined) 
 }
 
 /** One object of fakeMediaStore. */
-export type FakeMedia = { bytes: Uint8Array; contentType: string | null };
+export type FakeMedia = { bytes: Uint8Array; contentType: string | null; disposition: string | null };
 
 /**
- * An in-memory MediaStore (server/media.ts) that remembers what was put and which keys were asked for. `initial` objects
- * (bytes as a number list) are there from the start.
+ * An in-memory FileStore (server/media.ts) that remembers what was put (with its content type and Content-Disposition), which
+ * keys were asked for and which were deleted. `initial` objects (bytes as a number list) are there from the start.
  */
 export function fakeMediaStore(initial: Record<string, { bytes: number[]; contentType?: string }> = {}) {
-  const objects = new Map<string, FakeMedia>(Object.entries(initial).map(([key, o]) => [key, { bytes: new Uint8Array(o.bytes), contentType: o.contentType ?? null }]));
+  const objects = new Map<string, FakeMedia>(Object.entries(initial).map(([key, o]) => [key, { bytes: new Uint8Array(o.bytes), contentType: o.contentType ?? null, disposition: null }]));
   const requested: string[] = [];
+  const deleted: string[] = [];
   return {
     objects,
     requested,
-    async put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void> {
-      objects.set(key, { bytes: new Uint8Array(bytes.slice(0)), contentType });
+    deleted,
+    async put(key: string, bytes: ArrayBuffer, contentType: string, disposition?: string): Promise<void> {
+      objects.set(key, { bytes: new Uint8Array(bytes.slice(0)), contentType, disposition: disposition ?? null });
+    },
+    async delete(key: string): Promise<void> {
+      deleted.push(key);
+      objects.delete(key);
     },
     async get(key: string) {
       requested.push(key);

@@ -350,6 +350,22 @@ describe("e-course access", () => {
     expect((await loadDashboard(db, kati.id, NOW))!.cards[0]).toMatchObject({ kind: "ecourse", revoked: true });
     expect(await revokeAccessForm(db, form({ clientId: String(kati.id), accessId: "abc" }), NOW)).toEqual({ ok: false, error: "invalid" });
   });
+
+  test("the ids of Ava ligipääs and Lõpeta ligipääs are read like every id from text (parseRowId): digits only; \"1e3\", \" 7\", \"007\", \"0x10\" and the like are refused", async () => {
+    const kati = await client("kati@example.test");
+    const row = await access(kati.id);
+    // spellings of the very ids that exist, which z.coerce.number() would read as those ids
+    const spelled = (n: number) => [` ${n}`, `${n} `, `0${n}`, `${n}e0`, `0x${n.toString(16)}`, `+${n}`, `${n}.0`, `${n}.`];
+    for (const bad of spelled(kati.id)) {
+      expect(await grantAccessForm(db, form({ clientId: bad, courseId: String(ecourse.id), until: "2027-04-04" }), ADMIN, NOW), bad).toEqual({ ok: false, error: "invalid" });
+      expect(await revokeAccessForm(db, form({ clientId: bad, accessId: String(row.id) }), NOW), bad).toEqual({ ok: false, error: "invalid" });
+    }
+    for (const bad of spelled(ecourse.id)) expect(await grantAccessForm(db, form({ clientId: String(kati.id), courseId: bad, until: "2027-04-04" }), ADMIN, NOW), bad).toEqual({ ok: false, error: "course" });
+    for (const bad of spelled(row.id)) expect(await revokeAccessForm(db, form({ clientId: String(kati.id), accessId: bad }), NOW), bad).toEqual({ ok: false, error: "invalid" });
+    expect((await db.select().from(courseAccess).where(eq(courseAccess.id, row.id)))[0].revokedAt).toBeNull(); // nothing was ended
+    // the plain digits still work
+    expect(await revokeAccessForm(db, form({ clientId: String(kati.id), accessId: String(row.id) }), NOW)).toEqual({ ok: true });
+  });
 });
 
 describe("the change requests' registrations (Päringud, Muutmine)", () => {
