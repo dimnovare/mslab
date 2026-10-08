@@ -15,8 +15,8 @@ export type NewsletterFormTexts = {
   submit: string;
   /** The line under the button: signing up is the consent ("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda."). */
   notice: string;
-  /** The link that follows the line: the name of the privacy page ("Privaatsus"). */
-  privacy: string;
+  /** The link that follows the line: the name of the privacy page ("Privaatsus"). Not needed where `privacyLink` is off. */
+  privacy?: string;
   sentTitle: string;
   sentText: string;
   errorEmail: string;
@@ -57,7 +57,7 @@ export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }
 }
 
 /**
- * The newsletter sign-up: e-mail, "Liitu", a quiet line with the privacy link under it, and the answer in its place.
+ * The newsletter sign-up: e-mail, "Liitu", a quiet line (with the privacy link, unless `privacyLink` is off) under it, and the answer in its place.
  * Double opt-in: the action stores the address and sends a confirmation link; the answer is always "check your inbox".
  * There is no consent box: this form's only purpose is the newsletter, so sending it is the consent (the time is stored,
  * and the confirmation link still has to be opened); the line under the button says so. Used by the footer's block
@@ -66,8 +66,20 @@ export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }
  * which would clear the e-mail after a failed attempt. The status region is always in the page (polite),
  * so the confirmation is announced; focus moves to it because the form it replaces had focus.
  * `className`: the box's own size and place (default: the footer block's column).
+ * `privacyLink` (default on): the link after the line. The coming-soon page turns it off: while the gate is on, the privacy
+ * page is not served to visitors (it would show the coming-soon page again), so there the line stands alone.
  */
-export function NewsletterForm({ locale, t, className = styles.form }: { locale: Locale; t: NewsletterFormTexts; className?: string }) {
+export function NewsletterForm({
+  locale,
+  t,
+  className = styles.form,
+  privacyLink = true,
+}: {
+  locale: Locale;
+  t: NewsletterFormTexts;
+  className?: string;
+  privacyLink?: boolean;
+}) {
   const id = useId();
   const [email, setEmail] = useState("");
   const statusRef = useRef<HTMLDivElement>(null);
@@ -137,9 +149,15 @@ export function NewsletterForm({ locale, t, className = styles.form }: { locale:
               <Icon name="arrow" />
             </button>
           </div>
-          <p className={styles.notice} data-newsletter-notice="">
-            {t.notice} <Link href={href(locale, "/privaatsus")}>{t.privacy}</Link>
-          </p>
+          {privacyLink && t.privacy ? (
+            <p className={styles.notice} data-newsletter-notice="">
+              {t.notice} <Link href={href(locale, "/privaatsus")}>{t.privacy}</Link>
+            </p>
+          ) : (
+            <p className={`${styles.notice} ${styles.noticeAlone}`} data-newsletter-notice="">
+              {t.notice}
+            </p>
+          )}
           <input type="hidden" name="locale" value={locale} />
           {/* Honeypot: people never see or fill it. */}
           <div className={styles.honeypot} aria-hidden="true">

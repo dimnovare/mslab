@@ -151,6 +151,11 @@
   color: var(--ink);
 }
 
+/* Without the link there is no 44px line: the text keeps its own height, and sits a little lower under the button. */
+.noticeAlone {
+  margin-top: 12px;
+}
+
 .sentTitle {
   margin: 0;
   font: 400 27px/1.09 var(--font-display);
