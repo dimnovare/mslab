@@ -14,6 +14,19 @@ export function fakeKv(initial: Record<string, string> = {}) {
       store.set(key, value);
       ttl.set(key, opts?.expirationTtl);
     },
+    // The atomic counters of server/kv.ts PgKv (reserve / release), mirrored for a store that never expires an entry: nothing awaits
+    // between the read and the write here, so they are atomic as the SQL statements are.
+    async reserve(key: string, limit: number, windowSec: number): Promise<boolean> {
+      const n = Number(store.get(key) ?? "0");
+      if (n >= limit) return false;
+      store.set(key, String(n + 1));
+      ttl.set(key, windowSec);
+      return true;
+    },
+    async release(key: string): Promise<void> {
+      const n = Number(store.get(key) ?? "0");
+      if (n > 0) store.set(key, String(n - 1)); // the window (ttl) stays
+    },
   };
 }
 

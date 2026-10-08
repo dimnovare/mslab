@@ -96,7 +96,8 @@ const loginAt = (sec: number, body: unknown, ip?: string | null, over: Partial<A
   return call(deps(over).d, "/parool-login", { method: "POST", body, ip });
 };
 const answer = async (res: Response) => [res.status, await res.json()];
-const counters = async () => Object.fromEntries((await db.select().from(kvEntries)).filter((r) => r.key.startsWith("rl:pw-")).map((r) => [r.key, r.value]));
+/** The lock's counters above 0 (a slot given back leaves its row at "0" until the window ends). */
+const counters = async () => Object.fromEntries((await db.select().from(kvEntries)).filter((r) => r.key.startsWith("rl:pw-") && r.value !== "0").map((r) => [r.key, r.value]));
 
 test("POST /parool sets it: 200 with passwordSetAt, the dashboard says it, the change is mailed with Maria's address; the session goes on", async () => {
   const f = stubFetch(() => Response.json({ id: "email_1" }));
@@ -186,7 +187,9 @@ test("the lock per address: after 5 failures within 15 minutes even the right pa
   expect((await login(4 + 15 * 60 + 1, PASSWORD, "198.51.100.78")).status).toBe(200);
 }, 20_000);
 
-test("attempts sent in parallel cannot pass the lock together: the address's failures are counted one after another, under its lock", async () => {
+// (PGlite has one connection and runs a transaction at a time, so this checks the counting of 8 attempts at once, not the advisory lock
+// that makes them wait for each other on a real server: that is the pg_locks probe in client-password.test.ts.)
+test("8 attempts sent at once at one address end as 5 failures and 3 refused as locked, whatever the IPs", async () => {
   const { cookie } = await signedIn();
   await call(deps().d, "/parool", { method: "POST", cookie, body: { password: PASSWORD } });
   const statuses = await Promise.all(
@@ -282,7 +285,8 @@ test("a failure that cannot be counted fails the login too (500), the success th
 test("the IP's store failing lets the attempt through (as the other limits); the address's lock does not depend on it", async () => {
   const { cookie } = await signedIn();
   await call(deps().d, "/parool", { method: "POST", cookie, body: { password: PASSWORD } });
-  const broken = { async get(): Promise<string | null> { throw new Error("kv down"); }, async put(): Promise<void> { throw new Error("kv down"); } };
+  const down = async (): Promise<never> => { throw new Error("kv down"); };
+  const broken = { get: down, put: down, reserve: down, release: down };
   const withBrokenIpStore = { env: { ...deps().d.env, KV: broken } };
   for (let i = 0; i < 5; i++) expect((await loginAt(i, { email: "kati@example.com", password: `vale-${i}-parool` }, undefined, withBrokenIpStore)).status).toBe(400);
   expect((await loginAt(6, { email: "kati@example.com", password: PASSWORD }, undefined, withBrokenIpStore)).status).toBe(429);
@@ -384,3 +388,82 @@ test("the change mail without Maria's address in Seaded writes the line without 
   expect(resendCalls(f)[0].text).toContain("Kui see polnud sina, kirjuta kohe Mariale.");
   expect(resendCalls(f)[0].text).not.toContain("Mariale:");
 });
+
+// ---- the IP's slots are taken atomically, before the transaction and scrypt (fix round 1) -----------------------------------------
+
+const IP = "198.51.100.60";
+const ipSlot = async () => (await counters())[rateKey("pw-ip", IP)];
+/** Puts the IP's counter at `n`, a window that starts now (the clock). */
+const seedIp = (n: number, ip = IP) => new PgKv(db, () => clock).put(rateKey("pw-ip", ip), String(n), { expirationTtl: 900 });
+const loginFrom = (d: AccountDeps, email: string, password: string, ip = IP) => call(d, "/parool-login", { method: "POST", body: { email, password }, ip });
+
+test("40 attempts sent at once from one IP at 40 addresses: 20 take a slot and are checked, the other 20 are refused before the transaction and scrypt; 20 are counted", async () => {
+  const counting = countingDb(db);
+  const statuses = await Promise.all(Array.from({ length: 40 }, async (_, i) => (await loginFrom(deps({ db: counting.db }).d, `keegi${i}@example.com`, PASSWORD)).status));
+  expect([statuses.filter((s) => s === 400).length, statuses.filter((s) => s === 429).length]).toEqual([20, 20]);
+  expect(vi.mocked(verifyPassword)).toHaveBeenCalledTimes(20);
+  expect(counting.seen.transactions).toBe(20);
+  expect(await ipSlot()).toBe("20");
+}, 30_000);
+
+test("at 20 failures the 21st attempt from the IP, the right password too, is refused before the transaction and scrypt, and the counter stays 20", async () => {
+  const { cookie } = await signedIn();
+  await call(deps().d, "/parool", { method: "POST", cookie, body: { password: PASSWORD } });
+  await seedIp(19);
+  const counting = countingDb(db);
+  const verify = vi.mocked(verifyPassword);
+  expect(await answer(await loginFrom(deps({ db: counting.db }).d, "keegi@example.com", PASSWORD))).toEqual([400, { ok: false, error: "password" }]); // the 20th
+  expect([await ipSlot(), verify.mock.calls.length, counting.seen.transactions]).toEqual(["20", 1, 1]);
+  for (const [email, password] of [["keegi@example.com", PASSWORD], ["kati@example.com", PASSWORD], ["kati@example.com", "vale-parool-2026"]])
+    expect(await answer(await loginFrom(deps({ db: counting.db }).d, email, password)), email).toEqual([429, { ok: false, error: "locked" }]);
+  expect([await ipSlot(), verify.mock.calls.length, counting.seen.transactions]).toEqual(["20", 1, 1]);
+});
+
+test("a success and an attempt at a locked address give their slot back; a plain failure keeps it, and that is the count", async () => {
+  const { cookie } = await signedIn();
+  await call(deps().d, "/parool", { method: "POST", cookie, body: { password: PASSWORD } });
+  await seedIp(3);
+  expect((await loginFrom(deps().d, "kati@example.com", PASSWORD)).status).toBe(200);
+  expect(await ipSlot()).toBe("3");
+  expect((await loginFrom(deps().d, "kati@example.com", "vale-parool-2026")).status).toBe(400);
+  expect(await ipSlot()).toBe("4");
+  for (let i = 1; i <= 4; i++) await loginFrom(deps().d, "kati@example.com", `vale-${i}-parool`, `198.51.100.${60 + i}`); // the address has its 5 now
+  expect(await ipSlot()).toBe("4");
+  expect(await answer(await loginFrom(deps().d, "kati@example.com", PASSWORD))).toEqual([429, { ok: false, error: "locked" }]);
+  expect(await ipSlot()).toBe("4");
+});
+
+test("an expired window starts again at 1: 15 minutes after the last failure the IP is open, and its next failure is its first", async () => {
+  await seedIp(20);
+  expect(await answer(await loginAt(10, { email: "keegi@example.com", password: PASSWORD }, IP))).toEqual([429, { ok: false, error: "locked" }]);
+  expect(await ipSlot()).toBe("20");
+  expect((await loginAt(15 * 60 + 1, { email: "keegi@example.com", password: PASSWORD }, IP)).status).toBe(400);
+  expect(await ipSlot()).toBe("1");
+});
+
+test("the change mail goes out even when the contact setting cannot be read: the line without Maria's address", async () => {
+  const f = stubFetch(() => Response.json({ id: "email_1" }));
+  const { cookie } = await signedIn();
+  await db.execute(sql`drop table settings`);
+  const { d, flush } = deps();
+  expect((await call(d, "/parool", { method: "POST", cookie, body: { password: PASSWORD } })).status).toBe(200);
+  await flush(); // does not reject
+  const mails = resendCalls(f);
+  expect(mails.map((m) => m.to)).toEqual(["kati@example.com"]);
+  expect(mails[0].text).toContain("Kui see polnud sina, kirjuta kohe Mariale.");
+  expect(mails[0].text).not.toContain("Mariale:");
+});
+
+test("a store that fails when the slot is given back does not fail a login that succeeded or was refused as locked (the IP keeps the slot, logged)", async () => {
+  const { cookie } = await signedIn();
+  await call(deps().d, "/parool", { method: "POST", cookie, body: { password: PASSWORD } });
+  const pg = new PgKv(db, () => clock);
+  const down = async (): Promise<never> => { throw new Error("kv down"); };
+  const noRelease = { env: { ...deps().d.env, KV: { get: pg.get.bind(pg), put: pg.put.bind(pg), reserve: pg.reserve.bind(pg), release: down } } };
+  expect((await loginAt(1, { email: "kati@example.com", password: PASSWORD }, IP, noRelease)).status).toBe(200);
+  expect(await ipSlot()).toBe("1"); // not given back
+  for (let i = 0; i < 5; i++) await loginAt(2 + i, { email: "kati@example.com", password: `vale-${i}-parool` }, `198.51.100.${70 + i}`);
+  expect((await loginAt(10, { email: "kati@example.com", password: PASSWORD }, IP, noRelease)).status).toBe(429);
+  expect(errorSpy.mock.calls.length).toBeGreaterThan(0); // the failures of the store were logged (class and code only)
+});
+

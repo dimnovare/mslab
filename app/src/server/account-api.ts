@@ -29,7 +29,7 @@ import { changeRequestSummary } from "./messages";
 import { clientNewsletter, sendWelcome } from "./newsletter";
 import { adminUrl, notifyMaria, sendMail, type Env } from "./notify";
 import { isPrefetch } from "./prefetch";
-import { belowLimit, clientIp, countFailure, rateKey, rateLimit, windowKey } from "./ratelimit";
+import { belowLimit, clientIp, countFailure, rateKey, rateLimit, releaseSlot, reserveSlot, windowKey } from "./ratelimit";
 import { sha256 } from "./token";
 
 // The client account's JSON API (/api/konto/*) without Next.js: app/api/konto/[[...path]]/route.ts builds the dependencies
@@ -131,12 +131,18 @@ async function readObject(request: Request, max = MAX_BODY_CHARS): Promise<Recor
 }
 
 /**
+ * The visitor's rate limit bucket: the address of the request (ratelimit.ts clientIp), `next dev` without one uses a single "local"
+ * bucket, and null (production, which always has the header on Vercel) means no bucket: one shared bucket would lock everybody out.
+ */
+const visitorBucket = (request: Request, deps: AccountDeps): string | null => clientIp(request.headers) ?? (deps.dev ? "local" : null);
+
+/**
  * A rate limit that fails open: when the store is unavailable (or over its write quota) students can still sign in. No
  * address (never on Vercel, whose edge sets x-forwarded-for) is not limited either: one shared bucket would lock everybody out.
  * `next dev` without the header uses one local bucket. The daily e-mail cap in login() never fails open.
  */
 async function withinRateLimit(request: Request, deps: AccountDeps, form: string, limit: number): Promise<boolean> {
-  const ip = clientIp(request.headers) ?? (deps.dev ? "local" : null);
+  const ip = visitorBucket(request, deps);
   if (ip === null) return true;
   try {
     return await rateLimit(deps.env.KV, rateKey(form, ip), limit, RATE_WINDOW_SEC);
@@ -236,9 +242,9 @@ async function code(request: Request, deps: AccountDeps): Promise<Response> {
   return accountResponse({ ok: true, locale: result.locale }, 200, sessionCookies(result.sessionRaw));
 }
 
-/** The KV key of the password lock for this IP (rateKey "pw-ip"); null without an address (never on Vercel; `next dev` uses "local"). */
+/** The KV key of the password lock for this IP (rateKey "pw-ip"); null without a bucket (visitorBucket). */
 function passwordIpKey(request: Request, deps: AccountDeps): string | null {
-  const ip = clientIp(request.headers) ?? (deps.dev ? "local" : null);
+  const ip = visitorBucket(request, deps);
   return ip === null ? null : rateKey("pw-ip", ip);
 }
 
@@ -251,8 +257,13 @@ function passwordIpKey(request: Request, deps: AccountDeps): string | null {
  * too, until 15 minutes after the last failure (a locked attempt is not counted). Failures count whether or not the address
  * exists. The address's counter (a KV row under the address's hash) is read and counted under the address lock, in the login's own
  * transaction (the gate): attempts sent in parallel go one after another, and none passes the 5 alongside the others; a database
- * failure there fails the login (500), never opens the lock. The IP's counter is the forms' kind, read and then written (a burst can
- * pass a few more than 20), and a store that fails lets the attempt through, as the other limits.
+ * failure there fails the login (500), never opens the lock.
+ *
+ * The IP's 20 are slots taken BEFORE the transaction and scrypt, each in one statement (kv.ts PgKv.reserve): a burst sent at once from one
+ * IP, at any number of addresses, gets 20 checked and the rest 429, so a sprayer is stopped before it holds a pooled connection or a hash
+ * thread. No slot left: 429, nothing counted. The slot is the failure's count: it stays for a plain failure (400) and is given back
+ * (PgKv.release) when the attempt turns out not to be one, a success or a locked address. An attempt that ends in an error keeps it. A store
+ * that fails lets the attempt through (as the other limits) and is logged without the IP or the address.
  */
 async function passwordLogin(request: Request, deps: AccountDeps): Promise<Response> {
   const body = await readObject(request);
@@ -262,13 +273,25 @@ async function passwordLogin(request: Request, deps: AccountDeps): Promise<Respo
     logNote("[account] password login locked");
     return accountResponse({ ok: false, error: "locked" }, 429);
   };
-  // The IP's lock is asked before the login takes a database connection (and before scrypt): a sprayer is stopped at the door.
+  // The IP's slot is taken before the transaction and scrypt: a sprayer is stopped at the door, and a burst cannot pass it together.
   const ipKey = passwordIpKey(request, deps);
-  try {
-    if (ipKey !== null && !(await belowLimit(deps.env.KV, ipKey, PASSWORD_FAILURES_PER_IP))) return locked();
-  } catch (e) {
-    logFailure("[account] rate limit unavailable, allowing", e);
+  let slot: string | null = null;
+  if (ipKey !== null) {
+    try {
+      if (!(await reserveSlot(deps.env.KV, ipKey, PASSWORD_FAILURES_PER_IP, PASSWORD_LOCK_SEC))) return locked();
+      slot = ipKey;
+    } catch (e) {
+      logFailure("[account] rate limit unavailable, allowing", e);
+    }
   }
+  const giveSlotBack = async () => {
+    if (slot === null) return;
+    try {
+      await releaseSlot(deps.env.KV, slot, PASSWORD_LOCK_SEC);
+    } catch (e) {
+      logFailure("[account] rate limit unavailable", e);
+    }
+  };
   const addressKey = `rl:pw-mail:${await sha256(address)}`;
   // the address's lock, on the login's transaction (no sweep inside it: kv.ts)
   const gate: PasswordGate = (t) => {
@@ -276,15 +299,12 @@ async function passwordLogin(request: Request, deps: AccountDeps): Promise<Respo
     return { open: () => belowLimit(kv, addressKey, PASSWORD_FAILURES_PER_ADDRESS), failed: () => countFailure(kv, addressKey, PASSWORD_LOCK_SEC) };
   };
   const session = isEmail(address) && password ? await redeemClientPassword(deps.db, address, password, deps.now, gate) : null;
-  if (session === "locked") return locked();
-  if (!session) {
-    try {
-      if (ipKey !== null) await countFailure(deps.env.KV, ipKey, PASSWORD_LOCK_SEC);
-    } catch (e) {
-      logFailure("[account] rate limit unavailable", e);
-    }
-    return accountResponse({ ok: false, error: "password" }, 400);
+  if (session === "locked") {
+    await giveSlotBack(); // refused, not a failure of this IP
+    return locked();
   }
+  if (!session) return accountResponse({ ok: false, error: "password" }, 400); // the slot stays: that is the count
+  await giveSlotBack();
   return accountResponse({ ok: true, locale: session.locale }, 200, sessionCookies(session.sessionRaw));
 }
 
@@ -379,15 +399,19 @@ const lessonRef = (rawSlug: string, rawLesson: string): { slug: string; lessonId
 };
 
 /**
- * "Sinu MS LABi konto parool on muudetud." after the response (phase 2c), with Maria's address from Seaded when there is one: never in
- * development, never to a sample address. A failure is logged by `later` (route.ts), never the address.
+ * "Sinu MS LABi konto parool on muudetud." after the response (phase 2c), with Maria's address from Seaded when there is one (and without
+ * it when Seaded cannot be read): never in development, never to a sample address. A failure is logged by `later` (route.ts), never the address.
  */
 function mailPasswordChange(deps: AccountDeps, to: { email: string; locale: Locale }): void {
   if (deps.dev || isSampleAddress(to.email)) return;
   deps.later(async () => {
-    const contact = await readSetting(deps.db, "contact");
-    const maria = typeof (contact as { email?: unknown } | null)?.email === "string" ? (contact as { email: string }).email.trim() : "";
-    await sendMail(deps.env, passwordChangedMail(to.email, to.locale, maria));
+    // The mail is the only warning when somebody else's session sets a password: it goes out without Maria's address if Seaded cannot be read.
+    const contact = await readSetting(deps.db, "contact").catch((e) => {
+      logFailure("[account] contact setting unavailable for the password mail", e);
+      return null;
+    });
+    const email = (contact as { email?: unknown } | null)?.email;
+    await sendMail(deps.env, passwordChangedMail(to.email, to.locale, typeof email === "string" ? email.trim() : ""));
   });
 }
 

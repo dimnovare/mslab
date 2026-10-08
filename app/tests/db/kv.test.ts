@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
 import { makeTestDb } from "./helpers";
 import { kvEntries } from "@/db/schema";
@@ -153,3 +154,57 @@ test("sweep: false (a store on a caller's transaction) writes its own row and le
   expect([await later.get("old"), await later.get("rl:pw-mail:abc")]).toEqual([null, "1"]);
 });
 
+const SLOT = "rl:pw-ip:198.51.100.7";
+const T0 = Date.parse("2026-10-09T10:00:00Z");
+const clockAt = (db: Awaited<ReturnType<typeof makeTestDb>>, sec: number, opts?: { sweep?: boolean }) => new PgKv(db, () => new Date(T0 + sec * 1000), opts);
+const slotRow = async (db: Awaited<ReturnType<typeof makeTestDb>>) => (await db.select().from(kvEntries).where(eq(kvEntries.key, SLOT)))[0];
+
+test("reserve (the password login's IP slots, phase 2c fix): one statement takes a slot under the limit and renews the window; at the limit it refuses and changes nothing", async () => {
+  const db = await makeTestDb();
+  expect(await clockAt(db, 0).reserve(SLOT, 3, 900)).toBe(true);
+  expect(await clockAt(db, 10).reserve(SLOT, 3, 900)).toBe(true);
+  expect(await clockAt(db, 20).reserve(SLOT, 3, 900)).toBe(true);
+  const full = await slotRow(db);
+  expect([full.value, full.expiresAt]).toEqual(["3", new Date(T0 + 920_000)]); // the window runs 900 s from the last slot taken
+  expect(await clockAt(db, 40).reserve(SLOT, 3, 900)).toBe(false);
+  expect(await slotRow(db)).toEqual(full); // neither the count nor the window moved
+  expect(await clockAt(db, 919).get(SLOT)).toBe("3");
+  expect(await clockAt(db, 921).get(SLOT)).toBeNull();
+});
+
+test("reserve: an expired window starts again at 1 (even a count at the limit), and the limit is checked against the new count", async () => {
+  const db = await makeTestDb();
+  for (let i = 0; i < 3; i++) await clockAt(db, i).reserve(SLOT, 3, 900);
+  expect(await clockAt(db, 100).reserve(SLOT, 3, 900)).toBe(false);
+  expect(await clockAt(db, 2 + 900 + 1).reserve(SLOT, 3, 900)).toBe(true); // the last slot was taken at 2 s: the window ended at 902 s
+  const again = await slotRow(db);
+  expect([again.value, again.expiresAt]).toEqual(["1", new Date(T0 + 903_000 + 900_000)]);
+  expect(await clockAt(db, 904).reserve(SLOT, 1, 900)).toBe(false); // at the limit of 1 now
+});
+
+test("release gives one slot back: never below 0, the window stays as it was, an expired row and a missing key are left alone", async () => {
+  const db = await makeTestDb();
+  await clockAt(db, 0).reserve(SLOT, 5, 900);
+  await clockAt(db, 5).reserve(SLOT, 5, 900);
+  const two = await slotRow(db);
+  await clockAt(db, 6).release(SLOT);
+  expect(await slotRow(db)).toEqual({ ...two, value: "1" }); // the expiry is the one the last reserve set
+  await clockAt(db, 7).release(SLOT);
+  await clockAt(db, 8).release(SLOT);
+  expect((await slotRow(db)).value).toBe("0");
+  await clockAt(db, 9).release("rl:pw-ip:missing");
+  expect(await physicalKeys(db)).toEqual([SLOT]);
+  await clockAt(db, 10).reserve(SLOT, 5, 900);
+  await clockAt(db, 2000).release(SLOT); // expired by then: a count that belongs to no one is not touched
+  expect((await slotRow(db)).value).toBe("1");
+});
+
+test("reserve sweeps the expired rows as a put with a TTL does (they hold visitors' addresses), unless the store is on a caller's transaction", async () => {
+  const db = await makeTestDb();
+  await clockAt(db, 0).put("old-1", "x", { expirationTtl: 60 });
+  await clockAt(db, 0).put("old-2", "x", { expirationTtl: 60 });
+  await clockAt(db, 1000, { sweep: false }).reserve(SLOT, 3, 900);
+  expect(await physicalKeys(db)).toEqual(["old-1", "old-2", SLOT]);
+  await clockAt(db, 1000).reserve(SLOT, 3, 900);
+  expect(await physicalKeys(db)).toEqual([SLOT]);
+});

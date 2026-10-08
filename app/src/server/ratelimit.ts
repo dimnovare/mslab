@@ -6,6 +6,13 @@
 export type TextKv = {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  /**
+   * Atomic slots (PgKv; the tests' in-memory KV mirrors them), for a limit that must hold against requests sent at once: `reserve` takes
+   * one of `limit` slots under `key` in one step (false: none left, nothing changed), `release` gives one back. Optional: reserveSlot and
+   * releaseSlot fall back to read-then-write for a store without them.
+   */
+  reserve?(key: string, limit: number, windowSec: number): Promise<boolean>;
+  release?(key: string): Promise<void>;
 };
 
 /** Submissions a visitor may make per form within RATE_WINDOW_SEC. */
@@ -29,6 +36,22 @@ export async function belowLimit(kv: TextKv, key: string, limit: number): Promis
 export async function countFailure(kv: TextKv, key: string, windowSec: number): Promise<void> {
   const n = Number((await kv.get(key)) ?? "0");
   await kv.put(key, String(n + 1), { expirationTtl: windowSec });
+}
+
+/**
+ * Takes one of `limit` slots under `key` (true), or finds none left (false, and nothing is counted). The window (`windowSec`) starts
+ * again with each slot taken. With the store's own `reserve` (one SQL statement in PgKv) two requests at the same moment cannot take the
+ * same slot; without it this is rateLimit's read-then-write, which a burst can pass (phase 2c: the password login's IP limit).
+ */
+export async function reserveSlot(kv: TextKv, key: string, limit: number, windowSec: number): Promise<boolean> {
+  return kv.reserve ? kv.reserve(key, limit, windowSec) : rateLimit(kv, key, limit, windowSec);
+}
+
+/** Gives back a slot taken with reserveSlot (never below 0; PgKv keeps the window as the last slot set it). */
+export async function releaseSlot(kv: TextKv, key: string, windowSec: number): Promise<void> {
+  if (kv.release) return kv.release(key);
+  const n = Number((await kv.get(key)) ?? "0");
+  if (n > 0) await kv.put(key, String(n - 1), { expirationTtl: windowSec });
 }
 
 /** KV key of one visitor and form: `rl:<form>:<ip>`. */

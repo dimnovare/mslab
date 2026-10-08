@@ -450,4 +450,25 @@ describe("the password login without a database (phase 2c)", () => {
       expect(res.headers.get("cache-control")).toBe("private, no-store");
     }
   });
+
+  const IP_HEADERS = { "x-forwarded-for": "203.0.113.9" };
+  const withKv = (kv: ReturnType<typeof fakeKv>) => deps({ env: { ...deps().env, KV: kv } });
+
+  test("the IP at its limit is refused first, the right password too: 429 locked, private, before the database, and nothing is counted", async () => {
+    const kv = fakeKv({ "rl:pw-ip:203.0.113.9": "20" });
+    const res = (await handleAccountApi(post("/parool-login", { email: "kati@example.test", password: "pikk-parool-2026" }, IP_HEADERS), withKv(kv)))!;
+    expect([res.status, await res.json()]).toEqual([429, { ok: false, error: "locked" }]);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect([...kv.store]).toEqual([["rl:pw-ip:203.0.113.9", "20"]]);
+  });
+
+  test("a body that cannot be a login takes the IP's slot like any failure (it is the count), and a store that fails lets it through", async () => {
+    const kv = fakeKv();
+    const res = (await handleAccountApi(post("/parool-login", { email: "kati@example.test" }, IP_HEADERS), withKv(kv)))!;
+    expect(res.status).toBe(400);
+    expect([...kv.store]).toEqual([["rl:pw-ip:203.0.113.9", "1"]]);
+    const down = async (): Promise<never> => { throw new Error("kv down"); };
+    const broken = deps({ env: { ...deps().env, KV: { get: down, put: down, reserve: down, release: down } } });
+    expect((await handleAccountApi(post("/parool-login", { email: "kati@example.test" }, IP_HEADERS), broken))!.status).toBe(400);
+  });
 });
