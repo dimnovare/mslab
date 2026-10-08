@@ -27,7 +27,7 @@ export const courses = pgTable("courses", {
   body: jsonb("body").$type<I18n>().notNull(),
   outcomes: jsonb("outcomes").$type<I18n[]>().notNull().default([]),
   includes: jsonb("includes").$type<I18n[]>().notNull().default([]),
-  // Legacy (phase 3a): module titles live in course_modules; nothing reads or writes this column. Migration 0005 drops it after the 3a deploy.
+  // Legacy (phase 3a): module titles live in course_modules; nothing reads or writes this column. Migration 0006 drops it after the 3a deploy (code first).
   modules: jsonb("modules").$type<I18n[]>().notNull().default([]),
   language: text("language").notNull().default("ET"),        // "ET" | "RU" | "ET / RU"
   price: integer("price"),                                     // e-learning, cents
@@ -133,12 +133,27 @@ export const pages = pgTable("pages", { key: text("key").primaryKey(), title: js
 export const galleryItems = pgTable("gallery_items", { id: serial("id").primaryKey(), group: text("group").notNull(), key: text("key").notNull(), alt: jsonb("alt").$type<I18n>(), sort: integer("sort").notNull().default(0) });
 // group: "trainer_works"
 
+/** Which home-page popup a `campaign` row is (phase 2c): the campaign offer, or the newsletter sign-up. One row of each. */
+export type PopupKind = "campaign" | "newsletter";
+
+/** The fixed row of each popup kind (the seed and the admin write these ids). */
+export const POPUP_ID: Record<PopupKind, number> = { campaign: 1, newsletter: 2 };
+
+/**
+ * The home page's popups (prototype D's campaign; phase 2c adds the newsletter sign-up): one row per kind (POPUP_ID), and at most
+ * one of them shown (`active`). The partial unique index makes the second active row a duplicate: every active row has the same
+ * `active` value. The newsletter row uses kicker, title, text and imageKey; its code, ctaLabel and ctaHref stay empty.
+ */
 export const campaign = pgTable("campaign", {
   id: integer("id").primaryKey().default(1), active: boolean("active").notNull().default(true),
+  kind: text("kind").$type<PopupKind>().notNull().default("campaign"),
   kicker: jsonb("kicker").$type<I18n>().notNull(), title: jsonb("title").$type<I18n>().notNull(), text: jsonb("text").$type<I18n>().notNull(),
   code: text("code").notNull().default(""), ctaLabel: jsonb("cta_label").$type<I18n>().notNull(), ctaHref: text("cta_href").notNull(),
   imageKey: text("image_key").notNull(),
-});
+}, (t) => [
+  uniqueIndex("campaign_kind").on(t.kind),
+  uniqueIndex("campaign_one_active").on(t.active).where(sql`${t.active}`),
+]);
 
 export const subscribers = pgTable("subscribers", {
   id: serial("id").primaryKey(), email: text("email").notNull(), locale: text("locale").notNull().default("et"),
@@ -153,6 +168,10 @@ export const clients = pgTable("clients", {
   name: text("name").notNull().default(""),
   phone: text("phone").notNull().default(""),
   locale: text("locale").$type<"et" | "ru">().notNull().default("et"),
+  /** The optional password (phase 2c): `scrypt$15$8$1$<salt>$<key>` (server/password.ts); null without one. The e-mail code always works. */
+  passwordHash: text("password_hash"),
+  /** When the password was last set or changed; null without a password. */
+  passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("clients_email").on(t.email)]);
 
@@ -264,6 +283,11 @@ export const lessonProgress = pgTable("lesson_progress", {
   watchedSec: integer("watched_sec").notNull().default(0),
   doneAt: timestamp("done_at", { withTimezone: true }),
   unlockedBy: text("unlocked_by"),
+  /**
+   * The progress clock (phase 2c, domain/lessons.ts acceptProgress): the moment up to which her watching time has been used. Set when
+   * a video lesson is opened and moved on by every report; null for rows written before phase 2c.
+   */
+  clockAt: timestamp("clock_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.clientId, t.lessonId] }), index("lesson_progress_lesson").on(t.lessonId)]);
 

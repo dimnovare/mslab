@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
-import { courses, courseImages, courseSessions, registrations, requests, clients, clientSessions, courseAccess, mailQuota, courseModules, lessons, lessonFiles, lessonProgress } from "@/db/schema";
+import { courses, courseImages, courseSessions, registrations, requests, clients, clientSessions, courseAccess, mailQuota, courseModules, lessons, lessonFiles, lessonProgress, campaign } from "@/db/schema";
 
 test("migrations apply and a course round-trips", async () => {
   const db = await makeTestDb();
@@ -59,4 +59,18 @@ test("lesson tables: modules, lessons, files and progress, with their defaults, 
   await expect(db.insert(lessonProgress).values({ clientId: c.id, lessonId: lesson.id })).rejects.toThrow();
   await db.delete(courses).where(eq(courses.id, course.id));
   for (const table of [courseModules, lessons, lessonFiles, lessonProgress]) expect(await db.select().from(table)).toHaveLength(0);
+});
+
+test("phase 2c columns: a progress clock, an optional password, one popup row per kind", async () => {
+  const db = await makeTestDb();
+  const [c] = await db.insert(clients).values({ email: "p2c@example.test" }).returning();
+  expect([c.passwordHash, c.passwordChangedAt]).toEqual([null, null]);
+  const [course] = await db.insert(courses).values({ slug: "p2c", type: "e_learning", level: "basic", title: { et: "P" }, summary: { et: "" }, body: { et: "" } }).returning();
+  const [mod] = await db.insert(courseModules).values({ courseId: course.id, position: 1, title: { et: "M" } }).returning();
+  const [lesson] = await db.insert(lessons).values({ moduleId: mod.id, position: 1, title: { et: "L" } }).returning();
+  const [p] = await db.insert(lessonProgress).values({ clientId: c.id, lessonId: lesson.id }).returning();
+  expect(p.clockAt).toBeNull();
+  // the migration's newsletter row is there already; a campaign row takes the default kind
+  await db.insert(campaign).values({ id: 1, active: true, kicker: { et: "" }, title: { et: "K" }, text: { et: "" }, ctaLabel: { et: "" }, ctaHref: "/koolitused", imageKey: "/seed/a.jpg" });
+  expect((await db.select().from(campaign).orderBy(asc(campaign.id))).map((r) => [r.id, r.kind, r.active])).toEqual([[1, "campaign", true], [2, "newsletter", false]]);
 });

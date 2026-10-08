@@ -332,7 +332,7 @@ describe("campaign (D adminCamp + image upload, M3–M5)", () => {
     expect(c.values.campaign).toMatchObject({ active: true, code: "TALV15", ctaLabel: { et: "Leia enda koolitus" }, imageKey: "/seed/lash-editorial.jpg" });
     const value = { ...clone(c.values.campaign), imageKey: UPLOAD, code: " kevad-20 ", ctaLabel: { et: " " }, title: { et: "−20% kevadel", ru: "−20% весной" } };
     expect(await saveCampaignForm(db, form({ campaign: { version: c.versions.campaign, value } }))).toMatchObject({ ok: true });
-    const [row] = await db.select().from(campaign);
+    const [row] = await db.select().from(campaign).where(eq(campaign.id, 1));
     expect(row).toMatchObject({ imageKey: UPLOAD, code: "KEVAD-20", ctaLabel: { et: "Leia enda koolitus" }, title: { et: "−20% kevadel", ru: "−20% весной" }, active: true });
   });
 
@@ -382,7 +382,7 @@ describe("settings", () => {
       }),
     );
     expect(r).toMatchObject({ ok: true });
-    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%" });
+    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%", welcomeCode: "" });
     expect(await getPage(db, "privacy")).toMatchObject({ title: { et: "Privaatsuspoliitika" }, body: { et: "Esimene.\n\nTeine.", ru: "Первый." } });
   });
 

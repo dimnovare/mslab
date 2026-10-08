@@ -92,8 +92,15 @@ From the final review of phase 2a (04.10.2026); the merge-blocking items were fi
 - [ ] mslab.ee launch: add `mslab.ee` and `www.mslab.ee` to the Bunny library's allowed domains and change the host of the webhook URL (`docs/deploy.md` section 10).
 - [ ] Maria's own Bunny account later: a new library, new variables, the videos uploaded again; the `lessons.video_id` values change (`docs/deploy.md` section 10).
 - [ ] After the first month read Bunny's bill (the estimate is about €5–15 a month at 500 hours watched) and Vercel's function invocations (a watching student makes about 240 progress calls an hour).
-- [ ] Migration 0005 (drops `courses.modules`) only after 3a has run for a few days with no rollback planned: the code first, then the migration (plan 2026-10-05-phase3a, Task 12 step 11).
+- [ ] Migration 0006 (drops `courses.modules`) only after 3a has run for a few days with no rollback planned: the code first, then the migration (plan 2026-10-05-phase3a, Task 12 step 11).
 - [ ] Accepted limit: the iPhone's own full-screen video player shows no watermark (the page's "Täisekraan" keeps it).
 - [ ] Accepted limit: a student can fake her progress. A video lesson counts as done when the playhead reaches 90 % of the video, which is not the same as 90 % watched: dragging the slider to the end also completes it, as does a script that reports the progress. It only opens her own next lessons. Do not read "done" as "watched" (decide before the certificate phase whether completion should need continuous playback).
 - [ ] Accepted limit: the player's height is capped to leave room for the buttons below it (about 400 px reserved, 240 to 540 px high), so on a small laptop screen, with a 4:3 video or a lesson title that runs to two lines, "Täisekraan" can sit below the fold.
 - [ ] Bunny's embed host is `player.mediadelivery.net` (the old `iframe.mediadelivery.net` player goes in early 2027): nothing to do, noted.
+
+## 9. Phase 2c (Maria's feedback of 06.10.2026)
+- [ ] Native-speaker check of the Russian texts phase 2c added: `account.lesson.seekLocked`, the `account.dashboard` resume texts (`resumeTag` … `finished`), `newsletter.popupSent`, `newsletter.codeLine`, `mail.welcome.*`, `forms.newsletterConsent`, `account.passwordMail.*`, `account.details.password.*`, and the login page's password texts (`account.login.toPassword` … `passwordLocked`).
+- [ ] Maria fills Seaded → "Tervituskood" (empty: no welcome mail and no code on the confirmed page) and applies the code on her invoice.
+- [ ] Maria chooses in Hüpikaken what the home page shows (Kampaania / Uudiskiri / Väljas); the newsletter popup's picture is a sample one until she uploads her own.
+- [ ] Bunny's speed menu must stop at 2×: the server's progress clock assumes it (`TOP_SPEED` in `app/src/domain/lessons.ts`). If Bunny ever offers more, raise the factor to the top speed.
+- [ ] Accepted: a password is optional and per address; there is no "forgot password" link (the code login is the way back); admins have no passwords.

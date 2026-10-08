@@ -7,6 +7,7 @@ import { ru } from "@/i18n/dict/ru";
 const row = (patch: Partial<Campaign> = {}): Campaign => ({
   id: 1,
   active: true,
+  kind: "campaign",
   kicker: { et: "Talvine pakkumine" },
   title: { et: "−15% Lash Lift BOTOX koolitusele", ru: "−15% на курс Lash Lift BOTOX" },
   text: { et: "Kehtib registreerumisel kuni 30.11." },

@@ -1,8 +1,8 @@
 import { eq, getTableName, isNotNull, or, sql } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import type { Db } from "./client";
-import { campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessonFiles, lessonProgress, lessons, pages, posts, practicePackages, registrations, settings } from "./schema";
-import { campaignSeed, courseSeeds, faqSeeds, heroSeeds, pageSeeds, postSeeds, practiceSeeds, settingSeeds, trainerWorks } from "./seed-data";
+import { POPUP_ID, campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessonFiles, lessonProgress, lessons, pages, posts, practicePackages, registrations, settings } from "./schema";
+import { campaignSeed, courseSeeds, faqSeeds, heroSeeds, newsletterPopupSeed, pageSeeds, postSeeds, practiceSeeds, settingSeeds, trainerWorks } from "./seed-data";
 
 // Applies the prototype content. Plain drizzle: no Cloudflare bindings, so it runs from the CLI (seed.ts) and from tests.
 //
@@ -103,7 +103,8 @@ export async function applySeed(db: Db, opts: SeedOptions = {}): Promise<Record<
   await db.insert(pages).values(pageSeeds).onConflictDoNothing({ target: pages.key });
   const [{ n: galleryCount }] = await db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(galleryItems).where(eq(galleryItems.group, TRAINER_WORKS));
   if (galleryCount === 0) await db.insert(galleryItems).values(trainerWorks.map((item, i) => ({ group: TRAINER_WORKS, key: item.key, alt: item.alt, sort: i })));
-  await db.insert(campaign).values({ ...campaignSeed, id: 1 }).onConflictDoNothing({ target: campaign.id });
+  await db.insert(campaign).values({ ...campaignSeed, id: POPUP_ID.campaign, kind: "campaign" }).onConflictDoNothing({ target: campaign.id });
+  await db.insert(campaign).values({ ...newsletterPopupSeed, id: POPUP_ID.newsletter, kind: "newsletter" }).onConflictDoNothing({ target: campaign.id });
   await db.insert(settings).values(Object.entries(settingSeeds).map(([key, value]) => ({ key, value }))).onConflictDoNothing({ target: settings.key });
 
   const counts: Record<string, number> = {};

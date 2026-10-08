@@ -514,11 +514,23 @@ export const campaignSeed: CampaignInput = {
   imageKey: img("lash-editorial.jpg"),
 };
 
+/** The newsletter popup (phase 2c): switched off; the same row the migration adds, for a database the seed resets. */
+export const newsletterPopupSeed: CampaignInput = {
+  active: false,
+  kicker: t("MS LABi kirjad", "Письма MS LAB"),
+  title: t("Hea järgmine samm. Otse sinu postkasti.", "Ваш следующий шаг. В вашем почтовом ящике."),
+  text: t("Uued koolitused, kasulikud mõtted ja tervitussoodustus sinu esimesele koolitusele.", "Новые курсы, полезные идеи и приветственная скидка на первый курс."),
+  code: "",
+  ctaLabel: t(""),
+  ctaHref: "",
+  imageKey: img("gift-bag-serum.jpg"),
+};
+
 // ---------- settings ----------
 
 export const settingSeeds: Record<string, unknown> = {
   contact: { email: "info@mslab.ee", phone: "", address: "Pärnu", instagram: "", facebook: "" },
-  newsletter: { discountLabel: "10%" },
+  newsletter: { discountLabel: "10%", welcomeCode: "" },
   trainer: {
     portraitKey: img("maria-standing.jpg"),
     contactPhotoKey: img("maria-seated.jpg"),
