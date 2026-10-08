@@ -1,9 +1,11 @@
 import { eq, isNull, sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
+import * as schema from "@/db/schema";
 import { clients, clientSessions } from "@/db/schema";
-import { redeemClientPassword, type PasswordGate } from "@/server/client-auth";
+import { lockAddress, redeemClientPassword, type PasswordGate } from "@/server/client-auth";
 import { removeClientPassword, setClientPassword } from "@/server/client-password";
 import { DUMMY_HASH, verifyPassword } from "@/server/password";
 import { makeTestDb } from "./helpers";
@@ -23,6 +25,8 @@ beforeEach(async () => {
   db = await makeTestDb();
   vi.mocked(verifyPassword).mockClear();
 });
+/** A gate that never limits (the real one is Task 12's; the gate is a required argument, so a test that needs none passes this). */
+const open: PasswordGate = () => ({ open: async () => true, failed: async () => undefined });
 const kati = async () => (await db.insert(clients).values({ email: "kati@example.test", locale: "ru" }).returning())[0];
 
 test("setClientPassword keeps the scrypt hash and the time, never the password; refuses a short, a long and the e-mail itself; a gone client", async () => {
@@ -39,36 +43,55 @@ test("setClientPassword keeps the scrypt hash and the time, never the password; 
   expect(await setClientPassword(db, 987654, "pikk-parool-2026", NOW)).toEqual({ kind: "gone" });
 });
 
-test("removeClientPassword clears the hash and the time and says whether there was one", async () => {
+test("removeClientPassword clears the hash and the time and says whether there was one; the removed password no longer logs in", async () => {
   const c = await kati();
   expect(await removeClientPassword(db, c.id)).toEqual({ email: "kati@example.test", locale: "ru", had: false });
   await setClientPassword(db, c.id, "pikk-parool-2026", NOW);
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", NOW, open)).toMatchObject({ clientId: c.id }); // it worked
   expect(await removeClientPassword(db, c.id)).toEqual({ email: "kati@example.test", locale: "ru", had: true });
   expect((await db.select().from(clients))[0]).toMatchObject({ passwordHash: null, passwordChangedAt: null });
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", new Date(NOW.getTime() + 1000), open)).toBeNull(); // and now it is nothing
+  expect(await db.select().from(clientSessions)).toHaveLength(1); // only the login before the removal
   expect(await removeClientPassword(db, 987654)).toBeNull();
 });
 
 test("redeemClientPassword: the right password starts a session and ends the other one (one device); a wrong one is null", async () => {
   const c = await kati();
   await setClientPassword(db, c.id, "pikk-parool-2026", NOW);
-  expect(await redeemClientPassword(db, " KATI@example.test ", "pikk-parool-2026", NOW)).toMatchObject({ clientId: c.id, locale: "ru", isNew: false });
-  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", new Date(NOW.getTime() + 1000))).toMatchObject({ clientId: c.id });
+  expect(await redeemClientPassword(db, " KATI@example.test ", "pikk-parool-2026", NOW, open)).toMatchObject({ clientId: c.id, locale: "ru", isNew: false });
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", new Date(NOW.getTime() + 1000), open)).toMatchObject({ clientId: c.id });
   const sessions = await db.select().from(clientSessions).where(eq(clientSessions.clientId, c.id));
   expect(sessions).toHaveLength(2);
   expect(await db.select().from(clientSessions).where(isNull(clientSessions.endedAt))).toHaveLength(1);
-  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2025", NOW)).toBeNull();
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2025", NOW, open)).toBeNull();
 });
 
 test("an unknown address and one without a password run scrypt against the dummy hash (as long as a wrong password), and are null; no session", async () => {
   await kati();
   const verify = vi.mocked(verifyPassword);
-  expect(await redeemClientPassword(db, "keegi@example.test", "pikk-parool-2026", NOW)).toBeNull();
+  expect(await redeemClientPassword(db, "keegi@example.test", "pikk-parool-2026", NOW, open)).toBeNull();
   expect(verify).toHaveBeenLastCalledWith("pikk-parool-2026", DUMMY_HASH);
-  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", NOW)).toBeNull(); // she has no password
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", NOW, open)).toBeNull(); // she has no password
   expect(verify).toHaveBeenLastCalledWith("pikk-parool-2026", DUMMY_HASH);
   expect(verify).toHaveBeenCalledTimes(2);
   expect(await db.select().from(clientSessions)).toEqual([]);
   expect(await db.select().from(clients)).toHaveLength(1); // a password login never creates a client
+});
+
+test("a match with the dummy hash never logs anyone in: an unknown address and one without a password stay null, with no session and no new client", async () => {
+  await kati();
+  const counted: string[] = [];
+  const gate: PasswordGate = () => ({ open: async () => true, failed: async () => void counted.push("failed") });
+  const verify = vi.mocked(verifyPassword);
+  // as if the dummy hash matched (a bug in verifyPassword, a dummy made from a known password): it must still be a failure
+  verify.mockResolvedValueOnce(true);
+  expect(await redeemClientPassword(db, "keegi@example.test", "pikk-parool-2026", NOW, gate)).toBeNull();
+  verify.mockResolvedValueOnce(true);
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", NOW, gate)).toBeNull(); // she has no password
+  expect(verify).toHaveBeenCalledTimes(2);
+  expect(counted).toEqual(["failed", "failed"]);
+  expect(await db.select().from(clientSessions)).toEqual([]);
+  expect(await db.select().from(clients)).toHaveLength(1);
 });
 
 test("the gate (Task 12's lock), asked under the address lock: shut, nothing is checked and nothing counted; open, a failure is counted and a success is not", async () => {
@@ -126,10 +149,12 @@ const dialect = new PgDialect();
  * PGlite has one connection and runs one transaction at a time, so parallel logins would wait for each other here whatever the code
  * does, and a missing lock could never show. This gives Postgres's behaviour back for the test: transactions run side by side (their
  * queries interleave) and `pg_advisory_xact_lock(key)` makes a later transaction wait for the key until the one that holds it ends
- * (taking a key again in the same transaction is free). Everything else goes straight to the database.
+ * (taking a key again in the same transaction is free). Everything else goes straight to the database. `onWait` is called when a
+ * transaction has to wait for a key somebody else holds, so a test can tell "is waiting" from "went through" without guessing a time.
  */
-function sideBySide(real: Db): Db {
+function sideBySide(real: Db, onWait?: () => void): Db {
   const lines = new Map<string, Promise<void>>(); // per key: the end of the line of transactions waiting for it
+  const inLine = new Map<string, number>(); // per key: how many transactions hold it or wait for it
   const plain = (target: object) =>
     new Proxy(target, {
       get(on, prop) {
@@ -145,7 +170,9 @@ function sideBySide(real: Db): Db {
         const lock = async (key: string) => {
           if (mine.has(key)) return;
           const before = lines.get(key) ?? Promise.resolve();
-          const done = new Promise<void>((release) => mine.set(key, release));
+          if ((inLine.get(key) ?? 0) > 0) onWait?.();
+          inLine.set(key, (inLine.get(key) ?? 0) + 1);
+          const done = new Promise<void>((release) => mine.set(key, () => (inLine.set(key, (inLine.get(key) ?? 1) - 1), release())));
           lines.set(key, before.then(() => done));
           await before;
         };
@@ -185,4 +212,63 @@ test("attempts sent at once for one address go one after another: the lock's cou
   expect(results.filter((r) => r === "locked")).toHaveLength(8 - LIMIT); // met the shut gate: nothing checked
   expect(verify).toHaveBeenCalledTimes(LIMIT);
   expect(counter.failures).toBe(LIMIT);
+});
+
+/** Holds the login lock of `address` in a transaction of its own until `release()` (a login that is checking a password); resolves once it is held. */
+async function holdLock(racing: Db, address: string): Promise<{ release(): void; ended: Promise<unknown> }> {
+  let release!: () => void;
+  const held = new Promise<void>((go) => (release = go));
+  let taken!: () => void;
+  const isTaken = new Promise<void>((go) => (taken = go));
+  const ended = (racing as PostgresJsDatabase<typeof schema>).transaction(async (t) => {
+    await lockAddress(t as unknown as Db, address);
+    taken();
+    await held;
+  });
+  await isTaken;
+  return { release, ended };
+}
+
+/**
+ * Starts `write` while a login holds the lock of Kati's address. `first`: "waiting" when the write reached the lock and had to wait,
+ * "finished" when it went through without one; `hashThen`: her stored hash at that moment, with the lock still held.
+ */
+async function writeWhileALoginHoldsTheLock<T>(write: (racing: Db) => Promise<T>) {
+  let wait!: () => void;
+  const waiting = new Promise<"waiting">((go) => (wait = () => go("waiting")));
+  const racing = sideBySide(db, wait);
+  const login = await holdLock(racing, "kati@example.test");
+  const writing = write(racing);
+  const first = await Promise.race([waiting, writing.then(() => "finished" as const)]);
+  const hashThen = (await db.select().from(clients))[0].passwordHash;
+  login.release();
+  const result = await writing;
+  await login.ended;
+  return { first, hashThen, result };
+}
+
+test("removing the password waits for a login that holds the address lock (one that read the hash before cannot be let through after), then removes it", async () => {
+  const c = await kati();
+  await setClientPassword(db, c.id, "pikk-parool-2026", NOW);
+  const before = (await db.select().from(clients))[0].passwordHash;
+  const { first, hashThen, result } = await writeWhileALoginHoldsTheLock((racing) => removeClientPassword(racing, c.id));
+  expect(first).toBe("waiting");
+  expect(hashThen).toBe(before); // still there while the login holds the lock
+  expect(result).toEqual({ email: "kati@example.test", locale: "ru", had: true });
+  expect((await db.select().from(clients))[0]).toMatchObject({ passwordHash: null, passwordChangedAt: null });
+});
+
+test("setting or changing the password waits for the address lock too, then writes", async () => {
+  const c = await kati();
+  await setClientPassword(db, c.id, "pikk-parool-2026", NOW);
+  const before = (await db.select().from(clients))[0].passwordHash;
+  const later = new Date(NOW.getTime() + 60_000);
+  const { first, hashThen, result } = await writeWhileALoginHoldsTheLock((racing) => setClientPassword(racing, c.id, "uus-parool-2027", later));
+  expect(first).toBe("waiting");
+  expect(hashThen).toBe(before);
+  expect(result).toEqual({ kind: "saved", email: "kati@example.test", locale: "ru", changedAt: later });
+  const [row] = await db.select().from(clients);
+  expect(row.passwordHash).not.toBe(before);
+  expect(row.passwordChangedAt).toEqual(later);
+  expect(await redeemClientPassword(db, "kati@example.test", "uus-parool-2027", later, open)).toMatchObject({ clientId: c.id });
 });

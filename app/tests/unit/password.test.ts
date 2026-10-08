@@ -54,6 +54,10 @@ describe("password hashes (scrypt)", () => {
     expect(await verifyPassword("Mo\u0303o\u0303dulint-123", stored)).toBe(true); // o and the combining tilde, twice
   });
 
+  test("a salt of another length is refused: verifyPassword would never accept the hash", async () => {
+    for (const length of [0, 8, 15, 17, 32]) await expect(hashPassword("tere-tulemast-2026", Buffer.alloc(length, 7)), String(length)).rejects.toThrow();
+  });
+
   test("the dummy hash has today's shape and matches no likely password", async () => {
     expect(DUMMY_HASH).toMatch(SHAPE);
     for (const guess of ["", "password", "tere-tulemast-2026", "0123456789"]) expect(await verifyPassword(guess, DUMMY_HASH), guess).toBe(false);
@@ -70,5 +74,14 @@ describe("the password rules (Minu andmed and the server)", () => {
     expect(passwordProblem("x".repeat(200), "kati@example.test")).toBeNull();
     expect(passwordProblem("x".repeat(201), "kati@example.test")).toBe("long");
     expect(passwordProblem(" KATI@example.test ", "kati@example.test")).toBe("email");
+  });
+
+  test("the length is counted after NFC, as the hash is made: an o and a combining tilde is one character", () => {
+    // escapes, as in the NFC test above: 2 code points typed, 1 character after NFC
+    const tilde = "o\u0303";
+    expect(passwordProblem(tilde.repeat(5), "kati@example.test")).toBe("short"); // 10 code points, 5 characters
+    expect(passwordProblem(tilde.repeat(10), "kati@example.test")).toBeNull();
+    expect(passwordProblem(tilde.repeat(150), "kati@example.test")).toBeNull(); // 300 code points, 150 characters
+    expect(passwordProblem(tilde.repeat(201), "kati@example.test")).toBe("long");
   });
 });

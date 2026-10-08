@@ -26,8 +26,9 @@ function derive(password: string, salt: Buffer): Promise<Buffer> {
   );
 }
 
-/** The stored form of `password`: a new random salt, unless one is given (the tests' known vector). */
+/** The stored form of `password`: a new random salt, unless one is given (the tests' known vector; it must be SALT_BYTES long). */
 export async function hashPassword(password: string, salt: Buffer = randomBytes(SALT_BYTES)): Promise<string> {
+  if (salt.length !== SALT_BYTES) throw new RangeError(`a salt is ${SALT_BYTES} bytes`); // verifyPassword would refuse the hash of any other
   const key = await derive(password, salt);
   return `scrypt$${LOG_N}$${R}$${P}$${salt.toString("base64url")}$${key.toString("base64url")}`;
 }
