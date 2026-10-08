@@ -570,9 +570,12 @@ test.describe("contact and legal", () => {
     await page.goto("/konto/sisene");
     // the dev server's indicator sits at the bottom left, over the phone's legal links (the footer's bottom line is 20 px from the page's end)
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-    await page.locator("footer").getByRole("link", { name: "Privaatsus" }).click();
+    // the legal row's own links: the newsletter line above it has a "Privaatsus" link of its own
+    const legal = page.locator("footer [data-footer-legal]");
+    await expect(legal.getByRole("link")).toHaveCount(2);
+    await legal.getByRole("link", { name: "Privaatsus" }).click();
     await expect(page).toHaveURL(/\/privaatsus$/);
-    await page.locator("footer").getByRole("link", { name: "Õppetingimused" }).click();
+    await page.locator("footer [data-footer-legal]").getByRole("link", { name: "Õppetingimused" }).click();
     await expect(page).toHaveURL(/\/tingimused$/);
   });
 });

@@ -108,7 +108,7 @@ export function Footer({
       <div className={styles.bottom}>
         <span>{fill(d.footer.copyright, { year: new Date().getFullYear() })}</span>
         {/* data-fab-avoid: the review build's comment button moves up instead of covering the links (the bottom line is 20 px from the page's end) */}
-        <div className={styles.legal} data-fab-avoid="">
+        <div className={styles.legal} data-footer-legal="" data-fab-avoid="">
           <Link className={styles.link} href={to("/privaatsus")}>
             {d.footer.privacy}
           </Link>
