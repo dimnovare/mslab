@@ -55,7 +55,7 @@ const sessionRows = (s: SessionInfo): Row[] => [
 const sessionShort = (s: SessionInfo) => `${s.course} · ${sessionWhen(s.startsAt)} · ${s.city}`;
 
 export function registrationSummary(
-  s: SessionInfo & Visitor & { paymentChoice: "full" | "half"; wantsModelHelp: boolean; wantsAccount: boolean },
+  s: SessionInfo & Visitor & { paymentChoice: "full" | "half"; wantsModelHelp: boolean; wantsAccount: boolean; message: string },
   adminUrl: string,
 ): Summary {
   const title = "Uus registreerimine (grupikoolitus)";
@@ -69,6 +69,7 @@ export function registrationSummary(
         ["Tasumine", PAYMENT[s.paymentChoice]],
         ["Abi modellide leidmisel", yesNo(s.wantsModelHelp)],
         ["Loo konto", yesNo(s.wantsAccount)],
+        ["Sõnum", s.message, true],
       ],
       adminUrl,
       "Staatus: ootab ettemaksu. Koht kinnitub alles pärast vähemalt 50% ettemaksu laekumist.",
