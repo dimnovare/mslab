@@ -46,7 +46,7 @@ type State = { status: "idle" } | { status: "sent" } | { status: "error"; field:
  * `preview`: the admin's picture of the form (Hüpikaken, Task 8), which sits inside the editor's own <form>: a form never nests in a
  * form (the browser's parser drops the inner one, and the server's HTML and React's tree would differ). So the same fields in a plain
  * block, no honeypot (its input, off-screen but laid out, would count as a visible field), a button that submits nothing, and the
- * privacy word as plain text: a click in the editor never leaves the page with unsaved work.
+ * privacy word as a span with the link's look (not a link: a click in the editor never leaves the page with unsaved work).
  */
 export function NewsletterForm({
   locale,
@@ -125,7 +125,7 @@ export function NewsletterForm({
         {withLink && (
           <>
             {" "}
-            {preview ? t.privacy : <Link href={href(locale, "/privaatsus")}>{t.privacy}</Link>}
+            {preview ? <span className={styles.privacyWord}>{t.privacy}</span> : <Link href={href(locale, "/privaatsus")}>{t.privacy}</Link>}
           </>
         )}
       </p>

@@ -4,6 +4,9 @@ import { keepNamesTogether } from "@/lib/typography";
 import ui from "./ui.module.css";
 import styles from "./CampaignCard.module.css";
 
+/** The class for the form put in this card (NewsletterForm's `className`): the card's own gap above it, and no margin of the form's. */
+export const POPUP_FORM_CLASS = styles.signupForm;
+
 /**
  * The newsletter popup's card (phase 2c): the campaign card's picture, kicker, Jost title and text (CampaignCard.module.css), with the
  * sign-up form in place of the code and the button. Presentational only: the dialog is the popup's (NewsletterPopup), and `form` is

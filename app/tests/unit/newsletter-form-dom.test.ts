@@ -83,7 +83,7 @@ describe("the form's markup", () => {
     expect(markup({ locale: "ru", t: { ...t, privacy: "Конфиденциальность" } })).toContain('<a href="/ru/privaatsus">Конфиденциальность</a>');
   });
 
-  test("the admin's picture (preview): a plain block, no <form>, no honeypot, a button that submits nothing, the privacy word as plain text", () => {
+  test("the admin's picture (preview): a plain block, no <form>, no honeypot, a button that submits nothing, the privacy word as a span that looks like the link", () => {
     const html = markup({ preview: true });
     expect(html).not.toContain("<form");
     expect(html).toContain("<div data-newsletter-form");
@@ -92,8 +92,17 @@ describe("the form's markup", () => {
     expect(html).not.toContain('type="submit"');
     expect(html).not.toContain("<a "); // a click in the editor never leaves unsaved work
     expect(html).toContain("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda.");
-    expect(html).toContain("Privaatsus");
+    // the word is not a link but has the link's look (Newsletter.module.css: `.notice a` and `.privacyWord` are one rule), so the picture is as tall as the popup
+    expect(html).toMatch(/<span class="[^"]*privacyWord[^"]*">Privaatsus<\/span>/);
     expect(html.match(/data-newsletter-notice/g)).toHaveLength(1);
+    // the real form has the link and no such span
+    expect(markup()).not.toContain("privacyWord");
+  });
+
+  test("the picture without the privacy link (privacyLink off) has no word either", () => {
+    const html = markup({ preview: true, privacyLink: false });
+    expect(html).not.toContain("privacyWord");
+    expect(html).not.toContain("Privaatsus");
   });
 });
 

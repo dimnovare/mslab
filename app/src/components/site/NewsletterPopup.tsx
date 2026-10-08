@@ -4,7 +4,7 @@ import { useId } from "react";
 import { NEWSLETTER_SIGNED_KEY, type NewsletterPopupView } from "@/domain/campaign";
 import type { Locale } from "@/i18n/locales";
 import { NewsletterForm, type NewsletterFormTexts } from "./NewsletterForm";
-import { NewsletterPopupCard } from "./NewsletterPopupCard";
+import { NewsletterPopupCard, POPUP_FORM_CLASS } from "./NewsletterPopupCard";
 import { PopupDialog, usePopupOpen } from "./PopupDialog";
 
 export type NewsletterPopupTexts = { close: string; form: NewsletterFormTexts };
@@ -42,7 +42,7 @@ function NewsletterDialog({ n, locale, t, onClose }: { n: NewsletterPopupView; l
   const titleId = useId();
   return (
     <PopupDialog name="newsletter" titleId={titleId} closeLabel={t.close} onClose={onClose}>
-      {(close) => <NewsletterPopupCard n={n} titleId={titleId} close={close} form={<NewsletterForm locale={locale} t={t.form} onSent={rememberSignUp} />} />}
+      {(close) => <NewsletterPopupCard n={n} titleId={titleId} close={close} form={<NewsletterForm locale={locale} t={t.form} onSent={rememberSignUp} className={POPUP_FORM_CLASS} />} />}
     </PopupDialog>
   );
 }

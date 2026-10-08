@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { BrowserContext, Page, Route, TestInfo } from "@playwright/test";
+import type { BrowserContext, Locator, Page, Route, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
 import { LOCAL_ADMINS } from "../local-secrets";
 import { adminReady, signInAsAdmin } from "./admin-login";
@@ -416,6 +416,12 @@ test.describe("campaign (M2–M5)", () => {
 test.describe("the newsletter popup (phase 2c)", () => {
   test.use({ campaignPopup: 300 });
 
+  /** The space between the bottom of a text and the top of the form under it, in px. */
+  const gapAboveForm = async (text: Locator, form: Locator) => {
+    const [t, f] = [await text.boundingBox(), await form.boundingBox()];
+    return f!.y - (t!.y + t!.height);
+  };
+
   /** The newsletter popup shown instead of the campaign (at most one active: the campaign first goes off). */
   const showNewsletter = () =>
     onLocalDb(async (sql) => {
@@ -438,6 +444,8 @@ test.describe("the newsletter popup (phase 2c)", () => {
     const notice = popup.locator("[data-newsletter-notice]");
     await expect(notice).toHaveText("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda. Privaatsus");
     await expect(notice.getByRole("link", { name: "Privaatsus" })).toHaveAttribute("href", "/privaatsus");
+    // the gap between the text and the form is the card's own 18 px (the form adds no margin of its own on top of it); polled: the card rises into place first
+    await expect.poll(() => gapAboveForm(popup.getByText("Uued koolitused, kasulikud mõtted"), popup.locator("[data-newsletter-form]"))).toBeCloseTo(18, 0);
     const addr = testEmail("nl-popup", info.project.name);
     await popup.getByLabel("Sinu e-post").fill(addr);
     await popup.getByRole("button", { name: "Liitu" }).click();

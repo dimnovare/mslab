@@ -131,7 +131,8 @@
 }
 
 /* The quiet line under the button (there is no consent box: sending the form is the consent). The privacy link in it is a
-   44px-high target (touch targets): the line it sits on grows to that height. */
+   44px-high target (touch targets): the line it sits on grows to that height. The admin's picture of the form (`preview`) has the
+   word as a span, `.privacyWord`, with the same look, so the picture is as tall as the popup. */
 .notice {
   margin: 3px 0 0;
   color: #61555d;
@@ -139,7 +140,8 @@
   line-height: 1.5;
 }
 
-.notice a {
+.notice a,
+.privacyWord {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
