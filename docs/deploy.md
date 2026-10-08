@@ -46,6 +46,8 @@ Optional (each switches a feature on):
 | `CRON_SECRET` | Authorises the daily cron (section 5). A long random string. Sensitive. |
 | `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` | The lesson videos on Bunny Stream (section 10): the library's id, its API key and its embed token-authentication key. All three or none: without them the admin's video field says "Video seadistamata" and students see "Video lisandub peagi". The two keys are sensitive and never reach a browser. |
 | `BUNNY_WEBHOOK_SECRET` | The query secret of Bunny's webhook URL (`/api/bunny/webhook?secret=…`). Optional (the webhook only triggers a status read from Bunny's API), but set it. Sensitive. |
+| `SITE_GATE` | The coming-soon gate (`src/lib/site-gate.ts`, hotfix 08.10): `1` and every visitor gets the coming-soon page (`app/tulekul/[locale]`) at every address; `/admin`, the sign-in, the cron, Bunny's webhook, the newsletter's confirm link, `/media` and the static files still answer. Any value but `0`/`false`/`off`/`no` is on. The launch removes it (and redeploys). |
+| `PREVIEW_SECRET` | The key of the admins' preview cookie `mslab_preview` (`src/lib/preview-cookie.ts`), set at sign-in and by "Vaata kodulehte" in the admin's top line: with it an admin sees the whole site behind the gate. A long random string (32+ characters). Without it, with `SITE_GATE` on, nobody gets past the coming-soon page. Changing it ends every admin's pass (they click "Vaata kodulehte" again). Sensitive. |
 
 Set by Vercel itself (do not set by hand): `VERCEL`, and `VERCEL_PROJECT_PRODUCTION_URL`, `VERCEL_BRANCH_URL`, `VERCEL_URL`, which `src/server/site.ts` allows as the origin of links back to a preview or production host.
 
