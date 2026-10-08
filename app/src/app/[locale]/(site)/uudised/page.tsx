@@ -30,7 +30,7 @@ export default async function NewsPage({ params }: Props) {
     <div className={`${ui.wrap} ${styles.page}`}>
       <header className={styles.head}>
         <p className={ui.caps}>{d.news.title}</p>
-        <h1 className={styles.title}>{d.news.pageTitle}</h1>
+        <h1 className={`${ui.pageTitle} ${styles.title}`}>{d.news.pageTitle}</h1>
       </header>
       {posts.length > 0 ? (
         <NewsGrid

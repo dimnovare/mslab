@@ -13,11 +13,9 @@
   margin-bottom: 14px;
 }
 
+/* The H1, the trainer's name (the size: ui.pageTitle) */
 .name {
   margin: 0;
-  font: 400 clamp(44px, 6vw, 80px) / 1.02 var(--font-display);
-  letter-spacing: -0.02em;
-  text-wrap: balance;
 }
 
 /* D .lead */

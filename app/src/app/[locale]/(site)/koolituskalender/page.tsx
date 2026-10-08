@@ -68,7 +68,7 @@ export default async function CalendarPage({ params }: Props) {
   return (
     <div className={`${ui.wrap} ${styles.page}`}>
       <header className={styles.head}>
-        <h1 className={styles.title}>{c.title}</h1>
+        <h1 className={`${ui.pageTitle} ${styles.title}`}>{c.title}</h1>
         <p className={styles.lead}>{c.lead}</p>
       </header>
       <CalendarList

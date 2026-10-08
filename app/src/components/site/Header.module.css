@@ -1,5 +1,5 @@
 /* Prototype B header (public/p/b styles.css .site-header…, journey.css .over-hero…).
-   Only change requested by Maria: menu, login and language switch in Manrope 500 15px (G4). */
+   Only change requested by Maria: login and language switch in Manrope 500 15px (G4); the menu in Jost 400 16px (phase 2c). */
 
 .skip {
   position: fixed;
@@ -90,7 +90,7 @@
 .navLink {
   position: relative;
   padding: 14px 0;
-  font: 500 15px/1.65 var(--font-body);
+  font: 400 16px/1.55 var(--font-display); /* Jost (phase 2c): 16 / 1.55 keeps the 15 / 1.65 line's height */
   white-space: nowrap;
   transition: color 0.18s;
 }
@@ -294,7 +294,7 @@
 .menuLink {
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
-  font: 300 28px/1.65 var(--font-body);
+  font: 300 28px/1.65 var(--font-display);
   letter-spacing: -0.02em;
 }
 

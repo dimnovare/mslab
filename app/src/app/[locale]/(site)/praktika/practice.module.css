@@ -9,11 +9,9 @@
   color: #5e5559;
 }
 
-/* H11: "Praktika" first and largest on the page. */
+/* H11: "Praktika" first on the page; the size is the list pages' own (ui.pageTitle). */
 .title {
   margin: 18px 0 0;
-  font: 400 clamp(56px, 8vw, 112px) / 0.98 var(--font-display);
-  letter-spacing: -0.02em;
 }
 
 /* R4: practice takes place only in Pärnu. */

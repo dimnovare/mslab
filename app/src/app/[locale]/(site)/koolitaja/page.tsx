@@ -80,7 +80,7 @@ export default async function TrainerPage({ params }: Props) {
       <section className={`${ui.wrap} ${styles.intro}`} aria-labelledby="trainer-name">
         <div className={styles.text}>
           <p className={ui.caps}>{d.trainer.pageEyebrow}</p>
-          <h1 id="trainer-name" className={styles.name}>
+          <h1 id="trainer-name" className={`${ui.pageTitle} ${styles.name}`}>
             {name}
           </h1>
           {lead.map((p, i) => (

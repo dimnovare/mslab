@@ -12,18 +12,17 @@ test.describe("desktop", () => {
     await expect(header.getByRole("link", { name: "Koolitused" })).toBeVisible();
     await expect(header.getByRole("link", { name: "Logi sisse" })).toBeVisible();
     const navFont = await header.getByRole("link", { name: "Koolitused" }).evaluate((el) => getComputedStyle(el).fontFamily);
-    expect(navFont).toMatch(/Manrope/i);
+    expect(navFont).toMatch(/Jost/i); // phase 2c: the menu in Jost
     await page.mouse.wheel(0, 900); await page.waitForTimeout(400);
     expect(await header.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
     await expect(page.locator("footer").getByText("Otse sinu postkasti.")).toBeVisible();
     await page.goto("/ru"); await expect(page.locator("header").getByRole("link", { name: "Курсы" })).toBeVisible();
   });
 
-  test("menu, login and language switch are Manrope 500 15px (G4)", async ({ page }) => {
+  test("login and language switch are Manrope 500 15px (G4); the menu is Jost (phase 2c, look.spec.ts)", async ({ page }) => {
     await page.goto("/");
     const header = page.locator("header");
     for (const el of [
-      header.getByRole("navigation").getByRole("link", { name: "Praktika" }),
       header.getByRole("link", { name: "Logi sisse" }),
       header.getByRole("link", { name: /Vaheta keelt/ }),
     ]) {

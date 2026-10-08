@@ -55,7 +55,7 @@ export default async function CataloguePage({ params }: Props) {
     <div className={`${ui.wrap} ${styles.page}`}>
       <header className={styles.head}>
         <p className={ui.eyebrow}>{d.nav.courses}</p>
-        <h1 className={styles.title}>{c.title}</h1>
+        <h1 className={`${ui.pageTitle} ${styles.title}`}>{c.title}</h1>
         <p className={styles.intro} data-catalogue-intro="">
           {c.intro}
         </p>
