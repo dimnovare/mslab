@@ -414,10 +414,12 @@ test("the seek lock: a jump forward is taken back to the furthest point watched 
   const fake = await fakeFrame(page);
   await subscribed(fake);
   await playFrom(fake, 0, 6);
+  const pictureBefore = (await playerBoxes(page)).frame;
   await postFromPlayer(fake, "timeupdate", { seconds: 90, duration: 125 }); // the slider dragged far ahead
   await expect.poll(() => fake.evaluate(() => (window as unknown as { __seeks?: number[] }).__seeks ?? [])).toEqual([6]);
   const note = page.locator("[data-seek-note]");
   await expect(note).toHaveText("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
+  expect((await playerBoxes(page)).frame, "the picture does not move as the line comes").toEqual(pictureBefore); // only what is under it makes room
   await postFromPlayer(fake, "timeupdate", { seconds: 2, duration: 125 }); // back: free
   await postFromPlayer(fake, "pause");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 6, done: false });
@@ -425,3 +427,59 @@ test("the seek lock: a jump forward is taken back to the furthest point watched 
   await expect(note).toHaveText("", { timeout: 8_000 }); // gone after 6 s
   expect(await noOverflow(page)).toBe(true);
 });
+
+/** What the line must not move while the student drags the slider: the player's boxes and the fullscreen button's (the mark's corner too). */
+async function layoutOf(page: Page) {
+  const { wrapper, stage, frame, iframe, mark, corner } = await playerBoxes(page);
+  return { wrapper, stage, frame, iframe, mark, corner, button: box((await page.locator("[data-fullscreen]").boundingBox())!) };
+}
+
+/** The same layout, to within half a pixel (the button's hover lift is still settling after the click that enlarged the player). */
+function expectSameLayout(actual: Awaited<ReturnType<typeof layoutOf>>, expected: Awaited<ReturnType<typeof layoutOf>>, message: string): void {
+  for (const part of ["wrapper", "stage", "frame", "iframe", "mark", "button"] as const)
+    for (const side of ["x", "y", "w", "h"] as const)
+      expect(Math.abs(actual[part][side] - expected[part][side]), `${message}: ${part}.${side} is ${JSON.stringify(actual[part])}, was ${JSON.stringify(expected[part])}`).toBeLessThanOrEqual(0.5);
+  expect(actual.corner, message).toBe(expected.corner);
+}
+
+// fix round 1: an enlarged player (the browser's fullscreen, or the wrapper over the window) is as high as the screen, so a picture that
+// the screen's height limits (a phone on its side) would shrink when a line that took room from the stage comes and grow back after
+// 6 s, under the pointer that is dragging Bunny's slider. The line is out of the flow there: nothing moves as it comes and goes.
+// (The window cannot be resized while the browser is in fullscreen, so each size is its own test.)
+for (const mode of ["fullscreen", "cover"] as const) {
+  for (const size of [{ width: 844, height: 390 }, { width: 390, height: 844 }]) {
+    const how = mode === "cover" ? "no Fullscreen API" : "the browser's fullscreen";
+    test(`the seek line leaves the picture alone, enlarged (${how}) at ${size.width} × ${size.height}: the frame, the stage and the button stay where they are as the line comes and goes`, async ({ page }, info) => {
+      const { lesson, view } = await student(page, `seekbox-${mode}-${size.width}`, info.project.name);
+      if (mode === "cover")
+        await page.addInitScript(() => {
+          delete (Element.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+        });
+      await page.clock.install();
+      await page.setViewportSize(size);
+      await openPlayerHarness(page, lesson, view);
+      const fake = await fakeFrame(page);
+      await subscribed(fake);
+      await page.locator("[data-fullscreen]").click();
+      if (mode === "cover") await expect(page.locator("[data-player]")).toHaveAttribute("data-expanded", "");
+      else await expect.poll(() => page.evaluate(() => document.fullscreenElement?.hasAttribute("data-player") ?? false)).toBe(true);
+      const note = page.locator("[data-seek-note]");
+      await expect(note).toHaveText("");
+      await playFrom(fake, 0, 6);
+      const before = await layoutOf(page);
+      await postFromPlayer(fake, "timeupdate", { seconds: 90, duration: 125 }); // the slider dragged far ahead
+      await expect(note).toHaveText("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
+      const shown = await layoutOf(page);
+      expectSameLayout(shown, before, "nothing moves as the line comes");
+      // the line itself: on the screen and inside the player, clear of the button, taking no clicks
+      const line = box((await note.boundingBox())!);
+      expect(line.x >= 0 && line.x + line.w <= size.width + 0.5 && line.y >= 0, `the line is on the screen ${JSON.stringify(line)}`).toBe(true);
+      expect(line.x >= shown.wrapper.x - 0.5 && line.x + line.w <= shown.wrapper.x + shown.wrapper.w + 0.5, "the line is inside the player").toBe(true);
+      expect(line.y + line.h <= shown.button.y + 0.5, "the line is clear of the button").toBe(true);
+      expect(await note.evaluate((e) => getComputedStyle(e).pointerEvents)).toBe("none");
+      await page.clock.fastForward(6_000);
+      await expect(note).toHaveText("");
+      expectSameLayout(await layoutOf(page), before, "nothing moves as the line goes");
+    });
+  }
+}
