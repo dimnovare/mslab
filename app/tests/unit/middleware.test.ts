@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, type NextResponse } from "next/server";
 import { canonicalPath, middleware } from "@/middleware";
 
 // The path is appended to the origin as it is: new URL("//evil.example/", base) would parse "evil.example" as the host.
-const run = (path: string, init?: ConstructorParameters<typeof NextRequest>[1]) => middleware(new NextRequest(`http://localhost${path}`, init));
+// The coming-soon gate is off here (SITE_GATE unset), and then the middleware answers synchronously, as it always did
+// (tests/unit/middleware-gate.test.ts checks both).
+const run = (path: string, init?: ConstructorParameters<typeof NextRequest>[1]) => middleware(new NextRequest(`http://localhost${path}`, init)) as NextResponse;
 const rewrittenTo = (path: string) => {
   const to = run(path).headers.get("x-middleware-rewrite");
   return to ? new URL(to).pathname + new URL(to).search : null;

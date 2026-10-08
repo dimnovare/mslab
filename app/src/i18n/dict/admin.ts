@@ -86,6 +86,8 @@ export const adminEt = {
     closeMenu: "Sulge menüü",
     viewSite: "Vaata lehte",
     newWindow: "avaneb uues aknas",
+    // the top line's link through the coming-soon gate (api/admin/preview: the preview cookie, then the home page)
+    preview: "Vaata kodulehte",
     logout: "Logi välja",
     signedInAs: "Sisse logitud: {email}",
     badgeRegistrations: "{n} ootab ettemaksu",

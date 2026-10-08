@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { BAD_DATABASE_URL, LOCAL_DATABASE_URL, serverEnv } from "@/server/env";
+import { BAD_DATABASE_URL, gateEnv, LOCAL_DATABASE_URL, serverEnv } from "@/server/env";
 import { parseEnvFile } from "../local-secrets";
 
 // serverEnv() is the one place the server reads its configuration (process.env on Vercel and under `next dev`). In
@@ -34,16 +34,16 @@ describe("serverEnv in production", () => {
   test("returns the six required values as given; every optional one is undefined when not set", () => {
     const env = serverEnv(FULL, true);
     expect(env).toMatchObject(FULL);
-    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MEDIA_LOCAL", "CRON_SECRET", "BUNNY_LIBRARY_ID", "BUNNY_API_KEY", "BUNNY_TOKEN_KEY", "BUNNY_WEBHOOK_SECRET", "BUNNY_FAKE_URL"] as const)
+    for (const name of ["RESEND_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ADMIN_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MEDIA_LOCAL", "CRON_SECRET", "BUNNY_LIBRARY_ID", "BUNNY_API_KEY", "BUNNY_TOKEN_KEY", "BUNNY_WEBHOOK_SECRET", "BUNNY_FAKE_URL", "SITE_GATE", "PREVIEW_SECRET"] as const)
       expect(env[name], name).toBeUndefined();
   });
 
   test("optional values are passed through; blank ones count as not set", () => {
     const env = serverEnv(
-      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c", BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "bunny-api-key", BUNNY_TOKEN_KEY: "bunny-token-key", BUNNY_WEBHOOK_SECRET: "bunny-hook", BUNNY_FAKE_URL: "http://localhost:3998" },
+      { ...FULL, RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c", BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "bunny-api-key", BUNNY_TOKEN_KEY: "bunny-token-key", BUNNY_WEBHOOK_SECRET: "bunny-hook", BUNNY_FAKE_URL: "http://localhost:3998", SITE_GATE: "1", PREVIEW_SECRET: "preview-secret" },
       true,
     );
-    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c", BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "bunny-api-key", BUNNY_TOKEN_KEY: "bunny-token-key", BUNNY_WEBHOOK_SECRET: "bunny-hook", BUNNY_FAKE_URL: "http://localhost:3998" });
+    expect(env).toMatchObject({ RESEND_API_KEY: SECRET_KEY, TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "42", ADMIN_KEY: "k", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "id", R2_SECRET_ACCESS_KEY: "secret", R2_BUCKET: "mslab-media", MEDIA_LOCAL: "1", CRON_SECRET: "c", BUNNY_LIBRARY_ID: "12345", BUNNY_API_KEY: "bunny-api-key", BUNNY_TOKEN_KEY: "bunny-token-key", BUNNY_WEBHOOK_SECRET: "bunny-hook", BUNNY_FAKE_URL: "http://localhost:3998", SITE_GATE: "1", PREVIEW_SECRET: "preview-secret" });
     expect(serverEnv({ ...FULL, RESEND_API_KEY: "  ", ADMIN_KEY: "", CRON_SECRET: " " }, true)).toMatchObject({ RESEND_API_KEY: undefined, ADMIN_KEY: undefined, CRON_SECRET: undefined });
   });
 
@@ -136,6 +136,24 @@ describe("serverEnv() with no arguments", () => {
     expect(() => serverEnv()).toThrow("DATABASE_URL");
     vi.stubEnv("NODE_ENV", "development");
     expect(serverEnv().DATABASE_URL).toBe(LOCAL_DATABASE_URL);
+  });
+});
+
+describe("gateEnv (the middleware: the coming-soon gate's two settings only)", () => {
+  test("reads SITE_GATE and PREVIEW_SECRET trimmed, blank as not set, and needs none of the required ones, even in production", () => {
+    const key = "k".repeat(32);
+    expect(gateEnv({})).toEqual({ SITE_GATE: undefined, PREVIEW_SECRET: undefined });
+    expect(gateEnv({ SITE_GATE: " 1 ", PREVIEW_SECRET: ` ${key} \n` })).toEqual({ SITE_GATE: "1", PREVIEW_SECRET: key });
+    expect(gateEnv({ SITE_GATE: "  ", PREVIEW_SECRET: "" })).toEqual({ SITE_GATE: undefined, PREVIEW_SECRET: undefined });
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SITE_GATE", "1");
+    vi.stubEnv("PREVIEW_SECRET", key);
+    expect(gateEnv()).toEqual({ SITE_GATE: "1", PREVIEW_SECRET: key });
+  });
+
+  test("a PREVIEW_SECRET shorter than 32 characters counts as unset (the gate then fails closed)", () => {
+    for (const secret of ["1", "k", "k".repeat(31), ` ${"k".repeat(31)} `]) expect(gateEnv({ SITE_GATE: "1", PREVIEW_SECRET: secret }).PREVIEW_SECRET, secret).toBeUndefined();
+    expect(gateEnv({ SITE_GATE: "1", PREVIEW_SECRET: "k".repeat(32) }).PREVIEW_SECRET).toBe("k".repeat(32));
   });
 });
 

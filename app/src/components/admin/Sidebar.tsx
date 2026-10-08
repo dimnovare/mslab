@@ -50,8 +50,10 @@ function NavContent({ items, active, t }: { items: NavItem[]; active: Section; t
       </ul>
       <ul className={styles.nav + " " + styles.foot}>
         <li>
-          {/* opener only: a Referer to the public site is harmless, and admin forms must keep sending Origin */}
-          <a href="/" target="_blank" rel="noopener" className={styles.link}>
+          {/* The home page through the coming-soon gate: api/admin/preview gives this admin the preview cookie, then
+              opens "/" (a plain link: it is an API route). Opener only: a Referer to the public site is harmless, and
+              admin forms must keep sending Origin. */}
+          <a href="/api/admin/preview" target="_blank" rel="noopener" className={styles.link} data-admin-view-site="">
             <AdminIcon name="up" />
             <span className={styles.text}>
               {t.viewSite} <span aria-hidden="true">↗</span>

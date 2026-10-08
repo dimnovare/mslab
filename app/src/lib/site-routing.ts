@@ -1,13 +1,15 @@
 // Where a request path goes: the decisions of src/middleware.ts as plain functions, without Next.js (tested on their own).
 // ET lives at "/", RU at "/ru"; internally both render app/[locale]/…
 
+import { ROOT_FILE_SOURCE } from "./root-files";
 import { parseRowId } from "./row-id";
 import { isSlug } from "./slug";
 
 // Paths the app serves as they are (no "/et" rewrite). The hub (guide, p/…) and /api are handled before this list.
 // Every entry ends at a path boundary or is one exact file: "/admin.php", "/administrator" or "/media.php" are unknown
-// addresses (the cached 404 page), not the admin or /media.
-const PASS = /^\/(ru(\/|$)|admin(\/|$)|media(\/|$)|_next(\/|$)|feedback\.js$|robots\.txt$|favicon\.ico$|icon\.svg$|brand\/|seed\/|og\.(jpg|png)$)/;
+// addresses (the cached 404 page), not the admin or /media. The static files are lib/root-files.ts's list, which the
+// coming-soon gate shares.
+const PASS = new RegExp(`^\\/(ru(\\/|$)|admin(\\/|$)|media(\\/|$)|_next(\\/|$)|${ROOT_FILE_SOURCE})`);
 
 /** API routes answer at their own path: no trailing-slash or locale redirect (a POST must not be redirected). */
 const API = /^\/api(\/|$)/;

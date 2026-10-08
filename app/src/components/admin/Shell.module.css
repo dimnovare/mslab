@@ -52,6 +52,40 @@
   font: 500 12px/1.4 var(--font-body);
 }
 
+.end {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/* "Vaata kodulehte ↗": quiet, the top line's own type; a 44px target. */
+.preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--fog);
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.preview:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .who {
   display: inline-flex;
   align-items: center;

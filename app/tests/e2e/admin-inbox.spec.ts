@@ -94,7 +94,8 @@ test.describe("signed in", () => {
     await expect(nav.locator('[data-badge="registrations"]')).toBeVisible();
     await expect(nav.locator('[data-badge="requests"]')).toBeVisible();
     const site = nav.getByRole("link", { name: /Vaata lehte/ });
-    await expect(site).toHaveAttribute("href", "/");
+    // through api/admin/preview: the coming-soon gate's preview cookie, then the home page (src/lib/site-gate.ts)
+    await expect(site).toHaveAttribute("href", "/api/admin/preview");
     await expect(site).toHaveAttribute("target", "_blank");
     await expect(nav.getByRole("button", { name: "Logi välja" })).toBeVisible();
     for (const target of await nav.locator("a, button").all()) expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
