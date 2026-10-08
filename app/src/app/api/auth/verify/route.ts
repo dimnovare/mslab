@@ -4,11 +4,13 @@ import { SESSION_COOKIE, SESSION_TTL_MS, redeemLoginToken, sessionCookieOptions 
 import { serverEnv } from "@/server/env";
 import { logFailure } from "@/server/log";
 import { isPrefetch } from "@/server/prefetch";
+import { setPreviewCookie } from "@/server/preview";
 
 /**
  * The link in the login e-mail (`?t=<token>`): uses the token (single use, 15 minutes), starts a session of 30 days in
- * the `__Host-mslab_admin` cookie and sends the admin to /admin. Using the token and creating the session are one
- * transaction, so a database failure in between leaves the link usable. Anything else goes to /admin/login:
+ * the `__Host-mslab_admin` cookie (with the coming-soon gate's preview cookie `mslab_preview` next to it, server/preview.ts)
+ * and sends the admin to /admin. Using the token and creating the session are one transaction, so a database failure in
+ * between leaves the link usable. Anything else goes to /admin/login:
  * ?viga=link (unknown, expired or used token, or an address that is no longer allowed), =server (the database failed);
  * a prefetch goes there without a notice and without touching the token.
  */
@@ -27,7 +29,10 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
   const res = NextResponse.redirect(new URL(target, url.origin), 303);
-  if (session) res.cookies.set(SESSION_COOKIE, session, { ...sessionCookieOptions, maxAge: SESSION_TTL_MS / 1000 });
+  if (session) {
+    res.cookies.set(SESSION_COOKIE, session, { ...sessionCookieOptions, maxAge: SESSION_TTL_MS / 1000 });
+    await setPreviewCookie(res); // the pass through the coming-soon gate, for as long as the session (server/preview.ts)
+  }
   res.headers.set("cache-control", "no-store");
   res.headers.set("referrer-policy", "no-referrer"); // the token is in this URL
   return res;
