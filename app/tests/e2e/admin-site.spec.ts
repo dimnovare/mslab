@@ -344,7 +344,8 @@ test.describe("campaign (M2–M5)", () => {
     await signIn(page, context, visitorIp);
     await page.goto("/admin/kampaania");
     await adminReady(page);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kampaania hüpikaken");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hüpikaken");
+    const camp = page.locator('[data-popup-section="campaign"]'); // the page has two editors: the campaign's fields
     const preview = page.locator("[data-campaign-preview]");
     await expect(preview.getByRole("heading")).toHaveText("−15% Lash Lift BOTOX koolitusele");
     await expect(page.getByText("Mitte praegu")).toHaveCount(0); // M3
@@ -357,12 +358,12 @@ test.describe("campaign (M2–M5)", () => {
     expect(src).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
     await expect(preview.locator("img")).toHaveAttribute("src", `/media/${src}`);
     // the texts follow in the preview, ET and RU
-    await page.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E kampaania");
+    await camp.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E kampaania");
     await expect(preview.getByRole("heading")).toHaveText("E2E kampaania");
-    await page.getByRole("textbox", { name: "Sooduskood", exact: true }).fill("e2e-10");
+    await camp.getByRole("textbox", { name: "Sooduskood", exact: true }).fill("e2e-10");
     await expect(preview.locator("[data-campaign-code]")).toHaveText("E2E-10");
     // a script link: refused, nothing saved
-    const href = page.getByRole("combobox", { name: "Nupp viib", exact: true });
+    const href = camp.getByRole("combobox", { name: "Nupp viib", exact: true });
     await href.fill("javascript:alert(1)");
     await page.getByRole("button", { name: "Salvesta", exact: true }).click();
     await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
@@ -370,9 +371,9 @@ test.describe("campaign (M2–M5)", () => {
     expect(await one((sql) => sql<{ image: string }[]>`select image_key as image from campaign where id = 1`)).toEqual({ image: "/seed/lash-editorial.jpg" });
     await href.fill("/koolitused/lash-lift-botox");
     // an empty button text in both languages: "Leia enda koolitus" (M4); the seed's Russian text is cleared too
-    await page.getByRole("textbox", { name: "Nupu tekst (eesti keeles)", exact: true }).fill("");
-    await page.getByRole("group", { name: "Keel: Nupu tekst" }).getByRole("button", { name: /^RU/ }).click();
-    await page.getByRole("textbox", { name: "Nupu tekst (vene keeles)", exact: true }).fill("");
+    await camp.getByRole("textbox", { name: "Nupu tekst (eesti keeles)", exact: true }).fill("");
+    await camp.getByRole("group", { name: "Keel: Nupu tekst" }).getByRole("button", { name: /^RU/ }).click();
+    await camp.getByRole("textbox", { name: "Nupu tekst (vene keeles)", exact: true }).fill("");
     await save(page);
 
     const stored = await one((sql) => sql<{ image: string; code: string; cta: { et: string }; title: { et: string } }[]>`select image_key as image, code, cta_label as cta, title from campaign where id = 1`);
@@ -481,6 +482,39 @@ test.describe("the newsletter popup (phase 2c)", () => {
     await page.goto("/");
     await page.waitForTimeout(1200);
     await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
+  test("Hüpikaken: 'Lehel näidatakse' Uudiskiri, its texts and the preview, saved; the home page shows it; Väljas shows none", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/kampaania");
+    await adminReady(page);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hüpikaken");
+    const shown = page.getByRole("group", { name: "Lehel näidatakse" });
+    await expect(shown.getByRole("radio", { name: "Kampaania" })).toBeChecked();
+    await shown.getByRole("radio", { name: "Uudiskiri" }).check();
+    const nl = page.locator('[data-popup-section="newsletter"]');
+    await nl.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E uudiskiri");
+    const preview = page.locator("[data-newsletter-preview]");
+    await expect(preview.getByRole("heading")).toHaveText("E2E uudiskiri");
+    await expect(preview.getByRole("button", { name: "Liitu" })).toBeVisible();
+    await expect(page.locator("[data-campaign-editor] form")).toHaveCount(0); // the preview's form is a picture: no form inside the editor's
+    // the picture is as tall as the popup: the same gap above the form, and the privacy word (a span, not a link) makes the line 44 px high like the link
+    await expect.poll(() => gapAboveForm(preview.getByText("Uued koolitused, kasulikud mõtted"), preview.locator("[data-newsletter-form]"))).toBeCloseTo(18, 0);
+    await expect(preview.locator("[data-newsletter-notice] a")).toHaveCount(0);
+    expect((await preview.locator("[data-newsletter-notice]").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await save(page);
+    const rows = await onLocalDb((sql) => sql<{ id: number; active: boolean }[]>`select id, active from campaign order by id`);
+    expect(rows.map((r) => r.active)).toEqual([false, true]);
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "E2E uudiskiri" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.goto("/admin/kampaania");
+    await adminReady(page);
+    await page.getByRole("group", { name: "Lehel näidatakse" }).getByRole("radio", { name: "Väljas" }).check();
+    await save(page);
+    expect((await onLocalDb((sql) => sql<{ active: boolean }[]>`select active from campaign order by id`)).map((r) => r.active)).toEqual([false, false]);
   });
 });
 

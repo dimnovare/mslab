@@ -3,6 +3,7 @@
 // the stored-value → draft conversions, the limits, and the checks for links and focal points. Pure: no database, no
 // React.
 
+import type { Campaign } from "@/db/schema";
 import type { I18n } from "@/i18n/field";
 import { compactIban } from "./account-cards";
 import { centsToInput } from "./money";
@@ -289,6 +290,14 @@ export function campaignDraft(c: CampaignDraft | null): CampaignDraft {
     ctaHref: c.ctaHref,
     imageKey: c.imageKey,
   };
+}
+
+/** Hüpikaken's newsletter popup (phase 2c): shown or not, and its kicker, title, text and picture (no code and no button: it has the form). */
+export type NewsletterPopupDraft = { active: boolean; kicker: I18n; title: I18n; text: I18n; imageKey: string };
+
+export function newsletterPopupDraft(c: Campaign | null): NewsletterPopupDraft {
+  if (!c) return { active: false, kicker: empty(), title: empty(), text: empty(), imageKey: "" };
+  return { active: c.active, kicker: copyI18n(c.kicker), title: copyI18n(c.title), text: copyI18n(c.text), imageKey: c.imageKey };
 }
 
 export type ContactDraft = { email: string; phone: string; address: string; instagram: string; facebook: string };

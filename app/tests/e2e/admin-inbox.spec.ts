@@ -19,7 +19,7 @@ import {
 // fixtures.ts, an unpublished fixture course with its own session) and deletes again. The guard tests are GET-only and
 // also run against a deployment.
 
-const MENU = ["Ülevaade", "Koolitused", "Kalender", "Registreerimised", "Õpilased", "Päringud", "Praktika", "Avaleht", "Koolitaja", "Uudised", "Kampaania", "Uudiskiri", "Seaded"];
+const MENU = ["Ülevaade", "Koolitused", "Kalender", "Registreerimised", "Õpilased", "Päringud", "Praktika", "Avaleht", "Koolitaja", "Uudised", "Hüpikaken", "Uudiskiri", "Seaded"];
 
 const created = { tokens: new Set<string>(), sessions: new Set<string>() };
 let fx: AdminFixtures | null = null;
@@ -109,7 +109,7 @@ test.describe("signed in", () => {
       ["Avaleht", "/admin/avaleht", "Avaleht", "[data-home-editor]"],
       ["Koolitaja", "/admin/koolitaja", "Koolitaja", "[data-trainer-editor]"],
       ["Uudised", "/admin/uudised", "Uudised", "[data-add-post]"],
-      ["Kampaania", "/admin/kampaania", "Kampaania hüpikaken", "[data-campaign-editor]"],
+      ["Hüpikaken", "/admin/kampaania", "Hüpikaken", "[data-campaign-editor]"],
       ["Seaded", "/admin/seaded", "Seaded", "[data-settings-editor]"],
     ] as const;
     for (const [label, path, h1, marker] of sections) {

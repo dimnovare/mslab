@@ -1,7 +1,7 @@
 // The public campaign popup (Task 14; Maria C37–C41: M1, M3, M4): which stored campaign the home page shows, with which
 // button text, and when. Pure: no database, no React.
 
-import type { Campaign } from "@/db/schema";
+import type { Campaign, PopupKind } from "@/db/schema";
 import { pick, type I18n } from "@/i18n/field";
 import type { Locale } from "@/i18n/locales";
 import { mediaUrl } from "@/lib/media";
@@ -81,4 +81,17 @@ export function newsletterPopupView(c: Campaign | null | undefined, locale: Loca
   const title = pick(c.title, locale).trim();
   if (!title) return null;
   return { image: mediaUrl(c.imageKey), kicker: pick(c.kicker, locale), title, text: pick(c.text, locale) };
+}
+
+/** What "Lehel näidatakse" (admin Hüpikaken, phase 2c) is set to: one of the popups, or none. */
+export type PopupChoice = PopupKind | "off";
+
+/** The choice the two rows' `active` flags say (the database allows at most one on; were both, the campaign would be the one). */
+export function popupShown(campaignActive: boolean, newsletterActive: boolean): PopupChoice {
+  return campaignActive ? "campaign" : newsletterActive ? "newsletter" : "off";
+}
+
+/** The two rows' `active` flags for a choice: at most one on. */
+export function popupFlags(choice: PopupChoice): Record<PopupKind, boolean> {
+  return { campaign: choice === "campaign", newsletter: choice === "newsletter" };
 }

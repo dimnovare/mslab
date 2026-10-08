@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { campaignCtaLabel, campaignDelay, campaignView, CAMPAIGN_DELAY_MS, CAMPAIGN_SEEN_KEY, NEWSLETTER_SIGNED_KEY, newsletterPopupView } from "@/domain/campaign";
+import { campaignCtaLabel, campaignDelay, campaignView, CAMPAIGN_DELAY_MS, CAMPAIGN_SEEN_KEY, NEWSLETTER_SIGNED_KEY, newsletterPopupView, popupFlags, popupShown } from "@/domain/campaign";
 import type { Campaign } from "@/db/schema";
 import { et } from "@/i18n/dict/et";
 import { ru } from "@/i18n/dict/ru";
@@ -90,5 +90,20 @@ describe("the newsletter popup (phase 2c)", () => {
 
   test("a sign-up from the popup is remembered under its own key", () => {
     expect(NEWSLETTER_SIGNED_KEY).toBe("mslab-nl");
+  });
+});
+
+describe("Lehel näidatakse: one popup or none (phase 2c)", () => {
+  test("the choice from the two rows' flags (both on cannot be stored; the campaign wins if it ever were)", () => {
+    expect(popupShown(true, false)).toBe("campaign");
+    expect(popupShown(false, true)).toBe("newsletter");
+    expect(popupShown(false, false)).toBe("off");
+    expect(popupShown(true, true)).toBe("campaign");
+  });
+
+  test("the flags for a choice: at most one on", () => {
+    expect(popupFlags("campaign")).toEqual({ campaign: true, newsletter: false });
+    expect(popupFlags("newsletter")).toEqual({ campaign: false, newsletter: true });
+    expect(popupFlags("off")).toEqual({ campaign: false, newsletter: false });
   });
 });

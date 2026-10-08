@@ -11,7 +11,7 @@ import { linkSuggestions } from "@/server/site-links";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: adminTitle(adminEt.nav.campaign) };
 
-/** Kampaania: prototype D adminCamp with an image upload and the popup card as a live preview (Task 13B, M2–M5). */
+/** Hüpikaken: what the home page shows (Kampaania, Uudiskiri or Väljas) and both popups' editors with their live previews (Task 13B, M2–M5; phase 2c). */
 export default async function CampaignEditPage() {
   const email = await requireAdmin();
   const db = getDb();

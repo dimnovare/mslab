@@ -313,12 +313,16 @@ describe("admin queries", () => {
     expect((await getGallery(db, "other")).map((g) => g.key)).toEqual(["z.jpg"]);
   });
 
-  test("upsertCampaign keeps a single row and listSubscribers returns newest consent first", async () => {
+  test("upsertCampaign keeps one row per popup kind (POPUP_ID), at most one active, and listSubscribers returns newest consent first", async () => {
     const input = { active: true, kicker: { et: "k" }, title: { et: "t" }, text: { et: "x" }, ctaLabel: { et: "Leia enda koolitus" }, ctaHref: "/koolitused", imageKey: "/seed/a.jpg" };
     await upsertCampaign(db, input);
     const second = await upsertCampaign(db, { ...input, title: { et: "t2" } });
     expect(second.id).toBe(1);
     expect(second.title.et).toBe("t2");
+    // the newsletter row switched on switches the campaign off first (at most one active), in its own fixed row
+    const nl = await upsertCampaign(db, { ...input, title: { et: "Uudiskiri" } }, "newsletter");
+    expect([nl.id, nl.kind, nl.active]).toEqual([2, "newsletter", true]);
+    expect((await db.select().from(campaign).where(eq(campaign.id, 1)))[0].active).toBe(false);
 
     await db.insert(subscribers).values([
       { email: "a@example.com", token: "1", consentAt: new Date("2026-10-01T10:00:00Z") },
