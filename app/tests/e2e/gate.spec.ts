@@ -80,7 +80,6 @@ test.describe("a visitor", () => {
     const addr = testEmail("gate-api", info.project.name);
     try {
       await page.getByLabel("Sinu e-post").fill(addr);
-      await page.getByRole("checkbox").check();
       await page.getByRole("button", { name: "Liitu" }).click();
       await expect(page.locator("[data-newsletter-status]")).toContainText("Kontrolli oma postkasti");
       expect((await storedSubscriber(addr))?.email).toBe(addr);
@@ -89,19 +88,33 @@ test.describe("a visitor", () => {
     }
   });
 
-  test("the page: logo, heading, one line, the sign-up; no horizontal overflow, 44px targets", async ({ page }) => {
+  test("the page: logo, heading, one line, the sign-up with its line (no privacy link here); no horizontal overflow, 44px targets", async ({ page }) => {
     await page.goto("/koolitused");
     await expect(page.getByRole("img", { name: "MS LAB" })).toBeVisible();
     await expect(page.getByText("Liitu uudiskirjaga — anname teada, kui avame.")).toBeVisible();
     await expect(page.getByLabel("Sinu e-post")).toBeVisible();
-    await expect(page.getByRole("checkbox")).toBeVisible();
     await expect(page.getByRole("button", { name: "Liitu" })).toBeVisible();
+    // no consent box: the line under the button says signing up is the consent; no privacy link (the gate does not serve that page)
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
+    const notice = page.locator("[data-newsletter-notice]");
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveText("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda.");
+    await expect(notice.getByRole("link")).toHaveCount(0);
+    await expect(page.locator("a[href*='privaatsus']")).toHaveCount(0);
     expect(await noHorizontalOverflow(page)).toBe(true);
-    for (const target of [page.getByLabel("Sinu e-post"), page.getByRole("button", { name: "Liitu" }), page.locator("label:has(input[type=checkbox])")])
+    for (const target of [page.getByLabel("Sinu e-post"), page.getByRole("button", { name: "Liitu" })])
       expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await notice.boundingBox())!.height).toBeLessThan(44); // the line keeps its own height: no 44px target
+    const button = (await page.getByRole("button", { name: "Liitu" }).boundingBox())!;
+    expect((await notice.boundingBox())!.y).toBeGreaterThanOrEqual(button.y + button.height); // directly under the button
     await page.screenshot({ path: test.info().outputPath("tulekul-et.png"), fullPage: true });
     await page.goto("/ru");
     expect(await noHorizontalOverflow(page)).toBe(true);
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
+    const noticeRu = page.locator("[data-newsletter-notice]");
+    await expect(noticeRu).toHaveText("Подписываясь, вы получаете рассылку MS LAB. Отписаться можно в любой момент.");
+    await expect(noticeRu.getByRole("link")).toHaveCount(0);
+    await expect(page.locator("a[href*='privaatsus']")).toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath("tulekul-ru.png"), fullPage: true });
   });
 
@@ -111,7 +124,6 @@ test.describe("a visitor", () => {
     try {
       await page.goto("/koolitused/kulmude-lami");
       await page.getByLabel("Sinu e-post").fill(addr);
-      await page.getByRole("checkbox").check();
       await page.getByRole("button", { name: "Liitu" }).click();
       const status = page.locator("[data-newsletter-status]");
       await expect(status).toContainText("Kontrolli oma postkasti");
@@ -140,7 +152,6 @@ test.describe("a visitor", () => {
     try {
       await page.goto("/ru/kontakt");
       await page.getByLabel("Ваш e-mail").fill(addr);
-      await page.getByRole("checkbox").check();
       await page.getByRole("button", { name: "Подписаться" }).click();
       await expect(page.locator("[data-newsletter-status]")).toContainText("Проверьте почту");
       expect((await storedSubscriber(addr))?.locale).toBe("ru");

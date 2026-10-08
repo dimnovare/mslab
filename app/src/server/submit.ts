@@ -442,7 +442,8 @@ function confirmationMail(siteUrl: string, sub: Pick<Subscriber, "email" | "toke
 /**
  * Newsletter sign-up. The answer is always the same "check your inbox", so the form never tells whether an address
  * is already subscribed. A new address is stored unconfirmed and gets the confirmation link; an unconfirmed one gets
- * the same link again (new consent time); a confirmed one gets nothing.
+ * the same link again (new consent time); a confirmed one gets nothing. The consent is the sign-up itself (there is no
+ * consent box): `consentAt` is the time of the submission.
  */
 export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionResult> {
   return submission(deps, "subscribe", formData, parseSubscribe, async ({ email, locale }) => {

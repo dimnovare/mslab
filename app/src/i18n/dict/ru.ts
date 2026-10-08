@@ -320,7 +320,7 @@ export const ru: Dict = {
     emailLabel: "Ваш e-mail",
     emailPlaceholder: "name@example.com",
     submit: "Подписаться",
-    consent: "Я хочу получать рассылку MS LAB. Можно отписаться в любой момент.",
+    notice: "Подписываясь, вы получаете рассылку MS LAB. Отписаться можно в любой момент.",
     confirmTitle: "Подтвердите e-mail",
     confirmText: "Мы отправили вам письмо с подтверждением. Перейдите по ссылке в письме, чтобы завершить подписку.",
     confirmedTitle: "Добро пожаловать в MS LAB!",
