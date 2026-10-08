@@ -113,8 +113,10 @@
   transform: none;
 }
 
-/* The rose focus ring is below 3:1 on the lilac surface: controls here get the ink ring. */
-.newsletter :focus-visible {
+/* The rose focus ring is below 3:1 on the lilac surface: controls here get the ink ring (the sign-up on its own too: the
+   coming-soon page puts it on lilac). */
+.newsletter :focus-visible,
+.signup :focus-visible {
   outline-color: var(--ink);
 }
 

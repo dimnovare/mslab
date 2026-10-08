@@ -47,10 +47,18 @@ export async function Shell({ email, active, children }: { email: string; active
       <main id="main" className={styles.main} tabIndex={-1}>
         <div className={styles.top}>
           <span>{t.top}</span>
-          <span className={styles.who} title={fill(t.signedInAs, { email })}>
-            {name && <span className={styles.whoName}>{name}</span>}
-            <span className={styles.avatar} aria-hidden="true">
-              {(name || email).charAt(0).toUpperCase()}
+          <span className={styles.end}>
+            {/* The site behind the coming-soon gate: the route gives this admin the preview cookie, then opens the home
+                page (a plain link: it is an API route). Opener only, as the sidebar's "Vaata lehte". */}
+            <a href="/api/admin/preview" target="_blank" rel="noopener" className={styles.preview} data-admin-preview="">
+              {t.preview} <span aria-hidden="true">↗</span>
+              <span className={styles.sr}> ({t.newWindow})</span>
+            </a>
+            <span className={styles.who} title={fill(t.signedInAs, { email })}>
+              {name && <span className={styles.whoName}>{name}</span>}
+              <span className={styles.avatar} aria-hidden="true">
+                {(name || email).charAt(0).toUpperCase()}
+              </span>
             </span>
           </span>
         </div>

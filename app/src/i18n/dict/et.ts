@@ -634,6 +634,16 @@ export const et = {
     text: "Seda lehte ei ole olemas või on see teisaldatud.",
     home: "Avalehele",
   },
+
+  // The coming-soon page (app/tulekul/[locale]): all a visitor sees until the launch (SITE_GATE, lib/site-gate.ts).
+  // Its <title> is common.siteName; the sign-up is the newsletter's own (newsletter, forms).
+  gate: {
+    title: "Uus koduleht on peagi valmis.",
+    lead: "Liitu uudiskirjaga — anname teada, kui avame.",
+    logo: "MS LAB",
+    // the notice after a confirmation link that does not work (the form is right below the heading here)
+    linkInvalid: "See kinnituslink ei kehti. Liitu uudiskirjaga uuesti.",
+  },
 };
 
 export type Dict = typeof et;

@@ -1,6 +1,8 @@
 // The server's configuration, read from process.env (Vercel project settings; `.env.local` under `next dev`; see
 // .env.example). This is the one place the server reads it, so a missing variable fails the same way everywhere.
 
+import { previewKey } from "@/lib/preview-cookie";
+
 /** The local development database (docker: postgres/postgres on this machine). Never a shared one. */
 export const LOCAL_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/mslab";
 
@@ -39,6 +41,10 @@ export type ServerEnv = {
   BUNNY_WEBHOOK_SECRET?: string;
   /** The e2e run's fake Bunny server (tests/e2e/fake-bunny.ts). Ignored on Vercel (server/bunny.ts). */
   BUNNY_FAKE_URL?: string;
+  /** The coming-soon gate (lib/site-gate.ts): "1" until the launch, and visitors see only the coming-soon page. The middleware reads it (gateEnv). */
+  SITE_GATE?: string;
+  /** The key of the admins' preview cookie (lib/preview-cookie.ts). Unset with the gate on: nobody gets past the gate. */
+  PREVIEW_SECRET?: string;
 };
 
 type Source = Record<string, string | undefined>;
@@ -91,6 +97,8 @@ const OPTIONAL = [
   "BUNNY_TOKEN_KEY",
   "BUNNY_WEBHOOK_SECRET",
   "BUNNY_FAKE_URL",
+  "SITE_GATE",
+  "PREVIEW_SECRET",
 ] as const;
 
 /**
@@ -116,4 +124,13 @@ export function serverEnv(source: Source = process.env, production: boolean = pr
   if (!isPostgresUrl(env.DATABASE_URL!)) throw new Error(BAD_DATABASE_URL); // no cause: the URL error carries the input
   for (const name of OPTIONAL) env[name] = read(name);
   return env as ServerEnv;
+}
+
+/**
+ * The coming-soon gate's two settings, for the middleware (lib/site-gate.ts). Not serverEnv(): that would also insist on
+ * the six required ones, which the gate does not need. Blank counts as not set, as above; so does a PREVIEW_SECRET
+ * shorter than 32 characters (lib/preview-cookie.ts previewKey): with the gate on, nobody passes then.
+ */
+export function gateEnv(source: Source = process.env): Pick<ServerEnv, "SITE_GATE" | "PREVIEW_SECRET"> {
+  return { SITE_GATE: source.SITE_GATE?.trim() || undefined, PREVIEW_SECRET: previewKey(source.PREVIEW_SECRET) };
 }

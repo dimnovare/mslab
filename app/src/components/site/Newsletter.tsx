@@ -6,11 +6,8 @@ import { subscribe } from "@/server/actions/public";
 import { Icon } from "./Icon";
 import styles from "./Newsletter.module.css";
 
-export type NewsletterTexts = {
-  eyebrow: string;
-  titleFirst: string;
-  titleSecond: string;
-  body: string;
+/** The texts of the sign-up itself (NewsletterForm): the field, the consent, the button, the answers. */
+export type NewsletterFormTexts = {
   emailLabel: string;
   emailPlaceholder: string;
   submit: string;
@@ -23,17 +20,48 @@ export type NewsletterTexts = {
   errorGeneric: string;
 };
 
+export type NewsletterTexts = NewsletterFormTexts & {
+  eyebrow: string;
+  titleFirst: string;
+  titleSecond: string;
+  body: string;
+};
+
 type Field = "email" | "consent" | "form";
 type State = { status: "idle" } | { status: "sent" } | { status: "error"; field: Field; message: string };
 
 /**
- * B newsletter block ("MS LABi kirjad"), lilac surface, placed inside the footer (H13). Double opt-in: the action
- * stores the address and sends a confirmation link; the answer is always "check your inbox".
+ * B newsletter block ("MS LABi kirjad"), lilac surface, placed inside the footer (H13): the heading and the sign-up
+ * (NewsletterForm).
+ */
+export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }) {
+  const id = useId();
+  return (
+    <section className={styles.newsletter} aria-labelledby={`${id}-title`} data-footer-newsletter="">
+      <div>
+        <p className={styles.eyebrow}>{t.eyebrow}</p>
+        <h2 id={`${id}-title`} className={styles.title}>
+          {t.titleFirst}
+          <br />
+          {t.titleSecond}
+        </h2>
+        <p className={styles.text}>{t.body}</p>
+      </div>
+      <NewsletterForm locale={locale} t={t} />
+    </section>
+  );
+}
+
+/**
+ * The newsletter sign-up: e-mail, consent, "Liitu", and the answer in its place. Double opt-in: the action stores the
+ * address and sends a confirmation link; the answer is always "check your inbox". Used by the footer's block (Newsletter)
+ * and the coming-soon page (app/tulekul/[locale]); on a lilac surface (its colours and focus ring are made for it).
  * Submitted by hand (onSubmit + startTransition), as the other forms: React resets a form after `<form action>`, which
  * would un-tick the controlled consent box after a failed attempt. The status region is always in the page (polite),
  * so the confirmation is announced; focus moves to it because the form it replaces had focus.
+ * `className`: the box's own size and place (default: the footer block's column).
  */
-export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }) {
+export function NewsletterForm({ locale, t, className = styles.form }: { locale: Locale; t: NewsletterFormTexts; className?: string }) {
   const id = useId();
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
@@ -60,89 +88,78 @@ export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }
   const describe = (f: Field) => (error?.field === f ? { "aria-invalid": true, "aria-describedby": `${id}-error` } : {});
 
   return (
-    <section className={styles.newsletter} aria-labelledby={`${id}-title`} data-footer-newsletter="">
-      <div>
-        <p className={styles.eyebrow}>{t.eyebrow}</p>
-        <h2 id={`${id}-title`} className={styles.title}>
-          {t.titleFirst}
-          <br />
-          {t.titleSecond}
-        </h2>
-        <p className={styles.text}>{t.body}</p>
-      </div>
-      <div className={styles.form}>
-        <div ref={statusRef} className={styles.status} role="status" tabIndex={-1} data-newsletter-status="">
-          {state.status === "sent" && (
-            <>
-              <h3 className={styles.sentTitle}>{t.sentTitle}</h3>
-              <p className={styles.text}>{t.sentText}</p>
-            </>
-          )}
-        </div>
-        {state.status !== "sent" && (
-          <form
-            method="post"
-            noValidate
-            data-newsletter-form=""
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (pending) return;
-              const formData = new FormData(e.currentTarget);
-              startTransition(() => formAction(formData));
-            }}
-          >
-            <label className={styles.label} htmlFor={`${id}-email`}>
-              {t.emailLabel}
-            </label>
-            <div className={styles.row}>
-              <input
-                id={`${id}-email`}
-                className={styles.input}
-                name="email"
-                type="email"
-                required
-                autoComplete="email"
-                maxLength={200}
-                placeholder={t.emailPlaceholder}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                {...describe("email")}
-              />
-              {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
-              {/* data-fab-avoid: the review build's comment button moves up instead of covering it (N4) */}
-              <button className={styles.submit} type="submit" aria-disabled={pending || undefined} data-fab-avoid="">
-                {t.submit}
-                <Icon name="arrow" />
-              </button>
-            </div>
-            <label className={styles.check}>
-              <input
-                id={`${id}-consent`}
-                type="checkbox"
-                name="consent"
-                required
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                {...describe("consent")}
-              />
-              <span>{t.consent}</span>
-            </label>
-            <input type="hidden" name="locale" value={locale} />
-            {/* Honeypot: people never see or fill it. */}
-            <div className={styles.honeypot} aria-hidden="true">
-              <label>
-                Website
-                <input name="website" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
-              </label>
-            </div>
-            {error && (
-              <p id={error.field === "form" ? `${id}-form` : `${id}-error`} className={styles.error} role="alert" tabIndex={error.field === "form" ? -1 : undefined}>
-                {error.message}
-              </p>
-            )}
-          </form>
+    <div className={`${styles.signup} ${className}`}>
+      <div ref={statusRef} className={styles.status} role="status" tabIndex={-1} data-newsletter-status="">
+        {state.status === "sent" && (
+          <>
+            <h3 className={styles.sentTitle}>{t.sentTitle}</h3>
+            <p className={styles.text}>{t.sentText}</p>
+          </>
         )}
       </div>
-    </section>
+      {state.status !== "sent" && (
+        <form
+          method="post"
+          noValidate
+          data-newsletter-form=""
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (pending) return;
+            const formData = new FormData(e.currentTarget);
+            startTransition(() => formAction(formData));
+          }}
+        >
+          <label className={styles.label} htmlFor={`${id}-email`}>
+            {t.emailLabel}
+          </label>
+          <div className={styles.row}>
+            <input
+              id={`${id}-email`}
+              className={styles.input}
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              maxLength={200}
+              placeholder={t.emailPlaceholder}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              {...describe("email")}
+            />
+            {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
+            {/* data-fab-avoid: the review build's comment button moves up instead of covering it (N4) */}
+            <button className={styles.submit} type="submit" aria-disabled={pending || undefined} data-fab-avoid="">
+              {t.submit}
+              <Icon name="arrow" />
+            </button>
+          </div>
+          <label className={styles.check}>
+            <input
+              id={`${id}-consent`}
+              type="checkbox"
+              name="consent"
+              required
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              {...describe("consent")}
+            />
+            <span>{t.consent}</span>
+          </label>
+          <input type="hidden" name="locale" value={locale} />
+          {/* Honeypot: people never see or fill it. */}
+          <div className={styles.honeypot} aria-hidden="true">
+            <label>
+              Website
+              <input name="website" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
+            </label>
+          </div>
+          {error && (
+            <p id={error.field === "form" ? `${id}-form` : `${id}-error`} className={styles.error} role="alert" tabIndex={error.field === "form" ? -1 : undefined}>
+              {error.message}
+            </p>
+          )}
+        </form>
+      )}
+    </div>
   );
 }
