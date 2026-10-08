@@ -346,7 +346,7 @@ describe("campaign (D adminCamp + image upload, M3–M5)", () => {
       "campaign.code": "codeFormat",
     });
     expect(await saveCampaignForm(db, form({ campaign: { version: c.versions.campaign, value: { ...base, active: false, imageKey: "", title: { et: "" } } } }))).toMatchObject({ ok: true });
-    expect((await getHomeData(db)).campaign).toBeNull();
+    expect((await getHomeData(db)).popup).toBeNull();
   });
 });
 

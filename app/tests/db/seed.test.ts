@@ -136,7 +136,7 @@ describe("prototype seed", () => {
     expect(home.slides[4].imageKey).toBe("/seed/brow-editorial.jpg");
     expect(home.faq).toHaveLength(6);
     expect(home.posts).toHaveLength(6);
-    expect(home.campaign?.ctaLabel.et).toBe("Leia enda koolitus");
+    expect(home.popup).toMatchObject({ kind: "campaign", ctaLabel: { et: "Leia enda koolitus" } });
     expect(Object.keys(home.pages).sort()).toEqual(["center_story", "privacy", "statement", "terms", "trainer_bio", "trainer_journey", "trainer_teaser"]);
     expect(home.settings).toHaveProperty("contact");
     expect(home.settings).toHaveProperty("newsletter", { discountLabel: "10%", welcomeCode: "" });

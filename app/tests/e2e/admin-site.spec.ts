@@ -3,7 +3,7 @@ import type { BrowserContext, Page, Route, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
 import { LOCAL_ADMINS } from "../local-secrets";
 import { adminReady, signInAsAdmin } from "./admin-login";
-import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows } from "./fixtures";
+import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows, storedSubscriber, testEmail } from "./fixtures";
 
 // Task 13B: the site content editors (home page, practice, trainer, news, campaign, settings), each followed through to
 // the public site. They change shared seed content, so they run after every other test (playwright.config.ts: the
@@ -410,6 +410,69 @@ test.describe("campaign (M2–M5)", () => {
     await onLocalDb((sql) => sql`update campaign set active = true where id = 1`);
     await page.goto("/");
     await expect(page.getByRole("dialog", { name: "−15% Lash Lift BOTOX koolitusele" })).toBeVisible();
+  });
+});
+
+test.describe("the newsletter popup (phase 2c)", () => {
+  test.use({ campaignPopup: 300 });
+
+  /** The newsletter popup shown instead of the campaign (at most one active: the campaign first goes off). */
+  const showNewsletter = () =>
+    onLocalDb(async (sql) => {
+      await sql`update campaign set active = false where id = 1`;
+      await sql`update campaign set active = true where id = 2`;
+    });
+
+  test("it opens on the home page with its texts and the form; a sign-up says so inside and is never shown again in this browser", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/");
+    const popup = page.getByRole("dialog", { name: "Hea järgmine samm. Otse sinu postkasti." });
+    await expect(popup).toBeVisible();
+    await expect(popup.locator("[data-newsletter-card] img")).toHaveAttribute("src", "/seed/gift-bag-serum.jpg");
+    await expect(popup.getByText("MS LABi kirjad")).toBeVisible();
+    await expect(popup.locator("[data-campaign-code]")).toHaveCount(0); // no code in the popup: it comes after the confirmation
+    // no consent box (owner decision 08.10): the line under the button says signing up is the consent, with the privacy link
+    await expect(popup.getByRole("checkbox")).toHaveCount(0);
+    const notice = popup.locator("[data-newsletter-notice]");
+    await expect(notice).toHaveText("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda. Privaatsus");
+    await expect(notice.getByRole("link", { name: "Privaatsus" })).toHaveAttribute("href", "/privaatsus");
+    const addr = testEmail("nl-popup", info.project.name);
+    await popup.getByLabel("Sinu e-post").fill(addr);
+    await popup.getByRole("button", { name: "Liitu" }).click();
+    await expect(popup.locator("[data-newsletter-status]")).toHaveText("Saatsime sulle kinnituslingi. Ava see oma postkastis.");
+    expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBe("1");
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => sessionStorage.removeItem("mslab-camp")); // a new browser session …
+    await page.reload();
+    await page.waitForTimeout(1200);
+    await expect(page.getByRole("dialog")).toHaveCount(0); // … still none: signed up here
+  });
+
+  test("Russian, at a phone's width: the sheet with the form fits (no overflow, 44 px targets); the campaign is not shown meanwhile; switched off, none", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it (and sets the phone's width here)");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/ru");
+    const popup = page.getByRole("dialog", { name: "Ваш следующий шаг. В вашем почтовом ящике." });
+    await expect(popup).toBeVisible();
+    const submit = popup.getByRole("button", { name: "Подписаться" });
+    await expect(submit).toBeVisible();
+    expect((await submit.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const link = popup.locator("[data-newsletter-notice]").getByRole("link", { name: "Конфиденциальность" });
+    await expect(link).toHaveAttribute("href", "/ru/privaatsus");
+    expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    expect(await popup.locator("[data-newsletter-panel]").evaluate((p) => p.scrollWidth <= p.clientWidth)).toBe(true);
+    await expect(page.getByRole("dialog", { name: "−15% на курс Lash Lift BOTOX" })).toHaveCount(0);
+    await onLocalDb((sql) => sql`update campaign set active = false`);
+    await page.evaluate(() => sessionStorage.removeItem("mslab-camp"));
+    await page.goto("/");
+    await page.waitForTimeout(1200);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
 

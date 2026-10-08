@@ -1,7 +1,8 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
-import { courseModules, courses, courseSessions, registrations, requests, subscribers } from "@/db/schema";
+import { campaign, courseModules, courses, courseSessions, registrations, requests, subscribers } from "@/db/schema";
 import {
   getCourseBySlug,
   getGallery,
@@ -149,10 +150,15 @@ describe("public queries", () => {
     expect(home.practice.map((p) => p.code)).toEqual(["MINI"]);
     expect(Object.keys(home.pages)).toEqual(["statement"]);
     expect(home.settings).toEqual({ newsletter: { discountLabel: "10%" } });
-    expect(home.campaign).toBeNull();
+    expect(home.popup).toBeNull();
 
     await upsertCampaign(db, { active: true, kicker: { et: "k" }, title: { et: "t" }, text: { et: "x" }, ctaLabel: { et: "Leia enda koolitus" }, ctaHref: "/koolitused", imageKey: "/seed/a.jpg" });
-    expect((await getHomeData(db)).campaign?.ctaLabel.et).toBe("Leia enda koolitus");
+    expect((await getHomeData(db)).popup).toMatchObject({ kind: "campaign", ctaLabel: { et: "Leia enda koolitus" } });
+
+    // the newsletter row shown instead (at most one active): the home page gets that one
+    await db.update(campaign).set({ active: false }).where(eq(campaign.id, 1));
+    await db.update(campaign).set({ active: true }).where(eq(campaign.id, 2));
+    expect((await getHomeData(db)).popup).toMatchObject({ id: 2, kind: "newsletter" });
   });
 });
 

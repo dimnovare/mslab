@@ -98,6 +98,11 @@
   margin-top: 22px;
 }
 
+/* the newsletter popup's form in place of the code and the button (NewsletterPopupCard, phase 2c) */
+.signup {
+  margin-top: 18px;
+}
+
 @container (min-width: 640px) {
   .camp {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);

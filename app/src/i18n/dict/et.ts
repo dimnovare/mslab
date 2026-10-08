@@ -350,6 +350,8 @@ export const et = {
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
     sentTitle: "Kontrolli oma postkasti",
+    // the newsletter popup's answer after a sign-up (components/site/NewsletterPopup.tsx, phase 2c)
+    popupSent: "Saatsime sulle kinnituslingi. Ava see oma postkastis.",
     // Home page notice after the confirmation link (/?uudiskiri=kinnitatud or =vigane).
     linkInvalid: "See kinnituslink ei kehti. Liitu uudiskirjaga uuesti lehe allosas.",
   },

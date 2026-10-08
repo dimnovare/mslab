@@ -47,11 +47,12 @@ export function campaignCtaLabel(label: I18n | null | undefined, locale: Locale,
 }
 
 /**
- * The popup's card for the home page, or null when there is no popup: no row, a switched-off campaign, or one without a
- * title (the dialog is named by its title; the admin requires one for an active campaign).
+ * The popup's card for the home page, or null when there is no popup: no row, a switched-off campaign, a row of another kind (the
+ * newsletter popup: newsletterPopupView), or one without a title (the dialog is named by its title; the admin requires one for an
+ * active campaign).
  */
 export function campaignView(c: Campaign | null | undefined, locale: Locale, ctaFallback: string): CampaignView | null {
-  if (!c?.active) return null;
+  if (!c?.active || c.kind !== "campaign") return null;
   const title = pick(c.title, locale).trim();
   if (!title) return null;
   return {
@@ -63,4 +64,21 @@ export function campaignView(c: Campaign | null | undefined, locale: Locale, cta
     ctaLabel: campaignCtaLabel(c.ctaLabel, locale, ctaFallback),
     ctaHref: c.ctaHref,
   };
+}
+
+/** What the newsletter popup's card shows (components/site/NewsletterPopupCard), in the page's language (phase 2c). */
+export type NewsletterPopupView = { image: string; kicker: string; title: string; text: string };
+
+/** localStorage key, set after a sign-up from the newsletter popup: this browser never sees that popup again (spec 5). */
+export const NEWSLETTER_SIGNED_KEY = "mslab-nl";
+
+/**
+ * The newsletter popup's card for the home page (phase 2c), or null: no row, a switched-off one, another kind (the campaign: campaignView)
+ * or one without a title (the dialog is named by its title). The welcome code is never in it: it comes after the confirmation.
+ */
+export function newsletterPopupView(c: Campaign | null | undefined, locale: Locale): NewsletterPopupView | null {
+  if (!c?.active || c.kind !== "newsletter") return null;
+  const title = pick(c.title, locale).trim();
+  if (!title) return null;
+  return { image: mediaUrl(c.imageKey), kicker: pick(c.kicker, locale), title, text: pick(c.text, locale) };
 }
