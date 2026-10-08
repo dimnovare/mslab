@@ -92,3 +92,30 @@ test("below 900 px the newsletter card comes first, then the links; no page over
     }
   }
 });
+
+test("the news cards' focus ring is not cut off by the scrolling row, at the first and the last card", async ({ page, isMobile }) => {
+  test.skip(isMobile, "the widths are set here");
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    const track = page.locator("[data-news-band]").getByRole("group", { name: "Postituste karussell" });
+    const cards = track.getByRole("link");
+    for (const [name, card] of [["first", cards.first()], ["last", cards.last()]] as const) {
+      await card.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab"); // a keyboard focus: the :focus-visible ring (2 px line, 2 px offset) is drawn
+      await expect(card).toBeFocused();
+      await page.waitForTimeout(150);
+      const ring = 4 - 1; // 4 px outside the card, less 1 px for sub-pixel layout (the row's width and its scroll end are fractional)
+      const [c, t] = [(await card.boundingBox())!, (await track.boundingBox())!];
+      // the row clips what lies outside its box: the card's ring must lie inside it (the row's own box, which has no border)
+      expect(c.x - ring, `${name} card, ring left @ ${width}`).toBeGreaterThanOrEqual(t.x);
+      expect(c.x + c.width + ring, `${name} card, ring right @ ${width}`).toBeLessThanOrEqual(t.x + t.width);
+      expect(c.y - ring, `${name} card, ring top @ ${width}`).toBeGreaterThanOrEqual(t.y);
+      expect(c.y + c.height + ring, `${name} card, ring bottom @ ${width}`).toBeLessThanOrEqual(t.y + t.height);
+    }
+    expect(await noOverflow(page), `no overflow @ ${width}`).toBe(true);
+  }
+});

@@ -35,9 +35,15 @@
   grid-auto-columns: min(80%, 340px);
   grid-auto-flow: column;
   gap: 18px;
-  padding: 4px 0 8px;
+
+  /* The row clips what lies outside it (overflow), and the focus ring (2 px line, 2 px offset, globals.css) is drawn 4 px
+     outside a card: the row has 4 px of room on every side (its box is 4 px wider than the wrap at each side, so the cards
+     still start and end on the wrap's edge) */
+  margin-inline: -4px;
+  padding: 4px 4px 8px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  scroll-padding-inline: 4px;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
 }
