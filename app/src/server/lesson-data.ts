@@ -117,13 +117,20 @@ async function videoOf(row: LessonRow, bunny: BunnyConfig | null, now: Date): Pr
   };
 }
 
-/** Opening a video lesson whose video plays starts its progress clock (domain/lessons.ts openedClock); the row is made when there is none, its seconds stay. */
+/**
+ * Opening a video lesson whose video plays starts its progress clock (domain/lessons.ts openedClock); the row is made when there is
+ * none, its seconds stay. The clock only ever moves forward in SQL (`greatest`, as the seconds do): a report kept since this page read
+ * the row may have moved it on, and the older value written here must not take it back.
+ */
 async function startClock(db: Db, clientId: number, row: LessonRow, now: Date): Promise<void> {
   const clockAt = openedClock(row.clockAt, now);
   await db
     .insert(lessonProgress)
     .values({ clientId, lessonId: row.id, clockAt, updatedAt: now })
-    .onConflictDoUpdate({ target: [lessonProgress.clientId, lessonProgress.lessonId], set: { clockAt, updatedAt: now } });
+    .onConflictDoUpdate({
+      target: [lessonProgress.clientId, lessonProgress.lessonId],
+      set: { clockAt: sql`greatest(${lessonProgress.clockAt}, excluded.clock_at)`, updatedAt: now },
+    });
 }
 
 /** GET a lesson (spec 6): the only endpoint with the terms check. */
@@ -156,8 +163,8 @@ export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: nu
  * POST progress: the reported second clamped by the progress clock (domain/lessons.ts acceptProgress: at most twice the time since the
  * lesson was opened plus 30 s, a report past it is kept at that), kept at its highest (one upsert), done once what is kept reaches 90 %
  * of the length. A video lesson with a playable video only ("watch"): a text lesson, and a video lesson still waiting for its video,
- * are "video" (409). Two reports at the same moment read the same row; the later write wins the clock, which can let one race through
- * at most one more allowance: accepted.
+ * are "video" (409). Two reports at the same moment read the same row: the clock, like the seconds, only ever moves forward in SQL
+ * (`greatest`), so the one that writes last cannot take it back, and together they keep what the larger of the two raises allows.
  */
 export async function saveProgress(db: Db, clientId: number, slug: string, lessonId: number, watchedSec: number, now: Date): Promise<ProgressResult> {
   const opened = await openLesson(db, clientId, slug, lessonId, now);
@@ -173,7 +180,7 @@ export async function saveProgress(db: Db, clientId: number, slug: string, lesso
       target: [lessonProgress.clientId, lessonProgress.lessonId],
       set: {
         watchedSec: sql`greatest(${lessonProgress.watchedSec}, excluded.watched_sec)`,
-        clockAt: kept.clockAt,
+        clockAt: sql`greatest(${lessonProgress.clockAt}, excluded.clock_at)`,
         doneAt: sql`coalesce(${lessonProgress.doneAt}, excluded.done_at)`,
         updatedAt: now,
       },
