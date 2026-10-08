@@ -157,12 +157,55 @@ describe("GET /api/admin/preview ('Vaata kodulehte')", () => {
     expect(res.headers.getSetCookie()).toEqual([]);
   });
 
-  test("with the gate on and no PREVIEW_SECRET it is noted (no value in the note)", async () => {
+  test("a PREVIEW_SECRET shorter than 32 characters counts as unset: no cookie at sign-in or here", async () => {
+    for (const secret of ["1", "s".repeat(31)]) {
+      vi.stubEnv("PREVIEW_SECRET", secret);
+      state.cookie = await createSession(db, "admin@example.test");
+      const res = await call();
+      expect(res.status, secret).toBe(303);
+      expect(res.headers.getSetCookie(), secret).toEqual([]);
+      const token = await createLoginToken(db, "admin@example.test");
+      expect(Object.keys(setCookies(await verify(new Request(`${ORIGIN}/api/auth/verify?t=${token}`)))), secret).toEqual([SESSION_COOKIE]);
+    }
+    vi.stubEnv("PREVIEW_SECRET", "s".repeat(32));
+    expect(Object.keys(setCookies(await call()))).toEqual([PREVIEW_COOKIE]);
+  });
+
+  test("no usable PREVIEW_SECRET is noted once per instance (gate on, or a secret too short), never its value", async () => {
+    vi.resetModules(); // the note's "once" is module state: a fresh copy of the route and server/preview.ts
+    const { GET: fresh } = await import("@/app/api/admin/preview/route");
+    const short = "short-secret-0123456789";
+    vi.stubEnv("PREVIEW_SECRET", short);
+    state.cookie = await createSession(db, "admin@example.test");
+    for (let i = 0; i < 3; i++) await fresh(new Request(`${ORIGIN}/api/admin/preview`), {});
     vi.stubEnv("SITE_GATE", "1");
     vi.stubEnv("PREVIEW_SECRET", "");
+    await fresh(new Request(`${ORIGIN}/api/admin/preview`), {});
+    const notes = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(vi.mocked(console.error)).toHaveBeenCalledTimes(1);
+    expect(notes).toContain("PREVIEW_SECRET");
+    expect(notes).toContain("32 characters");
+    expect(notes).not.toContain(short);
+  });
+
+  test("gate off and no PREVIEW_SECRET at all (local development): nothing is noted", async () => {
+    vi.resetModules();
+    const { GET: fresh } = await import("@/app/api/admin/preview/route");
+    vi.stubEnv("PREVIEW_SECRET", "");
     state.cookie = await createSession(db, "admin@example.test");
-    await call();
-    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain("PREVIEW_SECRET");
+    await fresh(new Request(`${ORIGIN}/api/admin/preview`), {});
+    expect(vi.mocked(console.error)).not.toHaveBeenCalled();
+  });
+
+  test("a failing configuration (serverEnv throws) is logged and the answer goes on: setPreviewCookie never throws", async () => {
+    vi.stubEnv("NODE_ENV", "production"); // serverEnv() then insists on the six required settings, which are not set here
+    for (const name of ["DATABASE_URL", "SITE_URL", "ADMIN_NAMES", "MARIA_EMAIL", "MAIL_FROM"]) vi.stubEnv(name, "");
+    const { setPreviewCookie } = await import("@/server/preview");
+    const { NextResponse } = await import("next/server");
+    const res = NextResponse.redirect(`${ORIGIN}/`, 303);
+    await expect(setPreviewCookie(res)).resolves.toBeUndefined();
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain("[gate]");
   });
 });
 

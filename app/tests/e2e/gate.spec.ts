@@ -67,6 +67,28 @@ test.describe("a visitor", () => {
     await expect(page.locator("[data-coming-soon]")).toHaveCount(0);
   });
 
+  test("a mailed account link (/api/konto/verify?…) opened in the browser is the coming-soon page, and its sign-up works there; a script still gets 404 JSON", async ({ page }, info) => {
+    submitsForms();
+    const res = await page.goto("/api/konto/verify?t=not-a-real-token-0000000000");
+    expect(res?.status()).toBe(200);
+    await expectComingSoon(page);
+    expect(new URL(page.url()).pathname).toBe("/api/konto/verify");
+    await page.locator("html[data-site-ready]").waitFor({ state: "attached" }); // tests/e2e/test.ts waits on site pages only, not /api
+    // the page's own fetch to a gated API: the JSON answer
+    expect(await page.evaluate(async () => (await fetch("/api/konto/me")).status)).toBe(404);
+    // the newsletter's server action posts to this same address, and the coming-soon page answers it
+    const addr = testEmail("gate-api", info.project.name);
+    try {
+      await page.getByLabel("Sinu e-post").fill(addr);
+      await page.getByRole("checkbox").check();
+      await page.getByRole("button", { name: "Liitu" }).click();
+      await expect(page.locator("[data-newsletter-status]")).toContainText("Kontrolli oma postkasti");
+      expect((await storedSubscriber(addr))?.email).toBe(addr);
+    } finally {
+      await onLocalDb((sql) => sql`delete from subscribers where email = ${addr}`, { marksPages: false });
+    }
+  });
+
   test("the page: logo, heading, one line, the sign-up; no horizontal overflow, 44px targets", async ({ page }) => {
     await page.goto("/koolitused");
     await expect(page.getByRole("img", { name: "MS LAB" })).toBeVisible();
@@ -195,6 +217,16 @@ test.describe("an admin", () => {
       await expect(site.locator("[data-coming-soon]")).toHaveCount(0);
       await expect(site.locator("header")).toBeVisible();
       await site.close();
+
+      // the sidebar's "Vaata lehte ↗" goes the same way
+      await context.clearCookies({ name: PREVIEW_COOKIE });
+      const sidebar = page.locator("aside").getByRole("link", { name: /Vaata lehte/ });
+      await expect(sidebar).toHaveAttribute("href", "/api/admin/preview");
+      const [again] = await Promise.all([context.waitForEvent("page"), sidebar.click()]);
+      await again.waitForLoadState();
+      expect(new URL(again.url()).pathname).toBe("/");
+      await expect(again.locator("[data-coming-soon]")).toHaveCount(0);
+      await again.close();
 
       // logout clears the pass with the session
       await page.locator("aside").getByRole("button", { name: "Logi välja" }).click();

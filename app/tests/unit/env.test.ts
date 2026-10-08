@@ -141,13 +141,19 @@ describe("serverEnv() with no arguments", () => {
 
 describe("gateEnv (the middleware: the coming-soon gate's two settings only)", () => {
   test("reads SITE_GATE and PREVIEW_SECRET trimmed, blank as not set, and needs none of the required ones, even in production", () => {
+    const key = "k".repeat(32);
     expect(gateEnv({})).toEqual({ SITE_GATE: undefined, PREVIEW_SECRET: undefined });
-    expect(gateEnv({ SITE_GATE: " 1 ", PREVIEW_SECRET: " k \n" })).toEqual({ SITE_GATE: "1", PREVIEW_SECRET: "k" });
+    expect(gateEnv({ SITE_GATE: " 1 ", PREVIEW_SECRET: ` ${key} \n` })).toEqual({ SITE_GATE: "1", PREVIEW_SECRET: key });
     expect(gateEnv({ SITE_GATE: "  ", PREVIEW_SECRET: "" })).toEqual({ SITE_GATE: undefined, PREVIEW_SECRET: undefined });
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("SITE_GATE", "1");
-    vi.stubEnv("PREVIEW_SECRET", "k");
-    expect(gateEnv()).toEqual({ SITE_GATE: "1", PREVIEW_SECRET: "k" });
+    vi.stubEnv("PREVIEW_SECRET", key);
+    expect(gateEnv()).toEqual({ SITE_GATE: "1", PREVIEW_SECRET: key });
+  });
+
+  test("a PREVIEW_SECRET shorter than 32 characters counts as unset (the gate then fails closed)", () => {
+    for (const secret of ["1", "k", "k".repeat(31), ` ${"k".repeat(31)} `]) expect(gateEnv({ SITE_GATE: "1", PREVIEW_SECRET: secret }).PREVIEW_SECRET, secret).toBeUndefined();
+    expect(gateEnv({ SITE_GATE: "1", PREVIEW_SECRET: "k".repeat(32) }).PREVIEW_SECRET).toBe("k".repeat(32));
   });
 });
 

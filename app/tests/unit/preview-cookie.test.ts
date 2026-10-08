@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { PREVIEW_COOKIE, PREVIEW_TTL_S, signPreview, verifyPreview } from "@/lib/preview-cookie";
+import { PREVIEW_COOKIE, PREVIEW_SECRET_MIN, PREVIEW_TTL_S, previewKey, signPreview, verifyPreview } from "@/lib/preview-cookie";
 
 // The admins' pass through the coming-soon gate (lib/site-gate.ts): `<exp>.<sig>`, exp in unix seconds, sig the base64url
 // HMAC-SHA256 of "preview:<exp>" under PREVIEW_SECRET. Checked in the middleware with Web Crypto, without the database.
@@ -34,6 +34,24 @@ describe("the preview cookie", () => {
     await expect(signPreview("   ", NOW)).rejects.toThrow(/PREVIEW_SECRET/);
   });
 
+  test("a secret shorter than 32 characters counts as unset: previewKey, signPreview and verifyPreview all refuse it", async () => {
+    expect(PREVIEW_SECRET_MIN).toBe(32);
+    const short = "s".repeat(31);
+    const just = "s".repeat(32);
+    for (const secret of [undefined, "", "   ", "1", short, ` ${short} `, `${short}
+`]) expect(previewKey(secret), JSON.stringify(secret)).toBeUndefined();
+    expect(previewKey(just)).toBe(just);
+    expect(previewKey(` ${just}
+`)).toBe(just); // read trimmed, as every setting
+    await expect(signPreview(short, NOW)).rejects.toThrow(/PREVIEW_SECRET/);
+    await expect(signPreview("1", NOW)).rejects.toThrow(/PREVIEW_SECRET/);
+    // a value signed with the short key by someone else is no pass under it either
+    const exp = String(NOW / 1000 + 3600);
+    for (const secret of [short, "1"]) expect(await verifyPreview(`${exp}.${await hmac(secret, `preview:${exp}`)}`, secret, NOW), secret).toBe(false);
+    // 32 characters are enough
+    expect(await verifyPreview(await signPreview(just, NOW), just, NOW)).toBe(true);
+  });
+
   test("a value it signed is valid until it expires, and not a second later", async () => {
     const value = await signPreview(SECRET, NOW);
     expect(await verifyPreview(value, SECRET, NOW)).toBe(true);
@@ -61,7 +79,7 @@ describe("the preview cookie", () => {
   });
 
   test("a value signed with another secret is refused", async () => {
-    const value = await signPreview("another-secret-0123456789abcdef", NOW);
+    const value = await signPreview("another-secret-0123456789abcdef-x", NOW);
     expect(await verifyPreview(value, SECRET, NOW)).toBe(false);
   });
 

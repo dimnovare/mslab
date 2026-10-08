@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { signPreview } from "@/lib/preview-cookie";
 import { alwaysThrough, GATE_PAGES, gateDecision, gateOn, type GateEnv } from "@/lib/site-gate";
+import { ROOT_FILES, ROOT_FOLDERS } from "@/lib/root-files";
 import { routeSitePath } from "@/lib/site-routing";
 
 // The coming-soon gate (hotfix 08.10): with SITE_GATE on, a visitor without the admins' preview cookie is answered with the
@@ -159,10 +160,47 @@ describe("gateDecision", () => {
       expect(await decide(path), path).toMatchObject({ kind: "gate", page: "/tulekul/et" });
   });
 
-  test("a gated API address says so (answered without the page), a gated page does not", async () => {
+  test("a gated API address called by a script is answered as JSON (no page); a gated page is the page", async () => {
     for (const path of ["/api", "/api/", "/api/konto", "/api/konto/verify", "/api/feedback", "/api/feedback/1", "/api/admins", "/api/bunny/other"])
-      expect(await decide(path), path).toMatchObject({ kind: "gate", api: true });
-    for (const path of ["/", "/konto", "/api-docs", "/apix", "/guide/", "/ru/api/x"]) expect(await decide(path), path).toMatchObject({ kind: "gate", api: false });
+      expect(await decide(path), path).toMatchObject({ kind: "gate", json: true });
+    for (const path of ["/", "/konto", "/api-docs", "/apix", "/guide/", "/ru/api/x"]) expect(await decide(path), path).toMatchObject({ kind: "gate", json: false });
+  });
+
+  // A student's mailed login link (/api/konto/verify?…) opened in the browser must show the coming-soon page, not raw JSON.
+  const asked = (path: string, method: string, headers: { fetchMode?: string | null; accept?: string | null }) => gateDecision({ path, method, cookie: undefined, ...headers }, ON, NOW);
+  const BROWSER_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8";
+
+  test("a gated API address opened as a page (GET or HEAD, a navigation or an Accept that prefers HTML) is the coming-soon page", async () => {
+    for (const method of ["GET", "HEAD", "get"]) {
+      expect(await asked("/api/konto/verify", method, { fetchMode: "navigate", accept: BROWSER_ACCEPT }), method).toEqual({ kind: "gate", page: "/tulekul/et", json: false });
+      expect(await asked("/api/konto/verify", method, { fetchMode: "navigate" }), method).toMatchObject({ json: false });
+      expect(await asked("/api/feedback", method, { accept: BROWSER_ACCEPT }), method).toMatchObject({ json: false }); // no Sec-Fetch-Mode (an older browser)
+      expect(await asked("/api/konto/x", method, { accept: "text/html" }), method).toMatchObject({ json: false });
+      expect(await asked("/api/konto/x", method, { accept: "application/json;q=0.5, text/html" }), method).toMatchObject({ json: false });
+    }
+  });
+
+  test("a script's call (fetch, XHR: cors, same-origin, no-cors) or an Accept that prefers JSON keeps the 404 JSON; so does any other method", async () => {
+    for (const fetchMode of ["cors", "same-origin", "no-cors", "websocket", null, undefined])
+      for (const accept of ["*/*", "application/json", "application/json, text/plain, */*", null, undefined, ""])
+        expect(await asked("/api/konto/me", "GET", { fetchMode, accept }), `${fetchMode} ${accept}`).toMatchObject({ kind: "gate", json: true });
+    for (const accept of ["application/json, text/html", "text/html;q=0.5, application/json", "text/html;q=0", "application/json;q=1, text/html;q=1"])
+      expect(await asked("/api/konto/me", "GET", { accept }), accept).toMatchObject({ json: true });
+    // a form POSTed by navigation (or any write) is never turned into a page
+    for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+      expect(await asked("/api/konto/request", method, { fetchMode: "navigate", accept: BROWSER_ACCEPT }), method).toMatchObject({ kind: "gate", json: true });
+    // and the headers never open the gate
+    expect(await asked("/api/konto/me", "GET", { fetchMode: "navigate", accept: BROWSER_ACCEPT })).toMatchObject({ kind: "gate" });
+  });
+
+  test("the coming-soon page's own server action (a POST with Next-Action) to the /api address it was opened at goes to the page too", async () => {
+    // the newsletter form of the coming-soon page shown at /api/konto/verify?… posts its action to that same address
+    expect(await gateDecision({ path: "/api/konto/verify", method: "POST", cookie: undefined, action: true, fetchMode: "cors", accept: "text/x-component" }, ON, NOW)).toEqual({ kind: "gate", page: "/tulekul/et", json: false });
+    // not for another method, and never without the header
+    for (const method of ["GET", "PUT", "DELETE"]) expect(await gateDecision({ path: "/api/konto/verify", method, cookie: undefined, action: true, accept: "text/x-component" }, ON, NOW), method).toMatchObject({ json: true });
+    expect(await gateDecision({ path: "/api/konto/verify", method: "POST", cookie: undefined, action: false, accept: "text/x-component" }, ON, NOW)).toMatchObject({ json: true });
+    // the gate itself stays shut
+    expect(await gateDecision({ path: "/api/konto/me", method: "POST", cookie: undefined, action: true }, ON, NOW)).toMatchObject({ kind: "gate" });
   });
 
   test("the method never opens the gate (a server action is a POST to the page's own address) and never closes it", async () => {
@@ -182,7 +220,7 @@ describe("gateDecision", () => {
     const good = await signPreview(SECRET, NOW);
     const [exp, sig] = good.split(".");
     const expired = await signPreview(SECRET, NOW - 31 * 86_400_000);
-    const foreign = await signPreview("another-secret-0123456789abcdef", NOW);
+    const foreign = await signPreview("another-secret-0123456789abcdef-x", NOW);
     for (const cookie of [expired, foreign, `${Number(exp) + 1}.${sig}`, `${exp}.${sig.slice(1)}A`, "", "1", "x.y", "true", "admin"])
       for (const path of ["/", "/konto", "/ru", "/api/konto"]) expect(await kind(path, ON, cookie), `${cookie} ${path}`).toBe("gate");
   });
@@ -218,6 +256,36 @@ describe("the coming-soon page itself", () => {
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".tsx"))) {
       const source = readFileSync(join(dir, file), "utf8");
       expect(source, file).not.toMatch(/@\/server\/|@\/db\/|share-meta|next\/headers|process\.env|connection\(/);
+    }
+  });
+});
+
+describe("one list of static files for the routing and the gate (lib/root-files.ts)", () => {
+  const served = (path: string) => routeSitePath(path, new URLSearchParams()).kind === "other";
+
+  test("every file and folder of the list is served as it is AND goes through the gate; og.png included", () => {
+    expect(ROOT_FILES).toContain("og.png");
+    for (const name of ROOT_FILES) {
+      expect(served(`/${name}`), name).toBe(true);
+      expect(alwaysThrough(`/${name}`), name).toBe(true);
+    }
+    for (const folder of ROOT_FOLDERS) {
+      expect(served(`/${folder}/x.png`), folder).toBe(true);
+      expect(alwaysThrough(`/${folder}/x.png`), folder).toBe(true);
+    }
+  });
+
+  test("their look-alikes are neither: the routing's 404 page, and gated", () => {
+    const lookAlikes = [
+      ...ROOT_FILES.flatMap((name) => [`/${name}.bak`, `/${name}x`, `/x${name}`, `/${name}/x`, `/ru/${name}`, `/x/${name}`]),
+      ...ROOT_FOLDERS.flatMap((folder) => [`/${folder}`, `/${folder}x/a.png`, `/x/${folder}/a.png`]),
+      "/og.gif",
+      "/ogXjpg",
+      "/favicon.ico.php",
+    ];
+    for (const path of lookAlikes) {
+      expect(served(path), path).toBe(false);
+      expect(alwaysThrough(path), path).toBe(false);
     }
   });
 });

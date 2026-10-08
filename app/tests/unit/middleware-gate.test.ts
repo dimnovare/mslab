@@ -105,15 +105,36 @@ describe("gate on, a visitor (no valid preview cookie)", () => {
     }
   });
 
-  test("a gated /api address: 404 JSON, never kept, noindex said here (the middleware answers it itself)", async () => {
+  test("a gated /api address called by a script: 404 JSON, never kept, noindex said here (the middleware answers it itself)", async () => {
+    const fetched = { "sec-fetch-mode": "cors", accept: "application/json" };
     for (const method of ["GET", "POST"]) {
       for (const path of ["/api/konto/me", "/api/konto/request", "/api/feedback", "/api/feedback/1", "/api", "/api/nope"]) {
-        const res = await answer(path, { method });
-        expect(res, `${method} ${path}`).toMatchObject({ status: 404, rewrite: null, location: null, robots: "noindex, nofollow", cache: "no-store" });
-        expect(res.type).toContain("application/json");
-        expect(JSON.parse(res.body)).toEqual({ ok: false, error: "not_found" });
+        for (const headers of [{}, fetched, { "sec-fetch-mode": "same-origin", accept: "*/*" }]) {
+          const res = await answer(path, { method, headers });
+          expect(res, `${method} ${path} ${JSON.stringify(headers)}`).toMatchObject({ status: 404, rewrite: null, location: null, robots: "noindex, nofollow", cache: "no-store" });
+          expect(res.type).toContain("application/json");
+          expect(JSON.parse(res.body)).toEqual({ ok: false, error: "not_found" });
+        }
       }
     }
+  });
+
+  test("a gated /api address opened in the browser (a mailed login link): the coming-soon page, not raw JSON", async () => {
+    const browser = { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" };
+    for (const method of ["GET", "HEAD"]) {
+      expect(await answer("/api/konto/verify?t=abc&email=a%40example.test", { method, headers: browser }), method).toMatchObject({
+        status: 200,
+        rewrite: "/tulekul/et?t=abc&email=a%40example.test",
+        location: null,
+      });
+      expect(await answer("/api/feedback", { method, headers: { accept: "text/html" } }), method).toMatchObject({ status: 200, rewrite: "/tulekul/et" });
+    }
+    // a navigation that POSTs (a form) stays an API call: 404 JSON
+    expect(await answer("/api/konto/request", { method: "POST", headers: browser })).toMatchObject({ status: 404, rewrite: null });
+    // the page's own newsletter form there: its server action posts to the same address, and the page answers it
+    expect(await answer("/api/konto/verify?t=abc", { method: "POST", headers: { "next-action": "abc123", accept: "text/x-component" } })).toMatchObject({ status: 200, rewrite: "/tulekul/et?t=abc" });
+    // with the preview cookie the same link is the API's own answer
+    expect(await answer("/api/konto/verify?t=abc", { headers: browser, cookie: await signPreview(SECRET) })).toMatchObject({ status: 200, next: "1", rewrite: null });
   });
 
   test("the always-through addresses get the middleware's usual answers", async () => {
@@ -129,7 +150,7 @@ describe("gate on, a visitor (no valid preview cookie)", () => {
     const now = Date.now();
     const good = await signPreview(SECRET, now);
     const [exp, sig] = good.split(".");
-    for (const cookie of [await signPreview(SECRET, now - 31 * 86_400_000), await signPreview("another-secret-0123456789abcdef", now), `${Number(exp) + 60}.${sig}`, "", "1"])
+    for (const cookie of [await signPreview(SECRET, now - 31 * 86_400_000), await signPreview("another-secret-0123456789abcdef-x", now), `${Number(exp) + 60}.${sig}`, "", "1"])
       expect(await answer("/koolitused", { cookie }), cookie).toMatchObject({ status: 200, rewrite: "/tulekul/et" });
   });
 });
@@ -174,6 +195,29 @@ describe("gate on without PREVIEW_SECRET", () => {
     const notes = vi.mocked(console.error).mock.calls.flat().join("\n");
     expect(vi.mocked(console.error)).toHaveBeenCalledTimes(1);
     expect(notes).toContain("PREVIEW_SECRET");
+    expect(notes).toContain("/api/auth"); // says what still goes through
     expect(notes).not.toContain(SECRET);
+  });
+
+  test("a PREVIEW_SECRET shorter than 32 characters is no secret: a cookie signed with it (or any) is refused, noted once, never its value", async () => {
+    const short = "s".repeat(31);
+    vi.stubEnv("SITE_GATE", "1");
+    vi.stubEnv("PREVIEW_SECRET", short);
+    // what a short key would sign (the module refuses to sign with it): made here
+    const exp = String(Math.floor(Date.now() / 1000) + 3600);
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(short), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`preview:${exp}`)));
+    const forged = `${exp}.${btoa(String.fromCharCode(...sig)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+    const middleware = await load();
+    for (const cookie of [forged, await signPreview(SECRET)]) {
+      const res: NextResponse = await middleware(request("/koolitused", { cookie }));
+      expect(new URL(res.headers.get("x-middleware-rewrite")!).pathname).toBe("/tulekul/et");
+    }
+    const res: NextResponse = await middleware(request("/admin/login"));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(vi.mocked(console.error)).toHaveBeenCalledTimes(1);
+    const notes = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(notes).toContain("shorter than 32 characters");
+    expect(notes).not.toContain(short);
   });
 });

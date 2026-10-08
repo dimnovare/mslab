@@ -49,13 +49,26 @@ let notedNoSecret = false;
 async function gated(req: NextRequest, env: GateEnv): Promise<NextResponse> {
   if (!env.PREVIEW_SECRET && !notedNoSecret) {
     notedNoSecret = true;
-    logNote("[gate] SITE_GATE is on but PREVIEW_SECRET is not set: nobody gets past the coming-soon page (only /admin and the sign-in go through)");
+    logNote(
+      "[gate] SITE_GATE is on but PREVIEW_SECRET is not set or shorter than 32 characters: no preview cookie is valid, so admins see the coming-soon page too; only /admin, /api/auth, /api/admin, /api/cron, /api/bunny/webhook, /api/newsletter, /_next, /media and the static files go through",
+    );
   }
   const { pathname } = req.nextUrl;
-  const gate = await gateDecision({ path: pathname, method: req.method, cookie: req.cookies.get(PREVIEW_COOKIE)?.value }, env);
+  const gate = await gateDecision(
+    {
+      path: pathname,
+      method: req.method,
+      cookie: req.cookies.get(PREVIEW_COOKIE)?.value,
+      fetchMode: req.headers.get("sec-fetch-mode"),
+      accept: req.headers.get("accept"),
+      action: req.headers.has("next-action"),
+    },
+    env,
+  );
   if (gate.kind === "pass") return noindex(route(req));
-  if (gate.api) {
-    // no page for an API call: "not here", never kept, and said here (an answer of the middleware's own)
+  if (gate.json) {
+    // a script's call to a gated /api address: no page, "not here", never kept, and noindex said here (an answer of the
+    // middleware's own). A browser opening such an address (a mailed login link) gets the coming-soon page below.
     return NextResponse.json({ ok: false, error: "not_found" }, { status: 404, headers: { "cache-control": "no-store", "X-Robots-Tag": ROBOTS } });
   }
   // The coming-soon page, built once (static) and the same for every address: the visitor's address and query stay in the

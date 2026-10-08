@@ -13,6 +13,15 @@ export const PREVIEW_TTL_S = 30 * 24 * 60 * 60;
 /** Attributes of the cookie (Max-Age is added when it is set; 0 clears it). Not readable by scripts; sent on top-level visits from other sites (Lax). */
 export const previewCookieOptions = { httpOnly: true, secure: true, sameSite: "lax", path: "/" } as const;
 
+/** The shortest PREVIEW_SECRET used: a shorter one (a placeholder, a typo) could be guessed, and counts as not set. */
+export const PREVIEW_SECRET_MIN = 32;
+
+/** The key PREVIEW_SECRET gives (trimmed), or undefined when it is unset, blank or shorter than PREVIEW_SECRET_MIN: then nothing is signed or valid. */
+export function previewKey(secret: string | undefined): string | undefined {
+  const key = secret?.trim();
+  return key && key.length >= PREVIEW_SECRET_MIN ? key : undefined;
+}
+
 /** Unix seconds as signed: digits, no sign, no leading zero, at most 12 (the message is the text as it is in the cookie). */
 const EXP = /^[1-9][0-9]{0,11}$/;
 /** 32 bytes in base64url without padding. */
@@ -34,21 +43,22 @@ function fromBase64url(text: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-/** A new cookie value, valid for PREVIEW_TTL_S from `now` (ms). Throws on an empty secret: nothing is ever signed with a blank key. */
+/** A new cookie value, valid for PREVIEW_TTL_S from `now` (ms). Throws on a secret previewKey refuses: nothing is signed with a weak key. */
 export async function signPreview(secret: string, now: number = Date.now()): Promise<string> {
-  const key = secret.trim();
-  if (!key) throw new Error("PREVIEW_SECRET is not set");
+  const key = previewKey(secret);
+  if (!key) throw new Error(`PREVIEW_SECRET is not set or shorter than ${PREVIEW_SECRET_MIN} characters`);
   const exp = String(Math.floor(now / 1000) + PREVIEW_TTL_S);
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(key, "sign"), message(exp)));
   return `${exp}.${toBase64url(sig)}`;
 }
 
 /**
- * Is `value` a pass signed with `secret` that has not expired at `now` (ms)? No secret (unset or blank): nothing is. The
- * signature is compared by Web Crypto's verify (constant time); a value of the wrong shape is refused before any crypto.
+ * Is `value` a pass signed with `secret` that has not expired at `now` (ms)? No usable secret (unset, blank or too short,
+ * previewKey): nothing is. The signature is compared by Web Crypto's verify (constant time); a value of the wrong shape is
+ * refused before any crypto.
  */
 export async function verifyPreview(value: string | undefined, secret: string | undefined, now: number = Date.now()): Promise<boolean> {
-  const key = secret?.trim();
+  const key = previewKey(secret);
   if (!key || !value) return false;
   const dot = value.indexOf(".");
   if (dot < 0) return false;
