@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { clientIp, normalizeIp, rateKey, rateLimit, RATE_LIMIT, RATE_WINDOW_SEC } from "@/server/ratelimit";
+import { belowLimit, clientIp, countFailure, normalizeIp, rateKey, rateLimit, RATE_LIMIT, RATE_WINDOW_SEC } from "@/server/ratelimit";
 import { fakeKv } from "../fakes";
 
 describe("rateLimit", () => {
@@ -88,4 +88,14 @@ describe("IPv6 buckets: one per /64", () => {
     expect(await rateLimit(kv, rateKey("contact", clientIp(h({ "x-forwarded-for": "2001:db8:1:3::1" }))!), 5, 600)).toBe(true);
     expect([...kv.store.keys()]).toEqual(["rl:contact:2001:db8:1:2::/64", "rl:contact:2001:db8:1:3::/64"]);
   });
+});
+
+test("the password lock's counters (phase 2c): belowLimit counts nothing; countFailure adds one and starts the window again", async () => {
+  const kv = fakeKv();
+  expect(await belowLimit(kv, "k", 2)).toBe(true);
+  await countFailure(kv, "k", 900);
+  await countFailure(kv, "k", 900);
+  expect([kv.store.get("k"), kv.ttl.get("k")]).toEqual(["2", 900]);
+  expect(await belowLimit(kv, "k", 2)).toBe(false);
+  expect(await belowLimit(kv, "k", 3)).toBe(true);
 });

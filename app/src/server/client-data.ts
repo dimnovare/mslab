@@ -29,7 +29,15 @@ import { newToken } from "./token";
 /** At most this much of a request's text goes onto its card ("what was asked"). */
 const DETAIL_MAX = 200;
 
-export type ClientProfile = { email: string; name: string; phone: string; locale: "et" | "ru"; newsletter: boolean };
+export type ClientProfile = {
+  email: string;
+  name: string;
+  phone: string;
+  locale: "et" | "ru";
+  newsletter: boolean;
+  /** When her password was last set or changed (ISO); null without one (phase 2c). Never the hash. */
+  passwordSetAt: string | null;
+};
 
 export type Dashboard = {
   client: ClientProfile;
@@ -136,6 +144,9 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
         // a confirmed subscriber of the account's address (rows may hold the address in any case). Written out: in a single-table query
         // Drizzle prints a column without its table, which inside the subquery would be the subscriber's own column.
         newsletter: sql<boolean>`exists (select 1 from subscribers s where lower(s.email) = clients.email and s.confirmed_at is not null)`,
+        // whether there is a password, and when it was set: the hash itself is never selected
+        hasPassword: sql<boolean>`${clients.passwordHash} is not null`,
+        passwordChangedAt: clients.passwordChangedAt,
       })
       .from(clients)
       .where(eq(clients.id, clientId))
@@ -201,7 +212,10 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
   }));
 
   return {
-    client: { email: client.email, name: client.name, phone: client.phone, locale: client.locale, newsletter: client.newsletter },
+    client: {
+      email: client.email, name: client.name, phone: client.phone, locale: client.locale, newsletter: client.newsletter,
+      passwordSetAt: client.hasPassword && client.passwordChangedAt ? iso(client.passwordChangedAt) : null,
+    },
     cards: sorted,
     favourites,
     prepayment: parsePrepayment(prepayment),

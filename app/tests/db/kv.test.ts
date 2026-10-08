@@ -143,3 +143,13 @@ test("a failing sweep is logged without values and does not fail the put", async
     logged.mockRestore();
   }
 });
+
+test("sweep: false (a store on a caller's transaction) writes its own row and leaves the expired ones to the next sweep", async () => {
+  const db = await makeTestDb();
+  await new PgKv(db, () => new Date("2026-10-02T10:00:00Z")).put("old", "x", { expirationTtl: 60 });
+  const later = new PgKv(db, () => new Date("2026-10-02T11:00:00Z"), { sweep: false });
+  await later.put("rl:pw-mail:abc", "1", { expirationTtl: 900 });
+  expect(await physicalKeys(db)).toEqual(["old", "rl:pw-mail:abc"]);
+  expect([await later.get("old"), await later.get("rl:pw-mail:abc")]).toEqual([null, "1"]);
+});
+

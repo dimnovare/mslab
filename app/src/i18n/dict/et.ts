@@ -447,6 +447,14 @@ export const et = {
       line: "Sinu MS LAB konto on kustutatud.",
       kept: "Sinu registreeringud jäävad Mariale alles.",
     },
+    // The mail after the password was set, changed or removed (account-mail.ts passwordChangedMail, phase 2c): {email} is Maria's
+    // address from Seaded (the contact), `notYou` the line without one.
+    passwordMail: {
+      subject: "MS LABi konto parool on muudetud",
+      line: "Sinu MS LABi konto parool on muudetud.",
+      notYou: "Kui see polnud sina, kirjuta kohe Mariale.",
+      notYouAt: "Kui see polnud sina, kirjuta kohe Mariale: {email}",
+    },
     // The one sentence on each course card (domain/account-cards.ts nextStep): `{amount}` and `{rest}` are euros ("175 €"),
     // `{date}` the last day of an e-course access ("22.03.2027"). A session's date, time and place are on the card's own
     // line, so the sentences do not repeat them.

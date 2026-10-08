@@ -18,7 +18,7 @@ declare global {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const dashboard = (over: Partial<ClientProfile> = {}): Dashboard => ({
-  client: { email: "kati@example.test", name: "Kati Tamm", phone: "", locale: "et", newsletter: false, ...over },
+  client: { email: "kati@example.test", name: "Kati Tamm", phone: "", locale: "et", newsletter: false, passwordSetAt: null, ...over },
   cards: [],
   favourites: [],
   prepayment: null,

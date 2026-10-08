@@ -155,6 +155,20 @@ export function deletionMail(email: string, locale: Locale): Mail {
 }
 
 /**
+ * The mail after the account's password was set, changed or removed (phase 2c): the line, and whom to write to if it was not her
+ * (`contactEmail`, Seaded's contact address; "" for none). Plain text and a plain HTML body, no button. The caller never sends it to
+ * a sample address or in development.
+ */
+export function passwordChangedMail(email: string, locale: Locale, contactEmail: string): Mail {
+  const dict = getDict(locale).account;
+  const p = dict.passwordMail;
+  const notYou = contactEmail ? fill(p.notYouAt, { email: contactEmail }) : p.notYou;
+  const text = [dict.mail.greeting, "", p.line, notYou, "", dict.mail.signature].join("\n");
+  const html = mailCard(p.subject, locale, [greetingRow(dict.mail.greeting), paragraphRow(p.line), paragraphRow(notYou, 8), signatureRow(dict.mail)]);
+  return { to: email, subject: p.subject, text, html };
+}
+
+/**
  * The welcome mail after an address's first newsletter confirmation (phase 2c, server/newsletter.ts sendWelcome): the welcome code
  * large (the login code's lilac box) and how to use it, with no button. Plain text and HTML. The caller never sends it to a sample
  * address or in development.

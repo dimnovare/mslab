@@ -743,7 +743,7 @@ describe("GET /api/konto: the dashboard", () => {
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     expect(await res.json()).toEqual({
-      client: { email: EMAIL, name: "", phone: "", locale: "et", newsletter: false },
+      client: { email: EMAIL, name: "", phone: "", locale: "et", newsletter: false, passwordSetAt: null },
       cards: [
         {
           kind: "contact", registrationId: reg.id, course: { slug: "kulmude-lami", title: { et: "Kulmude lamineerimine" } },
@@ -1000,7 +1000,7 @@ describe("profile and newsletter", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(await (await call(deps, "/me", { cookie })).json()).toEqual({ ok: true, email: EMAIL, name: "Kati Tamm" });
-    expect((await (await call(deps, "", { cookie })).json()).client).toEqual({ email: EMAIL, name: "Kati Tamm", phone: "+372 555 1234", locale: "ru", newsletter: false });
+    expect((await (await call(deps, "", { cookie })).json()).client).toEqual({ email: EMAIL, name: "Kati Tamm", phone: "+372 555 1234", locale: "ru", newsletter: false, passwordSetAt: null });
   });
 
   test("POST /uudiskiri on: a confirmed subscriber for the account's address, no mail; off deletes it", async () => {

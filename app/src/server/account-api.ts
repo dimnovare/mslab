@@ -1,23 +1,26 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
+import { readSetting } from "@/db/queries/public";
 import { clients } from "@/db/schema";
 import { isEmail, isSampleAddress, normalizeEmail } from "@/domain/email";
 import type { Locale } from "@/i18n/locales";
 import { LOGIN_MARK } from "@/lib/account-marks";
 import { parseRowId } from "@/lib/row-id";
-import { deletionMail, loginMail, verifyLink } from "./account-mail";
+import { deletionMail, loginMail, passwordChangedMail, verifyLink } from "./account-mail";
 import {
-  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseProgress, parseSlug, parseTerms,
+  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parsePassword, parseProfile, parseProgress, parseSlug, parseTerms,
 } from "./account-input";
 import { isCrossSite } from "./auth";
 import type { BunnyConfig } from "./bunny";
 import {
   CLIENT_COOKIE, CLIENT_SESSION_TTL_MS, HINT_COOKIE, endClientSession, getClientSession, issueClientLogin, redeemClientCode,
-  redeemClientLink, reserveLoginMail,
+  redeemClientLink, redeemClientPassword, reserveLoginMail, type PasswordGate,
 } from "./client-auth";
 import {
   acceptTerms, createChangeRequest, deleteClient, loadDashboard, loadEcourse, loadFavouriteCards, mergeFavourites, setFavourite, setNewsletter, updateProfile,
 } from "./client-data";
+import { removeClientPassword, setClientPassword } from "./client-password";
+import { PgKv } from "./kv";
 import { lessonFileFor, loadLesson, markTextLessonDone, saveProgress } from "./lesson-data";
 import { attachmentHeader, FILE_URL_TTL_SEC } from "./lesson-files";
 import { logFailure, logNote } from "./log";
@@ -26,7 +29,8 @@ import { changeRequestSummary } from "./messages";
 import { clientNewsletter, sendWelcome } from "./newsletter";
 import { adminUrl, notifyMaria, sendMail, type Env } from "./notify";
 import { isPrefetch } from "./prefetch";
-import { clientIp, rateKey, rateLimit, windowKey } from "./ratelimit";
+import { belowLimit, clientIp, countFailure, rateKey, rateLimit, windowKey } from "./ratelimit";
+import { sha256 } from "./token";
 
 // The client account's JSON API (/api/konto/*) without Next.js: app/api/konto/[[...path]]/route.ts builds the dependencies
 // (database, settings, Postgres KV store, after()) and calls handleAccountApi; the tests call it with PGlite and fakes.
@@ -34,7 +38,9 @@ import { clientIp, rateKey, rateLimit, windowKey } from "./ratelimit";
 // Sign-in: POST login ({ email, locale }) e-mails a 6-digit code and a link (e-mail goes out after the response); POST code
 // ({ email, code, locale }) or GET verify (?t=<link token>&l=<locale>) uses the login once and starts the session (the
 // one-device rule is in client-auth.ts). The login page's language travels with the login (`locale`, the link's `l`): an
-// account the login creates speaks it, and a failed link opens the login page in it. The session is the `__Host-mslab_client` cookie (HttpOnly) plus `mslab_in=1`, a hint the static pages
+// account the login creates speaks it, and a failed link opens the login page in it. POST parool-login ({ email, password, locale }) does the same
+// with the password set in Minu andmed (phase 2c): one answer for every failure, and a lock after 5 failures for an address or 20 from an IP in
+// 15 minutes. The session is the `__Host-mslab_client` cookie (HttpOnly) plus `mslab_in=1`, a hint the static pages
 // read to show "Minu konto" instead of "Logi sisse" (it grants nothing). The login answer is the same for every address.
 // Every answer is `private, no-store`: it is one visitor's data, never kept by a CDN or a shared cache.
 //
@@ -42,7 +48,7 @@ import { clientIp, rateKey, rateLimit, windowKey } from "./ratelimit";
 // GET /kursus/:slug/:lesson one lesson (an open one with a signed video URL; 403 terms or locked), POST …/:lesson/progress how far a video has
 // been watched, POST …/:lesson/tehtud "Märgi tehtuks" for a text lesson, GET …/:lesson/fail/:file a lesson file, GET /lemmikud the
 // favourites as course cards, POST /lemmikud and /lemmikud/merge favourites, PATCH /andmed the profile, POST /uudiskiri the newsletter, POST /muutmine a request to cancel or
-// move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion.
+// move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion, POST /parool and DELETE /parool the optional password (each change mailed).
 // Each one starts with requireClient and answers through clientResponse (a renewed session's cookies reach the browser); the
 // client is always the session's, never a value from the request. A body that is not what the endpoint expects is 400
 // { ok: false, error: "<field>" } (account-input.ts), a record that is not the client's is 404.
@@ -76,6 +82,12 @@ const MERGE_BODY_CHARS = LIMITS.mergeSlugs * (LIMITS.slug + 4) + 64;
 const CHANGE_REQUESTS_PER_HOUR = 5;
 /** Progress reports a student may send per clock minute, across lessons (spec 6: it caps the writes; the player sends about 4). */
 const PROGRESS_PER_MINUTE = 12;
+/** Failed password logins per address, and per IP, within PASSWORD_LOCK_SEC before the lock (phase 2c, spec 7). */
+const PASSWORD_FAILURES_PER_ADDRESS = 5;
+const PASSWORD_FAILURES_PER_IP = 20;
+const PASSWORD_LOCK_SEC = 15 * 60;
+/** Password changes a client may make per hour: each one mails her. */
+const PASSWORD_CHANGES_PER_HOUR = 5;
 
 const BASE_HEADERS = { "cache-control": "private, no-store", "x-robots-tag": "noindex, nofollow" } as const;
 
@@ -224,6 +236,58 @@ async function code(request: Request, deps: AccountDeps): Promise<Response> {
   return accountResponse({ ok: true, locale: result.locale }, 200, sessionCookies(result.sessionRaw));
 }
 
+/** The KV key of the password lock for this IP (rateKey "pw-ip"); null without an address (never on Vercel; `next dev` uses "local"). */
+function passwordIpKey(request: Request, deps: AccountDeps): string | null {
+  const ip = clientIp(request.headers) ?? (deps.dev ? "local" : null);
+  return ip === null ? null : rateKey("pw-ip", ip);
+}
+
+/**
+ * POST /parool-login `{ email, password, locale? }` (phase 2c): the e-mail and the password set in Minu andmed start the session as a code
+ * does (the one-device rule): 200 `{ ok: true, locale }` + cookies, `locale` the account's own (the one in the body is ignored: a password
+ * login never creates an account). Every failure — unknown address, no password, wrong password, a body
+ * that cannot be a login — is the same 400 `{ error: "password" }` ("E-post või parool ei sobi."), and takes as long (client-auth.ts
+ * redeemClientPassword). After 5 failures for an address or 20 from an IP within 15 minutes: 429 `{ error: "locked" }`, the right password
+ * too, until 15 minutes after the last failure (a locked attempt is not counted). Failures count whether or not the address
+ * exists. The address's counter (a KV row under the address's hash) is read and counted under the address lock, in the login's own
+ * transaction (the gate): attempts sent in parallel go one after another, and none passes the 5 alongside the others; a database
+ * failure there fails the login (500), never opens the lock. The IP's counter is the forms' kind, read and then written (a burst can
+ * pass a few more than 20), and a store that fails lets the attempt through, as the other limits.
+ */
+async function passwordLogin(request: Request, deps: AccountDeps): Promise<Response> {
+  const body = await readObject(request);
+  const address = typeof body?.email === "string" ? normalizeEmail(body.email) : "";
+  const password = typeof body?.password === "string" && body.password.length <= LIMITS.passwordInput ? body.password : "";
+  const locked = () => {
+    logNote("[account] password login locked");
+    return accountResponse({ ok: false, error: "locked" }, 429);
+  };
+  // The IP's lock is asked before the login takes a database connection (and before scrypt): a sprayer is stopped at the door.
+  const ipKey = passwordIpKey(request, deps);
+  try {
+    if (ipKey !== null && !(await belowLimit(deps.env.KV, ipKey, PASSWORD_FAILURES_PER_IP))) return locked();
+  } catch (e) {
+    logFailure("[account] rate limit unavailable, allowing", e);
+  }
+  const addressKey = `rl:pw-mail:${await sha256(address)}`;
+  // the address's lock, on the login's transaction (no sweep inside it: kv.ts)
+  const gate: PasswordGate = (t) => {
+    const kv = new PgKv(t, () => deps.now, { sweep: false });
+    return { open: () => belowLimit(kv, addressKey, PASSWORD_FAILURES_PER_ADDRESS), failed: () => countFailure(kv, addressKey, PASSWORD_LOCK_SEC) };
+  };
+  const session = isEmail(address) && password ? await redeemClientPassword(deps.db, address, password, deps.now, gate) : null;
+  if (session === "locked") return locked();
+  if (!session) {
+    try {
+      if (ipKey !== null) await countFailure(deps.env.KV, ipKey, PASSWORD_LOCK_SEC);
+    } catch (e) {
+      logFailure("[account] rate limit unavailable", e);
+    }
+    return accountResponse({ ok: false, error: "password" }, 400);
+  }
+  return accountResponse({ ok: true, locale: session.locale }, 200, sessionCookies(session.sessionRaw));
+}
+
 /** A redirect (303) that carries no body: `target` is made absolute against this request's origin. */
 function redirect(url: URL, target: string, cookies: string[] = []): Response {
   const res = new Response(null, {
@@ -313,6 +377,19 @@ const lessonRef = (rawSlug: string, rawLesson: string): { slug: string; lessonId
   const lessonId = parseRowId(rawLesson);
   return slug === null || lessonId === null ? null : { slug, lessonId };
 };
+
+/**
+ * "Sinu MS LABi konto parool on muudetud." after the response (phase 2c), with Maria's address from Seaded when there is one: never in
+ * development, never to a sample address. A failure is logged by `later` (route.ts), never the address.
+ */
+function mailPasswordChange(deps: AccountDeps, to: { email: string; locale: Locale }): void {
+  if (deps.dev || isSampleAddress(to.email)) return;
+  deps.later(async () => {
+    const contact = await readSetting(deps.db, "contact");
+    const maria = typeof (contact as { email?: unknown } | null)?.email === "string" ? (contact as { email: string }).email.trim() : "";
+    await sendMail(deps.env, passwordChangedMail(to.email, to.locale, maria));
+  });
+}
 
 /** GET /me: `{ ok: true, email, name }` of the signed-in client. */
 async function me(request: Request, deps: AccountDeps): Promise<Response> {
@@ -465,6 +542,37 @@ async function newsletter(request: Request, deps: AccountDeps): Promise<Response
 }
 
 /**
+ * POST /parool `{ password }` (phase 2c): sets or changes the account's password (client-password.ts). 200 `{ ok: true, passwordSetAt }`;
+ * 400 `{ error: "password" }` (no usable string), `"short"` / `"long"` (10 … 200 characters) or `"email"` (the address itself); 429
+ * `{ error: "rate" }` after 5 in an hour. The session goes on; the change is mailed to her after the response.
+ */
+async function setPassword(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const input = parsePassword(await readObject(request));
+  if (!input.ok) return badInput(session, input.error);
+  if (!(await withinClientLimit(deps, session.clientId, "client-password", PASSWORD_CHANGES_PER_HOUR, 60 * 60))) {
+    logNote("[account] password change rate limited");
+    return clientResponse(session, { ok: false, error: "rate" }, 429);
+  }
+  const result = await setClientPassword(deps.db, session.clientId, input.data.password, deps.now);
+  if (result.kind === "gone") return unauthorized("none");
+  if (result.kind === "problem") return badInput(session, result.problem);
+  mailPasswordChange(deps, result);
+  return clientResponse(session, { ok: true, passwordSetAt: result.changedAt.toISOString() });
+}
+
+/** DELETE /parool (phase 2c): removes the password; the e-mail code works as always. 200 `{ ok: true }`; the change is mailed when there was one. */
+async function removePassword(request: Request, deps: AccountDeps): Promise<Response> {
+  const session = await requireClient(request, deps);
+  if (session instanceof Response) return session;
+  const removed = await removeClientPassword(deps.db, session.clientId);
+  if (!removed) return unauthorized("none");
+  if (removed.had) mailPasswordChange(deps, removed);
+  return clientResponse(session, { ok: true });
+}
+
+/**
  * POST /muutmine `{ registrationId, kind, message }`: a request to cancel (`cancel`) or move (`change`) one of the client's own
  * registrations. It changes nothing itself: it is stored for the admin's inbox and Maria is told after the response. 404
  * `{ error: "registration" }` for a registration that is not the client's (or is cancelled, past or called off), 429 `{ error: "rate" }` after 5 in an hour.
@@ -533,6 +641,8 @@ async function dataRoute(request: Request, path: string, deps: AccountDeps): Pro
     case "POST /lemmikud/merge": return mergeFavouriteList(request, deps);
     case "PATCH /andmed": return profile(request, deps);
     case "POST /uudiskiri": return newsletter(request, deps);
+    case "POST /parool": return setPassword(request, deps);
+    case "DELETE /parool": return removePassword(request, deps);
     case "POST /muutmine": return changeRequest(request, deps);
     case "POST /tingimused": return terms(request, deps);
     case "POST /kustuta": return deleteAccount(request, deps);
@@ -562,6 +672,7 @@ export async function handleAccountApi(request: Request, deps: AccountDeps): Pro
     switch (`${request.method} ${path}`) {
       case "POST /login": return await login(request, deps);
       case "POST /code": return await code(request, deps);
+      case "POST /parool-login": return await passwordLogin(request, deps);
       case "GET /verify": return await verify(request, url, deps);
       case "POST /logout": return await logout(request, deps);
       case "GET /me": return await me(request, deps);

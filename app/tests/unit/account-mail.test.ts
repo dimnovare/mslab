@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { nextStep, type ContactCard } from "@/domain/account-cards";
 import { getDict } from "@/i18n/locales";
 import { fill } from "@/i18n/format";
-import { accountLink, esc, registrationConfirmationMail, requestConfirmationMail, verifyLink, welcomeMail, type RegistrationConfirmationInput } from "@/server/account-mail";
+import { accountLink, esc, passwordChangedMail, registrationConfirmationMail, requestConfirmationMail, verifyLink, welcomeMail, type RegistrationConfirmationInput } from "@/server/account-mail";
 
 // The confirmation e-mails to a visitor who registered or sent a request (phase 2a Task 10): the texts in Estonian and
 // Russian, with and without the prepayment instructions, with and without a login code, escaping, the "Ava minu konto"
@@ -401,5 +401,21 @@ describe("the welcome mail (phase 2c)", () => {
     expect(mail.subject).toBe("Добро пожаловать в MS LAB!");
     expect(mail.text).toContain("Укажите код при регистрации в поле «Сообщение».");
     expect(mail.text).toContain("Мария вычтет скидку из вашего счёта.");
+  });
+});
+
+describe("the password changed mail (phase 2c)", () => {
+  test("the line, and whom to write to if it was not her: Maria's address when the contact setting has one", () => {
+    const mail = passwordChangedMail("kati@example.test", "et", "info@mslab.ee");
+    expect(mail.subject).toBe("MS LABi konto parool on muudetud");
+    expect(mail.text).toBe(["Tere!", "", "Sinu MS LABi konto parool on muudetud.", "Kui see polnud sina, kirjuta kohe Mariale: info@mslab.ee", "", "MS LAB Koolituskeskus"].join("\n"));
+    expect(passwordChangedMail("kati@example.test", "et", "").text).toContain("Kui see polnud sina, kirjuta kohe Mariale.");
+    expect(mail.html).toContain("Sinu MS LABi konto parool on muudetud.");
+  });
+
+  test("Russian", () => {
+    const mail = passwordChangedMail("kati@example.test", "ru", "info@mslab.ee");
+    expect(mail.subject).toBe("Пароль кабинета MS LAB изменён");
+    expect(mail.text).toContain("Если это были не вы, сразу напишите Марии: info@mslab.ee");
   });
 });

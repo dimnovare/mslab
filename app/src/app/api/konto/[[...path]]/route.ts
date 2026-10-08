@@ -43,6 +43,7 @@ async function answer(request: Request): Promise<Response> {
 export const GET = answer;
 export const POST = answer;
 export const PATCH = answer;
+export const DELETE = answer; // phase 2c: DELETE /parool
 
 /** Mail scanners and link previews often send HEAD first; Next would run GET for it and use up the login link. */
 export function HEAD(): Response {

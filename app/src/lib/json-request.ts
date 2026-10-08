@@ -8,7 +8,7 @@ export type JsonAnswer = { status: number; data: Record<string, unknown> };
 export async function sendJson(
   path: string,
   body: object,
-  opts: { method?: "POST" | "PATCH"; fetch?: typeof fetch } = {},
+  opts: { method?: "POST" | "PATCH" | "DELETE"; fetch?: typeof fetch } = {},
 ): Promise<JsonAnswer> {
   const send = opts.fetch ?? fetch;
   try {

@@ -33,7 +33,7 @@ const cards: AccountCard[] = [
 ];
 
 const dashboard = (over: Partial<Dashboard> = {}): Dashboard => ({
-  client: { email: "kati@example.test", name: "Kati Tamm", phone: "", locale: "et", newsletter: false },
+  client: { email: "kati@example.test", name: "Kati Tamm", phone: "", locale: "et", newsletter: false, passwordSetAt: null },
   cards,
   favourites: [],
   prepayment: { receiver: "MS LAB OÜ", iban: "EE00 0000 0000 0000 0000", bank: "Pank", referencePrefix: "MS" },

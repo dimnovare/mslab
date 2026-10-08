@@ -13,7 +13,7 @@ type Props = ComponentProps<typeof CoursesTab>;
 
 const t = coursesTexts(getDict("et"));
 const data: Dashboard = {
-  client: { email: "kati@example.test", name: "", phone: "", locale: "et", newsletter: false },
+  client: { email: "kati@example.test", name: "", phone: "", locale: "et", newsletter: false, passwordSetAt: null },
   cards: [],
   favourites: [],
   prepayment: null,

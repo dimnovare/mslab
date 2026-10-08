@@ -96,7 +96,7 @@ describe("loadDashboard", () => {
     await grant(kati.id, f.online.id);
 
     const dash = (await loadDashboard(db, kati.id, NOW))!;
-    expect(dash.client).toEqual({ email: "kati@example.test", name: "", phone: "", locale: "et", newsletter: false });
+    expect(dash.client).toEqual({ email: "kati@example.test", name: "", phone: "", locale: "et", newsletter: false, passwordSetAt: null });
     expect(dash.favourites).toEqual([]);
     expect(dash.prepayment).toBeNull();
 
@@ -256,7 +256,7 @@ describe("loadDashboard", () => {
     await db.insert(subscribers).values({ email: "Kati@Example.TEST", token: "t1", confirmedAt: at(-2) }); // stored in another case
     const dash = (await loadDashboard(db, kati.id, NOW))!;
     expect(dash.favourites).toEqual(["veebikursus", "kulmude-lami"]);
-    expect(dash.client).toEqual({ email: "kati@example.test", name: "Kati", phone: "+3725551234", locale: "ru", newsletter: true });
+    expect(dash.client).toEqual({ email: "kati@example.test", name: "Kati", phone: "+3725551234", locale: "ru", newsletter: true, passwordSetAt: null });
   });
 
   test("a subscriber still waiting for confirmation is not 'on'", async () => {

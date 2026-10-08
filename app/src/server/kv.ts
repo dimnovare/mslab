@@ -13,6 +13,7 @@ export class PgKv implements TextKv, FeedbackKv {
   constructor(
     private readonly db: Db,
     private readonly now: () => Date = () => new Date(),
+    private readonly opts: { sweep?: boolean } = {},
   ) {}
 
   /** Rows that have no expiry or have not reached it. */
@@ -29,11 +30,13 @@ export class PgKv implements TextKv, FeedbackKv {
    * Stores the value; `expirationTtl` is in seconds. Without it the entry never expires (a put replaces an earlier expiry,
    * as in Cloudflare KV). A put with a TTL also deletes the expired rows: the rate limit rows hold visitors' IP addresses,
    * which must not outlive their window (the partial index on expires_at keeps that delete cheap).
+   * `sweep: false` (a store on a caller's transaction: the password lock, account-api.ts): no sweep, which would hold the expired rows'
+   * locks until that transaction ends and could deadlock with another login's; the next put elsewhere, or the daily cron, sweeps.
    */
   async put(key: string, value: string, opts: { expirationTtl?: number } = {}): Promise<void> {
     const expiresAt = opts.expirationTtl ? new Date(this.now().getTime() + opts.expirationTtl * 1000) : null;
     await this.db.insert(kvEntries).values({ key, value, expiresAt }).onConflictDoUpdate({ target: kvEntries.key, set: { value, expiresAt } });
-    if (expiresAt) await this.sweep();
+    if (expiresAt && this.opts.sweep !== false) await this.sweep();
   }
 
   async delete(key: string): Promise<void> {

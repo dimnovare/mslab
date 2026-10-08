@@ -20,6 +20,17 @@ export async function rateLimit(kv: TextKv, key: string, limit: number, windowSe
   return true;
 }
 
+/** Is the count under `key` below `limit`? Counts nothing: the password lock checks before it tries, and counts failures only (phase 2c). */
+export async function belowLimit(kv: TextKv, key: string, limit: number): Promise<boolean> {
+  return Number((await kv.get(key)) ?? "0") < limit;
+}
+
+/** One more under `key`. Its window (`windowSec`) starts again with each one, so a lock ends `windowSec` after the last failure. */
+export async function countFailure(kv: TextKv, key: string, windowSec: number): Promise<void> {
+  const n = Number((await kv.get(key)) ?? "0");
+  await kv.put(key, String(n + 1), { expirationTtl: windowSec });
+}
+
 /** KV key of one visitor and form: `rl:<form>:<ip>`. */
 export const rateKey = (form: string, ip: string) => `rl:${form}:${ip}`;
 
