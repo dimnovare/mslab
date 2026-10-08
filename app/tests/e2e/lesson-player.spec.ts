@@ -2,6 +2,7 @@ import type { Frame, Page, Request } from "@playwright/test";
 import { clientEmail, signInAsClient, takeTerms } from "./account";
 import { E2E_BUNNY } from "./bunny-values";
 import { LOCK_WAIT_MS, removeClientRows } from "./fixtures";
+import { backdateClock } from "./lessons";
 import { insertPlayerLesson, openPlayerHarness, readyLesson, setProgress, storedProgress, type FakeShape } from "./player-harness";
 import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
@@ -177,6 +178,7 @@ test("the player: Bunny's frame (the fake) with the student's e-mail over it, pl
   expect(await mark.evaluate((e) => getComputedStyle(e).pointerEvents)).toBe("none");
 
   await subscribed(await fakeFrame(page));
+  await backdateClock(lesson.clientId, lesson.lessonId);
   await page.frameLocator("[data-player] iframe").getByRole("button", { name: "Mängi lõpuni" }).click();
   await expect(page.locator("[data-harness-done]")).toHaveText("Õppetund tehtud ✓");
   expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 125, done: true });
@@ -201,7 +203,7 @@ test("only the player's frame is heard (its origin and its window); leaving the 
   // the player at 30.6 s, then the student leaves (no pause): the report goes out as the page goes away (Playwright no longer sees
   // a request of a page being unloaded, so the database is the witness; one report and not two: lesson-player.test.ts)
   await postFromPlayer(fake, "timeupdate", { seconds: 30.6, duration: 125 });
-  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toBeNull();
+  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 0, done: false });
   await page.goto("/konto");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 30, done: false });
 });
@@ -221,7 +223,7 @@ test("no word from Bunny (a token it refuses): 'Video ei lae. Proovi hiljem uues
   await expect(page.locator("[data-player-frame] [role=status]")).toHaveText("Video ei lae. Proovi hiljem uuesti."); // the live region
   await expect(error).toBeInViewport();
   await expect(page.locator("[data-fullscreen]")).toHaveCount(0); // no "Täisekraan" for a video that does not load
-  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toBeNull();
+  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 0, done: false });
 });
 
 test("our fullscreen: the wrapper fills the screen with the picture in its middle and the watermark on it; the same button leaves it", async ({ page }, info) => {

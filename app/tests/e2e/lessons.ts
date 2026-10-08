@@ -68,3 +68,12 @@ export async function dropVideo(lessonId: number): Promise<void> {
 export async function setVideoShape(lessonId: number, width: number, height: number): Promise<void> {
   await localDb((sql) => sql`update lessons set video_width = ${width}, video_height = ${height} where id = ${lessonId}`);
 }
+
+/**
+ * Her progress clock on a lesson set `seconds` back (phase 2c: the server keeps reports of up to 2 × the time since the lesson was
+ * opened + 30 s), as if she had opened it that long ago: for tests whose fake player plays a whole video in a second. The lesson must
+ * have been opened (the lesson GET writes the row).
+ */
+export async function backdateClock(clientId: number, lessonId: number, seconds = 3600): Promise<void> {
+  await localDb((sql) => sql`update lesson_progress set clock_at = now() - make_interval(secs => ${seconds}) where client_id = ${clientId} and lesson_id = ${lessonId}`);
+}

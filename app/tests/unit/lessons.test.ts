@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  abandonUpload, completion, courseProgress, dropVideo, formatDuration, isWatched, lessonStates, moveLesson, nextLessonAfter, playableVideo, resumeAt,
-  settleVideo, startUpload, validShape, videoAspect, type OrderedLesson, type VideoFields,
+  abandonUpload, acceptProgress, completion, courseProgress, dropVideo, formatDuration, isWatched, lessonStates, moveLesson, nextLessonAfter, openedClock,
+  playableVideo, PROGRESS_SLACK_SEC, resumeAt, settleVideo, startUpload, TOP_SPEED, validShape, videoAspect, type OrderedLesson, type VideoFields,
 } from "@/domain/lessons";
 
 // Phase 3a (spec 3 and 5): visible lessons in course order; lesson k opens when it is the first, the one before it is done, or
@@ -297,4 +297,45 @@ describe("completing a lesson: the kind is explicit (controller ruling)", () => 
     expect(completion({ ...V({ videoId: "v", videoStatus: "ready", replacedVideoId: null, durationSec: 0 }), kind: "video" })).toBe("wait");
   });
   // That a waiting video lesson keeps the next one locked is checked end to end in Task 7's DB test (the API refuses to complete it).
+});
+
+describe("the progress clock (phase 2c, spec 3)", () => {
+  const T0 = new Date("2026-10-08T10:00:00Z");
+  const at = (sec: number) => new Date(T0.getTime() + sec * 1000);
+
+  test("a report within twice the time since the clock plus 30 s is kept; the clock moves on by half the raise", () => {
+    expect(acceptProgress({ watchedSec: 0, clockAt: T0 }, 40, at(20))).toEqual({ watchedSec: 40, clockAt: at(20) });
+    expect(acceptProgress({ watchedSec: 100, clockAt: T0 }, 130, at(15))).toEqual({ watchedSec: 130, clockAt: at(15) });
+  });
+
+  test("a report past it is clamped, not refused: (now − clock) × 2 + 30", () => {
+    expect(acceptProgress({ watchedSec: 0, clockAt: T0 }, 500, at(60))).toEqual({ watchedSec: 150, clockAt: at(75) });
+  });
+
+  test("a late or lower report raises nothing and leaves the clock", () => {
+    expect(acceptProgress({ watchedSec: 80, clockAt: at(10) }, 50, at(40))).toEqual({ watchedSec: 80, clockAt: at(10) });
+  });
+
+  test("no clock yet (a row from before phase 2c, or none): it starts now and the report may raise the seconds by 30", () => {
+    expect(acceptProgress({ watchedSec: 200, clockAt: null }, 900, at(0))).toEqual({ watchedSec: 230, clockAt: at(15) });
+    expect(acceptProgress({ watchedSec: 0, clockAt: null }, 12.7, at(0))).toEqual({ watchedSec: 12, clockAt: at(6) });
+  });
+
+  test("reports however often add up to at most 2 × the time + 30 s (the factor is the top speed)", () => {
+    let row: { watchedSec: number; clockAt: Date | null } = { watchedSec: 0, clockAt: T0 };
+    for (let s = 1; s <= 60; s++) row = acceptProgress(row, 10_000, at(s)); // every second, asking for the end
+    expect(TOP_SPEED).toBe(2);
+    expect(row.watchedSec).toBe(60 * TOP_SPEED + PROGRESS_SLACK_SEC);
+  });
+
+  test("a clock used up beyond now allows less than 30 s, never a negative raise", () => {
+    expect(acceptProgress({ watchedSec: 50, clockAt: at(40) }, 200, at(0))).toEqual({ watchedSec: 50, clockAt: at(40) });
+    expect(acceptProgress({ watchedSec: 50, clockAt: at(10) }, 200, at(0))).toEqual({ watchedSec: 60, clockAt: at(15) });
+  });
+
+  test("opening a lesson starts the clock now, unless it is already past now (no new 30 s by opening it again)", () => {
+    expect(openedClock(null, T0)).toEqual(T0);
+    expect(openedClock(at(-600), T0)).toEqual(T0);
+    expect(openedClock(at(12), T0)).toEqual(at(12));
+  });
 });

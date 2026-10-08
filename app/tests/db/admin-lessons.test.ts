@@ -115,6 +115,24 @@ describe("lessons", () => {
     expect((await listCourseLessons(db, courseId))[1].lessons[0].inUse).toBe(true);
     expect(await deleteLessonForm(db, form({ id: w.l3 }))).toEqual({ result: { ok: false, error: "inUse" }, cleanup: { videoIds: [], fileKeys: [] } });
     expect((await deleteLessonForm(db, form({ id: 999999 }))).result).toEqual({ ok: false, error: "notFound" });
+
+    // a row with only the progress clock (phase 2c: she opened the lesson and watched nothing) is no progress: the lesson can still go
+    await db.insert(lessonProgress).values({ clientId: c.id, lessonId: w.l1, clockAt: new Date() });
+    expect((await listCourseLessons(db, courseId))[0].lessons[0].inUse).toBe(false);
+    expect((await deleteLessonForm(db, form({ id: w.l1 }))).result).toEqual({ ok: true, id: w.l1, deleted: true });
+    expect(await db.select().from(lessonProgress).where(eq(lessonProgress.lessonId, w.l1))).toEqual([]); // its row went with it
+  });
+
+  test("a row that is done, or that an admin opened (\"Ava järgmine õppetund\"), is progress even with 0 s watched: the lesson can only be hidden", async () => {
+    const w = await twoModules();
+    const [c] = await db.insert(clients).values({ email: "mari@example.test" }).returning();
+    await db.insert(lessonProgress).values([
+      { clientId: c.id, lessonId: w.l1, doneAt: new Date(), clockAt: new Date() },
+      { clientId: c.id, lessonId: w.l2, unlockedBy: "admin@example.test", clockAt: new Date() },
+    ]);
+    const inUse = async () => (await listCourseLessons(db, courseId)).flatMap((m) => m.lessons.map((l) => [l.id, l.inUse]));
+    expect(await inUse()).toEqual([[w.l1, true], [w.l2, true], [w.l3, false]]);
+    for (const id of [w.l1, w.l2]) expect((await deleteLessonForm(db, form({ id }))).result, String(id)).toEqual({ ok: false, error: "inUse" });
   });
 
   test("a file row is removed and its key comes back for the store", async () => {

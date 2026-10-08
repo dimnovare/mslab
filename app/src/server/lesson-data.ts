@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { clients, courseModules, lessonFiles, lessonProgress, lessons } from "@/db/schema";
-import { completion, isWatched, nextLessonAfter, playableVideo, resumeAt, validShape, type VideoShape } from "@/domain/lessons";
+import { acceptProgress, completion, isWatched, nextLessonAfter, openedClock, playableVideo, resumeAt, validShape, type VideoShape } from "@/domain/lessons";
 import type { I18n } from "@/i18n/field";
 import { EMBED_TTL_SEC, signedEmbedUrl, type BunnyConfig } from "./bunny";
 import { activeAccess, termsState } from "./client-data";
@@ -13,6 +13,8 @@ import { courseOutline, type CourseOutline } from "./lesson-outline";
 // order (locked).
 // How a lesson is completed follows its kind (domain/lessons.ts completion): a text lesson by "Märgi tehtuks", a video lesson only
 // by watching 90 % of a playable video — a video lesson waiting for its video cannot be completed, so the next one stays locked.
+// Opening a video lesson starts its progress clock, and a report can raise the watched seconds only as far as the clock allows
+// (spec 2c section 3).
 
 export type LessonVideo =
   /** `shape`: the picture size in pixels of the video that plays (the player's frame takes its shape); null: unknown, the player assumes 16:9. */
@@ -59,6 +61,7 @@ export async function visibleLesson(db: Db, courseId: number, clientId: number, 
       videoHeight: lessons.videoHeight,
       watchedSec: sql<number>`coalesce(${lessonProgress.watchedSec}, 0)`.mapWith(Number),
       done: sql<boolean>`${lessonProgress.doneAt} is not null`,
+      clockAt: lessonProgress.clockAt,
     })
     .from(lessons)
     .innerJoin(courseModules, eq(lessons.moduleId, courseModules.id))
@@ -114,6 +117,15 @@ async function videoOf(row: LessonRow, bunny: BunnyConfig | null, now: Date): Pr
   };
 }
 
+/** Opening a video lesson whose video plays starts its progress clock (domain/lessons.ts openedClock); the row is made when there is none, its seconds stay. */
+async function startClock(db: Db, clientId: number, row: LessonRow, now: Date): Promise<void> {
+  const clockAt = openedClock(row.clockAt, now);
+  await db
+    .insert(lessonProgress)
+    .values({ clientId, lessonId: row.id, clockAt, updatedAt: now })
+    .onConflictDoUpdate({ target: [lessonProgress.clientId, lessonProgress.lessonId], set: { clockAt, updatedAt: now } });
+}
+
 /** GET a lesson (spec 6): the only endpoint with the terms check. */
 export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: number, slug: string, lessonId: number, now: Date): Promise<LessonResult> {
   const opened = await openLesson(db, clientId, slug, lessonId, now, { terms: true });
@@ -124,13 +136,15 @@ export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: nu
     db.select({ email: clients.email }).from(clients).where(eq(clients.id, clientId)).limit(1),
   ]);
   if (!client) return { kind: "notFound" };
+  const video = await videoOf(row, bunny, now);
+  if (video?.state === "ready") await startClock(db, clientId, row, now);
   return {
     kind: "lesson",
     view: {
       course: { slug: access.course.slug, title: access.course.title },
       module: { title: row.moduleTitle },
       lesson: { id: row.id, title: row.title, body: row.body, done: row.done, textOnly: row.kind === "text" },
-      video: await videoOf(row, bunny, now),
+      video,
       files,
       next: nextLessonAfter(outline.lessons, lessonId),
       watermark: client.email,
@@ -139,8 +153,11 @@ export async function loadLesson(db: Db, bunny: BunnyConfig | null, clientId: nu
 }
 
 /**
- * POST progress: kept at its highest (one upsert); done once it reaches 90 % of the length. A video lesson with a playable video
- * only ("watch"): a text lesson, and a video lesson still waiting for its video, are "video" (409).
+ * POST progress: the reported second clamped by the progress clock (domain/lessons.ts acceptProgress: at most twice the time since the
+ * lesson was opened plus 30 s, a report past it is kept at that), kept at its highest (one upsert), done once what is kept reaches 90 %
+ * of the length. A video lesson with a playable video only ("watch"): a text lesson, and a video lesson still waiting for its video,
+ * are "video" (409). Two reports at the same moment read the same row; the later write wins the clock, which can let one race through
+ * at most one more allowance: accepted.
  */
 export async function saveProgress(db: Db, clientId: number, slug: string, lessonId: number, watchedSec: number, now: Date): Promise<ProgressResult> {
   const opened = await openLesson(db, clientId, slug, lessonId, now);
@@ -148,14 +165,15 @@ export async function saveProgress(db: Db, clientId: number, slug: string, lesso
   const { row, outline } = opened;
   if (completion(row) !== "watch" || row.durationSec === null) return { kind: "video" };
   if (watchedSec > row.durationSec + 5) return { kind: "range" };
-  const watched = Math.floor(watchedSec);
+  const kept = acceptProgress({ watchedSec: row.watchedSec, clockAt: row.clockAt }, watchedSec, now);
   const [saved] = await db
     .insert(lessonProgress)
-    .values({ clientId, lessonId, watchedSec: watched, doneAt: isWatched(watched, row.durationSec) ? now : null, updatedAt: now })
+    .values({ clientId, lessonId, watchedSec: kept.watchedSec, clockAt: kept.clockAt, doneAt: isWatched(kept.watchedSec, row.durationSec) ? now : null, updatedAt: now })
     .onConflictDoUpdate({
       target: [lessonProgress.clientId, lessonProgress.lessonId],
       set: {
         watchedSec: sql`greatest(${lessonProgress.watchedSec}, excluded.watched_sec)`,
+        clockAt: kept.clockAt,
         doneAt: sql`coalesce(${lessonProgress.doneAt}, excluded.done_at)`,
         updatedAt: now,
       },

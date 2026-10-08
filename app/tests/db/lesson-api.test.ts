@@ -68,6 +68,11 @@ function deps(over: Partial<AccountDeps> = {}): AccountDeps {
 const call = async (d: AccountDeps, cookie: string, path: string, body?: unknown) =>
   (await handleAccountApi(new Request(`${SITE}/api/konto${path}`, { method: body === undefined ? "GET" : "POST", headers: { cookie }, body: body === undefined ? undefined : JSON.stringify(body) }), d))!;
 const lessonPath = (id: number, rest = "") => `/kursus/veebikursus/${id}${rest}`;
+/** Her progress clock on `lessonId` set `sec` seconds back, as if she had opened it then: reports up to 2 × sec + 30 s are kept. */
+async function openedAgo(w: Awaited<ReturnType<typeof world>>, lessonId: number, sec = 3600) {
+  const clockAt = new Date(NOW.getTime() - sec * 1000);
+  await db.insert(lessonProgress).values({ clientId: w.client.id, lessonId, clockAt }).onConflictDoUpdate({ target: [lessonProgress.clientId, lessonProgress.lessonId], set: { clockAt } });
+}
 
 test("the e-course lists its modules with the visible lessons and their states, the counts and where Jätka goes", async () => {
   const w = await world();
@@ -140,6 +145,7 @@ test("during a replacement the lesson answers with the shape of the video that p
 
 test("progress is kept at its highest; at 90 % the lesson is done and the next one opens; a done lesson starts from the beginning", async () => {
   const w = await world();
+  await openedAgo(w, w.l1.id);
   const d = deps();
   const post = (watchedSec: unknown) => call(d, w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec });
   expect(await (await post(50)).json()).toEqual({ ok: true, done: false, next: w.l2.id });
@@ -161,6 +167,7 @@ test("a lesson begun: the player starts at the saved second (t=…)", async () =
 
 test("progress refuses: no number (400), past the length + 5 s (400), a locked lesson (403), a hidden or unknown one (404), a text lesson (kind 'text', 409)", async () => {
   const w = await world();
+  await openedAgo(w, w.l1.id);
   const d = deps();
   const post = (id: number, body: unknown) => call(d, w.cookie, lessonPath(id, "/progress"), body);
   expect(await (await post(w.l1.id, { watchedSec: "50" })).json()).toEqual({ ok: false, error: "watchedSec" });
@@ -294,6 +301,7 @@ test("ids that cannot be ids are 404; a GET of …/progress or a POST of a lesso
 
 test("done_at is the moment the lesson was done: a later report keeps it, and the watched seconds still grow", async () => {
   const w = await world();
+  await openedAgo(w, w.l1.id);
   const at = (sec: number) => deps({ now: new Date(NOW.getTime() + sec * 1000) });
   expect((await (await call(at(0), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 95 })).json()).done).toBe(true);
   const [first] = await db.select().from(lessonProgress);
@@ -386,7 +394,8 @@ test("a lesson or file of another course is 404 under this course's slug, with a
   expect(await underA()).toEqual([404, 404, 404, 404, 404]); // access to both: still not under A's slug
   expect((await call(d, w.cookie, `/kursus/teine-kursus/${b.b1.id}`)).status).toBe(200); // under its own slug it is there
   expect((await call(d, w.cookie, `/kursus/teine-kursus/${w.l1.id}`)).status).toBe(404); // and A's lesson is not B's
-  expect(await db.select().from(lessonProgress)).toHaveLength(0); // the refused calls wrote nothing
+  // the refused calls wrote nothing; the lesson opened under its own slug started its clock (a row with 0 s)
+  expect((await db.select().from(lessonProgress)).map((r) => [r.lessonId, r.watchedSec, r.doneAt])).toEqual([[b.b1.id, 0, null]]);
 });
 
 test("visibleLesson (the first read of openLesson) finds a lesson only in its own course, and not a hidden one", async () => {
@@ -397,4 +406,56 @@ test("visibleLesson (the first read of openLesson) finds a lesson only in its ow
   expect((await visibleLesson(db, b.course.id, w.client.id, b.b1.id))?.id).toBe(b.b1.id);
   expect(await visibleLesson(db, w.course.id, w.client.id, w.hidden.id)).toBeNull();
   expect(await visibleLesson(db, w.course.id, w.client.id, 999999)).toBeNull();
+});
+
+// ---- phase 2c: the progress clock (spec 3, domain/lessons.ts acceptProgress) ----
+
+test("opening a lesson with a ready video starts its progress clock (a row with 0 s); reopened later it moves on, the seconds stay; a text lesson writes none", async () => {
+  const w = await world();
+  await call(deps(), w.cookie, lessonPath(w.l1.id));
+  const [row] = await db.select().from(lessonProgress);
+  expect([row.lessonId, row.watchedSec, row.clockAt, row.doneAt]).toEqual([w.l1.id, 0, NOW, null]);
+  await db.update(lessonProgress).set({ watchedSec: 40 });
+  const later = new Date(NOW.getTime() + 3600_000);
+  await call(deps({ now: later }), w.cookie, lessonPath(w.l1.id));
+  expect((await db.select().from(lessonProgress))[0]).toMatchObject({ watchedSec: 40, clockAt: later });
+  await db.update(lessonProgress).set({ doneAt: NOW });
+  await call(deps(), w.cookie, lessonPath(w.l2.id)); // the text lesson, open now
+  expect(await db.select().from(lessonProgress).where(eq(lessonProgress.lessonId, w.l2.id))).toEqual([]);
+});
+
+test("a report that runs ahead is clamped to twice the time since the lesson was opened plus 30 s, not refused; the 90 % rule counts what was kept", async () => {
+  const w = await world(); // lesson 1: 100 s
+  await call(deps(), w.cookie, lessonPath(w.l1.id));
+  const at = (sec: number) => deps({ now: new Date(NOW.getTime() + sec * 1000) });
+  expect(await (await call(at(10), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 95 })).json()).toEqual({ ok: true, done: false, next: w.l2.id });
+  expect((await db.select().from(lessonProgress))[0].watchedSec).toBe(50); // 10 × 2 + 30
+  expect(await (await call(at(30), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 95 })).json()).toEqual({ ok: true, done: true, next: w.l2.id });
+  expect((await db.select().from(lessonProgress))[0].watchedSec).toBe(90); // + (30 − 25) × 2 + 30
+});
+
+test("reports as often as the limit allows cannot beat the clock: a minute of them keeps at most 2 × 60 + 30 s", async () => {
+  const w = await world();
+  await db.update(lessons).set({ durationSec: 3600 }).where(eq(lessons.id, w.l1.id));
+  await call(deps(), w.cookie, lessonPath(w.l1.id));
+  for (let s = 5; s <= 60; s += 5) await call(deps({ now: new Date(NOW.getTime() + s * 1000) }), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 3600 });
+  expect((await db.select().from(lessonProgress))[0].watchedSec).toBe(150);
+});
+
+test("a row from before phase 2c (no clock): the first report raises the seconds by at most 30 and starts the clock", async () => {
+  const w = await world();
+  await db.update(lessons).set({ durationSec: 600 }).where(eq(lessons.id, w.l1.id));
+  await db.insert(lessonProgress).values({ clientId: w.client.id, lessonId: w.l1.id, watchedSec: 200 });
+  await call(deps(), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 400 });
+  expect((await db.select().from(lessonProgress))[0]).toMatchObject({ watchedSec: 230, clockAt: new Date(NOW.getTime() + 15_000) });
+});
+
+test("opening the lesson again gives no new 30 s while her time is used up beyond now", async () => {
+  const w = await world();
+  await db.update(lessons).set({ durationSec: 600 }).where(eq(lessons.id, w.l1.id));
+  await call(deps(), w.cookie, lessonPath(w.l1.id)); // the clock: NOW
+  await call(deps(), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 30 }); // 30 kept; the clock: NOW + 15 s
+  await call(deps(), w.cookie, lessonPath(w.l1.id)); // opened again at NOW: the clock stays at NOW + 15 s
+  await call(deps(), w.cookie, lessonPath(w.l1.id, "/progress"), { watchedSec: 60 }); // allowed: (0 − 15) × 2 + 30 = 0
+  expect((await db.select().from(lessonProgress))[0]).toMatchObject({ watchedSec: 30, clockAt: new Date(NOW.getTime() + 15_000) });
 });
