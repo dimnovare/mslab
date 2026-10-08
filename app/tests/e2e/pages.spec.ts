@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
 import { holdBackRouterHistoryPatch } from "./early-tap";
-import { LOCAL_FIXTURES, storedRequests, testEmail } from "./fixtures";
+import { LOCAL_FIXTURES, storedRequests, storedSubscriber, testEmail } from "./fixtures";
 import { sampleDayMonth, sampleWeekday } from "./seed-sessions";
 
 // Task 9: calendar (L1–L5), practice (R1–R5), trainer (T1–T4), blog (B1), contact and legal pages.
@@ -182,6 +182,7 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(form.getByLabel("Nimi")).toBeFocused();
     await expect(form).toContainText(`Kulmude LAMI · ${lamiParnu} · Pärnu`);
     await expect(form).toHaveAttribute("method", "post");
+    await expect(form.getByLabel("Soovin MS LABi uudiseid ja pakkumisi")).not.toBeChecked(); // phase 2c: the newsletter consent, unticked
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(form).toBeHidden();
@@ -206,11 +207,14 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     // A valid request shows the confirmation and moves focus to it; it is stored as a waitlist request.
     await email.fill(addr);
     const session = Number(await form.locator("input[name='session']").inputValue());
+    await form.getByLabel("Soovin MS LABi uudiseid ja pakkumisi").check();
     await submit.click();
     const sent = full.locator("[data-waitlist-sent]");
     await expect(sent).toHaveText("Aitäh! Oled ootenimekirjas.");
     await expect(sent).toBeFocused();
     expect(await storedRequests(addr)).toEqual([{ kind: "waitlist", payload: { session, course: "kulmude-lami", name: "Test Õpilane", email: addr, locale: "et" } }]);
+    // ticked: the newsletter's own sign-up followed the answer (phase 2c), and the request itself does not carry the box
+    await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
   });
 
   test("a session with two seats left says Viimased kohad and can still be booked", async ({ page }) => {

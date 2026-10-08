@@ -287,6 +287,8 @@ export const et = {
     // Contact-course registration extras (P11, P14, P16)
     modelHelp: "Soovin koolituskeskuse abi modellide leidmisel",
     createAccount: "Loo mulle kohe konto MS LAB keskkonda",
+    // the registration forms' newsletter consent (phase 2c): unticked; ticked, the newsletter's own sign-up follows
+    newsletterConsent: "Soovin MS LABi uudiseid ja pakkumisi",
     paymentLabel: "Tasumine",
     payFull: "100% kohe",
     payHalf: "50% registreerimisel + 50% koolituspäeval",

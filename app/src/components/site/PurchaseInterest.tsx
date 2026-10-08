@@ -6,6 +6,7 @@ import { submitPurchaseInterest } from "@/server/actions/public";
 import { Icon } from "./Icon";
 import ui from "./ui.module.css";
 import styles from "./PurchaseInterest.module.css";
+import checks from "./CourseBuy.module.css";
 
 type State = { status: "idle" } | { status: "sent" } | { status: "error"; message: string; field: boolean };
 
@@ -17,7 +18,7 @@ export function PurchaseInterest({
 }: {
   course: string;
   locale: Locale;
-  t: { email: string; submit: string; sending: string; sent: string; errorEmail: string; errorTooMany: string; errorGeneric: string };
+  t: { email: string; newsletterConsent: string; submit: string; sending: string; sent: string; errorEmail: string; errorTooMany: string; errorGeneric: string };
 }) {
   const id = useId();
   const [email, setEmail] = useState("");
@@ -86,6 +87,10 @@ export function PurchaseInterest({
       />
       <input type="hidden" name="course" value={course} />
       <input type="hidden" name="locale" value={locale} />
+      <label className={checks.check}>
+        <input type="checkbox" name="newsletter" />
+        <span>{t.newsletterConsent}</span>
+      </label>
       <div className={styles.honeypot} aria-hidden="true">
         <label>
           Website

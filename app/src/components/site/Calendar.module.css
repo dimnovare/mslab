@@ -339,6 +339,10 @@
   line-height: 1.5;
 }
 
+.waitlistConsent {
+  grid-column: 1 / -1;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -367,6 +371,7 @@
 
 .waitlistSubmit {
   align-self: end;
+  justify-self: start; /* with the consent line above it the button sits on a row of its own: keep its own width */
 }
 
 .error {

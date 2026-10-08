@@ -6,12 +6,14 @@ import { submitWaitlist } from "@/server/actions/public";
 import { Icon } from "./Icon";
 import ui from "./ui.module.css";
 import styles from "./Calendar.module.css";
+import checks from "./CourseBuy.module.css";
 
 export type WaitlistTexts = {
   title: string;
   lead: string;
   name: string;
   email: string;
+  newsletterConsent: string;
   submit: string;
   sending: string;
   sent: string;
@@ -122,6 +124,10 @@ export function WaitlistForm({ session, context, locale, t }: { session: number;
         <input {...field("email")} type="email" required autoComplete="email" maxLength={200} />
         {err("email")}
       </div>
+      <label className={`${checks.check} ${styles.waitlistConsent}`}>
+        <input type="checkbox" name="newsletter" />
+        <span>{t.newsletterConsent}</span>
+      </label>
       <input type="hidden" name="session" value={session} />
       <input type="hidden" name="locale" value={locale} />
       {/* Honeypot: people never see or fill it. */}

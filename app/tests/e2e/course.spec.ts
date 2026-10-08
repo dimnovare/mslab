@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
-import { LOCAL_FIXTURES, storedRegistrations, storedRequests, testEmail } from "./fixtures";
+import { LOCAL_FIXTURES, storedRegistrations, storedRequests, storedSubscriber, testEmail } from "./fixtures";
 
 // Course pages (Task 8): Maria's P1–P16. The first two tests are the brief's tests, verbatim except:
 // - getByLabel("E-post") also matches the footer newsletter's "Sinu e-post", so it is `exact`;
@@ -34,6 +34,21 @@ test("contact course group registration stays awaiting prepayment", async ({ pag
     expect(await storedRegistrations(addr)).toEqual([
       { kind: "group", status: "awaiting_prepayment", paidCents: 0, paymentChoice: "half", wantsModelHelp: true, locale: "et", course: "kulmumeistri-baaskoolitus", sessionId: session },
     ]);
+});
+test("the newsletter consent ticked on a group registration: an unconfirmed subscriber follows; the message is the group's too (phase 2c)", async ({ page }, info) => {
+  test.skip(!LOCAL_FIXTURES, "reads the local database");
+  submitsForms();
+  const addr = testEmail("register-nl", info.project.name);
+  await page.goto("/koolitused/kulmumeistri-baaskoolitus");
+  await page.getByRole("radio", { name: /Grupikoolitus/ }).check();
+  await page.locator("[data-session]:not([aria-disabled='true'])").first().click();
+  await page.getByLabel("Nimi").fill("Test Õpilane"); await page.getByLabel("E-post", { exact: true }).fill(addr); await page.getByLabel("Telefon").fill("+3725555555");
+  await page.getByRole("radio", { name: /100%/ }).check(); await page.getByLabel(/tingimustega/).check();
+  await page.getByLabel("Soovin MS LABi uudiseid ja pakkumisi").check();
+  await page.getByLabel(/Sõnum/).fill("Kood E2E");
+  await page.getByRole("button", { name: "Registreeru" }).click();
+  await expect(page.getByText(/koht kinnitub pärast ettemaksu/)).toBeVisible();
+  await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
 });
 
 const noErrors = (page: Page) => {
@@ -221,6 +236,8 @@ test.describe("contact page", () => {
     await expect(instalment).not.toBeChecked();
     await expect(form.getByRole("radio", { name: "100% kohe" })).toBeChecked();
     await expect(form.getByLabel("Loo mulle kohe konto MS LAB keskkonda")).toBeVisible();
+    await expect(form.getByLabel("Soovin MS LABi uudiseid ja pakkumisi")).not.toBeChecked(); // phase 2c: unticked
+    await expect(form.getByLabel(/Sõnum/)).toBeVisible(); // the optional message, for the group too (the welcome code goes there)
     await expect(form.getByText("Koht kinnitatakse pärast vähemalt 50% ettemaksu laekumist.")).toBeVisible();
     // Submitting without a date and fields shows errors instead of a success screen, and keeps what was chosen.
     await form.getByRole("radio", { name: /50% registreerimisel/ }).check();
@@ -426,10 +443,14 @@ test.describe("cart (/ostukorv)", () => {
     await expect(form.getByLabel("E-post")).toBeFocused();
     await expect(form.getByLabel("E-post")).toHaveAttribute("aria-invalid", "true");
     await form.getByLabel("E-post").fill(addr);
+    await expect(form.getByLabel("Soovin MS LABi uudiseid ja pakkumisi")).not.toBeChecked(); // phase 2c: the newsletter consent, unticked
+    await form.getByLabel("Soovin MS LABi uudiseid ja pakkumisi").check();
     await form.getByRole("button").click();
     await expect(page.getByText("Aitäh! Anname teada, kui makse on avatud.")).toBeVisible();
-    if (LOCAL_FIXTURES)
+    if (LOCAL_FIXTURES) {
       expect(await storedRequests(addr)).toEqual([{ kind: "contact", payload: { course: "kulmumeistri-e-koolitus", intent: "purchase", email: addr, locale: "et" } }]);
+      await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+    }
   });
 
   test("empty cart without a course or for a contact course", async ({ page }) => {

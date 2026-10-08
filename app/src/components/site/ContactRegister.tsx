@@ -47,6 +47,7 @@ export type ContactRegisterTexts = {
   payInstalmentNote: string;
   modelHelp: string;
   createAccount: string;
+  newsletterConsent: string;
   terms: string;
   termsLink: { label: string; href: string };
   preferredPeriod: string;
@@ -82,7 +83,7 @@ const FIELD_ORDER: Field[] = ["session", "name", "email", "phone", "period", "me
  *   has an individual price, a way to ask for the individual course instead.
  * - Individual: a request with the preferred period or date; Maria agrees the time and the payment afterwards, so there
  *   is no payment choice and no prepayment line.
- * Both: help finding models (P11), create an account (P16), terms.
+ * Both: help finding models (P11), create an account (P16), the newsletter consent and the optional message (phase 2c), terms.
  * After a failed submit, focus goes to the first field with an error (its message is linked with aria-describedby).
  * "?sessioon=12" (the links from the home page and the calendar) preselects that date until the visitor picks one. The
  * page is cached for every visitor, so the address is read in the browser (useUrlQuery: after hydration).
@@ -111,7 +112,7 @@ export function ContactRegister({
   const session = sessionChosen === undefined ? linked : sessionChosen;
   const [values, setValues] = useState({ name: "", email: "", phone: "", period: "", message: "" });
   const [payment, setPayment] = useState<"full" | "half">("full");
-  const [checks, setChecks] = useState({ modelHelp: false, account: false, terms: false });
+  const [checks, setChecks] = useState({ modelHelp: false, account: false, newsletter: false, terms: false });
   const [switched, setSwitched] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const individualRef = useRef<HTMLInputElement>(null);
@@ -343,21 +344,20 @@ export function ContactRegister({
               {err("phone")}
             </div>
             {kind === "individual" && (
-              <>
-                <div className={`${styles.field} ${styles.wide}`}>
-                  <label htmlFor={`${id}-period`}>{t.preferredPeriod}</label>
-                  <input {...text("period")} type="text" required maxLength={200} placeholder={t.preferredPeriodPlaceholder} />
-                  {err("period")}
-                </div>
-                <div className={`${styles.field} ${styles.wide}`}>
-                  <label htmlFor={`${id}-message`}>
-                    {t.message} <span className={styles.optional}>({t.optional})</span>
-                  </label>
-                  <textarea {...text("message")} rows={3} maxLength={2000} />
-                  {err("message")}
-                </div>
-              </>
+              <div className={`${styles.field} ${styles.wide}`}>
+                <label htmlFor={`${id}-period`}>{t.preferredPeriod}</label>
+                <input {...text("period")} type="text" required maxLength={200} placeholder={t.preferredPeriodPlaceholder} />
+                {err("period")}
+              </div>
             )}
+            {/* Optional, for both kinds (phase 2c): the welcome code is written here. */}
+            <div className={`${styles.field} ${styles.wide}`}>
+              <label htmlFor={`${id}-message`}>
+                {t.message} <span className={styles.optional}>({t.optional})</span>
+              </label>
+              <textarea {...text("message")} rows={3} maxLength={2000} />
+              {err("message")}
+            </div>
           </div>
 
           {/* Group only: an individual course's time and payment are agreed with Maria afterwards. */}
@@ -394,6 +394,10 @@ export function ContactRegister({
             <label className={styles.check}>
               <input type="checkbox" name="account" checked={checks.account} onChange={(e) => setChecks((c) => ({ ...c, account: e.target.checked }))} />
               <span>{t.createAccount}</span>
+            </label>
+            <label className={styles.check}>
+              <input type="checkbox" name="newsletter" checked={checks.newsletter} onChange={(e) => setChecks((c) => ({ ...c, newsletter: e.target.checked }))} />
+              <span>{t.newsletterConsent}</span>
             </label>
             <div>
               <label className={styles.check}>
