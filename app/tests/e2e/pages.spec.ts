@@ -564,6 +564,8 @@ test.describe("contact and legal", () => {
     await page.goto("/ru/tingimused");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Условия обучения");
     await page.goto("/konto/sisene");
+    // the dev server's indicator sits at the bottom left, over the phone's legal links (the footer's bottom line is 20 px from the page's end)
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.locator("footer").getByRole("link", { name: "Privaatsus" }).click();
     await expect(page).toHaveURL(/\/privaatsus$/);
     await page.locator("footer").getByRole("link", { name: "Õppetingimused" }).click();

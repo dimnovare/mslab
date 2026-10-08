@@ -1,20 +1,11 @@
-/* Prototype D .blogp / .news.dk / .car (blog panel on the home page, Maria photo_5 reference). */
+/* The home page's news block (phase 2c, Maria 06.10): a full-width band in the canvas colour, as "Kuidas soovid õppida?"
+   (FormatsBlock), its content in the page's wrap; the cards in the light card style of the news list (NewsCard: 4:3 photo,
+   date · category, Jost title, excerpt) on paper; a scroll-snap row with "Kõik postitused" and the previous / next buttons
+   (aria-disabled at the ends). Tokens only. */
 
 .section {
-  padding: clamp(24px, 3vw, 40px) 0 clamp(56px, 7vw, 100px);
-}
-
-.panel {
-  --pi: clamp(24px, 4.5vw, 64px);
-  overflow: hidden;
-  padding: clamp(28px, 4.5vw, 64px) 0;
-  border-radius: var(--r-tile);
-  background: var(--ink);
-  color: #fff;
-}
-
-.eyebrow {
-  color: var(--iced);
+  padding: clamp(72px, 8vw, 120px) 0;
+  background: var(--canvas);
 }
 
 .head {
@@ -22,22 +13,21 @@
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 16px 48px;
   align-items: end;
-  padding: 0 var(--pi);
 }
 
 .lead {
   justify-self: end;
   max-width: 420px;
   margin: 0;
-  color: var(--fog);
+  color: var(--muted);
   font-size: 16px;
   line-height: 1.55;
 }
 
 .rule {
   height: 1px;
-  margin: clamp(24px, 3vw, 40px) var(--pi);
-  background: rgba(255, 255, 255, 0.14);
+  margin: clamp(24px, 3vw, 40px) 0;
+  background: var(--line);
 }
 
 .track {
@@ -45,10 +35,9 @@
   grid-auto-columns: min(80%, 340px);
   grid-auto-flow: column;
   gap: 18px;
-  padding: 4px var(--pi) 8px;
+  padding: 4px 0 8px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  scroll-padding: 0 var(--pi);
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
 }
@@ -58,25 +47,28 @@
 }
 
 .track:focus-visible {
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
-/* D .news.dk */
+/* NewsCard .card, on paper (the band is canvas) */
 .card {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 10px;
-  border-radius: 22px;
-  background: #2e2c2d;
-  color: #fff;
+  overflow: hidden;
+  border-radius: var(--r-card);
+  background: var(--paper);
+  color: var(--ink);
   text-decoration: none;
   scroll-snap-align: start;
-  transition: transform 0.45s var(--ease);
+  transition:
+    transform 0.45s var(--ease),
+    box-shadow 0.45s var(--ease);
 }
 
 .card:hover {
   transform: translateY(-4px);
+  box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
 .photo {
@@ -84,7 +76,7 @@
   display: block;
   aspect-ratio: 4 / 3;
   overflow: hidden;
-  border-radius: 14px;
+  background: var(--first);
 }
 
 .image {
@@ -101,13 +93,11 @@
   flex: 1;
   flex-direction: column;
   gap: 10px;
-  margin-top: 14px;
-  padding: 18px 12px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 22px 24px 26px;
 }
 
 .meta {
-  color: var(--iced);
+  color: var(--muted);
   font: 500 12px/1.2 var(--font-body);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -120,9 +110,9 @@
 }
 
 .excerpt {
-  color: var(--fog);
-  font-size: 14px;
-  line-height: 1.5;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
 }
 
 .foot {
@@ -130,7 +120,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px var(--pi) 0;
+  padding-top: 24px;
 }
 
 .buttons {
@@ -144,16 +134,16 @@
   width: 44px;
   height: 44px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--line);
   border-radius: 50%;
-  background: transparent;
-  color: #fff;
+  background: var(--paper);
+  color: var(--ink);
   cursor: pointer;
   transition: border-color 0.3s;
 }
 
 .buttons button:hover:not([aria-disabled="true"]) {
-  border-color: #fff;
+  border-color: var(--ink);
 }
 
 .buttons button[aria-disabled="true"] {

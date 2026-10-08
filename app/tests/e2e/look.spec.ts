@@ -50,3 +50,45 @@ test("the phone menu is Jost too", async ({ page, isMobile }) => {
   const link = page.getByRole("dialog").getByRole("link", { name: "Praktika" });
   expect(await link.evaluate((e) => getComputedStyle(e).fontFamily)).toMatch(/Jost/i);
 });
+
+test("the home page's news block is a full-width band in the canvas colour, its cards on paper", async ({ page }) => {
+  await page.goto("/");
+  const band = page.locator("[data-news-band]");
+  await expect(band).toHaveAccessibleName("Uudised ja nõuanded");
+  const box = (await band.boundingBox())!;
+  const width = await page.evaluate(() => document.documentElement.clientWidth);
+  expect([Math.round(box.x), Math.round(box.width)]).toEqual([0, width]);
+  expect(await band.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(246, 244, 245)"); // --canvas
+  const card = band.getByRole("link", { name: /Kuidas valida endale sobiv kulmukoolitus/ });
+  expect(await card.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 255, 255)"); // --paper
+});
+
+test("the footer at 1440: the links at the left, the newsletter card at the right, at most 460 px high", async ({ page, isMobile }) => {
+  test.skip(isMobile, "1440 wide");
+  await page.goto("/");
+  const footer = page.locator("footer");
+  expect((await footer.boundingBox())!.height).toBeLessThanOrEqual(460);
+  const card = (await footer.locator("[data-footer-newsletter]").boundingBox())!;
+  const links = (await footer.getByRole("link", { name: "Kõik koolitused" }).boundingBox())!;
+  expect(card.x).toBeGreaterThan(links.x);
+  expect(card.y).toBeLessThan(links.y + links.height); // side by side, not under each other
+  await expect(footer.getByRole("heading", { level: 2, name: /Hea järgmine samm/ })).toHaveCSS("font-size", "28px");
+});
+
+test("below 900 px the newsletter card comes first, then the links; no page overflows at the check widths", async ({ page, isMobile }) => {
+  test.skip(isMobile, "the widths are set here");
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 834, height: 1112 });
+  await page.goto("/");
+  const footer = page.locator("footer");
+  const card = (await footer.locator("[data-footer-newsletter]").boundingBox())!;
+  const links = (await footer.getByRole("link", { name: "Kõik koolitused" }).boundingBox())!;
+  expect(card.y + card.height).toBeLessThanOrEqual(links.y);
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const path of ["/", "/ru", "/kontakt"]) {
+      await page.goto(path);
+      expect(await noOverflow(page), `${path} @ ${width}`).toBe(true);
+    }
+  }
+});
