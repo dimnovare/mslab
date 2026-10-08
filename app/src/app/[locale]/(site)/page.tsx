@@ -101,10 +101,11 @@ export default async function Home({ params }: Props) {
   const trainerName = trainer.name || pick(bio?.title, locale);
 
   // The newsletter confirmation link (/api/newsletter/confirm) lands here with ?uudiskiri=kinnitatud | vigane | viga.
-  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice).
+  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice); the first confirmation carries
+  // the welcome code in the fragment (#kood=…), which the notice shows (phase 2c): the page's HTML never holds the code.
   const nl = d.newsletter;
   const newsletterNotices: Record<string, FlashMessage> = {
-    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText },
+    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText, codeLine: nl.codeLine },
     vigane: { tone: "warn", title: nl.linkInvalid },
     viga: { tone: "warn", title: d.forms.errorGeneric },
   };

@@ -931,7 +931,7 @@ export const adminEt = {
     close: "Sulge",
     rules: "Reeglid",
     rulesList: [
-      "Kuvatakse esilehel 6 sekundi pärast",
+      "Kuvatakse avalehel 6 sekundi pärast",
       "Kord külastuse jooksul",
       "Korraga üks aken: kampaania või uudiskiri",
       "Uudiskirja akent ei näidata enam brauseris, kust sellega liituti",
@@ -943,7 +943,7 @@ export const adminEt = {
   settings: {
     eyebrow: "Seaded",
     title: "Seaded",
-    lead: "Kontaktandmed, sotsiaalmeedia lingid, uudiskirja soodustus, ettemaksu juhised, õigustekstid ja e-koolituse tingimused.",
+    lead: "Kontaktandmed, sotsiaalmeedia lingid, uudiskirja soodustus ja tervituskood, ettemaksu juhised, õigustekstid ja e-koolituse tingimused.",
     contact: "Kontaktandmed",
     contactLead: "Jaluses ja kontaktilehel. Tühja välja ei näidata.",
     email: "E-post",
@@ -956,6 +956,8 @@ export const adminEt = {
     newsletter: "Uudiskiri",
     discount: "Tervitussoodustus",
     discountHint: "Jaluse uudiskirja plokis: „… {discount} tervitussoodustus sinu esimesele koolitusele.“ Näiteks 10%.",
+    welcomeCode: "Tervituskood",
+    welcomeCodeHint: "Saadetakse tervituskirjas pärast uudiskirja kinnitamist ja näidatakse avalehel kinnitusteates; hüpikaknas seda ei näidata. Tühjaks jättes koodi ei saadeta. Tähed A–Z, numbrid ja sidekriips, kuni 30 märki.",
     // where students pay the prepayment: on the unpaid contact-course cards of their account (never on a public page)
     prepayment: "Ettemaksu juhised",
     prepaymentLead: "Õpilase kontol, kontaktkoolituse kaardil, mis ootab ettemaksu.",

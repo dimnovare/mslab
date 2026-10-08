@@ -305,7 +305,7 @@ export const kvEntries = pgTable(
   (t) => [index("kv_entries_expires_at").on(t.expiresAt).where(sql`${t.expiresAt} is not null`)],
 );
 export const settings = pgTable("settings", { key: text("key").primaryKey(), value: jsonb("value").notNull() });
-// keys: "contact" {email, phone, address, instagram, facebook}, "newsletter" {discountLabel}, "trainer" {portraitKey, name, role: I18n, stats: [{value,label:I18n}]}, "prepayment" {receiver, iban, bank, referencePrefix}
+// keys: "contact" {email, phone, address, instagram, facebook}, "newsletter" {discountLabel, welcomeCode}, "trainer" {portraitKey, name, role: I18n, stats: [{value,label:I18n}]}, "prepayment" {receiver, iban, bank, referencePrefix}
 
 export const authTokens = pgTable("auth_tokens", { hash: text("hash").primaryKey(), email: text("email").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(), usedAt: timestamp("used_at", { withTimezone: true }) });
 export const adminSessions = pgTable("admin_sessions", { idHash: text("id_hash").primaryKey(), email: text("email").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull() });

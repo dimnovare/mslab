@@ -20,7 +20,8 @@ export const dynamic = "force-static";
  * (the preview cookie) see the site. Outside the site's shell (no header, footer or review widget): the logo, the
  * heading, one line and the newsletter's own sign-up (the subscribe action, double opt-in; its line under "Liitu" has no
  * privacy link here: the gate does not serve /privaatsus to visitors). The confirmation link sends
- * the visitor to "/?uudiskiri=…", which is this page here: the notice reads the address in the browser (FlashNotice).
+ * the visitor to "/?uudiskiri=…", which is this page here: the notice reads the address in the browser (FlashNotice), and with the
+ * welcome code in the fragment (#kood=…, phase 2c) it shows the code too: while the gate is on, every real subscriber lands here.
  * Not a page of the site: with the gate off, or for an admin, /tulekul/et is the 404 page (lib/site-routing.ts). The title,
  * description and noindex are the layout's.
  */
@@ -30,7 +31,7 @@ export default async function ComingSoon({ params }: Props) {
   const d = getDict(locale);
   const nl = d.newsletter;
   const notices: Record<string, FlashMessage> = {
-    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText },
+    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText, codeLine: nl.codeLine },
     vigane: { tone: "warn", title: d.gate.linkInvalid },
     viga: { tone: "warn", title: d.forms.errorGeneric },
   };

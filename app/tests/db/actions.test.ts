@@ -539,15 +539,15 @@ describe("newsletter double opt-in", () => {
     });
   });
 
-  test("confirmSubscriber sets confirmedAt once; unknown or malformed tokens are null", async () => {
+  test("confirmSubscriber sets confirmedAt once and says whether this was the first time; unknown or malformed tokens are null", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const { deps } = setup();
     await signUp(deps);
     const [sub] = await db.select().from(subscribers);
     const first = await confirmSubscriber(db, sub.token, new Date("2026-10-03T00:00:00Z"));
-    expect(first?.confirmedAt).toEqual(new Date("2026-10-03T00:00:00Z"));
+    expect(first).toMatchObject({ first: true, sub: { confirmedAt: new Date("2026-10-03T00:00:00Z") } });
     const again = await confirmSubscriber(db, sub.token, new Date("2026-10-04T00:00:00Z"));
-    expect(again?.confirmedAt).toEqual(new Date("2026-10-03T00:00:00Z"));
+    expect(again).toMatchObject({ first: false, sub: { confirmedAt: new Date("2026-10-03T00:00:00Z") } });
     expect(await confirmSubscriber(db, "x".repeat(43), NOW)).toBeNull();
     expect(await confirmSubscriber(db, "", NOW)).toBeNull();
     expect(await confirmSubscriber(db, "' or 1=1 --", NOW)).toBeNull();

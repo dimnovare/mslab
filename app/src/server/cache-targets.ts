@@ -19,7 +19,7 @@ export type PublicChange =
   | { kind: "trainer"; parts: string[] }
   /** a post saved or deleted */
   | { kind: "posts" }
-  /** Kampaania (the home page popup) */
+  /** Hüpikaken (the home page's popup: the campaign or the newsletter sign-up) */
   | { kind: "campaign" }
   /** Seaded: contact and newsletter (footer, every page), privacy, terms; `course_terms` (the e-course terms) and `prepayment` show on no public page */
   | { kind: "settings"; parts: string[] };

@@ -349,6 +349,8 @@ export const et = {
     confirmText: "Saatsime sulle kinnituskirja. Vajuta kirjas olevale lingile, et liitumine lõpule viia.",
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
+    // the confirmed notice's line when Seaded has a welcome code (the confirmation link's #kood=…, phase 2c)
+    codeLine: "Sinu tervituskood: {code}. Lisa kood registreerimisel lahtrisse „Sõnum“.",
     sentTitle: "Kontrolli oma postkasti",
     // the newsletter popup's answer after a sign-up (components/site/NewsletterPopup.tsx, phase 2c)
     popupSent: "Saatsime sulle kinnituslingi. Ava see oma postkastis.",
@@ -369,6 +371,14 @@ export const et = {
       "",
       "MS LAB Koolituskeskus",
     ].join("\n"),
+    // The welcome mail after the first confirmation (server/account-mail.ts welcomeMail, phase 2c): the code is Seaded "Tervituskood".
+    welcome: {
+      subject: "Tere tulemast MS LABi!",
+      intro: "Aitäh, et liitusid MS LABi uudiskirjaga.",
+      codeIntro: "Sinu tervituskood:",
+      use: "Lisa kood registreerimisel lahtrisse „Sõnum“.",
+      invoice: "Maria arvestab soodustuse sinu arvelt maha.",
+    },
   },
 
   // /ostukorv: e-learning purchase placeholder until bank-link payment arrives (P9).

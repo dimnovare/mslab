@@ -42,7 +42,7 @@ export const savePractice = adminAction(async (_admin, _prev: EditResult | null,
 /** Koolitaja "Salvesta": field data ({ parts: trainer | bio | works | center_story | trainer_journey }). */
 export const saveTrainer = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("trainer save", (r) => ({ kind: "trainer", parts: savedParts(r) }), (db) => saveTrainerForm(db, formData)));
 
-/** Kampaania "Salvesta": field data ({ parts: campaign }). */
+/** Hüpikaken "Salvesta": field data ({ parts: campaign and/or newsletter }). */
 export const saveCampaign = adminAction(async (_admin, _prev: EditResult | null, formData: FormData) => run("campaign save", () => ({ kind: "campaign" }), (db) => saveCampaignForm(db, formData)));
 
 /** Seaded "Salvesta": field data ({ parts: contact | newsletter | prepayment | privacy | terms | course_terms }). */

@@ -545,6 +545,26 @@ test.describe("settings", () => {
     await expect(page.locator("[data-contact-details]").getByRole("link", { name: /instagram\.com\/mslab\.e2e/ })).toBeVisible();
   });
 
+  test("Tervituskood: saved in Seaded; the first confirmation link lands on the home page with the code, the second without", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "desktop changes the newsletter setting");
+    await changing(["settings", { column: "key", value: "newsletter" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/seaded");
+    await adminReady(page);
+    await page.getByRole("textbox", { name: "Tervituskood", exact: true }).fill("e2e-tere");
+    await save(page);
+    expect(await one((sql) => sql<{ code: string }[]>`select value->>'welcomeCode' as code from settings where key = 'newsletter'`)).toEqual({ code: "E2E-TERE" });
+    const addr = testEmail("welcome", info.project.name);
+    const token = "w".repeat(40) + info.project.name.slice(0, 3).padEnd(3, "x");
+    await onLocalDb((sql) => sql`insert into subscribers (email, locale, token) values (${addr}, 'et', ${token})`, { marksPages: false });
+    await page.goto(`/api/newsletter/confirm?t=${token}`);
+    await expect(page.locator("[data-flash-code]")).toHaveText("Sinu tervituskood: E2E-TERE. Lisa kood registreerimisel lahtrisse „Sõnum“.");
+    expect(new URL(page.url()).hash).toBe(""); // the fragment is gone from the address
+    await page.goto(`/api/newsletter/confirm?t=${token}`);
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "ok");
+    await expect(page.locator("[data-flash-code]")).toHaveCount(0);
+  });
+
   test("the privacy page in two paragraphs, text typed during a save is kept; the admin addresses are shown, not editable", async ({ page, context, visitorIp }, info) => {
     test.skip(!phone(info), "the phone project changes the privacy page; desktop the contact settings");
     await changing(["pages", { column: "key", value: "privacy" }]);

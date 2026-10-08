@@ -489,6 +489,18 @@ describe("settings", () => {
     expect(await getPage(db, "privacy")).toMatchObject({ title: { et: "Privaatsuspoliitika" }, body: { et: "Esimene.\n\nTeine.", ru: "Первый." } });
   });
 
+  test("Tervituskood: stored in capitals next to the discount; another shape or over 30 is refused; a save without it keeps it", async () => {
+    const s = await loadSettings(db);
+    const save = (value: object) => saveSettingsForm(db, form({ newsletter: { version: s.versions.newsletter, value } }));
+    expect(fieldsOf(await save({ discountLabel: "10%", welcomeCode: "tere 10" }))).toEqual({ "newsletter.welcomeCode": "codeFormat" });
+    expect(fieldsOf(await save({ discountLabel: "10%", welcomeCode: "A".repeat(31) }))).toEqual({ "newsletter.welcomeCode": "tooLong" });
+    expect(await save({ discountLabel: "10%", welcomeCode: " tere-10 " })).toMatchObject({ ok: true });
+    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "10%", welcomeCode: "TERE-10" });
+    const t = await loadSettings(db);
+    expect(await saveSettingsForm(db, form({ newsletter: { version: t.versions.newsletter, value: { discountLabel: "15%" } } }))).toMatchObject({ ok: true });
+    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%", welcomeCode: "TERE-10" });
+  });
+
   describe("E-koolituse tingimused (course_terms)", () => {
     const stored = async () => ({
       page: await getPage(db, "course_terms"),
@@ -702,7 +714,7 @@ describe("missing rows", () => {
     await db.delete(settings).where(eq(settings.key, "newsletter"));
     const s = await loadSettings(db);
     expect(s.values.terms).toEqual({ title: { et: "" }, body: { et: "" } });
-    expect(s.values.newsletter).toEqual({ discountLabel: "" });
+    expect(s.values.newsletter).toEqual({ discountLabel: "", welcomeCode: "" });
     const r = await saveSettingsForm(
       db,
       form({ terms: { version: s.versions.terms, value: { title: { et: "Tingimused" }, body: { et: "Tekst." } } }, newsletter: { version: s.versions.newsletter, value: { discountLabel: "10%" } } }),

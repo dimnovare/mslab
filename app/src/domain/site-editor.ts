@@ -306,8 +306,9 @@ export function contactDraft(value: unknown): ContactDraft {
   return { email: str(c.email), phone: str(c.phone), address: str(c.address), instagram: str(c.instagram), facebook: str(c.facebook) };
 }
 
-export type NewsletterDraft = { discountLabel: string };
-export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountLabel: str(obj(value).discountLabel) });
+/** Seaded "Uudiskiri" (settings key "newsletter"): the discount label and the welcome code ("Tervituskood", phase 2c; "" = none). */
+export type NewsletterDraft = { discountLabel: string; welcomeCode: string };
+export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountLabel: str(obj(value).discountLabel), welcomeCode: str(obj(value).welcomeCode) });
 
 /** Seaded "Ettemaksu juhised" (settings key "prepayment"): where students pay, shown on their unpaid contact-course cards. */
 export type PrepaymentDraft = { receiver: string; iban: string; bank: string; referencePrefix: string };

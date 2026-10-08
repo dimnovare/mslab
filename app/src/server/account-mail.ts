@@ -154,6 +154,27 @@ export function deletionMail(email: string, locale: Locale): Mail {
   return { to: email, subject, text, html };
 }
 
+/**
+ * The welcome mail after an address's first newsletter confirmation (phase 2c, server/newsletter.ts sendWelcome): the welcome code
+ * large (the login code's lilac box) and how to use it, with no button. Plain text and HTML. The caller never sends it to a sample
+ * address or in development.
+ */
+export function welcomeMail(email: string, code: string, locale: Locale): Mail {
+  const w = getDict(locale).mail.welcome;
+  const mail = getDict(locale).account.mail;
+  const text = [mail.greeting, "", w.intro, "", w.codeIntro, "", code, "", w.use, w.invoice, "", mail.signature].join("\n");
+  const html = mailCard(w.subject, locale, [
+    greetingRow(mail.greeting),
+    paragraphRow(w.intro),
+    paragraphRow(w.codeIntro),
+    codeRow(code),
+    paragraphRow(w.use),
+    paragraphRow(w.invoice, 8),
+    signatureRow(mail),
+  ]);
+  return { to: email, subject: w.subject, text, html };
+}
+
 // ---------- confirmation e-mails to a visitor ----------
 
 /** A live login (server/client-auth.ts issueClientLogin) a confirmation e-mail may carry: the link token and the 6-digit code. */

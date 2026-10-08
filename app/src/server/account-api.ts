@@ -23,6 +23,7 @@ import { attachmentHeader, FILE_URL_TTL_SEC } from "./lesson-files";
 import { logFailure, logNote } from "./log";
 import type { FileStore } from "./media";
 import { changeRequestSummary } from "./messages";
+import { clientNewsletter, sendWelcome } from "./newsletter";
 import { adminUrl, notifyMaria, sendMail, type Env } from "./notify";
 import { isPrefetch } from "./prefetch";
 import { clientIp, rateKey, rateLimit, windowKey } from "./ratelimit";
@@ -447,13 +448,20 @@ async function profile(request: Request, deps: AccountDeps): Promise<Response> {
   return (await updateProfile(deps.db, session.clientId, input.data)) ? clientResponse(session, { ok: true }) : unauthorized("none");
 }
 
-/** POST /uudiskiri `{ on }`: the account's address subscribes (confirmed: the login proved it) or unsubscribes. 200 `{ ok: true }`. */
+/**
+ * POST /uudiskiri `{ on }`: the account's address subscribes (confirmed: the login proved it) or unsubscribes. 200 `{ ok: true }`. Switched
+ * on and confirmed now for the first time: the welcome mail with Seaded's code after the response (phase 2c; server/newsletter.ts
+ * sendWelcome: once per address, never in development, never to a sample address).
+ */
 async function newsletter(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
   const input = parseNewsletter(await readObject(request));
   if (!input.ok) return badInput(session, input.error);
-  return (await setNewsletter(deps.db, session.clientId, input.data.on, deps.now)) ? clientResponse(session, { ok: true }) : unauthorized("none");
+  const before = input.data.on ? await clientNewsletter(deps.db, session.clientId) : null;
+  if (!(await setNewsletter(deps.db, session.clientId, input.data.on, deps.now))) return unauthorized("none");
+  if (before && before.state !== "yes" && !deps.dev) deps.later(() => sendWelcome(deps, { email: before.email, locale: before.locale }));
+  return clientResponse(session, { ok: true });
 }
 
 /**

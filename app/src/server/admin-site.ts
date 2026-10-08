@@ -58,6 +58,7 @@ import {
   type TrainerDraft,
   type WorkDraft,
 } from "@/domain/site-editor";
+import { isWelcomeCode, normalizeWelcomeCode, WELCOME_CODE_MAX } from "@/domain/welcome-code";
 import type { I18n } from "@/i18n/field";
 import { isSlug, SLUG_MAX, slugify } from "@/lib/slug";
 import { contentVersion } from "@/lib/version";
@@ -408,7 +409,7 @@ const campaignParts: Parts = {
 export const loadCampaign = async (q: Q) => (await loadParts(q, campaignParts)) as SavedParts & { values: { campaign: CampaignDraft; newsletter: NewsletterPopupDraft } };
 export const saveCampaignForm = (db: Db, formData: FormData) => saveParts(db, campaignParts, formData);
 
-// ---------- Seaded: contact details, newsletter discount, prepayment instructions, legal pages, the e-course terms ----------
+// ---------- Seaded: contact details, newsletter discount and welcome code, prepayment instructions, legal pages, the e-course terms ----------
 
 export type SettingsValues = {
   contact: ContactDraft;
@@ -438,14 +439,19 @@ const settingsParts: Parts = {
       return (tx, stored) => setSetting(tx, "contact", { ...obj(stored), ...values });
     },
   }),
-  newsletter: part<NewsletterDraft>({
+  // the editor always sends welcomeCode; a body without it (an older page) keeps the stored one
+  newsletter: part<{ discountLabel: string; welcomeCode?: string }>({
     tables: ["settings"],
-    schema: z.object({ discountLabel: text(400) }),
+    schema: z.object({ discountLabel: text(400), welcomeCode: text(400).optional() }),
     read: (q) => readSetting(q, "newsletter"),
     draft: newsletterDraft,
     check: (c, v, name) => {
       const discountLabel = c.plain(`${name}.discountLabel`, v.discountLabel, L.discount, { required: true });
-      return (tx, stored) => setSetting(tx, "newsletter", { ...obj(stored), discountLabel });
+      // "Tervituskood" (phase 2c): A–Z, 0–9 and "-", at most 30, stored in capitals; empty = no welcome code
+      const welcomeCode = v.welcomeCode === undefined ? undefined : normalizeWelcomeCode(v.welcomeCode);
+      if (welcomeCode !== undefined && welcomeCode.length > WELCOME_CODE_MAX) c.fail(`${name}.welcomeCode`, "tooLong");
+      else if (welcomeCode !== undefined && !isWelcomeCode(welcomeCode)) c.fail(`${name}.welcomeCode`, "codeFormat");
+      return (tx, stored) => setSetting(tx, "newsletter", { ...obj(stored), discountLabel, ...(welcomeCode === undefined ? {} : { welcomeCode }) });
     },
   }),
   // "Ettemaksu juhised": where students pay the prepayment (account-only: the unpaid contact-course cards). Every field may

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { readSetting } from "@/db/queries/public";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
@@ -486,12 +486,14 @@ export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionR
   });
 }
 
-/** The confirmation link: sets `confirmedAt` once (later clicks keep the first time). null = unknown token. */
-export async function confirmSubscriber(db: Db, token: string, now: Date): Promise<Subscriber | null> {
+/**
+ * The confirmation link: sets `confirmedAt` once (later clicks keep the first time). `first` is true for the click that confirmed it
+ * (the welcome mail follows that one only, server/newsletter.ts). null = unknown token.
+ */
+export async function confirmSubscriber(db: Db, token: string, now: Date): Promise<{ sub: Subscriber; first: boolean } | null> {
   if (!isTokenShape(token)) return null;
+  const [confirmed] = await db.update(subscribers).set({ confirmedAt: now }).where(and(eq(subscribers.token, token), isNull(subscribers.confirmedAt))).returning();
+  if (confirmed) return { sub: confirmed, first: true };
   const [row] = await db.select().from(subscribers).where(eq(subscribers.token, token)).limit(1);
-  if (!row) return null;
-  if (row.confirmedAt) return row;
-  const [updated] = await db.update(subscribers).set({ confirmedAt: now }).where(eq(subscribers.id, row.id)).returning();
-  return updated ?? row;
+  return row ? { sub: row, first: false } : null;
 }

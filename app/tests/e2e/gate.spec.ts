@@ -146,6 +146,42 @@ test.describe("a visitor", () => {
     }
   });
 
+  test("the welcome code (phase 2c): the first confirmation lands on the coming-soon page with #kood=… and the notice shows the code, in the subscriber's language; the second click shows none", async ({ page }, info) => {
+    test.skip(info.project.name !== "w1440", "sets Seaded's welcome code once, on the desktop project");
+    submitsForms();
+    const subscribers = [
+      { addr: testEmail("gate-code-et", info.project.name), locale: "et", token: "g".repeat(40) + "et1", line: "Sinu tervituskood: E2E-GATE. Lisa kood registreerimisel lahtrisse „Sõnum“.", path: "/" },
+      { addr: testEmail("gate-code-ru", info.project.name), locale: "ru", token: "g".repeat(40) + "ru1", line: "Ваш приветственный код: E2E-GATE. Укажите его при регистрации в поле «Сообщение».", path: "/ru" },
+    ];
+    // the setting as it was (the row may be missing): put back below. No public page shows the welcome code, so no page is marked stale.
+    const before = await onLocalDb((sql) => sql<{ value: object }[]>`select value from settings where key = 'newsletter'`, { marksPages: false });
+    try {
+      await onLocalDb(async (sql) => {
+        const value = sql.json({ ...(before[0]?.value ?? { discountLabel: "10%" }), welcomeCode: "E2E-GATE" });
+        await sql`insert into settings (key, value) values ('newsletter', ${value}) on conflict (key) do update set value = excluded.value`;
+        for (const s of subscribers) await sql`insert into subscribers (email, locale, token) values (${s.addr}, ${s.locale}, ${s.token})`;
+      }, { marksPages: false });
+      for (const s of subscribers) {
+        await page.goto(`/api/newsletter/confirm?t=${s.token}`);
+        await expectComingSoon(page, s.locale === "ru" ? HEADING_RU : HEADING_ET);
+        await expect(page.locator("[data-flash-notice='ok']")).toBeVisible();
+        await expect(page.locator("[data-flash-code]")).toHaveText(s.line);
+        // the notice has taken the fragment out of the address; the server's own HTML of the page never held the code
+        await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search + new URL(page.url()).hash).toBe(s.path);
+        expect(await (await page.request.get(s.path)).text()).not.toContain("E2E-GATE");
+        await page.goto(`/api/newsletter/confirm?t=${s.token}`);
+        await expect(page.locator("[data-flash-notice='ok']")).toBeVisible();
+        await expect(page.locator("[data-flash-code]")).toHaveCount(0);
+      }
+    } finally {
+      await onLocalDb(async (sql) => {
+        if (before[0]) await sql`update settings set value = ${sql.json(before[0].value as never)} where key = 'newsletter'`;
+        else await sql`delete from settings where key = 'newsletter'`;
+        for (const s of subscribers) await sql`delete from subscribers where email = ${s.addr}`;
+      }, { marksPages: false });
+    }
+  });
+
   test("a Russian sign-up from /ru", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("gate-ru", info.project.name);
