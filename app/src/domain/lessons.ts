@@ -71,6 +71,29 @@ export function openedClock(clockAt: Date | null, now: Date): Date {
   return clockAt !== null && clockAt > now ? clockAt : now;
 }
 
+/** How far past the furthest point watched a timeupdate may be and still count (Bunny reports a few times a second; 2× moves about 1 s). */
+export const SEEK_TOLERANCE_SEC = 3;
+/** "ended" counts as the end of the video only this close to it. */
+export const END_TOLERANCE_SEC = 5;
+
+/** One timeupdate's effect: the new furthest point, and where to send the player back to (null: nowhere). */
+export type SeekStep = { furthest: number; back: number | null };
+
+/**
+ * The seek lock (spec 3, the player's side): a timeupdate at most 3 s past `furthest` counts (furthest grows, capped at the length); one
+ * further on is a jump forward, so the player goes back to `furthest` (Player.js setCurrentTime) and furthest stays. An earlier second
+ * (a rewind) changes nothing. The server's progress clock (acceptProgress) is the real rule; this keeps an honest player honest.
+ */
+export function seekStep(furthest: number, seconds: number, durationSec: number): SeekStep {
+  if (seconds > furthest + SEEK_TOLERANCE_SEC) return { furthest, back: furthest };
+  return { furthest: Math.max(furthest, Math.min(seconds, durationSec)), back: null };
+}
+
+/** The furthest point after "ended": the whole length when it was already within 5 s of the end, else unchanged. */
+export function endedAt(furthest: number, durationSec: number): number {
+  return furthest >= durationSec - END_TOLERANCE_SEC ? durationSec : furthest;
+}
+
 /** A video's length as the admin reads it: "12:34", "1:02:03". */
 export function formatDuration(totalSec: number): string {
   const s = Math.max(0, Math.round(totalSec));

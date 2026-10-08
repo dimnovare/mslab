@@ -94,6 +94,23 @@
   padding: 8px 0;
 }
 
+/* the line under the picture after a jump forward was taken back: a polite live region, empty (no height) otherwise */
+.seekNote {
+  margin: 0;
+  color: var(--ink-soft);
+  font: 400 14px/1.5 var(--font-body);
+}
+
+.seekNote:not(:empty) {
+  padding-top: 8px;
+}
+
+.player:fullscreen .seekNote,
+.player[data-expanded] .seekNote {
+  padding-inline: 16px;
+  color: var(--paper);
+}
+
 .player:fullscreen,
 .player[data-expanded] {
   background: var(--ink);

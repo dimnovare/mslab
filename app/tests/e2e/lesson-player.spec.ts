@@ -14,7 +14,8 @@ import { submitsForms, test, expect } from "./test";
 // fullscreen with the Fullscreen API and without it (an iPhone), with the watermark on the picture in every corner, upright and
 // sideways; the resume point; and (Task 8b) an upright video (1080 × 1920 in the fake Bunny, stored by the app through the webhook
 // and handed to the player by the lesson API): the frame has its shape, is capped in height and centred at normal size, and is the
-// largest upright box that fits, centred, when enlarged, with the watermark on the picture each time. Clients are sample addresses (`e2e-client-…@example.test`, never
+// largest upright box that fits, centred, when enlarged, with the watermark on the picture each time; and (phase 2c) the seek lock: a
+// jump forward is sent back to the furthest point watched, with the line under the player. Clients are sample addresses (`e2e-client-…@example.test`, never
 // mailed); the lesson API checks the course terms, so the terms are taken (takeTerms) just for reading the lesson.
 
 const made = new Set<string>();
@@ -73,6 +74,12 @@ const subscribed = (frame: Frame) =>
 /** Posts a Player.js event from `frame`'s window to its parent, as the player would. */
 const postFromPlayer = (frame: Frame, event: string, value?: unknown) =>
   frame.evaluate(([e, v]) => parent.postMessage(JSON.stringify({ context: "player.js", version: "0.0.11", event: e, value: v }), "*"), [event, value] as const);
+
+/** The fake player playing from `from` to `to`: Player.js timeupdates a second apart, as a playing video sends them (the seek lock takes back a jump of more than 3 s). */
+async function playFrom(frame: Frame, from: number, to: number, duration = 125) {
+  for (let s = Math.floor(from) + 1; s < to; s++) await postFromPlayer(frame, "timeupdate", { seconds: s, duration });
+  await postFromPlayer(frame, "timeupdate", { seconds: to, duration });
+}
 
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
@@ -202,7 +209,7 @@ test("only the player's frame is heard (its origin and its window); leaving the 
   });
   // the player at 30.6 s, then the student leaves (no pause): the report goes out as the page goes away (Playwright no longer sees
   // a request of a page being unloaded, so the database is the witness; one report and not two: lesson-player.test.ts)
-  await postFromPlayer(fake, "timeupdate", { seconds: 30.6, duration: 125 });
+  await playFrom(fake, 0, 30.6);
   expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 0, done: false });
   await page.goto("/konto");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 30, done: false });
@@ -301,7 +308,7 @@ test("resume: the frame starts at the saved second (t=40) and the reports begin 
   // within the saved second: nothing to say; past it: reported (the messages are handled in order)
   await postFromPlayer(fake, "timeupdate", { seconds: 40.8, duration: 125 });
   await postFromPlayer(fake, "pause");
-  await postFromPlayer(fake, "timeupdate", { seconds: 45.2, duration: 125 });
+  await playFrom(fake, 40.8, 45.2);
   await postFromPlayer(fake, "pause");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 45, done: false });
   expect(reports).toEqual([{ watchedSec: 45 }]);
@@ -398,4 +405,23 @@ test("a 4:3 video (a mixed course): at normal size it fills the column like a wi
 test("a video stored with a quarter turn (1920 × 1080, rotation 90: a phone held upright) is handed to the player as 1080 × 1920", async ({ page }, info) => {
   const { view } = await student(page, "turned", info.project.name, { shape: { width: 1920, height: 1080, rotation: 90 } });
   expect(view.video.shape).toEqual({ width: 1080, height: 1920 });
+});
+
+test("the seek lock: a jump forward is taken back to the furthest point watched (setCurrentTime), with the line under the player; rewinding is free", async ({ page }, info) => {
+  const { lesson, view } = await student(page, "seek", info.project.name);
+  const reports = progressReports(page, lesson.lessonId);
+  await openPlayerHarness(page, lesson, view);
+  const fake = await fakeFrame(page);
+  await subscribed(fake);
+  await playFrom(fake, 0, 6);
+  await postFromPlayer(fake, "timeupdate", { seconds: 90, duration: 125 }); // the slider dragged far ahead
+  await expect.poll(() => fake.evaluate(() => (window as unknown as { __seeks?: number[] }).__seeks ?? [])).toEqual([6]);
+  const note = page.locator("[data-seek-note]");
+  await expect(note).toHaveText("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
+  await postFromPlayer(fake, "timeupdate", { seconds: 2, duration: 125 }); // back: free
+  await postFromPlayer(fake, "pause");
+  await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 6, done: false });
+  expect(reports).toEqual([{ watchedSec: 6 }]);
+  await expect(note).toHaveText("", { timeout: 8_000 }); // gone after 6 s
+  expect(await noOverflow(page)).toBe(true);
 });

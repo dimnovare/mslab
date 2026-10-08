@@ -10,7 +10,9 @@ import { E2E_BUNNY } from "./bunny-values";
 //   1920 × 1080: the picture size `width` × `height` is in the answer only from status 4 on, 0 before, as Bunny's is not known
 //   until the file is processed; `rotation` is null, as Bunny's is without rotation metadata);
 // - the player: GET /embed/<library>/<video>?token&expires[&t] (token = sha256(token key + video + expiry), not expired), a page that
-//   speaks Player.js: "ready" at once; "Mängi lõpuni" sends timeupdate up to the length (to subscribed events only), then pause, ended;
+//   speaks Player.js: "ready" at once; "Mängi lõpuni" sends timeupdate up to the length in 2 s steps (to subscribed events only; the
+//   page's seek lock takes back a jump of more than 3 s), then pause, ended; setCurrentTime moves the fake's time and is noted in
+//   `window.__seeks`;
 // - for the tests: GET /_fake/state (the videos and the deleted ids); POST /_fake/video {width, height, rotation?} (a video that is
 //   finished already, e.g. an upright 1080 × 1920 one; answers its guid); POST /_fake/shape {videoId, width, height, rotation?} (the
 //   picture size a video gets when it finishes, or at once when it has); and GET /health.
@@ -83,22 +85,22 @@ function player(start: number): string {
 <button type="button" data-fake-play style="min-height:44px;margin:12px">Mängi lõpuni</button>
 <p data-fake-time>${start}</p>
 <script>
-const duration = ${LENGTH}; let current = ${start}; const listeners = {};
+const duration = ${LENGTH}; let current = ${start}; const listeners = {}; const seeks = []; window.__seeks = seeks;
 const post = (m) => parent.postMessage(JSON.stringify({ context: "player.js", version: "0.0.11", ...m }), "*");
 addEventListener("message", (e) => {
   let m; try { m = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch { return; }
   if (!m || m.context !== "player.js") return;
   if (m.method === "addEventListener") listeners[m.value] = m.listener ?? m.value;
-  if (m.method === "setCurrentTime") current = Number(m.value);
+  if (m.method === "setCurrentTime") { current = Number(m.value); seeks.push(current); document.querySelector("[data-fake-time]").textContent = String(current); }
 });
 const emit = (event, value) => { if (event in listeners) post({ event, value, listener: listeners[event] }); };
 document.querySelector("[data-fake-play]").onclick = async () => {
   emit("play");
   while (current < duration) {
-    current = Math.min(duration, current + Math.ceil(duration / 10));
+    current = Math.min(duration, current + 2);
     emit("timeupdate", { seconds: current, duration });
     document.querySelector("[data-fake-time]").textContent = String(current);
-    await new Promise((r) => setTimeout(r, 40));
+    await new Promise((r) => setTimeout(r, 20));
   }
   emit("pause");
   emit("ended");

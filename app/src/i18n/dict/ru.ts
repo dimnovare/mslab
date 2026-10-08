@@ -523,6 +523,7 @@ export const ru: Dict = {
       fullscreen: "Во весь экран",
       exitFullscreen: "Выйти из полноэкранного режима",
       video: "Видео: {title}",
+      seekLocked: "Перемотать вперёд можно только до места, до которого вы досмотрели.",
     },
     favourites: {
       title: "Ваше избранное",

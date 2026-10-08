@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  abandonUpload, acceptProgress, completion, courseProgress, dropVideo, formatDuration, isWatched, lessonStates, moveLesson, nextLessonAfter, openedClock,
-  playableVideo, PROGRESS_SLACK_SEC, resumeAt, settleVideo, startUpload, TOP_SPEED, validShape, videoAspect, type OrderedLesson, type VideoFields,
+  abandonUpload, acceptProgress, completion, courseProgress, dropVideo, endedAt, formatDuration, isWatched, lessonStates, moveLesson, nextLessonAfter,
+  openedClock, playableVideo, PROGRESS_SLACK_SEC, resumeAt, seekStep, settleVideo, startUpload, TOP_SPEED, validShape, videoAspect, type OrderedLesson, type VideoFields,
 } from "@/domain/lessons";
 
 // Phase 3a (spec 3 and 5): visible lessons in course order; lesson k opens when it is the first, the one before it is done, or
@@ -337,5 +337,24 @@ describe("the progress clock (phase 2c, spec 3)", () => {
     expect(openedClock(null, T0)).toEqual(T0);
     expect(openedClock(at(-600), T0)).toEqual(T0);
     expect(openedClock(at(12), T0)).toEqual(at(12));
+  });
+});
+
+describe("the seek lock (phase 2c, spec 3)", () => {
+  test("within 3 s of the furthest point a timeupdate counts (capped at the length); further on it is a jump: back to the furthest point", () => {
+    expect(seekStep(10, 12.5, 100)).toEqual({ furthest: 12.5, back: null });
+    expect(seekStep(10, 13, 100)).toEqual({ furthest: 13, back: null });
+    expect(seekStep(10, 13.01, 100)).toEqual({ furthest: 10, back: 10 });
+    expect(seekStep(98, 100.5, 100)).toEqual({ furthest: 100, back: null });
+  });
+
+  test("rewinding is free: an earlier second changes nothing", () => {
+    expect(seekStep(40, 5, 100)).toEqual({ furthest: 40, back: null });
+  });
+
+  test("ended is the end only within 5 s of it", () => {
+    expect(endedAt(95, 100)).toBe(100);
+    expect(endedAt(100, 100)).toBe(100);
+    expect(endedAt(94.9, 100)).toBe(94.9);
   });
 });

@@ -575,6 +575,7 @@ export const et = {
     },
     // one lesson /konto/kursus/<slug>/<lesson> (components/account/LessonPage.tsx, LessonPlayer.tsx): one button, "Järgmine õppetund"
     // (or "Märgi tehtuks" in its place while a text lesson is not done), and a quiet way back. {name} is a file's name, {title} the lesson's.
+    // `seekLocked`: the line under the player after a jump forward was taken back (phase 2c).
     lesson: {
       back: "Tagasi koolitusele",
       next: "Järgmine õppetund",
@@ -591,6 +592,7 @@ export const et = {
       fullscreen: "Täisekraan",
       exitFullscreen: "Välju täisekraanist",
       video: "Video: {title}",
+      seekLocked: "Edasi saab kerida kuni kohani, kuhu oled jõudnud.",
     },
     // "Lemmikud" /konto/lemmikud (components/account/FavouritesTab.tsx): the hearted courses as the catalogue's cards, each with ♡ to
     // take it off. {title} is a course's title (the button's name for a screen reader, and what was taken off).
