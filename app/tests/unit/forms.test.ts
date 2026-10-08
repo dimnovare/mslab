@@ -178,6 +178,25 @@ describe("the newsletter consent and the group form's message (phase 2c)", () =>
     expect(w.ok && w.data.wantsNewsletter).toBe(false);
   });
 
+  test("only 'on' ticks the box: '', 'off' and 'true' are false, on all four forms", () => {
+    const individual = { course: "kulmud", name: "Kati", email: "kati@example.com", phone: "+372 5555 5555", period: "detsember", terms: "on", locale: "et" };
+    const forms = [
+      (n: string) => parseGroupRegistration(fd({ ...group, newsletter: n })),
+      (n: string) => parseIndividual(fd({ ...individual, newsletter: n })),
+      (n: string) => parsePurchaseInterest(fd({ course: "e-kulmud", email: "kati@example.com", locale: "ru", newsletter: n })),
+      (n: string) => parseWaitlist(fd({ session: "4", name: "Kati", email: "kati@example.com", locale: "et", newsletter: n })),
+    ];
+    for (const parse of forms)
+      for (const value of ["", "off", "true", "ON", "1", "yes"]) {
+        const r = parse(value);
+        expect(r.ok && r.data.wantsNewsletter, `"${value}"`).toBe(false);
+      }
+    for (const parse of forms) {
+      const r = parse("on");
+      expect(r.ok && r.data.wantsNewsletter).toBe(true);
+    }
+  });
+
   test("the group form's optional message: trimmed, at most 2000", () => {
     const g = parseGroupRegistration(fd({ ...group, message: "  Kood TERE10  " }));
     expect(g.ok && g.data.message).toBe("Kood TERE10");

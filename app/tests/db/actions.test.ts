@@ -968,7 +968,10 @@ describe("the newsletter consent on the registration forms (phase 2c)", () => {
     try {
       expect(await handleRegistration(deps, form(groupFields("nl-fail@example.com", { newsletter: "on" })))).toEqual({ ok: true });
       await flush();
-      expect(errors.mock.calls.flat().map(String).join("\n")).toContain("[forms] register: newsletter sign-up failed");
+      const logged = errors.mock.calls.flat().map(String).join("\n");
+      expect(logged).toContain("[forms] register: newsletter sign-up failed: DrizzleQueryError (code 42P01)");
+      expect(logged).not.toContain("nl-fail@example.com"); // the log line holds the error class and code, never the address
+      expect(logged).not.toContain("example.com");
     } finally {
       await db.execute(sql`alter table subscribers_away rename to subscribers`);
     }
@@ -1031,6 +1034,27 @@ describe("the newsletter consent on the registration forms (phase 2c)", () => {
       expect(await db.select({ email: subscribers.email }).from(subscribers)).toEqual([{ email: "nl-dev@example.com" }]);
       expect(mails()).toEqual([]);
       expect(await quota()).toEqual([]);
+    });
+
+    test("with one place of the day's cap left, the registration's own confirmation takes it, not the newsletter's (the prepayment details come first)", async () => {
+      const { mails } = outbox();
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      // the visitor confirmation's own counter is the slow store here, as it can be on a bad day: whichever mail asks first would win a
+      // place if the two ran side by side, so the confirmation must not depend on being quick
+      const kv = fakeKv({ "tg:chat": "42" });
+      const get = kv.get;
+      kv.get = async (key: string) => {
+        if (key.startsWith("rl:visitor-confirm:")) await new Promise((resolve) => setTimeout(resolve, 60));
+        return get(key);
+      };
+      const { deps, flush } = setup({ secrets: true, kv });
+      await db.insert(mailQuota).values({ day: "2026-10-01", sent: CONFIRMATION_MAIL_DAILY_CAP - 1 });
+      expect(await handleRegistration(deps, form(groupFields("nl-last@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+      await flush();
+      expect(mails().filter((m) => m.to === "nl-last@example.com").map((m) => m.subject)).toEqual(["Registreering on vastu võetud — Kulmude baaskoolitus"]);
+      expect(await db.select({ email: subscribers.email, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-last@example.com", confirmed: null }]); // still signed up
+      expect(await quota()).toEqual([["2026-10-01", CONFIRMATION_MAIL_DAILY_CAP]]);
+      expect(error).toHaveBeenCalledWith("[forms] register: daily mail cap reached: no confirmation e-mail");
     });
   });
 

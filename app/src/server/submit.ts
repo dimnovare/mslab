@@ -151,10 +151,15 @@ async function submission<T>(
       console.info(`[forms] ${form}: stored; confirmation e-mail sent: ${sent}`);
     });
   }
-  if (confirm) deps.later(() => sendConfirmation(deps, form, confirm));
-  if (out.subscribe) {
-    const wish = out.subscribe;
-    deps.later(() => subscribeLater(deps, form, wish));
+  // One task, in this order: the visitor's own confirmation (it carries the prepayment details) reserves its place of the day's mail cap
+  // first, then the newsletter's sign-up takes what is left. Two tasks side by side would race for the last place, and the marketing mail
+  // could win it. Neither function throws (each logs its own failure), so the sign-up always follows.
+  const wish = out.subscribe;
+  if (confirm || wish) {
+    deps.later(async () => {
+      if (confirm) await sendConfirmation(deps, form, confirm);
+      if (wish) await subscribeLater(deps, form, wish);
+    });
   }
   return out.result;
 }
