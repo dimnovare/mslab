@@ -346,7 +346,7 @@ export const newsletterPopupSeed: CampaignInput = {
   await db.insert(campaign).values({ ...newsletterPopupSeed, id: POPUP_ID.newsletter, kind: "newsletter" }).onConflictDoNothing({ target: campaign.id });
 ```
 
-- [ ] **Step 8: Update the tests that read `campaign` as one row.**
+- [ ] **Step 8: Update the tests that read `campaign` as one row, and the two that read the seeded newsletter setting whole.**
   - **`tests/db/seed.test.ts`:** in the counts object, `campaign: 1` becomes `campaign: 2`.
   - **`tests/db/ru-fill.test.ts`:** the two campaign lines of the setup name row 1:
 
@@ -357,6 +357,9 @@ export const newsletterPopupSeed: CampaignInput = {
 
   - **`tests/db/admin-site.test.ts`:** in the describe "campaign (D adminCamp + image upload, M3–M5)", its first test, change `const [row] = await db.select().from(campaign);` to `const [row] = await db.select().from(campaign).where(eq(campaign.id, 1));` (import `eq` if missing).
   - **`tests/unit/campaign.test.ts`:** the `row()` fixture builds a `Campaign`; add `kind: "campaign",` to its object.
+  - **The seeded `newsletter` setting now holds `welcomeCode: ""`** (step 7), so the two exact expectations of it follow:
+    - **`tests/db/seed.test.ts`**, "home data: five slides …": `expect(home.settings).toHaveProperty("newsletter", { discountLabel: "10%" });` becomes `expect(home.settings).toHaveProperty("newsletter", { discountLabel: "10%", welcomeCode: "" });`;
+    - **`tests/db/admin-site.test.ts`**, "newsletter discount label and the legal pages": `expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%" });` becomes `expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%", welcomeCode: "" });` (the save keeps the stored keys it does not edit).
 
 - [ ] **Step 9: Migration 0006 everywhere the 3a texts said 0005.**
   - **`docs/superpowers/plans/2026-10-05-phase3a-lessons-video.md`.** Every `0005` in it is the drop of `courses.modules` (ten places: lines 82, 192, 307, 461, 4500, 5204, 5221, 5227, 5300, 5309). Replace each `0005` with `0006`. In Task 12 step 11.5, change "the migrations count is 6" to "the migrations count is 7".
@@ -403,8 +406,8 @@ Spec section 3 (Server). The real rule against skipping: whatever the player say
 The formula stays `(now − clock_at) × 2 + 30`. All raises since the lesson was opened then add up to at most `2 × (time open) + 30`, however often she reports. An honest player at 1× or 2× is never clamped.
 
 **Files:**
-- Modify: `app/src/domain/lessons.ts`, `app/src/server/lesson-data.ts`
-- Test: `app/tests/unit/lessons.test.ts` (extend), `app/tests/db/lesson-api.test.ts` (new tests and three updated ones)
+- Modify: `app/src/domain/lessons.ts`, `app/src/server/lesson-data.ts`, `app/src/server/admin-lessons.ts` (the delete guard: a clock-only row is no progress)
+- Test: `app/tests/unit/lessons.test.ts` (extend), `app/tests/db/lesson-api.test.ts` (new tests and four updated ones), `app/tests/db/admin-lessons.test.ts` (extend)
 - E2E: `app/tests/e2e/lessons.ts` (+ `backdateClock`), `app/tests/e2e/lesson-player.spec.ts`, `app/tests/e2e/account-lessons.spec.ts`
 - Docs: `docs/launch-checklist.md` §8 (the "fake progress" item), `docs/deploy.md` §10 step 4 (the speed menu)
 
@@ -419,6 +422,7 @@ The formula stays `(now − clock_at) × 2 + 30`. All raises since the lesson wa
   - `visibleLesson`'s row gains `clockAt: Date | null`;
   - `loadLesson` writes the clock for a ready video;
   - `saveProgress` clamps. Its answer type is unchanged.
+- Changes, in `src/server/admin-lessons.ts`: `inUse` and the refusal of "Kustuta õppetund" count only rows with progress (watched, done or opened by an admin), not the clock-only row the lesson GET writes.
 
 - [ ] **Step 1: Write the failing domain test.** Append it to `tests/unit/lessons.test.ts` and add `acceptProgress`, `openedClock`, `PROGRESS_SLACK_SEC` and `TOP_SPEED` to its `@/domain/lessons` import:
 
@@ -513,7 +517,14 @@ async function openedAgo(w: Awaited<ReturnType<typeof world>>, lessonId: number,
      - "progress is kept at its highest; at 90 % the lesson is done …";
      - "progress refuses: no number (400), past the length + 5 s (400), …";
      - "done_at is the moment the lesson was done: …".
-  3. Append the new tests:
+  3. One existing test counts the progress rows after opening a lesson. "a lesson or file of another course is 404 under this course's slug, …" opens B's video lesson under its own slug (200), which now writes her clock row there. Its last line becomes:
+
+```ts
+  // the refused calls wrote nothing; the lesson opened under its own slug started its clock (a row with 0 s)
+  expect((await db.select().from(lessonProgress)).map((r) => [r.lessonId, r.watchedSec, r.doneAt])).toEqual([[b.b1.id, 0, null]]);
+```
+
+  4. Append the new tests:
 
 ```ts
 // ---- phase 2c: the progress clock (spec 3, domain/lessons.ts acceptProgress) ----
@@ -569,7 +580,17 @@ test("opening the lesson again gives no new 30 s while her time is used up beyon
 });
 ```
 
-- [ ] **Step 6: Run it — expect FAIL** (`npx vitest run tests/db/lesson-api.test.ts`): no row after the lesson GET, and nothing is clamped.
+  5. **`tests/db/admin-lessons.test.ts`.** "Kustuta õppetund" is refused once a student has progress on the lesson (3a spec 7: the counts stay honest). The row the lesson GET now writes holds only her clock: it must not turn a lesson she merely opened into one that can only be hidden. At the end of "hide and show; delete only without progress, …", add:
+
+```ts
+    // a row with only the progress clock (phase 2c: she opened the lesson and watched nothing) is no progress: the lesson can still go
+    await db.insert(lessonProgress).values({ clientId: c.id, lessonId: w.l1, clockAt: new Date() });
+    expect((await listCourseLessons(db, courseId))[0].lessons[0].inUse).toBe(false);
+    expect((await deleteLessonForm(db, form({ id: w.l1 }))).result).toEqual({ ok: true, id: w.l1, deleted: true });
+    expect(await db.select().from(lessonProgress).where(eq(lessonProgress.lessonId, w.l1))).toEqual([]); // its row went with it
+```
+
+- [ ] **Step 6: Run it — expect FAIL** (`npx vitest run tests/db/lesson-api.test.ts tests/db/admin-lessons.test.ts`): no row after the lesson GET, nothing is clamped, and the clock-only row blocks the delete.
 
 - [ ] **Step 7: Implement** in `src/server/lesson-data.ts`:
   1. Import `acceptProgress` and `openedClock` from `@/domain/lessons`.
@@ -642,8 +663,17 @@ export async function saveProgress(db: Db, clientId: number, slug: string, lesso
 ```
 
   6. In the file's top comment, add one sentence: "Opening a video lesson starts its progress clock, and a report can raise the watched seconds only as far as the clock allows (spec 2c section 3)."
+  7. **The lesson's delete guard keeps its meaning** (`src/server/admin-lessons.ts`). A row that holds only the clock (0 s, not done, not opened by an admin) is no progress. Add `and` to the file's `drizzle-orm` import, and after the imports:
 
-- [ ] **Step 8: Run** `npx vitest run tests/db/lesson-api.test.ts tests/unit/lessons.test.ts` — expect PASS; then the whole `npx vitest run`.
+```ts
+/** A progress row that is progress: watched, done, or opened by an admin ("Ava järgmine õppetund"). A row with only the progress clock (phase 2c: the lesson GET writes it) is none. */
+const HAS_PROGRESS = sql`(${lessonProgress.watchedSec} > 0 or ${lessonProgress.doneAt} is not null or ${lessonProgress.unlockedBy} is not null)`;
+```
+
+     - In `listCourseLessons`, `inUse` becomes `` sql<boolean>`exists (select 1 from ${lessonProgress} where ${lessonProgress.lessonId} = ${lessons.id} and ${HAS_PROGRESS})` ``.
+     - In `deleteLessonForm`, the count's `.where(eq(lessonProgress.lessonId, id))` becomes `.where(and(eq(lessonProgress.lessonId, id), HAS_PROGRESS))`, and its doc comment says "once any student has progress on it (watched, done or opened by an admin; a row with only the progress clock is none)".
+
+- [ ] **Step 8: Run** `npx vitest run tests/db/lesson-api.test.ts tests/db/admin-lessons.test.ts tests/unit/lessons.test.ts` — expect PASS; then the whole `npx vitest run`.
 
 - [ ] **Step 9: The e2e tests that play a whole video in a few seconds.** The fake player reaches the end of 125 s in about a second: the clock now keeps only about 30 s of it. These tests set her clock back an hour, as if she had been watching for that long.
   1. **`tests/e2e/lessons.ts`.** Append:
@@ -679,7 +709,7 @@ export async function backdateClock(clientId: number, lessonId: number, seconds 
 - [ ] **Step 12: Commit.**
 
 ```bash
-git add app/src/domain/lessons.ts app/src/server/lesson-data.ts app/tests/unit/lessons.test.ts app/tests/db/lesson-api.test.ts app/tests/e2e/lessons.ts app/tests/e2e/lesson-player.spec.ts app/tests/e2e/account-lessons.spec.ts docs/launch-checklist.md docs/deploy.md
+git add app/src/domain/lessons.ts app/src/server/lesson-data.ts app/src/server/admin-lessons.ts app/tests/unit/lessons.test.ts app/tests/db/lesson-api.test.ts app/tests/db/admin-lessons.test.ts app/tests/e2e/lessons.ts app/tests/e2e/lesson-player.spec.ts app/tests/e2e/account-lessons.spec.ts docs/launch-checklist.md docs/deploy.md
 git commit -m "feat(lessons): the progress clock — watched seconds grow at most twice the real time plus 30 s
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2133,7 +2163,7 @@ export async function progressActivity(db: Db, clientId: number): Promise<Map<nu
   - `ru.ts`:
 
 ```ts
-      resumeTag: "В процессе",
+      resumeTag: "В процессе",
       resumeWhere: "{module} · {lesson}",
       resumeProgress: "Пройдено уроков: {done} / {total}",
       resumeContinue: "Продолжить",
@@ -2187,7 +2217,7 @@ describe("the 'Pooleli' card and the e-course cards' lessons (phase 2c)", () => 
 
   test("Russian", () => {
     const html = render("ru", { data: one(withLessons(1, 3), ecourse.slug) });
-    expect(html).toContain("В процессе");
+    expect(html).toContain("В процессе");
     expect(html).toContain("Пройдено уроков: 1 / 3");
     expect(html).toContain("Продолжить");
   });
@@ -2541,7 +2571,7 @@ Spec section 5 (Popup).
   - `campaignView` now answers null for a row that is not of kind `campaign`.
 - Produces, as components:
   - `usePopupOpen(image: string, skip?: () => boolean): [boolean, () => void]` and `PopupDialog({ name, titleId, closeLabel, status?, onClose, children })` (`children: (close: ReactNode) => ReactNode`);
-  - `NewsletterForm({ locale, t, onSent? })` with `NewsletterFormTexts`;
+  - `NewsletterForm({ locale, t, onSent?, preview? })` with `NewsletterFormTexts` (`preview`: the admin's picture of it, Task 8 — no `<form>` element, no honeypot, a button that submits nothing);
   - `NewsletterPopupCard({ n, titleId?, close?, form })`;
   - `NewsletterPopup({ n, locale, t })` with `NewsletterPopupTexts = { close: string; form: NewsletterFormTexts }`.
 - Produces, in the dictionaries: `newsletter.popupSent`.
@@ -2907,7 +2937,7 @@ function CampaignDialog({ c, locale, t, onClose }: { c: CampaignView; locale: Lo
 ```
 
 - [ ] **Step 6: The form and the newsletter popup.**
-  1. **Create `src/components/site/NewsletterForm.tsx`.** The form part of `Newsletter.tsx` moves here unchanged, plus `onSent`:
+  1. **Create `src/components/site/NewsletterForm.tsx`.** The form part of `Newsletter.tsx` moves here unchanged, plus `onSent` and `preview`. `preview` is the admin's picture of the form (Task 8): Hüpikaken's editor is a `<form>` itself, and a form inside a form is dropped by the browser's parser, so the server's HTML and React's tree would differ and the admin page would fail to hydrate; the picture has no honeypot either (its input, off-screen but laid out, would fail the admin's 44 px check in `admin-site.spec.ts`):
 
 ```tsx
 "use client";
@@ -2941,9 +2971,11 @@ type State = { status: "idle" } | { status: "sent" } | { status: "error"; field:
  * and the home page's newsletter popup (NewsletterPopup) both use it. `onSent`: told once, when the address was taken (the popup
  * remembers the sign-up). Submitted by hand (onSubmit + startTransition), as the other forms: React resets a form after
  * `<form action>`, which would un-tick the controlled consent box after a failed attempt. The status region is always in the page
- * (polite), so the confirmation is announced; focus moves to it because the form it replaces had focus.
+ * (polite), so the confirmation is announced; focus moves to it because the form it replaces had focus. `preview`: a picture of the form
+ * for the admin's Hüpikaken (Task 8), which sits inside the editor's own form: the same fields in a plain block (a form never nests in
+ * a form), no honeypot, and a button that submits nothing.
  */
-export function NewsletterForm({ locale, t, onSent }: { locale: Locale; t: NewsletterFormTexts; onSent?: () => void }) {
+export function NewsletterForm({ locale, t, onSent, preview = false }: { locale: Locale; t: NewsletterFormTexts; onSent?: () => void; preview?: boolean }) {
   const id = useId();
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
@@ -2976,6 +3008,54 @@ export function NewsletterForm({ locale, t, onSent }: { locale: Locale; t: Newsl
   const error = state.status === "error" ? state : null;
   const describe = (f: Field) => (error?.field === f ? { "aria-invalid": true, "aria-describedby": `${id}-error` } : {});
 
+  const fields = (
+    <>
+      <label className={styles.label} htmlFor={`${id}-email`}>
+        {t.emailLabel}
+      </label>
+      <div className={styles.row}>
+        <input
+          id={`${id}-email`}
+          className={styles.input}
+          name="email"
+          type="email"
+          required
+          autoComplete="email"
+          maxLength={200}
+          placeholder={t.emailPlaceholder}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          {...describe("email")}
+        />
+        {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
+        {/* data-fab-avoid: the review build's comment button moves up instead of covering it (N4) */}
+        <button className={styles.submit} type={preview ? "button" : "submit"} aria-disabled={pending || undefined} data-fab-avoid="">
+          {t.submit}
+          <Icon name="arrow" />
+        </button>
+      </div>
+      <label className={styles.check}>
+        <input id={`${id}-consent`} type="checkbox" name="consent" required checked={consent} onChange={(e) => setConsent(e.target.checked)} {...describe("consent")} />
+        <span>{t.consent}</span>
+      </label>
+      <input type="hidden" name="locale" value={locale} />
+      {/* Honeypot: people never see or fill it (the admin's picture has none). */}
+      {!preview && (
+        <div className={styles.honeypot} aria-hidden="true">
+          <label>
+            Website
+            <input name="website" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
+          </label>
+        </div>
+      )}
+      {error && (
+        <p id={error.field === "form" ? `${id}-form` : `${id}-error`} className={styles.error} role="alert" tabIndex={error.field === "form" ? -1 : undefined}>
+          {error.message}
+        </p>
+      )}
+    </>
+  );
+
   return (
     <div className={styles.form}>
       <div ref={statusRef} className={styles.status} role="status" tabIndex={-1} data-newsletter-status="">
@@ -2986,61 +3066,24 @@ export function NewsletterForm({ locale, t, onSent }: { locale: Locale; t: Newsl
           </>
         )}
       </div>
-      {state.status !== "sent" && (
-        <form
-          method="post"
-          noValidate
-          data-newsletter-form=""
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (pending) return;
-            const formData = new FormData(e.currentTarget);
-            startTransition(() => formAction(formData));
-          }}
-        >
-          <label className={styles.label} htmlFor={`${id}-email`}>
-            {t.emailLabel}
-          </label>
-          <div className={styles.row}>
-            <input
-              id={`${id}-email`}
-              className={styles.input}
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              maxLength={200}
-              placeholder={t.emailPlaceholder}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              {...describe("email")}
-            />
-            {/* aria-disabled, not disabled: a disabled button would drop keyboard focus to the page while sending. */}
-            {/* data-fab-avoid: the review build's comment button moves up instead of covering it (N4) */}
-            <button className={styles.submit} type="submit" aria-disabled={pending || undefined} data-fab-avoid="">
-              {t.submit}
-              <Icon name="arrow" />
-            </button>
-          </div>
-          <label className={styles.check}>
-            <input id={`${id}-consent`} type="checkbox" name="consent" required checked={consent} onChange={(e) => setConsent(e.target.checked)} {...describe("consent")} />
-            <span>{t.consent}</span>
-          </label>
-          <input type="hidden" name="locale" value={locale} />
-          {/* Honeypot: people never see or fill it. */}
-          <div className={styles.honeypot} aria-hidden="true">
-            <label>
-              Website
-              <input name="website" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
-            </label>
-          </div>
-          {error && (
-            <p id={error.field === "form" ? `${id}-form` : `${id}-error`} className={styles.error} role="alert" tabIndex={error.field === "form" ? -1 : undefined}>
-              {error.message}
-            </p>
-          )}
-        </form>
-      )}
+      {state.status !== "sent" &&
+        (preview ? (
+          <div data-newsletter-form="">{fields}</div>
+        ) : (
+          <form
+            method="post"
+            noValidate
+            data-newsletter-form=""
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (pending) return;
+              const formData = new FormData(e.currentTarget);
+              startTransition(() => formAction(formData));
+            }}
+          >
+            {fields}
+          </form>
+        ))}
     </div>
   );
 }
@@ -3303,7 +3346,7 @@ Spec section 5 (Admin).
 - Modify: `app/src/db/queries/admin-site.ts`, `app/src/db/queries/admin.ts`
 - Modify: `app/src/server/admin-site.ts`, `app/src/components/admin/CampaignEditor.tsx`, `app/src/app/admin/(panel)/kampaania/page.tsx` (comment only)
 - Modify: `app/src/i18n/dict/admin.ts`
-- Test: `app/tests/unit/campaign.test.ts`, `app/tests/db/admin-site.test.ts`, `app/tests/db/queries.test.ts`
+- Test: `app/tests/unit/campaign.test.ts`, `app/tests/unit/admin.test.ts` (the menu's label), `app/tests/db/admin-site.test.ts`, `app/tests/db/queries.test.ts`
 - E2E: `app/tests/e2e/admin-site.spec.ts`, `app/tests/e2e/admin-inbox.spec.ts`
 
 **Interfaces:**
@@ -3474,7 +3517,7 @@ export async function upsertCampaign(db: Q, input: CampaignInput, kind: PopupKin
   - Both parts lock `campaign`. Each part's write switches the other row off before it switches its own on (`upsertCampaign`), so a save of both parts in either order keeps at most one row active.
 - [ ] **Step 6: Run** the tests of step 1 — expect PASS.
 - [ ] **Step 7: The admin texts** (`src/i18n/dict/admin.ts`).
-  - `nav.campaign: "Kampaania"` becomes `"Hüpikaken"`.
+  - `nav.campaign: "Kampaania"` becomes `"Hüpikaken"`. In `tests/unit/admin.test.ts`, "the sections in Maria's order, …" lists the menu's labels: its `"Kampaania",` becomes `"Hüpikaken",`.
   - Replace the `campaign` section with the following (the two keys `active` and `activeHint` go):
 
 ```ts
@@ -3690,13 +3733,14 @@ export function CampaignEditor({ initial, links }: { initial: Loaded<{ campaign:
               <LangSwitch lang={langN} onChange={setLangN} label={`${t.preview}: ${t.newsletterForm}`} missingRu={false} />
             </div>
             {shown !== "newsletter" && <p className={`${ui.notice} ${styles.cardLead}`}>{t.off}</p>}
-            {/* inert: the form in the preview is a picture of the real one (nothing is sent from here) */}
+            {/* inert: the form in the preview is a picture of the real one (`preview`: no <form> inside this editor's form, nothing is sent from here) */}
             <div className={styles.previewBox} inert data-newsletter-preview="" data-off={shown === "newsletter" ? undefined : ""} lang={langN}>
               <NewsletterPopupCard
                 n={newsletterPreview}
                 form={
                   <NewsletterForm
                     locale={langN}
+                    preview
                     t={{ ...site.newsletter, sentTitle: "", sentText: site.newsletter.popupSent, errorEmail: "", errorRequired: "", errorTooMany: "", errorGeneric: "" }}
                   />
                 }
@@ -3712,9 +3756,10 @@ export function CampaignEditor({ initial, links }: { initial: Loaded<{ campaign:
 }
 ```
 
-     Two notes on this code:
+     Three notes on this code:
      - **`LangSwitch`** names its group "Keel: {label}": the two previews' switches are "Keel: Eelvaade" and "Keel: Eelvaade: Uudiskiri". The e2e's "Keel: Nupu tekst" is the campaign's `I18nInput`.
      - **The radio group** uses `ed.fieldset`, `ed.choices`, `ed.choice` and `ui.legend` as `LessonDrawer.tsx`'s "Õppetunni liik" does.
+     - **The newsletter preview's form is `NewsletterForm` with `preview`** (Task 7): the whole editor is one `<form>`, and a `<form>` inside it would be dropped by the HTML parser (a hydration error on this server-rendered page); the picture also has no honeypot, whose input would fail "every editor at phone width" (every `main input:visible` at least 44 px).
 
      In `app/admin/(panel)/kampaania/page.tsx`, the comment becomes "Hüpikaken: what the home page shows (Kampaania, Uudiskiri or Väljas) and both popups' editors with their live previews (Task 13B, M2–M5; phase 2c)."
 - [ ] **Step 9: E2E.**
@@ -3740,6 +3785,7 @@ export function CampaignEditor({ initial, links }: { initial: Loaded<{ campaign:
     const preview = page.locator("[data-newsletter-preview]");
     await expect(preview.getByRole("heading")).toHaveText("E2E uudiskiri");
     await expect(preview.getByRole("button", { name: "Liitu" })).toBeVisible();
+    await expect(page.locator("[data-campaign-editor] form")).toHaveCount(0); // the preview's form is a picture: no form inside the editor's
     await save(page);
     const rows = await onLocalDb((sql) => sql<{ id: number; active: boolean }[]>`select id, active from campaign order by id`);
     expect(rows.map((r) => r.active)).toEqual([false, true]);
@@ -4382,7 +4428,7 @@ export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountL
 ```
 
   5. **`tests/db/admin-site.test.ts`.**
-     - In the settings test, `expect(s.values.newsletter).toEqual({ discountLabel: "" });` becomes `expect(s.values.newsletter).toEqual({ discountLabel: "", welcomeCode: "" });`.
+     - In "a page or setting that is not stored yet loads empty and is created on save" (the describe "missing rows"), `expect(s.values.newsletter).toEqual({ discountLabel: "" });` becomes `expect(s.values.newsletter).toEqual({ discountLabel: "", welcomeCode: "" });`.
      - Append to the settings describe:
 
 ```ts
@@ -4541,6 +4587,15 @@ describe("the newsletter consent on the registration forms (phase 2c)", () => {
     }
     expect(await db.select().from(registrations).where(eq(registrations.email, "nl-fail@example.com"))).toHaveLength(1);
   });
+
+  test("a sample address (@example.test) ticked: its unconfirmed row, and no mail (as the forms' own confirmations)", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    expect(await handleRegistration(deps, form(groupFields("nl-sample@example.test", { newsletter: "on" })))).toEqual({ ok: true });
+    await flush();
+    expect(await db.select({ email: subscribers.email, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-sample@example.test", confirmed: null }]);
+    expect(mails().filter((m) => m.to === "nl-sample@example.test")).toEqual([]);
+  });
 });
 ```
 
@@ -4610,12 +4665,17 @@ async function subscribeAddress(deps: Deps, email: string, locale: "et" | "ru"):
 
 /**
  * "Soovin MS LABi uudiseid ja pakkumisi" ticked on a registration form (phase 2c): the newsletter's own sign-up (subscribeAddress) after
- * the answer. Never throws: the registration is stored whatever happens here, and a failure is logged without the address.
+ * the answer. A sample address (`@example.test`) gets its row and no mail, as the forms' own confirmations (sendConfirmation): the
+ * live checks register one. Never throws: the registration is stored whatever happens here, and a failure is logged without the address.
  */
 async function subscribeLater(deps: Deps, form: FormName, wish: { email: string; locale: "et" | "ru" }): Promise<void> {
   try {
     const mail = await subscribeAddress(deps, wish.email, wish.locale);
     if (!mail) return;
+    if (isSampleAddress(wish.email)) {
+      console.info(`[forms] ${form}: newsletter sign-up stored; confirmation e-mail skipped (sample address)`);
+      return;
+    }
     const sent = await sendMail(deps.env, mail);
     console.info(`[forms] ${form}: newsletter confirmation e-mail sent: ${sent}`);
   } catch (e) {
@@ -4752,6 +4812,7 @@ Spec section 7 (Data, Hash).
   - The password is NFC-normalised before hashing, so the same password typed with combining marks matches.
 - **Rules** (shared by Minu andmed and the server): 10 … 200 characters (code points, as people count them), not the e-mail address.
 - **Login check:** an unknown address, or one without a password, runs scrypt against a fixed dummy hash, so every failure takes the same time. The session it starts is the code's (`startSession`: the one-device rule).
+  - Every attempt for one address runs under the address lock (`lockAddress`), together with the lock's counter that Task 12 hands in (`gate`). Attempts sent in parallel are then checked and counted one after another: none can pass the "5 failures" lock alongside the others. A counter read before the check and written after it, outside any lock, would let a burst of parallel attempts all see "below 5".
 
 **Files:**
 - Create: `app/src/domain/password.ts`, `app/src/server/password.ts`, `app/src/server/client-password.ts`
@@ -4772,7 +4833,9 @@ Spec section 7 (Data, Hash).
   - `type SetPasswordResult = { kind: "saved"; email: string; locale: "et" | "ru"; changedAt: Date } | { kind: "problem"; problem: PasswordProblem } | { kind: "gone" }`;
   - `setClientPassword(db: Db, clientId: number, password: string, now: Date): Promise<SetPasswordResult>`;
   - `removeClientPassword(db: Db, clientId: number): Promise<{ email: string; locale: "et" | "ru"; had: boolean } | null>`.
-- Produces, from `src/server/client-auth.ts`: `redeemClientPassword(db: Db, email: string, password: string, now?: Date): Promise<ClientLogin | null>`.
+- Produces, from `src/server/client-auth.ts`:
+  - `type PasswordGate = (t: Db) => { open(): Promise<boolean>; failed(): Promise<void> }` (the lock's counter, on the login's transaction `t`);
+  - `redeemClientPassword(db: Db, email: string, password: string, now?: Date, gate?: PasswordGate): Promise<ClientLogin | "locked" | null>`.
 - Produces, from `src/server/account-input.ts`: `parsePassword(body: unknown): Input<{ password: string }>` and `LIMITS.passwordInput = 800`.
 
 - [ ] **Step 1: Write the failing unit tests.**
@@ -4811,8 +4874,9 @@ describe("password hashes (scrypt)", () => {
   });
 
   test("a password typed with combining marks is the same password as the composed one (NFC)", async () => {
-    const stored = await hashPassword("Mõõdulint-123");
-    expect(await verifyPassword("Mõõdulint-123", stored)).toBe(true);
+    // written with escapes, so that no editor or tool can normalise the two spellings into one (the test could not fail then)
+    const stored = await hashPassword("M\u00f5\u00f5dulint-123"); // õ as one code point
+    expect(await verifyPassword("Mo\u0303o\u0303dulint-123", stored)).toBe(true); // o and the combining tilde, twice
   });
 
   test("the dummy hash has today's shape and matches no likely password", async () => {
@@ -4995,6 +5059,21 @@ test("an unknown address and one without a password run scrypt against the dummy
   expect(verify).toHaveBeenCalledTimes(2);
   expect(await db.select().from(clientSessions)).toEqual([]);
 });
+
+test("the gate (Task 12's lock), asked under the address lock: shut, nothing is checked and nothing counted; open, a failure is counted and a success is not", async () => {
+  const c = await kati();
+  await setClientPassword(db, c.id, "pikk-parool-2026", NOW);
+  const counted: string[] = [];
+  const gate = (open: boolean) => () => ({ open: async () => open, failed: async () => void counted.push("failed") });
+  const verify = vi.mocked(verifyPassword);
+  verify.mockClear();
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", NOW, gate(false))).toBe("locked");
+  expect(verify).not.toHaveBeenCalled();
+  expect(counted).toEqual([]);
+  expect(await redeemClientPassword(db, "kati@example.test", "vale-parool-2026", NOW, gate(true))).toBeNull();
+  expect(await redeemClientPassword(db, "kati@example.test", "pikk-parool-2026", NOW, gate(true))).toMatchObject({ clientId: c.id });
+  expect(counted).toEqual(["failed"]);
+});
 ```
 
 - [ ] **Step 6: Run it — expect FAIL.**
@@ -5040,21 +5119,31 @@ export async function removeClientPassword(db: Db, clientId: number): Promise<{ 
 
 ```ts
 /**
- * The session for an e-mail and the password set in Minu andmed (phase 2c), or null: an unknown address, no password set and a wrong
- * password alike. scrypt runs every time — against a fixed dummy hash when there is no password to check — so the answer takes as long
- * whatever the address. The check (about 80 ms) runs before the address lock; under the lock the password must still be the one
- * checked (changed or removed meanwhile: null). The session is the code's (startSession: the one-device rule). Never a new client.
+ * The password login's lock for one address (account-api.ts passwordLogin, phase 2c): its counter, on the login's transaction `t`.
+ * `open()`: may this attempt be checked; `failed()`: count it as a failure.
  */
-export async function redeemClientPassword(db: Db, email: string, password: string, now = new Date()): Promise<ClientLogin | null> {
+export type PasswordGate = (t: Db) => { open(): Promise<boolean>; failed(): Promise<void> };
+
+/**
+ * The session for an e-mail and the password set in Minu andmed (phase 2c); null: an unknown address, no password set and a wrong
+ * password alike; "locked": the gate is shut. Everything runs in one transaction under the address lock, so the attempts for one
+ * address go one after another, and attempts sent in parallel cannot pass the gate together: the gate is asked first (a locked
+ * attempt checks nothing and counts nothing), then scrypt runs every time — against a fixed dummy hash when there is no password to
+ * check — so the answer takes as long whatever the address, and a failure is counted before the lock is let go. The session is the
+ * code's (startSession: the one-device rule). Never a new client.
+ */
+export async function redeemClientPassword(db: Db, email: string, password: string, now = new Date(), gate?: PasswordGate): Promise<ClientLogin | "locked" | null> {
   const address = normalizeEmail(email);
-  const [row] = await db.select({ hash: clients.passwordHash }).from(clients).where(eq(clients.email, address)).limit(1);
-  const stored = row?.hash ?? null;
-  const matches = await verifyPassword(password, stored ?? DUMMY_HASH);
-  if (!matches || stored === null) return null;
   return tx(db, async (t) => {
     await lockAddress(t, address);
-    const [still] = await t.select({ hash: clients.passwordHash }).from(clients).where(eq(clients.email, address)).limit(1);
-    return still?.hash === stored ? startSession(t, address, now) : null;
+    const lock = gate?.(t);
+    if (lock && !(await lock.open())) return "locked";
+    const [row] = await t.select({ hash: clients.passwordHash }).from(clients).where(eq(clients.email, address)).limit(1);
+    const stored = row?.hash ?? null;
+    const matches = await verifyPassword(password, stored ?? DUMMY_HASH);
+    if (matches && stored !== null) return startSession(t, address, now);
+    await lock?.failed();
+    return null;
   });
 }
 ```
@@ -5077,6 +5166,8 @@ Spec section 7 (Login, API).
 - **`POST /api/konto/parool-login {email, password}`** → `startSession`, the one-device rule as for the code. Same-origin POST, `private, no-store`.
 - **Every failure gets one answer**, "E-post või parool ei sobi.": unknown address, no password set and wrong password alike, with the timing of Task 11.
 - **The lock:** 5 failures per address or 20 per IP in 15 minutes, in the Postgres KV store → "Liiga palju katseid. …". Failures count whether or not the address exists. A locked attempt is refused before anything is checked and is not counted, so the lock ends 15 minutes after the last failure.
+  - The address's counter is read and written under the address lock, in the login's own transaction (Task 11's `gate`, on a `PgKv` of that transaction). Attempts sent in parallel are checked and counted one after another, so no burst passes the 5. The store inside the transaction does not sweep (`sweep: false`): a sweep there would hold expired rows' locks until the commit and could deadlock with another login's.
+  - The IP's counter is the forms' kind (read, then written, outside any lock): a burst can pass a few more than 20. It guards against spraying many addresses, each of which keeps its own exact 5.
 - **Set and remove**, both behind `requireClient` + `clientResponse`:
   - `POST /api/konto/parool {password}` sets or changes it (5 changes an hour: each one mails her).
   - `DELETE /api/konto/parool` removes it.
@@ -5084,13 +5175,14 @@ Spec section 7 (Login, API).
 - **`passwordSetAt`.** The spec names `GET /api/konto/andmed`, but there is no such endpoint: Minu andmed reads the dashboard (`GET /api/konto`), whose `client` is the profile. So `passwordSetAt` goes there.
 
 **Files:**
-- Modify: `app/src/server/account-api.ts`, `app/src/app/api/konto/[[...path]]/route.ts`, `app/src/server/ratelimit.ts`, `app/src/server/client-data.ts`, `app/src/server/account-mail.ts`, `app/src/lib/json-request.ts`
+- Modify: `app/src/server/account-api.ts`, `app/src/app/api/konto/[[...path]]/route.ts`, `app/src/server/ratelimit.ts`, `app/src/server/kv.ts` (`sweep: false`), `app/src/server/client-data.ts`, `app/src/server/account-mail.ts`, `app/src/lib/json-request.ts`
 - Modify: `app/src/i18n/dict/et.ts`, `ru.ts` (`account.passwordMail`)
-- Test: `app/tests/unit/ratelimit.test.ts`, `app/tests/unit/account-api.test.ts`, `app/tests/unit/account-guards.test.ts`, `app/tests/unit/account-mail.test.ts`, `app/tests/db/password-api.test.ts` (new)
+- Test: `app/tests/unit/ratelimit.test.ts`, `app/tests/unit/account-api.test.ts`, `app/tests/unit/account-guards.test.ts`, `app/tests/unit/account-mail.test.ts`, `app/tests/db/kv.test.ts`, `app/tests/db/password-api.test.ts` (new)
 - Update (`passwordSetAt: null` in the profile): `app/tests/unit/account-dashboard-dom.test.ts`, `account-dashboard.test.ts`, `account-readonly.test.ts`, `account-types.test.ts`, `account-details-dom.test.ts`, `app/tests/db/client-data.test.ts`, `app/tests/db/account-api.test.ts`
 
 **Interfaces:**
-- Consumes: `redeemClientPassword`, `setClientPassword`, `removeClientPassword`, `parsePassword` (Task 11).
+- Consumes: `redeemClientPassword` with its `PasswordGate`, `setClientPassword`, `removeClientPassword`, `parsePassword` (Task 11).
+- Produces, from `src/server/kv.ts`: `new PgKv(db, now?, opts?: { sweep?: boolean })` (`sweep: false`: a store inside a caller's transaction, whose puts do not sweep).
 - Produces, from `src/server/ratelimit.ts`:
   - `belowLimit(kv: TextKv, key: string, limit: number): Promise<boolean>`;
   - `countFailure(kv: TextKv, key: string, windowSec: number): Promise<void>`.
@@ -5219,11 +5311,25 @@ export function passwordChangedMail(email: string, locale: Locale, contactEmail:
 
   4. **`src/lib/json-request.ts`.** `opts: { method?: "POST" | "PATCH" | "DELETE"; fetch?: typeof fetch }`.
   5. **`src/app/api/konto/[[...path]]/route.ts`.** After `export const PATCH = answer;`, add `export const DELETE = answer; // phase 2c: DELETE /parool`.
+  6. **`src/server/kv.ts`.** `PgKv`'s constructor gains a third parameter, `private readonly opts: { sweep?: boolean } = {}`, and `put` sweeps only when `this.opts.sweep !== false` (`if (expiresAt && this.opts.sweep !== false) await this.sweep();`). Add to `put`'s doc comment: "`sweep: false` (a store on a caller's transaction: the password lock, account-api.ts): no sweep, which would hold the expired rows' locks until that transaction ends and could deadlock with another login's; the next put elsewhere, or the daily cron, sweeps." Then append to `tests/db/kv.test.ts`:
+
+```ts
+test("sweep: false (a store on a caller's transaction) writes its own row and leaves the expired ones to the next sweep", async () => {
+  const db = await makeTestDb();
+  await new PgKv(db, () => new Date("2026-10-02T10:00:00Z")).put("old", "x", { expirationTtl: 60 });
+  const later = new PgKv(db, () => new Date("2026-10-02T11:00:00Z"), { sweep: false });
+  await later.put("rl:pw-mail:abc", "1", { expirationTtl: 900 });
+  expect(await physicalKeys(db)).toEqual(["old", "rl:pw-mail:abc"]);
+  expect([await later.get("old"), await later.get("rl:pw-mail:abc")]).toEqual([null, "1"]);
+});
+```
+
 - [ ] **Step 4: The endpoints** (`src/server/account-api.ts`).
   1. Imports:
      - `readSetting` from `@/db/queries/public`;
      - `parsePassword` (with the other parsers);
-     - `redeemClientPassword` from `./client-auth`;
+     - `redeemClientPassword` and `type PasswordGate` from `./client-auth`;
+     - `PgKv` from `./kv`;
      - `removeClientPassword` and `setClientPassword` from `./client-password`;
      - `passwordChangedMail` from `./account-mail`;
      - `belowLimit` and `countFailure` from `./ratelimit`;
@@ -5244,13 +5350,10 @@ const PASSWORD_CHANGES_PER_HOUR = 5;
   4. After the `code` handler, add:
 
 ```ts
-/** The KV keys of the password lock for this attempt: the address's (under its hash) when it is one, and the IP's when there is one. */
-async function passwordLockKeys(request: Request, deps: AccountDeps, address: string): Promise<{ key: string; limit: number }[]> {
+/** The KV key of the password lock for this IP (rateKey "pw-ip"); null without an address (never on Vercel; `next dev` uses "local"). */
+function passwordIpKey(request: Request, deps: AccountDeps): string | null {
   const ip = clientIp(request.headers) ?? (deps.dev ? "local" : null);
-  return [
-    ...(isEmail(address) ? [{ key: `rl:pw-mail:${await sha256(address)}`, limit: PASSWORD_FAILURES_PER_ADDRESS }] : []),
-    ...(ip !== null ? [{ key: rateKey("pw-ip", ip), limit: PASSWORD_FAILURES_PER_IP }] : []),
-  ];
+  return ip === null ? null : rateKey("pw-ip", ip);
 }
 
 /**
@@ -5259,27 +5362,36 @@ async function passwordLockKeys(request: Request, deps: AccountDeps, address: st
  * that cannot be a login — is the same 400 `{ error: "password" }` ("E-post või parool ei sobi."), and takes as long (client-auth.ts
  * redeemClientPassword). After 5 failures for an address or 20 from an IP within 15 minutes: 429 `{ error: "locked" }`, the right
  * password too, until 15 minutes after the last failure (a locked attempt is not counted). Failures count whether or not the address
- * exists. The counters are KV rows under the address's hash and the IP; a store that fails lets the attempt through, as the other limits.
+ * exists. The address's counter (a KV row under the address's hash) is read and counted under the address lock, in the login's own
+ * transaction (the gate): attempts sent in parallel go one after another, and none passes the 5 alongside the others; a database
+ * failure there fails the login (500), never opens the lock. The IP's counter is the forms' kind, read and then written (a burst can
+ * pass a few more than 20), and a store that fails lets the attempt through, as the other limits.
  */
 async function passwordLogin(request: Request, deps: AccountDeps): Promise<Response> {
   const body = await readObject(request);
   const address = typeof body?.email === "string" ? normalizeEmail(body.email) : "";
   const password = typeof body?.password === "string" && body.password.length <= LIMITS.passwordInput ? body.password : "";
-  const keys = await passwordLockKeys(request, deps, address);
+  const locked = () => {
+    logNote("[account] password login locked");
+    return accountResponse({ ok: false, error: "locked" }, 429);
+  };
+  const ipKey = passwordIpKey(request, deps);
   try {
-    for (const { key, limit } of keys) {
-      if (!(await belowLimit(deps.env.KV, key, limit))) {
-        logNote("[account] password login locked");
-        return accountResponse({ ok: false, error: "locked" }, 429);
-      }
-    }
+    if (ipKey !== null && !(await belowLimit(deps.env.KV, ipKey, PASSWORD_FAILURES_PER_IP))) return locked();
   } catch (e) {
     logFailure("[account] rate limit unavailable, allowing", e);
   }
-  const session = isEmail(address) && password ? await redeemClientPassword(deps.db, address, password, deps.now) : null;
+  const addressKey = `rl:pw-mail:${await sha256(address)}`;
+  // the address's lock, on the login's transaction (no sweep inside it: kv.ts)
+  const gate: PasswordGate = (t) => {
+    const kv = new PgKv(t, () => deps.now, { sweep: false });
+    return { open: () => belowLimit(kv, addressKey, PASSWORD_FAILURES_PER_ADDRESS), failed: () => countFailure(kv, addressKey, PASSWORD_LOCK_SEC) };
+  };
+  const session = isEmail(address) && password ? await redeemClientPassword(deps.db, address, password, deps.now, gate) : null;
+  if (session === "locked") return locked();
   if (!session) {
     try {
-      for (const { key } of keys) await countFailure(deps.env.KV, key, PASSWORD_LOCK_SEC);
+      if (ipKey !== null) await countFailure(deps.env.KV, ipKey, PASSWORD_LOCK_SEC);
     } catch (e) {
       logFailure("[account] rate limit unavailable", e);
     }
@@ -5514,6 +5626,16 @@ test("the lock per address: after 5 failures within 15 minutes even the right pa
   expect((await login(4 + 15 * 60 + 1, "pikk-parool-2026", "198.51.100.78")).status).toBe(200);
 }, 20_000);
 
+test("attempts sent in parallel cannot pass the lock together: the address's failures are counted one after another, under its lock", async () => {
+  const { cookie } = await signedIn();
+  await call(deps().d, "/parool", { method: "POST", cookie, body: { password: "pikk-parool-2026" } });
+  const statuses = await Promise.all(
+    Array.from({ length: 8 }, async (_, i) => (await call(deps().d, "/parool-login", { method: "POST", body: { email: "kati@example.com", password: `vale-${i}-parool` }, ip: `198.51.100.${i}` })).status),
+  );
+  expect(statuses.filter((s) => s === 400)).toHaveLength(5);
+  expect(statuses.filter((s) => s === 429)).toHaveLength(3);
+}, 20_000);
+
 test("the lock per IP: 20 failures from one IP in 15 minutes, whatever the addresses (unknown ones too), lock that IP; another IP still signs in", async () => {
   const { cookie } = await signedIn();
   const { d } = deps();
@@ -5525,11 +5647,11 @@ test("the lock per IP: 20 failures from one IP in 15 minutes, whatever the addre
 }, 30_000);
 ```
 
-- [ ] **Step 8: Run** `npx vitest run` (all), tsc, lint — green. The DB password tests run scrypt about 30 times: a few seconds.
+- [ ] **Step 8: Run** `npx vitest run` (all), tsc, lint — green. The DB password tests run scrypt about 40 times: a few seconds.
 - [ ] **Step 9: Commit.**
 
 ```bash
-git add app/src/server/account-api.ts "app/src/app/api/konto/[[...path]]/route.ts" app/src/server/ratelimit.ts app/src/server/client-data.ts app/src/server/account-mail.ts app/src/lib/json-request.ts app/src/i18n/dict/et.ts app/src/i18n/dict/ru.ts app/tests
+git add app/src/server/account-api.ts "app/src/app/api/konto/[[...path]]/route.ts" app/src/server/ratelimit.ts app/src/server/kv.ts app/src/server/client-data.ts app/src/server/account-mail.ts app/src/lib/json-request.ts app/src/i18n/dict/et.ts app/src/i18n/dict/ru.ts app/tests
 git commit -m "feat(account): password endpoints — login with one answer and a lock, set and remove with a mail, passwordSetAt
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
