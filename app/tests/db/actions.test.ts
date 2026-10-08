@@ -491,6 +491,54 @@ describe("newsletter double opt-in", () => {
     expect(mails()).toHaveLength(3);
   });
 
+  describe("the confirmation e-mail counts against the day's cap (phase 2c, security)", () => {
+    const quotaToday = async () => (await db.select().from(mailQuota)).map((r) => [r.day, r.sent]);
+
+    test("below the cap a sign-up takes one place of the day's counter, one for each mail", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: "2026-10-01", sent: CONFIRMATION_MAIL_DAILY_CAP - 2 });
+      expect(await signUp(deps)).toEqual({ ok: true });
+      expect(await quotaToday()).toEqual([["2026-10-01", CONFIRMATION_MAIL_DAILY_CAP - 1]]);
+      expect(await signUp(deps, "teine@example.com")).toEqual({ ok: true });
+      expect(await quotaToday()).toEqual([["2026-10-01", CONFIRMATION_MAIL_DAILY_CAP]]);
+      await flush();
+      expect(mails()).toHaveLength(2);
+    });
+
+    test("the cap reached: the address is stored and the answer is the same, but no e-mail goes out and no place is taken", async () => {
+      const { mails } = outbox();
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: "2026-10-01", sent: CONFIRMATION_MAIL_DAILY_CAP });
+      expect(await signUp(deps)).toEqual({ ok: true });
+      await flush();
+      expect(await db.select().from(subscribers)).toHaveLength(1);
+      expect(mails()).toEqual([]);
+      expect(await quotaToday()).toEqual([["2026-10-01", CONFIRMATION_MAIL_DAILY_CAP]]);
+      expect(error).toHaveBeenCalledWith("[forms] subscribe: daily mail cap reached: no confirmation e-mail");
+      // the next day has places again
+      expect(await signUp({ ...deps, now: new Date("2026-10-02T10:00:00Z") }, "UUS@example.com")).toEqual({ ok: true });
+      await flush();
+      expect(mails().map((m) => m.to)).toEqual(["uus@example.com"]);
+    });
+
+    test("a sample address is never mailed and takes no place; nor does a deployment without Resend", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      expect(await signUp(deps, "kati@example.test")).toEqual({ ok: true });
+      await flush();
+      expect(await db.select().from(subscribers)).toHaveLength(1);
+      expect(mails()).toEqual([]);
+      expect(await quotaToday()).toEqual([]);
+      const bare = setup();
+      expect(await signUp(bare.deps, "mari@example.com")).toEqual({ ok: true });
+      await bare.flush();
+      expect(mails()).toEqual([]);
+      expect(await quotaToday()).toEqual([]);
+    });
+  });
+
   test("confirmSubscriber sets confirmedAt once; unknown or malformed tokens are null", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const { deps } = setup();

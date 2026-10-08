@@ -444,6 +444,12 @@ function confirmationMail(siteUrl: string, sub: Pick<Subscriber, "email" | "toke
  * is already subscribed. A new address is stored unconfirmed and gets the confirmation link; an unconfirmed one gets
  * the same link again (new consent time); a confirmed one gets nothing. The consent is the sign-up itself (there is no
  * consent box): `consentAt` is the time of the submission.
+ *
+ * The confirmation e-mail goes the way the registrations' and requests' do (sendConfirmation): none to a sample address
+ * (`@example.test`) or from a deployment without Resend, neither of which takes a place; at most 3 per address and day; and one
+ * place of the day's confirmation cap (the `mail_quota` row, which never fails open) — while the coming-soon gate is on, this form
+ * is the only public one, and without the cap anyone could make the site mail every address they type. Over the cap, or with the
+ * quota failing, the address is stored and the answer is the same, with no e-mail.
  */
 export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionResult> {
   return submission(deps, "subscribe", formData, parseSubscribe, async ({ email, locale }) => {
@@ -458,8 +464,22 @@ export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionR
       if (!existing || existing.confirmedAt) return { result: OK };
       [sub] = await deps.db.update(subscribers).set({ consentAt: deps.now, locale }).where(eq(subscribers.id, existing.id)).returning();
     }
+    if (isSampleAddress(email)) {
+      console.info("[forms] subscribe: stored; confirmation e-mail skipped (sample address)");
+      return { result: OK };
+    }
+    if (!mailConfigured(deps.env)) return { result: OK };
     if (!(await allowed(deps.env, `rl:confirm:${await sha256(email)}`, CONFIRM_MAILS_PER_DAY, 24 * 60 * 60))) {
       console.info("[forms] subscribe: confirmation e-mails for this address are paused for today");
+      return { result: OK };
+    }
+    try {
+      if (!(await reserveLoginMail(deps.db, deps.now, CONFIRMATION_MAIL_DAILY_CAP))) {
+        logNote("[forms] subscribe: daily mail cap reached: no confirmation e-mail");
+        return { result: OK };
+      }
+    } catch (e) {
+      logFailure("[forms] subscribe: mail quota unavailable, no confirmation e-mail", e);
       return { result: OK };
     }
     return { result: OK, mail: confirmationMail(deps.siteUrl, sub) };
