@@ -753,6 +753,7 @@ describe("GET /api/konto: the dashboard", () => {
       ],
       favourites: ["veebikursus"],
       prepayment: { receiver: "MS LAB OÜ", iban: "EE00 0000", bank: "Pank", referencePrefix: "MS" },
+      resume: null,
     });
     expect((await call(deps, "/", { cookie })).status).toBe(200); // the trailing slash is the same endpoint
   });

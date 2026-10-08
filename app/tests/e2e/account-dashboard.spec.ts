@@ -1,8 +1,9 @@
 import type { Locator, Page } from "@playwright/test";
 import { formatDate, formatTime } from "../../src/i18n/format";
-import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, storedChangeRequests, TEST_PREPAYMENT, type AccountCardKind } from "./account";
+import { clientEmail, insertAccountFixtures, setPrepayment, signInAsClient, storedChangeRequests, takeTerms, TEST_PREPAYMENT, type AccountCardKind } from "./account";
 import { signInAsAdmin, type CreatedRows } from "./admin-login";
 import { holdLocalLock, LOCK_WAIT_MS, onLocalDb, removeAdminRows, removeClientRows, snapshotRows } from "./fixtures";
+import { insertLessonCourse, markDone, removeLessonFile } from "./lessons";
 import { submitsForms, test, expect } from "./test";
 import { scrollLeft, swipe } from "./touch";
 
@@ -404,4 +405,43 @@ test("in Russian: the page, the tabs and Выйти speak Russian, and logging o
   await page.getByRole("button", { name: "Выйти" }).click();
   await expect(page).toHaveURL(/\/ru$/);
   await expect(page.locator("[data-account-link]").first()).toHaveAttribute("data-account-link", "out");
+});
+
+test("an e-course with lessons: the dark 'Pooleli' card on top with the next lesson and 'Jätka'; the card's bar; finished: 'Läbitud ✓' and no dark card", async ({ page }, info) => {
+  submitsForms();
+  // the lesson page the card opens checks the course terms, shared by every client: this test takes them like the lesson specs do
+  info.setTimeout(info.timeout + LOCK_WAIT_MS);
+  const restoreTerms = await takeTerms();
+  const email = clientEmail("dash-pooleli", info.project.name);
+  await removeClientRows(email);
+  const c = await insertLessonCourse(email);
+  try {
+    await signInAsClient(page, email);
+    await page.goto("/konto");
+    const resume = page.locator("[data-resume-card]");
+    await expect(resume).toContainText("Pooleli");
+    await expect(resume.locator("[data-resume-where]")).toHaveText("Alustame · Esimene tund");
+    await expect(resume.locator("[data-resume-progress]")).toHaveText("0 / 3 õppetundi tehtud");
+    await expect(resume.locator("[data-resume-next]")).toHaveText("Alusta");
+    await markDone(c.clientId, c.lessons.video);
+    await page.reload();
+    await expect(resume.locator("[data-resume-where]")).toHaveText("Alustame · Teine tund");
+    await expect(resume.locator("[data-resume-next]")).toHaveText("Jätka");
+    await expect(page.locator(`[data-card="course-${c.slug}"] [data-card-progress]`)).toHaveText("1 / 3");
+    expect(await noOverflow(page)).toBe(true);
+    await resume.locator("[data-resume-next]").click();
+    await expect(page).toHaveURL(new RegExp(`/konto/kursus/${c.slug}/${c.lessons.text}$`));
+    await markDone(c.clientId, c.lessons.text);
+    await markDone(c.clientId, c.lessons.last);
+    await page.goto("/konto");
+    await expect(page.locator(`[data-card="course-${c.slug}"] [data-card-finished]`)).toHaveText("Läbitud ✓");
+    await expect(page.locator("[data-resume-card]")).toHaveCount(0);
+  } finally {
+    try {
+      await removeClientRows(email);
+      await removeLessonFile(c.fileKey);
+    } finally {
+      await restoreTerms();
+    }
+  }
 });

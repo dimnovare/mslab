@@ -17,6 +17,7 @@ const data: Dashboard = {
   cards: [],
   favourites: [],
   prepayment: null,
+  resume: null,
 };
 
 const ownAccount: Props = { locale: "et", t };

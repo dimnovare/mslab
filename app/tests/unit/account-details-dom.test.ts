@@ -22,6 +22,7 @@ const dashboard = (over: Partial<ClientProfile> = {}): Dashboard => ({
   cards: [],
   favourites: [],
   prepayment: null,
+  resume: null,
 });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

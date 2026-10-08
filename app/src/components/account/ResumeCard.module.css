@@ -1,0 +1,74 @@
+/* The "Pooleli" card (ResumeCard.tsx): the account card's box (AccountCourseCard.module.css) in ink with paper text, B .tag in a faint
+   paper line, the course title in Jost, the next lesson in fog, the e-course page's thin bar (ProgressBar, dark tone) and the one
+   button as a paper pill (ui.btn turned around for the dark surface). Tokens only. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 28px;
+  padding: 28px;
+  border-radius: 22px;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border: 1px solid color-mix(in srgb, var(--paper) 35%, transparent);
+  border-radius: 99px;
+  font: 500 11px/1.3 var(--font-body);
+  white-space: nowrap;
+}
+
+.title {
+  margin: 16px 0 6px;
+  font: 400 clamp(24px, 2.4vw, 30px) / 1.2 var(--font-display);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.where {
+  margin: 0;
+  color: var(--fog);
+  font: 400 15px/1.5 var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.count {
+  margin: 18px 0 0;
+  font: 500 14px/1.5 var(--font-body);
+}
+
+.card > [role="progressbar"] {
+  align-self: stretch;
+  max-width: 520px;
+}
+
+.card .action {
+  margin-top: 22px;
+  border-color: var(--paper);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.card .action:hover {
+  border-color: var(--first);
+  background: var(--first);
+}
+
+.card .action:focus-visible {
+  outline-color: var(--paper);
+}
+
+@media (max-width: 640px) {
+  .card {
+    padding: 24px 20px;
+  }
+
+  .card .action {
+    width: 100%;
+  }
+}

@@ -5,7 +5,7 @@ import { AccountShell } from "@/components/account/AccountShell";
 import { CoursesTab } from "@/components/account/CoursesTab";
 import { forgetChangeRequests, isSent, pruneChangeRequests, rememberChangeRequest, SENT_KEY, SENT_TTL_MS, sentChangeRequests } from "@/components/account/sent-requests";
 import { coursesTexts, shellTexts } from "@/components/account/texts";
-import type { AccountCard, ContactCard } from "@/domain/account-cards";
+import type { AccountCard, ContactCard, EcourseCard } from "@/domain/account-cards";
 import { getDict, type Locale } from "@/i18n/locales";
 import type { Dashboard } from "@/server/client-data";
 
@@ -37,6 +37,7 @@ const dashboard = (over: Partial<Dashboard> = {}): Dashboard => ({
   cards,
   favourites: [],
   prepayment: { receiver: "MS LAB OÜ", iban: "EE00 0000 0000 0000 0000", bank: "Pank", referencePrefix: "MS" },
+  resume: null,
   ...over,
 });
 
@@ -248,5 +249,53 @@ describe("the sent change requests of this tab (sessionStorage)", () => {
     expect(() => rememberChangeRequest(contact(1))).not.toThrow();
     expect(() => pruneChangeRequests([])).not.toThrow();
     expect(() => forgetChangeRequests()).not.toThrow();
+  });
+});
+
+describe("the 'Pooleli' card and the e-course cards' lessons (phase 2c)", () => {
+  const withLessons = (done: number, total: number): EcourseCard => ({
+    kind: "ecourse", course: ecourse, grantedAt: NOW, expiresAt: "2027-04-03T10:00:00.000Z", revoked: false,
+    progress: { done, total, next: done < total ? { lessonId: 12, title: { et: "Värvid", ru: "Цвета" }, moduleTitle: { et: "Alused" } } : null },
+  });
+  const one = (card: EcourseCard, resume: string | null) => dashboard({ cards: [card], resume });
+
+  test("at the top: the tag, the course, '{module} · {lesson}', the bar and its sentence, and 'Jätka' to the next lesson", () => {
+    const html = render("et", { data: one(withLessons(1, 3), ecourse.slug) });
+    const card = html.slice(html.indexOf("data-resume-card"), html.indexOf("data-account-cards"));
+    expect(card).toContain(">Pooleli<");
+    expect(card).toContain("Kulmumeistri e-koolitus");
+    expect(card).toContain("Alused · Värvid");
+    expect(card).toContain("1 / 3 õppetundi tehtud");
+    expect(card).toMatch(/role="progressbar"[^>]*aria-valuenow="1"/);
+    expect(card).toContain(`href="/konto/kursus/${ecourse.slug}/12"`);
+    expect(card).toContain("Jätka");
+    expect(html.indexOf("data-resume-card")).toBeLessThan(html.indexOf("data-account-cards")); // above the cards
+  });
+
+  test("before the first lesson is done the button says 'Alusta'; no card without `resume`", () => {
+    expect(render("et", { data: one(withLessons(0, 3), ecourse.slug) })).toContain("Alusta");
+    expect(render("et", { data: one(withLessons(1, 3), null) })).not.toContain("data-resume-card");
+  });
+
+  test("the e-course card: '{done} / {total}' with the thin bar; a finished one 'Läbitud ✓' and no bar", () => {
+    const open = cardHtml(render("et", { data: one(withLessons(2, 5), null) }), `course-${ecourse.slug}`);
+    expect(open).toContain(">2 / 5<");
+    expect(open).toMatch(/role="progressbar"[^>]*aria-label="2 \/ 5 õppetundi tehtud"/);
+    const done = cardHtml(render("et", { data: one(withLessons(5, 5), null) }), `course-${ecourse.slug}`);
+    expect(done).toContain("Läbitud ✓");
+    expect(done).not.toContain("progressbar");
+  });
+
+  test("the admin's read-only view: the card's button is there but does nothing", () => {
+    const html = render("et", { data: one(withLessons(1, 3), ecourse.slug), readOnly: true });
+    expect(html).toMatch(/<a[^>]*aria-disabled="true"[^>]*data-resume-next=""/);
+    expect(html).not.toContain(`href="/konto/kursus/${ecourse.slug}/12"`);
+  });
+
+  test("Russian", () => {
+    const html = render("ru", { data: one(withLessons(1, 3), ecourse.slug) });
+    expect(html).toContain("В процессе");
+    expect(html).toContain("Пройдено уроков: 1 / 3");
+    expect(html).toContain("Продолжить");
   });
 });

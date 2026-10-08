@@ -76,12 +76,20 @@ export type WaitlistCard = {
   createdAt: string;
 };
 
+/**
+ * An open e-course's lessons for the student (phase 2c; visible lessons only): how many are done of how many, and the next one to open
+ * (the first open lesson not done, with its module's title), null when every lesson is done.
+ */
+export type EcourseProgress = { done: number; total: number; next: { lessonId: number; title: I18n; moduleTitle: I18n } | null };
+
 export type EcourseCard = {
   kind: "ecourse";
   course: CourseRef;
   grantedAt: string;
   expiresAt: string;
   revoked: boolean;
+  /** Present for an active access: its lessons (null without visible lessons); absent for an access that has ended. */
+  progress?: EcourseProgress | null;
 };
 
 export type AccountCard = ContactCard | IndividualCard | RequestCard | WaitlistCard | EcourseCard;
@@ -236,6 +244,22 @@ export function sortCards(cards: AccountCard[], now: Date): AccountCard[] {
       return b.made - a.made || byKey(a.key, b.key);
     })
     .map((x) => x.card);
+}
+
+/**
+ * Which e-course the dark "Pooleli" card at the top of "Minu koolitused" is for (spec 4). Of her open e-courses with a lesson left
+ * (an active access, and a progress with a next lesson), the one she did something in last. `activity` maps a course slug to the time
+ * in ms of her last lesson row write. With no activity in any of them, the first such course in the cards' order: the card then
+ * says "Alusta". null: none — every course finished, none with lessons, none open.
+ */
+export function resumeSlug(cards: readonly AccountCard[], activity: ReadonlyMap<string, number>, now: Date): string | null {
+  let best: { slug: string; at: number } | null = null;
+  for (const card of cards) {
+    if (card.kind !== "ecourse" || isPastCard(card, now) || !card.progress?.next) continue;
+    const at = activity.get(card.course.slug) ?? -Infinity;
+    if (best === null || at > best.at) best = { slug: card.course.slug, at };
+  }
+  return best?.slug ?? null;
 }
 
 // ---------- for the dashboard's view (components/account) ----------

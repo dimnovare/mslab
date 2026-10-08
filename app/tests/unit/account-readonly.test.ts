@@ -34,6 +34,7 @@ const dashboard: Dashboard = {
   ],
   favourites: [],
   prepayment: { receiver: "MS LAB OÜ", iban: "EE00 0000 0000 0000 0000", bank: "", referencePrefix: "MS" },
+  resume: null,
 };
 
 const d = getDict("et");

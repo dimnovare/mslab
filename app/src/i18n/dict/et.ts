@@ -481,6 +481,16 @@ export const et = {
       open: "Ava koolitus",
       empty: "Sul ei ole veel koolitusi.",
       browse: "Vaata koolitusi",
+      // The dark "Pooleli" card at the top (components/account/ResumeCard.tsx) and the e-course cards' lessons (phase 2c): {module} and
+      // {lesson} are the next lesson's module and title, {done} and {total} count the lessons. "Jätka" ("Alusta" before the first one is
+      // done) opens the next lesson; a finished course says "Läbitud ✓".
+      resumeTag: "Pooleli",
+      resumeWhere: "{module} · {lesson}",
+      resumeProgress: "{done} / {total} õppetundi tehtud",
+      resumeContinue: "Jätka",
+      resumeBegin: "Alusta",
+      lessonCount: "{done} / {total}",
+      finished: "Läbitud ✓",
       loading: "Laadin koolitusi…",
       // where to pay the prepayment (components/account/PrepaymentInfo.tsx); "Selgitus" is the bank transfer's explanation field
       payment: {

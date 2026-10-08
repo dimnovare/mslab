@@ -30,6 +30,7 @@ const dashboard = (cards: AccountCard[]): Dashboard => ({
   cards,
   favourites: [],
   prepayment: null,
+  resume: null,
 });
 
 const d = getDict("et");

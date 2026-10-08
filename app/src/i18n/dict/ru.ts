@@ -435,6 +435,13 @@ export const ru: Dict = {
       open: "Открыть курс",
       empty: "У\u00a0вас пока нет курсов.",
       browse: "Посмотреть курсы",
+      resumeTag: "В процессе",
+      resumeWhere: "{module} · {lesson}",
+      resumeProgress: "Пройдено уроков: {done} / {total}",
+      resumeContinue: "Продолжить",
+      resumeBegin: "Начать",
+      lessonCount: "{done} / {total}",
+      finished: "Пройден ✓",
       loading: "Загружаем курсы…",
       payment: {
         receiver: "Получатель",
