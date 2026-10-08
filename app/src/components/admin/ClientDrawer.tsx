@@ -62,6 +62,9 @@ export function ClientDetailView({ detail, ecourses, now }: { detail: ClientDeta
         <p className={`${ui.muted} ${ui.small}`}>
           {fill(t.created, { date: formatDate(c.createdAt, "et") })} · {t.locale} {c.locale === "ru" ? adminEt.common.locale.ru : adminEt.common.locale.et}
         </p>
+        <p className={`${ui.muted} ${ui.small}`} data-client-newsletter={detail.newsletter}>
+          {fill(t.newsletter, { state: t.newsletterStates[detail.newsletter] })}
+        </p>
         <Link className={`${ui.btn} ${ui.secondary} ${ui.smallBtn}`} href={`/admin/opilased/${c.id}/vaade`} data-view-as="">
           {t.viewAs}
         </Link>

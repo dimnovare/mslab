@@ -306,6 +306,9 @@ export const adminEt = {
       notFound: "Seda õpilast ei leitud.",
       noName: "Nimi puudub",
       created: "Konto loodud {date}",
+      // her address's newsletter (phase 2c)
+      newsletter: "Uudiskiri: {state}",
+      newsletterStates: { yes: "jah", pending: "ootab kinnitust", no: "ei" },
       phone: "Telefon",
       locale: "Keel",
       viewAs: "Vaata tema vaadet",

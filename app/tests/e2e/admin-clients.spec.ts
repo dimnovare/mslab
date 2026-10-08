@@ -246,6 +246,8 @@ test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the numb
       values ('contact', ${sql.json({ course: "kulmumeistri-e-koolitus", intent: "purchase", email: kStudent, locale: "et" })}, ${k.clientId})`,
     { marksPages: false },
   );
+  // Kai signed up for the newsletter and has not confirmed yet (removed with the other rows of her address)
+  await onLocalDb((sql) => sql`insert into subscribers (email, locale, token) values (${kStudent}, 'et', ${`e2e-adm-nl-${info.project.name}`})`, { marksPages: false });
   await signInAsAdmin(page, context, visitorIp, created);
   await page.goto("/admin/opilased");
   await adminReady(page);
@@ -290,6 +292,7 @@ test("the list: Kõik / E-õpe / Kontaktõpe, search by name or e-mail, the numb
   // the drawer: her registrations (named as her cards name them), each opening its own drawer
   const d = await openStudent(page, kStudent);
   await expect(d.getByRole("heading", { level: 2 })).toHaveText(`Kai E2E ${info.project.name}`);
+  await expect(d.locator("[data-client-newsletter]")).toHaveText("Uudiskiri: ootab kinnitust"); // phase 2c
   const reqs = d.locator("[data-client-request]");
   await expect(reqs).toHaveCount(1);
   await expect(reqs.locator("strong")).toHaveText("E-õppe huvi");

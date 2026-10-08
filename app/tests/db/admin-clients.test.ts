@@ -186,6 +186,15 @@ describe("clientDetail", () => {
     expect([await clientLabel(db, a.id), await clientLabel(db, b.id), await clientLabel(db, c.id), await clientLabel(db, 999_999)]).toEqual(["Anu", "Berit Saar", "c@example.test", null]);
   });
 
+  test("the drawer's newsletter line: yes, waiting for confirmation, or no (phase 2c)", async () => {
+    const kati = await client("kati@example.test");
+    expect((await clientDetail(db, kati.id, NOW))!.newsletter).toBe("no");
+    await db.insert(subscribers).values({ email: "Kati@example.test", token: "n1" });
+    expect((await clientDetail(db, kati.id, NOW))!.newsletter).toBe("pending");
+    await db.update(subscribers).set({ confirmedAt: NOW });
+    expect((await clientDetail(db, kati.id, NOW))!.newsletter).toBe("yes");
+  });
+
   test("the e-courses to pick from: e-learning only, drafts too, in the public order, with today + their access months (12 without)", async () => {
     expect(await listEcourses(db, NOW)).toEqual([
       { id: ecourse.id, title: { et: "Kulmumeistri e-koolitus" }, published: true, accessMonths: 6, until: "2027-04-04" },
