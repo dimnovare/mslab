@@ -434,8 +434,41 @@ async function layoutOf(page: Page) {
   return { wrapper, stage, frame, iframe, mark, corner, button: box((await page.locator("[data-fullscreen]").boundingBox())!) };
 }
 
-/** The same layout, to within half a pixel (the button's hover lift is still settling after the click that enlarged the player). */
-function expectSameLayout(actual: Awaited<ReturnType<typeof layoutOf>>, expected: Awaited<ReturnType<typeof layoutOf>>, message: string): void {
+type Layout = Awaited<ReturnType<typeof layoutOf>>;
+
+/** The largest difference, in pixels, between two layouts' boxes (Infinity when the mark is in another corner). */
+function layoutDistance(a: Layout, b: Layout): number {
+  if (a.corner !== b.corner) return Infinity;
+  let most = 0;
+  for (const part of ["wrapper", "stage", "frame", "iframe", "mark", "button"] as const)
+    for (const side of ["x", "y", "w", "h"] as const) most = Math.max(most, Math.abs(a[part][side] - b[part][side]));
+  return most;
+}
+
+/**
+ * The layout once it has stopped changing by itself, so that only the line can move anything between two readings: the pointer is
+ * taken off the button (its hover lift, translateY(-2px) over 0.2 s, would be in the button's box, and a click's :active scale before
+ * it), the fonts are loaded (the watermark's Manrope 600 may still be landing, and it sizes the mark), every transition has ended, and
+ * two readings 50 ms apart are the same. Under load each of these can still be going on a second after the click that enlarged it.
+ */
+async function settledLayout(page: Page, pointer: { x: number; y: number }): Promise<Layout> {
+  await page.mouse.move(pointer.x, pointer.y);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)));
+  });
+  let last = await layoutOf(page);
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(50);
+    const next = await layoutOf(page);
+    if (layoutDistance(next, last) < 0.01) return next;
+    last = next;
+  }
+  throw new Error(`e2e: the player's layout does not settle: ${JSON.stringify(last)}`);
+}
+
+/** The same layout, to within half a pixel. */
+function expectSameLayout(actual: Layout, expected: Layout, message: string): void {
   for (const part of ["wrapper", "stage", "frame", "iframe", "mark", "button"] as const)
     for (const side of ["x", "y", "w", "h"] as const)
       expect(Math.abs(actual[part][side] - expected[part][side]), `${message}: ${part}.${side} is ${JSON.stringify(actual[part])}, was ${JSON.stringify(expected[part])}`).toBeLessThanOrEqual(0.5);
@@ -466,10 +499,11 @@ for (const mode of ["fullscreen", "cover"] as const) {
       const note = page.locator("[data-seek-note]");
       await expect(note).toHaveText("");
       await playFrom(fake, 0, 6);
-      const before = await layoutOf(page);
+      const pointer = { x: size.width / 2, y: size.height / 2 }; // over the picture, as when she drags the slider
+      const before = await settledLayout(page, pointer);
       await postFromPlayer(fake, "timeupdate", { seconds: 90, duration: 125 }); // the slider dragged far ahead
       await expect(note).toHaveText("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
-      const shown = await layoutOf(page);
+      const shown = await settledLayout(page, pointer);
       expectSameLayout(shown, before, "nothing moves as the line comes");
       // the line itself: on the screen and inside the player, clear of the button, taking no clicks
       const line = box((await note.boundingBox())!);
@@ -479,7 +513,7 @@ for (const mode of ["fullscreen", "cover"] as const) {
       expect(await note.evaluate((e) => getComputedStyle(e).pointerEvents)).toBe("none");
       await page.clock.fastForward(6_000);
       await expect(note).toHaveText("");
-      expectSameLayout(await layoutOf(page), before, "nothing moves as the line goes");
+      expectSameLayout(await settledLayout(page, pointer), before, "nothing moves as the line goes");
     });
   }
 }
