@@ -415,7 +415,7 @@ describe("failures are logged without personal data", () => {
 });
 
 describe("newsletter double opt-in", () => {
-  const signUp = (deps: Deps, email = "uus@example.com", locale = "et") => handleSubscribe(deps, form({ email, consent: "on", locale }));
+  const signUp = (deps: Deps, email = "uus@example.com", locale = "et") => handleSubscribe(deps, form({ email, locale }));
 
   test("a new address is stored unconfirmed and gets the confirmation link in its language", async () => {
     const { mails } = outbox();
@@ -424,7 +424,7 @@ describe("newsletter double opt-in", () => {
     const [sub] = await db.select().from(subscribers);
     expect(sub).toMatchObject({ email: "uus@example.com", locale: "ru", confirmedAt: null });
     expect(sub.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(sub.consentAt).toEqual(NOW);
+    expect(sub.consentAt).toEqual(NOW); // the time of the submission: sending the form is the consent (no consent box)
     await flush();
     const [mail] = mails();
     expect(mail.to).toBe("uus@example.com");
@@ -434,6 +434,16 @@ describe("newsletter double opt-in", () => {
     await signUp({ ...deps, siteUrl: "https://mslab.diipsolutions.eu" }, "teine@example.com");
     await flush();
     expect(mails()[1].text).toContain("https://mslab.diipsolutions.eu/api/newsletter/confirm?t=");
+  });
+
+  test("the e-mail alone is a sign-up: no consent field is needed, one that an older page sends changes nothing, a bad address stores nothing", async () => {
+    const { deps } = setup({ secrets: true });
+    expect(await handleSubscribe(deps, form({ email: "yksi@example.com" }))).toEqual({ ok: true });
+    expect(await handleSubscribe(deps, form({ email: "kaks@example.com", consent: "on" }))).toEqual({ ok: true });
+    expect(await handleSubscribe(deps, form({ email: "vale-aadress" }))).toEqual({ ok: false, errors: { email: "invalid" } });
+    const rows = await db.select().from(subscribers);
+    expect(rows.map((r) => r.email).sort()).toEqual(["kaks@example.com", "yksi@example.com"]);
+    expect(rows.every((r) => r.confirmedAt === null && r.consentAt.getTime() === NOW.getTime())).toBe(true);
   });
 
   test("signing up again does not tell whether the address exists: same answer, one row; unconfirmed → link again", async () => {

@@ -18,7 +18,8 @@ export const dynamic = "force-static";
  * The coming-soon page (hotfix 08.10): while the site's content is still sample content, the middleware answers every
  * page request of a visitor with this page (a rewrite to /tulekul/et or /tulekul/ru, lib/site-gate.ts); signed-in admins
  * (the preview cookie) see the site. Outside the site's shell (no header, footer or review widget): the logo, the
- * heading, one line and the newsletter's own sign-up (the subscribe action, double opt-in). The confirmation link sends
+ * heading, one line and the newsletter's own sign-up (the subscribe action, double opt-in; its line under "Liitu" has no
+ * privacy link here: the gate does not serve /privaatsus to visitors). The confirmation link sends
  * the visitor to "/?uudiskiri=…", which is this page here: the notice reads the address in the browser (FlashNotice).
  * Not a page of the site: with the gate off, or for an admin, /tulekul/et is the 404 page (lib/site-routing.ts). The title,
  * description and noindex are the layout's.
@@ -47,15 +48,15 @@ export default async function ComingSoon({ params }: Props) {
           <NewsletterForm
             locale={locale}
             className={styles.form}
+            privacyLink={false}
             t={{
               emailLabel: nl.emailLabel,
               emailPlaceholder: nl.emailPlaceholder,
               submit: nl.submit,
-              consent: nl.consent,
+              notice: nl.notice,
               sentTitle: nl.sentTitle,
               sentText: nl.confirmText,
               errorEmail: d.forms.errorEmail,
-              errorRequired: d.forms.errorRequired,
               errorTooMany: d.forms.errorTooMany,
               errorGeneric: d.forms.errorGeneric,
             }}

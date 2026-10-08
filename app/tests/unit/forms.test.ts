@@ -98,9 +98,14 @@ describe("contact, newsletter, cart, practice, waitlist", () => {
     expect(errors(parseContact(form({ name: " ", email: "x@", message: "" })))).toEqual({ name: "required", email: "invalid", message: "required" });
     expect(errors(parseContact(form({ name: "x".repeat(121), email: "a@example.ee", message: "x".repeat(2001) })))).toEqual({ name: "required", message: "required" });
   });
-  test("newsletter: e-mail and consent", () => {
-    expect(parseSubscribe(form({ email: "a@example.ee", consent: "on" }))).toEqual({ ok: true, data: { email: "a@example.ee", consent: "on", locale: "et" } });
-    expect(errors(parseSubscribe(form({ email: "nope" })))).toEqual({ email: "invalid", consent: "required" });
+  test("newsletter: the e-mail alone is a sign-up (sending the form is the consent, there is no consent field)", () => {
+    expect(parseSubscribe(form({ email: "a@example.ee" }))).toEqual({ ok: true, data: { email: "a@example.ee", locale: "et" } });
+    expect(parseSubscribe(form({ email: " A@Example.ee ", locale: "ru" }))).toEqual({ ok: true, data: { email: "a@example.ee", locale: "ru" } });
+    // an older page may still send the box: it is not read, and ticked or not it makes no difference
+    expect(parseSubscribe(form({ email: "a@example.ee", consent: "on" }))).toEqual({ ok: true, data: { email: "a@example.ee", locale: "et" } });
+    expect(parseSubscribe(form({ email: "a@example.ee" })).ok).toBe(true);
+    expect(errors(parseSubscribe(form({ email: "nope" })))).toEqual({ email: "invalid" });
+    expect(errors(parseSubscribe(form({})))).toEqual({ email: "invalid" });
   });
   test("cart interest: e-mail and course", () => {
     expect(parsePurchaseInterest(form({ course: "kulmumeistri-e-koolitus", email: "test@example.com" })).ok).toBe(true);

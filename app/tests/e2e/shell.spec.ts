@@ -114,7 +114,6 @@ test.describe("desktop", () => {
     await page.goto("/konto/sisene");
     const footer = page.locator("footer");
     await footer.getByLabel("Sinu e-post").fill(addr);
-    await footer.getByRole("checkbox").check();
     await footer.getByRole("button", { name: "Liitu" }).click();
     await expect(footer.getByText("Kontrolli oma postkasti")).toBeVisible();
     if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
