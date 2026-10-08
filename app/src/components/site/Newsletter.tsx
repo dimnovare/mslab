@@ -1,21 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
+import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import { subscribe } from "@/server/actions/public";
 import { Icon } from "./Icon";
 import styles from "./Newsletter.module.css";
 
-/** The texts of the sign-up itself (NewsletterForm): the field, the consent, the button, the answers. */
+/** The texts of the sign-up itself (NewsletterForm): the field, the button, the line under it, the answers. */
 export type NewsletterFormTexts = {
   emailLabel: string;
   emailPlaceholder: string;
   submit: string;
-  consent: string;
+  /** The line under the button: signing up is the consent ("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda."). */
+  notice: string;
+  /** The link that follows the line: the name of the privacy page ("Privaatsus"). */
+  privacy: string;
   sentTitle: string;
   sentText: string;
   errorEmail: string;
-  errorRequired: string;
   errorTooMany: string;
   errorGeneric: string;
 };
@@ -27,7 +31,7 @@ export type NewsletterTexts = NewsletterFormTexts & {
   body: string;
 };
 
-type Field = "email" | "consent" | "form";
+type Field = "email" | "form";
 type State = { status: "idle" } | { status: "sent" } | { status: "error"; field: Field; message: string };
 
 /**
@@ -53,18 +57,19 @@ export function Newsletter({ locale, t }: { locale: Locale; t: NewsletterTexts }
 }
 
 /**
- * The newsletter sign-up: e-mail, consent, "Liitu", and the answer in its place. Double opt-in: the action stores the
- * address and sends a confirmation link; the answer is always "check your inbox". Used by the footer's block (Newsletter)
- * and the coming-soon page (app/tulekul/[locale]); on a lilac surface (its colours and focus ring are made for it).
- * Submitted by hand (onSubmit + startTransition), as the other forms: React resets a form after `<form action>`, which
- * would un-tick the controlled consent box after a failed attempt. The status region is always in the page (polite),
+ * The newsletter sign-up: e-mail, "Liitu", a quiet line with the privacy link under it, and the answer in its place.
+ * Double opt-in: the action stores the address and sends a confirmation link; the answer is always "check your inbox".
+ * There is no consent box: this form's only purpose is the newsletter, so sending it is the consent (the time is stored,
+ * and the confirmation link still has to be opened); the line under the button says so. Used by the footer's block
+ * (Newsletter) and the coming-soon page (app/tulekul/[locale]); on a lilac surface (its colours and focus ring are made
+ * for it). Submitted by hand (onSubmit + startTransition), as the other forms: React resets a form after `<form action>`,
+ * which would clear the e-mail after a failed attempt. The status region is always in the page (polite),
  * so the confirmation is announced; focus moves to it because the form it replaces had focus.
  * `className`: the box's own size and place (default: the footer block's column).
  */
 export function NewsletterForm({ locale, t, className = styles.form }: { locale: Locale; t: NewsletterFormTexts; className?: string }) {
   const id = useId();
   const [email, setEmail] = useState("");
-  const [consent, setConsent] = useState(false);
   const statusRef = useRef<HTMLDivElement>(null);
   const [state, formAction, pending] = useActionState<State, FormData>(async (_prev, formData) => {
     try {
@@ -72,7 +77,6 @@ export function NewsletterForm({ locale, t, className = styles.form }: { locale:
       if (result.ok) return { status: "sent" };
       const { errors } = result;
       if (errors.email) return { status: "error", field: "email", message: t.errorEmail };
-      if (errors.consent) return { status: "error", field: "consent", message: t.errorRequired };
       return { status: "error", field: "form", message: errors.form === "rate" ? t.errorTooMany : t.errorGeneric };
     } catch {
       return { status: "error", field: "form", message: t.errorGeneric };
@@ -133,18 +137,9 @@ export function NewsletterForm({ locale, t, className = styles.form }: { locale:
               <Icon name="arrow" />
             </button>
           </div>
-          <label className={styles.check}>
-            <input
-              id={`${id}-consent`}
-              type="checkbox"
-              name="consent"
-              required
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              {...describe("consent")}
-            />
-            <span>{t.consent}</span>
-          </label>
+          <p className={styles.notice} data-newsletter-notice="">
+            {t.notice} <Link href={href(locale, "/privaatsus")}>{t.privacy}</Link>
+          </p>
           <input type="hidden" name="locale" value={locale} />
           {/* Honeypot: people never see or fill it. */}
           <div className={styles.honeypot} aria-hidden="true">

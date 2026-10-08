@@ -343,7 +343,8 @@ export const et = {
     emailLabel: "Sinu e-post",
     emailPlaceholder: "nimi@e-post.ee",
     submit: "Liitu",
-    consent: "Soovin saada MS LABi uudiskirju. Saan igal ajal loobuda.",
+    // The line under "Liitu", before the link "Privaatsus" (footer.privacy): the form's only purpose is the newsletter, so sending it is the consent.
+    notice: "Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda.",
     confirmTitle: "Kinnita oma e-post",
     confirmText: "Saatsime sulle kinnituskirja. Vajuta kirjas olevale lingile, et liitumine lõpule viia.",
     confirmedTitle: "Tere tulemast MS LABi!",

@@ -88,7 +88,8 @@ export const practiceSchema = z.object({
 
 export const waitlistSchema = z.object({ session: id, name: line(MAX.name), email, locale });
 
-export const subscribeSchema = z.object({ email, consent: z.literal("on"), locale });
+/** The newsletter's own sign-up: sending it is the consent (the time is stored), so there is no consent field. */
+export const subscribeSchema = z.object({ email, locale });
 
 // ---------- FormData → schema ----------
 
@@ -133,8 +134,8 @@ const slugPlacement: Placement = { course: ["form", "invalid"] };
 /** Contact message (home, /kontakt). Fields: name, email, message, locale. */
 export const parseContact = (fd: FormData) => parseForm(contactSchema, fd, same("name", "email", "message", "locale"));
 
-/** Newsletter. Fields: email, consent ("on"), locale. */
-export const parseSubscribe = (fd: FormData) => parseForm(subscribeSchema, fd, same("email", "consent", "locale"));
+/** Newsletter. Fields: email, locale (a "consent" field an older page may still send is not read). */
+export const parseSubscribe = (fd: FormData) => parseForm(subscribeSchema, fd, same("email", "locale"));
 
 /** Group registration. Fields: course (slug), session, name, email, phone, payment, modelHelp, account, terms, locale. */
 export const parseGroupRegistration = (fd: FormData) =>

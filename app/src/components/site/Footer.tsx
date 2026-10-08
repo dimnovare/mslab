@@ -32,9 +32,9 @@ export function Footer({
         t={{
           ...d.newsletter,
           body: fill(d.newsletter.body, { discount: newsletter.discountLabel }),
+          privacy: d.footer.privacy,
           sentText: d.newsletter.confirmText,
           errorEmail: d.forms.errorEmail,
-          errorRequired: d.forms.errorRequired,
           errorTooMany: d.forms.errorTooMany,
           errorGeneric: d.forms.errorGeneric,
         }}

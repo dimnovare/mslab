@@ -94,7 +94,7 @@ describe("records made for an address with an account link to it at once", () =>
     expect(await handlePractice(deps(), form({ package: "MINI", name: "Kati Kask", email: "kati@example.test", phone: "+372 5555 1234", times: "õhtuti" }))).toEqual({ ok: true });
     expect(await handlePurchaseInterest(deps(), form({ course: "e-kulm", email: "kati@example.test" }))).toEqual({ ok: true });
     expect(await handleContact(deps(), form({ name: "Kati Kask", email: "kati@example.test", message: "Tere!" }))).toEqual({ ok: true });
-    expect(await handleSubscribe(deps(), form({ email: "kati@example.test", consent: "on" }))).toEqual({ ok: true });
+    expect(await handleSubscribe(deps(), form({ email: "kati@example.test" }))).toEqual({ ok: true });
 
     expect((await db.select().from(requests)).map((r) => [r.kind, r.clientId])).toEqual([["practice", id], ["contact", id], ["contact", id]]);
     expect((await db.select().from(subscribers)).map((s) => s.clientId)).toEqual([id]);
@@ -143,7 +143,7 @@ describe("records made for an address with an account link to it at once", () =>
     const kati = await signedIn("kati@example.test");
     expect(await register("mari@example.test", { name: "Mari Maasikas" })).toEqual({ ok: true });
     expect(await waitlist("mari@example.test")).toEqual({ ok: true });
-    expect(await handleSubscribe(deps(), form({ email: "mari@example.test", consent: "on" }))).toEqual({ ok: true });
+    expect(await handleSubscribe(deps(), form({ email: "mari@example.test" }))).toEqual({ ok: true });
     expect((await db.select().from(registrations)).map((r) => r.clientId)).toEqual([null]);
     expect((await db.select().from(requests)).map((r) => r.clientId)).toEqual([null]);
     expect((await db.select().from(subscribers)).map((s) => s.clientId)).toEqual([null]);

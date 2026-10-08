@@ -51,11 +51,11 @@ export default async function ComingSoon({ params }: Props) {
               emailLabel: nl.emailLabel,
               emailPlaceholder: nl.emailPlaceholder,
               submit: nl.submit,
-              consent: nl.consent,
+              notice: nl.notice,
+              privacy: d.footer.privacy,
               sentTitle: nl.sentTitle,
               sentText: nl.confirmText,
               errorEmail: d.forms.errorEmail,
-              errorRequired: d.forms.errorRequired,
               errorTooMany: d.forms.errorTooMany,
               errorGeneric: d.forms.errorGeneric,
             }}

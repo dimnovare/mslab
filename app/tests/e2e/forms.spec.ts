@@ -9,7 +9,7 @@ import { LOCAL_FIXTURES, storedRequests, storedSubscriber, testEmail } from "./f
 const INK = "rgb(34, 34, 34)";
 
 test.describe("newsletter", () => {
-  test("a failed attempt keeps the e-mail and the consent; each error is on its own field", async ({ page }, info) => {
+  test("a failed attempt keeps the e-mail; the error is on the e-mail field", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("nl-failed", info.project.name);
     await page.goto("/konto/sisene");
@@ -17,30 +17,78 @@ test.describe("newsletter", () => {
     const form = footer.locator("[data-newsletter-form]");
     await expect(form).toHaveAttribute("method", "post");
     const email = footer.getByLabel("Sinu e-post");
-    const consent = footer.getByRole("checkbox");
     const submit = footer.getByRole("button", { name: "Liitu" });
 
     await email.fill("vale-aadress");
-    await consent.check();
     await submit.click();
     await expect(email).toBeFocused();
     await expect(email).toHaveAttribute("aria-invalid", "true");
     await expect(email).toHaveAccessibleDescription("Sisesta korrektne e-posti aadress.");
-    await expect(consent).toBeChecked(); // React did not reset the form
-    await expect(consent).not.toHaveAttribute("aria-invalid", "true");
+    await expect(email).toHaveValue("vale-aadress"); // React did not reset the form
+    await expect(footer.getByRole("checkbox")).toHaveCount(0);
 
-    await email.fill(addr);
-    await consent.uncheck();
+    // a second failed attempt (nothing typed) keeps the form as it is, and the error stays on the e-mail
+    await email.fill("");
     await submit.click();
-    await expect(consent).toBeFocused();
-    await expect(consent).toHaveAttribute("aria-invalid", "true");
-    await expect(consent).toHaveAccessibleDescription("See väli on kohustuslik.");
-    await expect(email).not.toHaveAttribute("aria-invalid", "true");
-    await expect(email).toHaveValue(addr);
+    await expect(email).toBeFocused();
+    await expect(email).toHaveAttribute("aria-invalid", "true");
+    await expect(email).toHaveValue("");
     if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toBeNull();
+
+    // the corrected address alone is enough
+    await email.fill(addr);
+    await submit.click();
+    await expect(footer.locator("[data-newsletter-status]")).toContainText("Kontrolli oma postkasti");
+    if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
   });
 
-  test("sign-up: announced in the status region, stored unconfirmed; the e-mailed link confirms it", async ({ page }, info) => {
+  test("no consent box: the line under Liitu says signing up is the consent, with the privacy link, in Estonian and Russian", async ({ page }) => {
+    const cases = [
+      { path: "/konto/sisene", notice: "Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda.", link: "Privaatsus", href: "/privaatsus", button: "Liitu" },
+      { path: "/ru/koolitused", notice: "Подписываясь, вы получаете рассылку MS LAB. Отписаться можно в любой момент.", link: "Конфиденциальность", href: "/ru/privaatsus", button: "Подписаться" },
+    ];
+    for (const c of cases) {
+      await page.goto(c.path);
+      const footer = page.locator("footer");
+      const form = footer.locator("[data-newsletter-form]");
+      await expect(form.getByRole("checkbox")).toHaveCount(0);
+      await expect(form.locator("input[name='consent']")).toHaveCount(0);
+      const notice = form.locator("[data-newsletter-notice]");
+      await expect(notice).toHaveText(`${c.notice} ${c.link}`);
+      const link = notice.getByRole("link", { name: c.link });
+      await expect(link).toHaveAttribute("href", c.href);
+      // directly under the button: the line starts right below the e-mail row
+      const button = (await form.getByRole("button", { name: c.button }).boundingBox())!;
+      const line = (await notice.boundingBox())!;
+      expect(line.y).toBeGreaterThanOrEqual(button.y + button.height);
+      expect(line.y - (button.y + button.height)).toBeLessThan(12);
+    }
+    // the link opens the privacy page
+    await page.goto("/konto/sisene");
+    await page.locator("footer [data-newsletter-notice]").getByRole("link", { name: "Privaatsus" }).click();
+    await expect(page).toHaveURL(/\/privaatsus$/);
+    await expect(page.locator("footer [data-newsletter-form]")).toBeVisible();
+  });
+
+  test("the line and its link fit 390, 834 and 1440 px wide: no horizontal overflow, the link is a 44px target", async ({ page }) => {
+    for (const [path, link] of [["/konto/sisene", "Privaatsus"], ["/ru/koolitused", "Конфиденциальность"]]) {
+      for (const [width, height] of [[390, 844], [834, 1112], [1440, 900]]) {
+        await page.setViewportSize({ width, height });
+        await page.goto(path);
+        const notice = page.locator("footer [data-newsletter-notice]");
+        await notice.scrollIntoViewIfNeeded();
+        const box = (await notice.getByRole("link", { name: link }).boundingBox())!;
+        expect(box.height, `${path} at ${width}`).toBeGreaterThanOrEqual(44);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(overflow, `${path} at ${width}`).toBeLessThanOrEqual(0);
+        const form = (await page.locator("footer [data-newsletter-form]").boundingBox())!;
+        expect(box.x, `${path} at ${width}`).toBeGreaterThanOrEqual(form.x);
+        expect(box.x + box.width, `${path} at ${width}`).toBeLessThanOrEqual(form.x + form.width + 1);
+      }
+    }
+  });
+
+  test("sign-up with the e-mail alone: announced in the status region, stored unconfirmed; the e-mailed link confirms it", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("nl", info.project.name);
     await page.goto("/koolitused");
@@ -50,7 +98,6 @@ test.describe("newsletter", () => {
     await expect(status).toHaveAttribute("role", "status");
     await expect(status).toBeEmpty();
     await footer.getByLabel("Sinu e-post").fill(addr.toUpperCase());
-    await footer.getByRole("checkbox").check();
     await footer.getByRole("button", { name: "Liitu" }).click();
     await expect(status).toContainText("Kontrolli oma postkasti");
     await expect(status).toContainText("Saatsime sulle kinnituskirja.");
@@ -79,7 +126,6 @@ test.describe("newsletter", () => {
       await page.goto("/uudised");
       const footer = page.locator("footer");
       await footer.getByLabel("Sinu e-post").fill(addr);
-      await footer.getByRole("checkbox").check();
       await footer.getByRole("button", { name: "Liitu" }).click();
       await expect(footer.locator("[data-newsletter-status]")).toContainText("Kontrolli oma postkasti");
     }
@@ -94,7 +140,6 @@ test.describe("newsletter", () => {
     await page.goto("/ru/koolitused");
     const footer = page.locator("footer");
     await footer.getByLabel("Ваш e-mail").fill(addr);
-    await footer.getByRole("checkbox").check();
     await footer.getByRole("button", { name: "Подписаться" }).click();
     await expect(footer.locator("[data-newsletter-status]")).toContainText("Проверьте почту");
     const sub = await storedSubscriber(addr);
@@ -108,7 +153,7 @@ test.describe("newsletter", () => {
     await expect.poll(() => new URL(page.url()).pathname).toBe("/");
   });
 
-  test("ink focus ring on the lilac surface; consent hit area and login pill at least 44px", async ({ page, isMobile }) => {
+  test("ink focus ring on the lilac surface; privacy link and login pill at least 44px", async ({ page, isMobile }) => {
     await page.goto("/konto/sisene");
     const footer = page.locator("footer");
     const email = footer.getByLabel("Sinu e-post");
@@ -116,12 +161,11 @@ test.describe("newsletter", () => {
     expect(await email.evaluate((e) => getComputedStyle(e).outlineColor)).toBe(INK);
     await page.keyboard.press("Tab"); // the Liitu button
     expect(await footer.getByRole("button", { name: "Liitu" }).evaluate((e) => getComputedStyle(e).outlineColor)).toBe(INK);
-    await page.keyboard.press("Tab"); // the consent box
-    const consent = footer.getByRole("checkbox");
-    await expect(consent).toBeFocused();
-    expect(await consent.evaluate((e) => getComputedStyle(e).outlineColor)).toBe(INK);
-    const label = await footer.locator("label:has(input[name='consent'])").boundingBox();
-    expect(label!.height).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press("Tab"); // the privacy link under it (no consent box between)
+    const privacy = footer.locator("[data-newsletter-notice]").getByRole("link", { name: "Privaatsus" });
+    await expect(privacy).toBeFocused();
+    expect(await privacy.evaluate((e) => getComputedStyle(e).outlineColor)).toBe(INK);
+    expect((await privacy.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
     if (isMobile) {
       await page.locator("header").getByRole("button", { name: "Ava menüü" }).click();

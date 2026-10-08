@@ -129,26 +129,26 @@
   outline-offset: 4px;
 }
 
-/* The whole label is the hit area: at least 44px high (touch targets). */
-.check {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-height: 44px;
-  margin-top: 3px;
-  padding-block: 12px;
+/* The quiet line under the button (there is no consent box: sending the form is the consent). The privacy link in it is a
+   44px-high target (touch targets): the line it sits on grows to that height. */
+.notice {
+  margin: 3px 0 0;
   color: #61555d;
   font-size: 11px;
   line-height: 1.5;
-  cursor: pointer;
 }
 
-.check input {
-  flex-shrink: 0;
-  width: 17px;
-  height: 17px;
-  margin: 0;
-  accent-color: var(--ink);
+.notice a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.notice a:hover {
+  color: var(--ink);
 }
 
 .sentTitle {
