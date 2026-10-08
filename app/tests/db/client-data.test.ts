@@ -706,19 +706,23 @@ describe("e-course progress on the dashboard (phase 2c)", () => {
     return { course, lessons: list };
   }
 
-  test("an open e-course carries done of total and the next lesson with its module; one without lessons null; an ended access none", async () => {
+  test("an open e-course carries done of total and the next lesson with its module; one without lessons null; an ended or revoked access none", async () => {
     const kati = await client();
     const a = await lessonCourse("kursus-a", 3);
     await grant(kati.id, a.course.id);
     await grant(kati.id, f.online.id); // modules, no lessons
     const ended = await lessonCourse("kursus-vana", 1);
     await grant(kati.id, ended.course.id, { expiresAt: at(-1), grantedAt: at(-30) });
+    const revoked = await lessonCourse("kursus-tuhistatud", 2); // lessons, but the access was revoked: not open
+    await grant(kati.id, revoked.course.id, { revokedAt: at(-1), grantedAt: at(-20) });
     await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: a.lessons[0].id, doneAt: NOW });
     const { cards } = (await loadDashboard(db, kati.id, NOW))!;
     const card = (slug: string) => cards.find((c) => c.kind === "ecourse" && c.course.slug === slug)!;
     expect(card("kursus-a")).toMatchObject({ progress: { done: 1, total: 3, next: { lessonId: a.lessons[1].id, title: { et: "L2" }, moduleTitle: { et: "M" } } } });
     expect(card("veebikursus")).toMatchObject({ progress: null });
     expect(card("kursus-vana")).not.toHaveProperty("progress");
+    expect(card("kursus-tuhistatud")).toMatchObject({ revoked: true });
+    expect(card("kursus-tuhistatud")).not.toHaveProperty("progress");
   });
 
   test("the 'Pooleli' card is for the e-course she did something in last; with no activity the first open one with lessons; none when all are finished", async () => {
@@ -727,8 +731,12 @@ describe("e-course progress on the dashboard (phase 2c)", () => {
     const b = await lessonCourse("kursus-b", 2);
     await grant(kati.id, a.course.id, { grantedAt: at(-3) });
     await grant(kati.id, b.course.id, { grantedAt: at(-2) });
+    // a revoked access with lessons and the freshest activity of all: never chosen
+    const revoked = await lessonCourse("kursus-tuhistatud", 2);
+    await grant(kati.id, revoked.course.id, { revokedAt: at(-1), grantedAt: at(-1) });
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: revoked.lessons[0].id, updatedAt: NOW });
     const resume = async () => (await loadDashboard(db, kati.id, NOW))!.resume;
-    expect(await resume()).toBe("kursus-b"); // no activity: the cards' order, the newest grant first
+    expect(await resume()).toBe("kursus-b"); // no activity in a and b: the cards' order, the newest grant first
     await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: a.lessons[0].id, updatedAt: at(-1) });
     expect(await resume()).toBe("kursus-a");
     await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: b.lessons[0].id, updatedAt: NOW });
