@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parseProfile, parseProgress, parseSlug, parseTerms,
+  LIMITS, parseChangeRequest, parseDeletion, parseFavourite, parseMerge, parseNewsletter, parsePassword, parseProfile, parseProgress, parseSlug, parseTerms,
 } from "@/server/account-input";
 
 // The bodies of the account's data endpoints, parsed without a database: a wrong shape, a wrong type, a value over its limit
@@ -15,7 +15,7 @@ const NOT_OBJECTS: unknown[] = [null, undefined, "x", 7, true, []];
 describe("every parser refuses a body that is not an object", () => {
   test.each([
     ["favourite", parseFavourite], ["merge", parseMerge], ["profile", parseProfile], ["newsletter", parseNewsletter],
-    ["change request", parseChangeRequest], ["terms", parseTerms], ["deletion", parseDeletion],
+    ["change request", parseChangeRequest], ["terms", parseTerms], ["deletion", parseDeletion], ["password", parsePassword],
   ] as const)("%s", (_name, parse) => {
     for (const body of NOT_OBJECTS) expect(parse(body), String(body)).toEqual(err("body"));
     expect(parse({})).toMatchObject({ ok: false });
@@ -164,4 +164,11 @@ test("progress: a number of seconds, 0 … two days", () => {
   expect(parseProgress({ watchedSec: 12.5 })).toEqual({ ok: true, data: { watchedSec: 12.5 } });
   expect(parseProgress({ watchedSec: "x" })).toEqual({ ok: false, error: "watchedSec" });
   for (const bad of [{ watchedSec: "12" }, { watchedSec: -1 }, { watchedSec: 172_801 }, {}, null]) expect(parseProgress(bad).ok, JSON.stringify(bad)).toBe(false);
+});
+
+test("parsePassword (phase 2c): any string the database can store, 1 … 800 UTF-16 units, kept exactly as typed; the length rule is the server's (domain/password.ts)", () => {
+  expect(parsePassword({ password: " pikk-parool-2026 " })).toEqual({ ok: true, data: { password: " pikk-parool-2026 " } });
+  for (const body of [{ password: "" }, { password: 12345678901 }, { password: "x".repeat(801) }, { password: "a\u0000b".repeat(4) }, {}])
+    expect(parsePassword(body)).toEqual({ ok: false, error: "password" });
+  expect(parsePassword(null)).toEqual({ ok: false, error: "body" });
 });

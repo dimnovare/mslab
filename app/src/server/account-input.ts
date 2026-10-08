@@ -5,11 +5,12 @@ import { storable } from "@/lib/storable"; // Postgres rejects a NUL in text and
 // that is too long or text the database cannot store gives `{ ok: false, error: "<field>" }` (the endpoint's 400), never an
 // exception and never a database error. The limits are the endpoints' contract:
 // name 120, phone 40, message 1000, slugs 200 (at most 100 in a merge), language et or ru, kind cancel or change, watchedSec 0 … 172 800
-// (two days; the real bound is the video's length + 5 s, checked with the lesson). Ids in a path are not parsed here: parseRowId (lib/row-id.ts).
+// (two days; the real bound is the video's length + 5 s, checked with the lesson), a password 1 … 800 UTF-16 units (the 10 … 200 characters
+// rule is domain/password.ts, checked with the account's address). Ids in a path are not parsed here: parseRowId (lib/row-id.ts).
 
 export type Input<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100, version: 64, watchedSec: 172_800 } as const;
+export const LIMITS = { name: 120, phone: 40, message: 1000, slug: 200, mergeSlugs: 100, version: 64, watchedSec: 172_800, passwordInput: 800 } as const;
 
 /** One line: inner whitespace (newlines too) becomes single spaces, the ends are trimmed. May be empty. */
 const line = (max: number) =>
@@ -30,6 +31,8 @@ const changeRequest = z.object({ registrationId: rowId, kind: z.enum(["cancel", 
 const terms = z.object({ slug, version: z.string().min(1).max(LIMITS.version).refine(storable) });
 const deletion = z.object({ confirm: z.literal(true) });
 const progress = z.object({ watchedSec: z.number().min(0).max(LIMITS.watchedSec) });
+/** Kept exactly as typed (no trim): the length and the e-mail rules are the server's, with the account's address (domain/password.ts). */
+const password = z.object({ password: z.string().min(1).max(LIMITS.passwordInput).refine(storable) });
 
 export type FavouriteInput = z.infer<typeof favourite>;
 export type MergeInput = z.infer<typeof merge>;
@@ -55,6 +58,7 @@ export const parseChangeRequest = (body: unknown) => parse(changeRequest, body);
 export const parseTerms = (body: unknown) => parse(terms, body);
 export const parseDeletion = (body: unknown) => parse(deletion, body);
 export const parseProgress = (body: unknown) => parse(progress, body);
+export const parsePassword = (body: unknown) => parse(password, body);
 
 /** The course slug of a request path (still percent-encoded), or null when it cannot be a slug (not decodable, empty, too long, text the database cannot hold). */
 export function parseSlug(raw: string): string | null {

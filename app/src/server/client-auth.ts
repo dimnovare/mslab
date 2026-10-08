@@ -4,6 +4,7 @@ import type { Db, Q } from "@/db/client";
 import * as schema from "@/db/schema";
 import { clientLoginTokens, clients, clientSessions, mailQuota, registrations, requests, subscribers } from "@/db/schema";
 import { normalizeEmail } from "@/domain/email";
+import { DUMMY_HASH, verifyPassword } from "./password";
 import { isTokenShape, newToken, sha256 } from "./token";
 
 export const CLIENT_COOKIE = "__Host-mslab_client";
@@ -124,6 +125,35 @@ export async function redeemClientCode(db: Db, email: string, code: string, now 
     await t.update(clientLoginTokens).set({ attempts: sql`${clientLoginTokens.attempts} + 1` })
       .where(inArray(clientLoginTokens.hash, live.map((row) => row.hash)));
     return "wrong";
+  });
+}
+
+/**
+ * The password login's lock for one address (account-api.ts passwordLogin, phase 2c): its counter, on the login's transaction `t`.
+ * `open()`: may this attempt be checked; `failed()`: count it as a failure.
+ */
+export type PasswordGate = (t: Db) => { open(): Promise<boolean>; failed(): Promise<void> };
+
+/**
+ * The session for an e-mail and the password set in Minu andmed (phase 2c); null: an unknown address, no password set and a wrong
+ * password alike; "locked": the gate is shut. Everything runs in one transaction under the address lock, so the attempts for one
+ * address go one after another, and attempts sent in parallel cannot pass the gate together: the gate is asked first (a locked
+ * attempt checks nothing and counts nothing), then scrypt runs every time — against a fixed dummy hash when there is no password to
+ * check — so the answer takes as long whatever the address, and a failure is counted before the lock is let go. The session is the
+ * code's (startSession: the one-device rule). Never a new client.
+ */
+export async function redeemClientPassword(db: Db, email: string, password: string, now = new Date(), gate?: PasswordGate): Promise<ClientLogin | "locked" | null> {
+  const address = normalizeEmail(email);
+  return tx(db, async (t) => {
+    await lockAddress(t, address);
+    const lock = gate?.(t);
+    if (lock && !(await lock.open())) return "locked";
+    const [row] = await t.select({ hash: clients.passwordHash }).from(clients).where(eq(clients.email, address)).limit(1);
+    const stored = row?.hash ?? null;
+    const matches = await verifyPassword(password, stored ?? DUMMY_HASH);
+    if (matches && stored !== null) return startSession(t, address, now);
+    await lock?.failed();
+    return null;
   });
 }
 
