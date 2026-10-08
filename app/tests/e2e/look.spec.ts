@@ -63,16 +63,22 @@ test("the home page's news block is a full-width band in the canvas colour, its 
   expect(await card.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 255, 255)"); // --paper
 });
 
-test("the footer at 1440: the links at the left, the newsletter card at the right, at most 460 px high", async ({ page, isMobile }) => {
+test("the footer at 1440: the links at the left, the newsletter card at the right, at most 460 px high, in Estonian and in Russian", async ({ page, isMobile }) => {
   test.skip(isMobile, "1440 wide");
-  await page.goto("/");
-  const footer = page.locator("footer");
-  expect((await footer.boundingBox())!.height).toBeLessThanOrEqual(460);
-  const card = (await footer.locator("[data-footer-newsletter]").boundingBox())!;
-  const links = (await footer.getByRole("link", { name: "Kõik koolitused" }).boundingBox())!;
-  expect(card.x).toBeGreaterThan(links.x);
-  expect(card.y).toBeLessThan(links.y + links.height); // side by side, not under each other
-  await expect(footer.getByRole("heading", { level: 2, name: /Hea järgmine samm/ })).toHaveCSS("font-size", "28px");
+  // Russian is the taller one (longer words in the card, the line under the button wraps more)
+  for (const c of [
+    { path: "/", heading: /Hea järgmine samm/, links: "Kõik koolitused" },
+    { path: "/ru", heading: /Ваш следующий шаг/, links: "Все курсы" },
+  ]) {
+    await page.goto(c.path);
+    const footer = page.locator("footer");
+    expect((await footer.boundingBox())!.height, c.path).toBeLessThanOrEqual(460);
+    const card = (await footer.locator("[data-footer-newsletter]").boundingBox())!;
+    const links = (await footer.getByRole("link", { name: c.links }).boundingBox())!;
+    expect(card.x, c.path).toBeGreaterThan(links.x);
+    expect(card.y, c.path).toBeLessThan(links.y + links.height); // side by side, not under each other
+    await expect(footer.getByRole("heading", { level: 2, name: c.heading }), c.path).toHaveCSS("font-size", "28px");
+  }
 });
 
 test("below 900 px the newsletter card comes first, then the links; no page overflows at the check widths", async ({ page, isMobile }) => {

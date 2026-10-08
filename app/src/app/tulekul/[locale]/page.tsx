@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { FlashNotice, type FlashMessage } from "@/components/site/FlashNotice";
-import { NewsletterForm } from "@/components/site/Newsletter";
+import { NewsletterForm } from "@/components/site/NewsletterForm";
 import { SiteReady } from "@/components/site/SiteReady";
 import { getDict, isLocale } from "@/i18n/locales";
 import styles from "./tulekul.module.css";

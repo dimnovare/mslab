@@ -33,7 +33,7 @@ test.describe("newsletter", () => {
     await expect(email).toBeFocused();
     await expect(email).toHaveAttribute("aria-invalid", "true");
     await expect(email).toHaveValue("");
-    if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toBeNull();
+    if (LOCAL_FIXTURES) expect(await storedSubscriber("vale-aadress")).toBeNull(); // the bad attempts stored nothing
 
     // the corrected address alone is enough
     await email.fill(addr);
@@ -55,6 +55,10 @@ test.describe("newsletter", () => {
       await expect(form.locator("input[name='consent']")).toHaveCount(0);
       const notice = form.locator("[data-newsletter-notice]");
       await expect(notice).toHaveText(`${c.notice} ${c.link}`);
+      await expect(notice).toHaveCSS("font-size", "12px");
+      // signing up is the consent: a screen reader hears the line on the button (the e-mail field keeps only its own error)
+      await expect(form.getByRole("button", { name: c.button })).toHaveAccessibleDescription(`${c.notice} ${c.link}`);
+      await expect(form.locator("input[name='email']")).not.toHaveAccessibleDescription(/\S/);
       const link = notice.getByRole("link", { name: c.link });
       await expect(link).toHaveAttribute("href", c.href);
       // directly under the button: the line starts right below the e-mail row

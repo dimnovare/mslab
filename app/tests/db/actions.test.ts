@@ -241,6 +241,19 @@ describe("honeypot and rate limit", () => {
     expect([...kv.store.keys()].filter((k) => k.startsWith("rl:"))).toEqual([]);
   });
 
+  test("a filled honeypot on the newsletter sign-up answers like success, stores no subscriber, sends no mail and does not count", async () => {
+    const { mails } = outbox();
+    const { deps, kv, flush } = setup({ secrets: true });
+    expect(await handleSubscribe(deps, form({ email: "bot@example.com", locale: "et", website: "x" }))).toEqual({ ok: true });
+    await flush();
+    expect(await db.select().from(subscribers)).toHaveLength(0);
+    expect(mails()).toHaveLength(0);
+    expect([...kv.store.keys()].filter((k) => k.startsWith("rl:"))).toEqual([]);
+    // the same address without the honeypot is a normal sign-up (the test could fail: the form is otherwise good)
+    expect(await handleSubscribe(deps, form({ email: "bot@example.com", locale: "et" }))).toEqual({ ok: true });
+    expect(await db.select().from(subscribers)).toHaveLength(1);
+  });
+
   test("5 submissions per form and IP in 10 minutes; the 6th gets form 'rate'", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const { deps, kv } = setup({ ip: "198.51.100.9" });
