@@ -131,7 +131,11 @@ test.describe("newsletter", () => {
   test("the unsubscribe page fits 390, 834 and 1440 px wide: no horizontal overflow, the button is a 44px target", async ({ page }) => {
     for (const [width, height] of [[390, 844], [834, 1112], [1440, 900]]) {
       await page.setViewportSize({ width, height });
-      await page.goto("/api/newsletter/loobu?t=not-a-real-token-0000000000"); // a token that belongs to no row: the page is the same
+      const res = await page.goto("/api/newsletter/loobu?t=not-a-real-token-0000000000"); // a token that belongs to no row: the page is the same
+      // the headers the server really sends: same-origin (never no-referrer: the button's POST would carry Origin: null and be refused), noindex, not cached
+      expect(res!.headers()["referrer-policy"], `at ${width}`).toBe("same-origin");
+      expect(res!.headers()["x-robots-tag"], `at ${width}`).toBe("noindex, nofollow");
+      expect(res!.headers()["cache-control"], `at ${width}`).toBe("no-store");
       const button = page.getByRole("button", { name: "Loobu uudiskirjast" });
       await expect(button).toBeVisible();
       expect((await button.boundingBox())!.height, `at ${width}`).toBeGreaterThanOrEqual(44);

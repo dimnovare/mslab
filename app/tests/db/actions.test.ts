@@ -5,7 +5,7 @@ import type { Db } from "@/db/client";
 import { clientLoginTokens, courses, courseSessions, mailQuota, practicePackages, registrations, requests, settings, subscribers } from "@/db/schema";
 import type { PublicChange } from "@/server/cache-targets";
 import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, NEWSLETTER_MAIL_DAILY_CAP, issueClientLogin, redeemClientCode } from "@/server/client-auth";
-import { confirmSubscriber } from "@/server/newsletter";
+import { confirmSubscriber, unsubscribeByToken } from "@/server/newsletter";
 import type { Env } from "@/server/notify";
 import { sha256 } from "@/server/token";
 import {
@@ -546,7 +546,7 @@ describe("newsletter sign-up in one step (owner decision 09.10)", () => {
     expect(mails()).toHaveLength(3);
   });
 
-  test("the welcome goes to an address once a year: after unsubscribing and signing up again there is a row, and no second mail", async () => {
+  test("the welcome goes to an address once a year: a row that was lost some other way and comes back gets a row, and no second mail", async () => {
     const { mails } = outbox();
     const { deps, flush } = setup({ secrets: true });
     await signUp(deps);
@@ -556,6 +556,44 @@ describe("newsletter sign-up in one step (owner decision 09.10)", () => {
     await flush();
     expect(await db.select().from(subscribers)).toHaveLength(1);
     expect(mails()).toHaveLength(1);
+  });
+
+  test("sign up, unsubscribe with the button, sign up again: a second welcome mail goes out, with the new row's token and a working link", async () => {
+    const { mails } = outbox();
+    const { deps, kv, flush } = setup({ secrets: true });
+    await signUp(deps);
+    await flush();
+    const [first] = await db.select().from(subscribers);
+    expect(mails()).toHaveLength(1);
+    expect(mails()[0].text).toContain(`/api/newsletter/loobu?t=${first.token}`);
+    expect(await unsubscribeByToken(db, kv, first.token)).toEqual({ locale: "et" });
+    expect(await db.select().from(subscribers)).toEqual([]);
+    expect([...kv.store.keys()].filter((k) => k.startsWith("rl:welcome:"))).toEqual([]);
+    expect(await signUp(deps)).toEqual({ ok: true });
+    await flush();
+    const [second] = await db.select().from(subscribers);
+    expect(second.token).not.toBe(first.token);
+    expect(mails().map((m) => m.to)).toEqual(["uus@example.com", "uus@example.com"]);
+    expect(mails()[1].text).toContain(`/api/newsletter/loobu?t=${second.token}`);
+    expect(mails()[1].text).not.toContain(first.token);
+    // and that link works: the row goes again, the mark with it
+    expect(await unsubscribeByToken(db, kv, second.token)).toEqual({ locale: "et" });
+    expect(await db.select().from(subscribers)).toEqual([]);
+  });
+
+  test("a KV that cannot forget does not fail the unsubscribing: the row is gone, the failure is logged without the address", async () => {
+    outbox();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { deps, kv, flush } = setup({ secrets: true });
+    await signUp(deps);
+    await flush();
+    const [sub] = await db.select().from(subscribers);
+    const broken = { ...kv, delete: async () => { throw new Error("kv down for uus@example.com"); } };
+    expect(await unsubscribeByToken(db, broken, sub.token)).toEqual({ locale: "et" });
+    expect(await db.select().from(subscribers)).toEqual([]);
+    const logged = error.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("[newsletter] welcome mark not forgotten");
+    expect(logged).not.toContain("uus@example.com");
   });
 
   describe("the newsletter's mail counts against its own daily counter (phase 2c, security)", () => {

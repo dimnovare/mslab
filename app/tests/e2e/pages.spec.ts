@@ -213,8 +213,8 @@ test.describe("calendar seat states (test-owned fixtures in the local DB)", () =
     await expect(sent).toHaveText("Aitäh! Oled ootenimekirjas.");
     await expect(sent).toBeFocused();
     expect(await storedRequests(addr)).toEqual([{ kind: "waitlist", payload: { session, course: "kulmude-lami", name: "Test Õpilane", email: addr, locale: "et" } }]);
-    // ticked: the newsletter's own sign-up followed the answer (phase 2c), and the request itself does not carry the box
-    await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+    // ticked: the newsletter's own sign-up followed the answer (phase 2c), confirmed at once (one step, 09.10), and the request itself does not carry the box
+    await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: true });
   });
 
   test("a session with two seats left says Viimased kohad and can still be booked", async ({ page }) => {

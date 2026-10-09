@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db/client";
 import { isCrossSite } from "@/server/auth";
+import { serverKv } from "@/server/kv";
 import { logFailure } from "@/server/log";
 import { subscriberLocale, unsubscribeByToken } from "@/server/newsletter";
 import { unsubscribePage } from "@/server/unsubscribe-page";
@@ -15,8 +16,11 @@ import { isTokenShape } from "@/server/token";
  * - POST (the button's form field `t`) is the only thing that deletes the row, and sends the visitor to the home page in the row's language
  *   with the notice ?uudiskiri=loobutud. Unsubscribing is idempotent and reveals nothing: an unknown or malformed token, or a button pressed
  *   twice, gets the very same answer in Estonian. Only when the database could not be reached is the visitor told so (?uudiskiri=viga),
- *   never that she is unsubscribed when she is not. A cross-site POST is refused with 403, like the other routes' writes.
+ *   never that she is unsubscribed when she is not. A cross-site POST is refused with 403, like the other routes' writes. The row's
+ *   once-a-year welcome mark goes with it, so signing up again later gets a fresh welcome.
  * - HEAD (below) does nothing.
+ * The page's headers other than the type and the cache are next.config.ts's (headers() replaces a route's own): noindex, and Referrer-Policy
+ * same-origin. That must never become no-referrer: a form posted from such a document carries `Origin: null`.
  */
 export async function GET(request: Request): Promise<Response> {
   const token = new URL(request.url).searchParams.get("t") ?? "";
@@ -27,17 +31,22 @@ export async function GET(request: Request): Promise<Response> {
     logFailure("[newsletter] unsubscribe page: language unavailable", e); // the page is shown all the same; never the message: it would contain the token
   }
   return new Response(unsubscribePage(locale, isTokenShape(token) ? token : null), {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      "x-robots-tag": "noindex",
-      "referrer-policy": "no-referrer",
-    },
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 }
 
+/**
+ * Is this POST from another site? isCrossSite (the Origin header), except that `Origin: null` with `Sec-Fetch-Site: same-origin` is this site's
+ * own page: the browser sends that pair when the page's referrer policy is strict, and only a browser can say it (the header is forbidden to
+ * scripts). A named foreign site is cross-site whatever Sec-Fetch-Site says.
+ */
+function crossSitePost(request: Request): boolean {
+  if (request.headers.get("origin") === "null" && request.headers.get("sec-fetch-site") === "same-origin") return false;
+  return isCrossSite(request);
+}
+
 export async function POST(request: Request): Promise<Response> {
-  if (isCrossSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403, headers: { "cache-control": "no-store" } });
+  if (crossSitePost(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403, headers: { "cache-control": "no-store" } });
   let token = "";
   try {
     const field = (await request.formData()).get("t");
@@ -49,7 +58,7 @@ export async function POST(request: Request): Promise<Response> {
   let page = "/";
   let outcome = "loobutud";
   try {
-    const gone = await unsubscribeByToken(getDb(), token);
+    const gone = await unsubscribeByToken(getDb(), serverKv(), token);
     if (gone?.locale === "ru") page = "/ru";
   } catch (e) {
     logFailure("[newsletter] unsubscribe failed", e); // never the message: it would contain the token

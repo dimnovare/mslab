@@ -9,7 +9,7 @@ import { welcomeMail } from "./account-mail";
 import { reserveNewsletterMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { mailConfigured, sendMail, type Env } from "./notify";
-import { forgetKey } from "./ratelimit";
+import { forgetKey, type TextKv } from "./ratelimit";
 import { isTokenShape, sha256 } from "./token";
 
 // The newsletter after the sign-up (phase 2c, spec 5; one step since 09.10): where an address stands (the admin's drawer, Minu andmed), the
@@ -47,6 +47,9 @@ async function subscriberToken(db: Db, address: string): Promise<string | null> 
 /** A welcome mail is sent to an address at most once in this many seconds (a KV mark under the hash of the address). */
 const WELCOME_ONCE_SEC = 365 * 24 * 60 * 60;
 
+/** The KV key of an address's "had its welcome" mark (`address` normalised already). */
+const welcomeMarkKey = async (address: string) => `rl:welcome:${await sha256(address)}`;
+
 /**
  * The welcome mail to a newly subscribed address (the sign-up, "Saada mulle uudiskirja", the old confirmation link): the greeting, Seaded's
  * welcome code when there is one (without a code the mail still goes out), and the unsubscribe link of the address's row. Never throws, and
@@ -66,7 +69,7 @@ export async function sendWelcome(deps: WelcomeDeps, to: { email: string; locale
       return;
     }
     const code = welcomeCodeOf(await readSetting(deps.db, "newsletter")) || null;
-    const mark = `rl:welcome:${await sha256(address)}`;
+    const mark = await welcomeMarkKey(address);
     try {
       if (await deps.env.KV.get(mark)) {
         console.info("[newsletter] welcome e-mail sent to this address before: not again");
@@ -116,14 +119,21 @@ export async function subscriberLocale(db: Db, token: string): Promise<"et" | "r
 }
 
 /**
- * The button of the unsubscribe page (POST /api/newsletter/loobu, the only thing that unsubscribes): deletes the subscriber's row, and says
- * which language she gets the answer in. null = no such row (an unknown or malformed token, or the button pressed before): nothing is
- * deleted, and the caller answers the same.
+ * The button of the unsubscribe page (POST /api/newsletter/loobu, the only thing that unsubscribes): deletes the subscriber's row, forgets
+ * the address's once-a-year welcome mark (so a later sign-up gets a fresh welcome, with a link for its new row), and says which language she
+ * gets the answer in. null = no such row (an unknown or malformed token, or the button pressed before): nothing is deleted or forgotten,
+ * and the caller answers the same. A store that cannot forget is logged and does not undo the unsubscribing.
  */
-export async function unsubscribeByToken(db: Db, token: string): Promise<{ locale: "et" | "ru" } | null> {
+export async function unsubscribeByToken(db: Db, kv: TextKv, token: string): Promise<{ locale: "et" | "ru" } | null> {
   if (!isTokenShape(token)) return null;
   const [gone] = await db.delete(subscribers).where(eq(subscribers.token, token)).returning();
-  return gone ? { locale: gone.locale === "ru" ? "ru" : "et" } : null;
+  if (!gone) return null;
+  try {
+    await forgetKey(kv, await welcomeMarkKey(normalizeEmail(gone.email)));
+  } catch (e) {
+    logFailure("[newsletter] welcome mark not forgotten", e);
+  }
+  return { locale: gone.locale === "ru" ? "ru" : "et" };
 }
 
 /**

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { subscribers } from "@/db/schema";
+import { PgKv } from "@/server/kv";
+import { sha256 } from "@/server/token";
 import { makeTestDb } from "./helpers";
 
 // The unsubscribe link in the welcome mail (/api/newsletter/loobu?t=…) takes two steps, so a mail gateway that opens every link of a mail
@@ -58,7 +60,10 @@ test("GET shows the confirm page and deletes nothing: 200 HTML, never cached or 
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toMatch(/^text\/html/);
   expect(res.headers.get("cache-control")).toBe("no-store");
-  expect(res.headers.get("x-robots-tag")).toMatch(/noindex/);
+  // X-Robots-Tag and Referrer-Policy are next.config.ts's (headers() replaces a route's own): the route sets neither. It must never send
+  // "no-referrer": a form posted from such a page carries "Origin: null", which the same-origin check refuses.
+  expect(res.headers.get("x-robots-tag")).toBeNull();
+  expect(res.headers.get("referrer-policy")).toBeNull();
   const html = await res.text();
   expect(html).toContain('<meta name="robots" content="noindex">');
   expect(html).toContain('<html lang="et">');
@@ -140,6 +145,42 @@ test("a cross-site POST (another site's Origin, or 'null') is 403 and deletes no
     expect([res.status, res.headers.get("cache-control"), res.headers.get("location")], origin).toEqual([403, "no-store", null]);
     expect(await emails(), origin).toEqual(BOTH);
   }
+});
+
+test("a POST that carries Origin: null (a document with a strict referrer policy) is the same site when the browser says Sec-Fetch-Site: same-origin; any other claim stays cross-site", async () => {
+  const same = await post(TOKEN, { origin: "null", "sec-fetch-site": "same-origin" });
+  expect([same.status, where(same)]).toEqual([303, "/?uudiskiri=loobutud"]);
+  expect(await emails()).toEqual(["uus-ru@example.com"]);
+  const refused: Record<string, string>[] = [
+    { origin: "null" },
+    { origin: "null", "sec-fetch-site": "cross-site" },
+    { origin: "null", "sec-fetch-site": "same-site" },
+    { origin: "null", "sec-fetch-site": "none" },
+    { origin: "https://evil.example", "sec-fetch-site": "same-origin" }, // only Origin: null is excused, a named foreign site never is
+    { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+  ];
+  for (const headers of refused) {
+    const res = await post(TOKEN_RU, headers);
+    expect(res.status, JSON.stringify(headers)).toBe(403);
+    expect(await emails(), JSON.stringify(headers)).toEqual(["uus-ru@example.com"]);
+  }
+});
+
+test("the button's POST forgets the address's once-a-year welcome mark, so a later sign-up gets a fresh welcome; a refused POST leaves it", async () => {
+  const kv = new PgKv(db);
+  const mark = `rl:welcome:${await sha256("uus@example.com")}`;
+  const other = `rl:welcome:${await sha256("uus-ru@example.com")}`;
+  await kv.put(mark, "1", { expirationTtl: 365 * 24 * 60 * 60 });
+  await kv.put(other, "1", { expirationTtl: 365 * 24 * 60 * 60 });
+  expect((await post(TOKEN, { origin: "https://evil.example" })).status).toBe(403);
+  expect(await kv.get(mark)).toBe("1");
+  expect((await get(TOKEN)).status).toBe(200); // opening the link forgets nothing
+  expect(await kv.get(mark)).toBe("1");
+  expect(where(await post(TOKEN))).toBe("/?uudiskiri=loobutud");
+  expect(await kv.get(mark)).toBeNull();
+  expect(await kv.get(other)).toBe("1"); // another address's mark is not touched
+  await post("x".repeat(43)); // an unknown token forgets nothing either
+  expect(await kv.get(other)).toBe("1");
 });
 
 test("POST with an unknown token, a used one, a malformed one or none: the same 303 to the Estonian home page, nothing else deleted", async () => {
