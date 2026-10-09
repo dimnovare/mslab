@@ -780,27 +780,58 @@ test("a password (phase 2c): set in Minu andmed; after logging out 'Sisene paroo
   }
 });
 
-test("the password never leaves the request: not in the address, the storage or the page", async ({ page }) => {
+test("the password never leaves the request: not in the address, the storage or the history, while it is typed and while the request is out; the fields pair user name and password for a password manager", async ({ page }) => {
+  const SECRET = "salajane-parool-2026";
   const sent: { url: string; body: string }[] = [];
+  // the request is held (the answer waits for `release`), so everything below can be looked at while the password is still typed
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
   await page.route("**/api/konto/parool-login", async (route) => {
     sent.push({ url: route.request().url(), body: route.request().postData() ?? "" });
+    await held;
     await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, error: "password" }) });
   });
+  /** Where the browser could keep the password: the address, both storages, the history entry's state and the cookies. */
+  const leaks = () =>
+    page.evaluate(
+      (secret) => ({
+        address: location.href.includes(secret),
+        storage: JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]).includes(secret),
+        history: JSON.stringify(history.state ?? null).includes(secret),
+        cookies: document.cookie.includes(secret),
+      }),
+      SECRET,
+    );
+  const none = { address: false, storage: false, history: false, cookies: false };
+
   await openLogin(page, `${LOGIN}#parool`);
   const password = page.getByLabel("Parool", { exact: true });
   await expect(password).toHaveAttribute("type", "password");
   await expect(password).toHaveAttribute("autocomplete", "current-password");
+  await expect(emailField(page)).toHaveAttribute("autocomplete", "username"); // the user name of the password, as a password manager pairs them
   await emailField(page).fill("e2e-client-password-leak@example.test");
-  await password.fill("salajane-parool-2026");
+  await password.fill(SECRET);
+  await expect(password).toHaveValue(SECRET);
+  expect(await leaks(), "typed, nothing sent yet").toEqual(none);
+
   await page.getByRole("button", { name: "Logi sisse", exact: true }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  await expect(password).toHaveValue(SECRET); // still typed (read-only), the answer is on hold
+  expect(await leaks(), "the request is out").toEqual(none);
+  // React keeps a controlled field's value in the markup (the value attribute) while it is typed: the password is in the page then, in the
+  // field only. What is guaranteed is the list above and that it is gone from the page when the answer empties the field (below).
+  expect(sent[0].url).not.toContain(SECRET);
+  expect(JSON.parse(sent[0].body)).toEqual({ email: "e2e-client-password-leak@example.test", password: SECRET, locale: "et" });
+
+  release();
   await expect(page.locator("[data-login-password-error]")).toHaveText("E-post või parool ei sobi.");
-  expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0].body)).toEqual({ email: "e2e-client-password-leak@example.test", password: "salajane-parool-2026", locale: "et" });
-  expect(sent[0].url).not.toContain("salajane");
-  expect(page.url()).not.toContain("salajane");
-  const kept = await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]));
-  expect(kept).not.toContain("salajane");
-  expect(await page.content()).not.toContain("salajane"); // a password field's value is a property, never in the markup
+  await expect(password).toHaveValue("");
+  expect(await leaks(), "after a wrong answer").toEqual(none);
+  expect(await page.content(), "a wrong answer empties the field: the password is nowhere in the page").not.toContain(SECRET);
+
+  // the way back to the code: its e-mail field keeps the autocomplete it had before the password step existed
+  await page.getByRole("button", { name: "Saada mulle hoopis kood" }).click();
+  await expect(emailField(page)).toHaveAttribute("autocomplete", "email");
 });
 
 /** The password step and the link to it at 390, 834 and 1440 px, in both languages: no overflow, no control under 44 px, nothing outside the screen. */

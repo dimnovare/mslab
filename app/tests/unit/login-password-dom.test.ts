@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { LoginForm } from "@/components/account/LoginForm";
+import { PENDING_KEY } from "@/components/account/useAccount";
 import { getDict, type Locale } from "@/i18n/locales";
 
 // The login page's password step (phase 2c, spec 7): "Sisene parooliga" under the e-mail step, its own step kept in the fragment
@@ -81,7 +82,7 @@ test("'Sisene parooliga' opens the e-mail and password step and keeps it in the 
   expect($("section")?.getAttribute("data-login-step")).toBe("password");
   expect(window.location.hash).toBe("#parool");
   expect([pw().name, pw().type, pw().getAttribute("autocomplete")]).toEqual(["password", "password", "current-password"]);
-  expect([emailInput().name, emailInput().getAttribute("autocomplete")]).toEqual(["email", "email"]);
+  expect([emailInput().name, emailInput().getAttribute("autocomplete")]).toEqual(["email", "username"]); // a password manager pairs the user name with the password
   await click($("[data-login-to-code]"));
   expect($("section")?.getAttribute("data-login-step")).toBe("email");
   expect(window.location.hash).toBe("");
@@ -257,6 +258,49 @@ test("signed in: the e-mail is remembered, the favourites copy of a previous ses
   expect(keptInBrowser()).toContain("kati@example.test"); // the address is remembered ...
   expect(keptInBrowser()).not.toContain("pikk-parool-2026"); // ... the password never
   expect(fetchMock.mock.calls[0][1]!.method).toBe("POST");
+});
+
+test("signed in with the password, a code step this tab kept is forgotten (it must not come back after a logout)", async () => {
+  fetchMock.mockResolvedValue(json(200, { ok: true, locale: "et" }));
+  sessionStorage.setItem(PENDING_KEY, JSON.stringify({ sentTo: "kati@example.test", sentAt: Date.now() }));
+  window.history.replaceState(null, "", "/konto/sisene#parool");
+  await mount();
+  expect(sessionStorage.getItem(PENDING_KEY)).not.toBeNull(); // the step is kept until a login ends it
+  await type(emailInput(), "kati@example.test");
+  await type(pw(), "pikk-parool-2026");
+  await signIn();
+  expect(replace).toHaveBeenCalledWith("/konto");
+  expect(sessionStorage.getItem(PENDING_KEY)).toBeNull();
+});
+
+test("'Sisene parooliga' does nothing while a code is on its way; the code step then opens with an address without #parool", async () => {
+  let answer: (res: Response) => void = () => {};
+  fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (answer = resolve)));
+  await mount();
+  await type($<HTMLInputElement>("[data-login-email] input"), "kati@example.test");
+  await act(async () => $<HTMLFormElement>("[data-login-email]")!.requestSubmit());
+  await settle();
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/konto/login"]); // the code is on its way
+  await click($("[data-login-to-password]"));
+  expect(step()).toBe("email");
+  expect(window.location.hash).toBe("");
+  await act(async () => answer(json(200, { ok: true })));
+  await settle();
+  expect(step()).toBe("code");
+  expect(window.location.hash).toBe("");
+});
+
+test("a code step never has #parool in the address: an address that still carried it (an old notice link) loses it when the code goes out", async () => {
+  window.history.replaceState(null, "", "/konto/sisene?viga=link#parool");
+  fetchMock.mockResolvedValueOnce(json(200, { ok: true }));
+  await mount();
+  expect(step()).toBe("email");
+  expect($("[data-login-banner]")).not.toBeNull();
+  await type($<HTMLInputElement>("[data-login-email] input"), "kati@example.test");
+  await act(async () => $<HTMLFormElement>("[data-login-email]")!.requestSubmit());
+  await settle();
+  expect(step()).toBe("code");
+  expect(window.location.hash).toBe("");
 });
 
 test("the strings of the step in Russian, with a no-break space after the one-letter word", async () => {

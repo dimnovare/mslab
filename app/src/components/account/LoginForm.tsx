@@ -142,8 +142,18 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     element.focus();
   });
 
+  /**
+   * The address with or without the password step's fragment (history.replaceState: no new entry, the page is not loaded again). Off takes
+   * away `#parool` only: any other fragment is not ours.
+   */
+  const markPasswordStep = (on: boolean) => {
+    if (!on && window.location.hash !== `#${PASSWORD_MARK}`) return;
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${on ? `#${PASSWORD_MARK}` : ""}`);
+  };
+
   /** Opens the code step for `address`, the code sent at `sentAt` (null: nothing was sent from this tab, a new code can be asked for at once). */
   function showCodeStep(address: string, sentAt: number | null): void {
+    markPasswordStep(false); // the address says what the step is: a code step never has #parool
     setNow(Date.now());
     setResendAt(sentAt === null ? 0 : sentAt + RESEND_AFTER_MS);
     setSentTo(address);
@@ -323,12 +333,9 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     focusAfterRender.current = "email";
   };
 
-  /** The address with or without the password step's fragment (history.replaceState: no new entry, the page is not loaded again). */
-  const markPasswordStep = (on: boolean) =>
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${on ? `#${PASSWORD_MARK}` : ""}`);
-
-  /** "Sisene parooliga": the e-mail and password step (#parool, kept for a reload). */
+  /** "Sisene parooliga": the e-mail and password step (#parool, kept for a reload). Not while a request is out (a code on its way would open its own step). */
   const toPassword = () => {
+    if (busy.current) return;
     setStep("password");
     setPassword("");
     setPasswordError(null);
@@ -369,6 +376,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     setPasswordError(null);
     const { status, data } = await sendJson("/api/konto/parool-login", { email: address, password, locale });
     if (status === 200 && data.ok === true) {
+      keepPendingCode(null); // a code step this tab kept is of no use now: it must not come back after a logout
       rememberEmail(address);
       forgetAccountFavourites(); // a previous session's copy of the favourites must not show for this account
       // replace, as for the code: Back from "Minu konto" never returns to this form
@@ -475,7 +483,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
                   name="email"
                   type="email"
                   inputMode="email"
-                  autoComplete="email"
+                  autoComplete="username"
                   autoCapitalize="none"
                   spellCheck={false}
                   maxLength={254}
