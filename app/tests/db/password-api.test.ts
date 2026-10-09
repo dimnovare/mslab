@@ -151,6 +151,37 @@ test("DELETE /parool removes it: 200, passwordSetAt null again, the removal mail
   expect((await (await call(d, "", { method: "GET", cookie })).json()).client.passwordSetAt).toBeNull();
 });
 
+test("DELETE /parool counts in the same 5 changes an hour as POST: the 6th change, of either kind, is 429 { error: \"rate\" } and mails nothing; the password stays as it was", async () => {
+  const f = stubFetch(() => Response.json({ id: "email_1" }));
+  const { cookie } = await signedIn();
+  const { d, flush } = deps();
+  const change = async (method: "POST" | "DELETE") => {
+    const r = await call(d, "/parool", { method, cookie, body: method === "POST" ? { password: PASSWORD } : undefined });
+    return [r.status, (await r.json()).error];
+  };
+  for (const method of ["POST", "DELETE", "POST", "DELETE", "POST"] as const) expect(await change(method), method).toEqual([200, undefined]);
+  await flush();
+  expect(resendCalls(f)).toHaveLength(5); // five real changes, five mails
+  expect(await change("DELETE")).toEqual([429, "rate"]);
+  expect(await change("POST")).toEqual([429, "rate"]);
+  await flush();
+  expect(resendCalls(f)).toHaveLength(5);
+  expect((await (await call(d, "", { method: "GET", cookie })).json()).client.passwordSetAt).toBe(NOW.toISOString()); // the refused DELETE removed nothing
+  // the hour is the window of the last accepted change: an hour after it, a change is accepted again
+  clock = new Date(NOW.getTime() + 61 * 60_000);
+  expect((await call(deps().d, "/parool", { method: "DELETE", cookie })).status).toBe(200);
+});
+
+test("the answers of a refused DELETE hold neither the address nor the password in a log line", async () => {
+  stubFetch(() => Response.json({ id: "email_1" }));
+  const { cookie } = await signedIn();
+  const { d } = deps();
+  for (let i = 0; i < 6; i++) await call(d, "/parool", { method: "DELETE", cookie });
+  const lines = JSON.stringify([...infoSpy.mock.calls, ...errorSpy.mock.calls]);
+  expect(lines).toContain("password change rate limited");
+  expect(lines).not.toContain("kati");
+});
+
 test("POST /parool-login: the right e-mail and password start the session (cookies, the old one replaced); every failure is the same 400", async () => {
   const { cookie } = await signedIn();
   const { d } = deps();

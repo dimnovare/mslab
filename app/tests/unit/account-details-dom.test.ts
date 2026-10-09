@@ -477,6 +477,30 @@ describe("Parool: the rest of the behaviour", () => {
     expect(document.activeElement).toBe($("[data-password-set]"));
   });
 
+  test("a removal over the hour's limit (429 rate) says the limit's sentence, in the error style, and keeps the question and the password; other failures keep 'Ei õnnestunud eemaldada.'", async () => {
+    let answer = json(429, { ok: false, error: "rate" });
+    api(SET, { "/api/konto/parool": async () => answer });
+    await mount();
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe("Oled parooli juba mitu korda muutnud. Proovi tunni aja pärast uuesti.");
+    expect($("[data-password-status]")?.className).toMatch(/error/);
+    expect($("[data-password-confirm]")).not.toBeNull();
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("set");
+    answer = json(500, { ok: false, error: "server" });
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe("Ei õnnestunud eemaldada. Proovi uuesti.");
+  });
+
+  test("the same limit in Russian", async () => {
+    api({ ...SET, locale: "ru" }, { "/api/konto/parool": async () => json(429, { ok: false, error: "rate" }) });
+    await mount("ru");
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe(getDict("ru").account.details.password.rate);
+    expect($("[data-password-status]")?.textContent).toMatch(/[а-я]/);
+  });
+
   test("the question takes the focus; Tühista and Esc give it back to 'Eemalda parool' and send nothing", async () => {
     api(SET);
     await mount();

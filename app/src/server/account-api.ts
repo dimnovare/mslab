@@ -48,7 +48,7 @@ import { sha256 } from "./token";
 // GET /kursus/:slug/:lesson one lesson (an open one with a signed video URL; 403 terms or locked), POST …/:lesson/progress how far a video has
 // been watched, POST …/:lesson/tehtud "Märgi tehtuks" for a text lesson, GET …/:lesson/fail/:file a lesson file, GET /lemmikud the
 // favourites as course cards, POST /lemmikud and /lemmikud/merge favourites, PATCH /andmed the profile, POST /uudiskiri the newsletter, POST /muutmine a request to cancel or
-// move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion, POST /parool and DELETE /parool the optional password (each change mailed).
+// move a registration (Maria is told after the response), POST /tingimused the e-course terms, POST /kustuta account deletion, POST /parool and DELETE /parool the optional password (each change mailed; 5 changes an hour between them).
 // Each one starts with requireClient and answers through clientResponse (a renewed session's cookies reach the browser); the
 // client is always the session's, never a value from the request. A body that is not what the endpoint expects is 400
 // { ok: false, error: "<field>" } (account-input.ts), a record that is not the client's is 404.
@@ -565,20 +565,26 @@ async function newsletter(request: Request, deps: AccountDeps): Promise<Response
   return clientResponse(session, { ok: true });
 }
 
+/** Takes one of the hour's 5 password changes (a set, a change or a removal: each one mails her); false: they are used up. */
+const withinPasswordLimit = (deps: AccountDeps, clientId: number) => withinClientLimit(deps, clientId, "client-password", PASSWORD_CHANGES_PER_HOUR, 60 * 60);
+
+/** 429 `{ error: "rate" }` for a password change over the hour's limit. */
+function passwordRateLimited(session: ClientSession): Response {
+  logNote("[account] password change rate limited");
+  return clientResponse(session, { ok: false, error: "rate" }, 429);
+}
+
 /**
  * POST /parool `{ password }` (phase 2c): sets or changes the account's password (client-password.ts). 200 `{ ok: true, passwordSetAt }`;
  * 400 `{ error: "password" }` (no usable string), `"short"` / `"long"` (10 … 200 characters) or `"email"` (the address itself); 429
- * `{ error: "rate" }` after 5 in an hour. The session goes on; the change is mailed to her after the response.
+ * `{ error: "rate" }` after 5 changes in an hour (a removal counts too, see removePassword). The session goes on; the change is mailed to her after the response.
  */
 async function setPassword(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
   const input = parsePassword(await readObject(request));
   if (!input.ok) return badInput(session, input.error);
-  if (!(await withinClientLimit(deps, session.clientId, "client-password", PASSWORD_CHANGES_PER_HOUR, 60 * 60))) {
-    logNote("[account] password change rate limited");
-    return clientResponse(session, { ok: false, error: "rate" }, 429);
-  }
+  if (!(await withinPasswordLimit(deps, session.clientId))) return passwordRateLimited(session);
   const result = await setClientPassword(deps.db, session.clientId, input.data.password, deps.now);
   if (result.kind === "gone") return unauthorized("none");
   if (result.kind === "problem") return badInput(session, result.problem);
@@ -586,10 +592,14 @@ async function setPassword(request: Request, deps: AccountDeps): Promise<Respons
   return clientResponse(session, { ok: true, passwordSetAt: result.changedAt.toISOString() });
 }
 
-/** DELETE /parool (phase 2c): removes the password; the e-mail code works as always. 200 `{ ok: true }`; the change is mailed when there was one. */
+/**
+ * DELETE /parool (phase 2c): removes the password; the e-mail code works as always. 200 `{ ok: true }`; the change is mailed when there was
+ * one. It counts in the same 5 changes an hour as POST (a removal mails her too, and each one would otherwise be free): 429 `{ error: "rate" }`.
+ */
 async function removePassword(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);
   if (session instanceof Response) return session;
+  if (!(await withinPasswordLimit(deps, session.clientId))) return passwordRateLimited(session);
   const removed = await removeClientPassword(deps.db, session.clientId);
   if (!removed) return unauthorized("none");
   if (removed.had) mailPasswordChange(deps, removed);

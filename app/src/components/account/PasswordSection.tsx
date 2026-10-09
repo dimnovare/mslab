@@ -128,7 +128,8 @@ export function PasswordSection({ email, setAt: initial, locale, t, reload }: { 
       return;
     }
     if (answer.status === 401) return void reload({ quiet: true });
-    setStatus({ text: t.removeFailed, error: true }); // DELETE has no "rate" answer (it sends nothing that is counted), so this is all that can fail
+    // Over the hour's 5 changes (a removal counts with the others): the same sentence as the saving's; any other failure is ours
+    setStatus({ text: answer.status === 429 && answer.data.error === "rate" ? t.rate : t.removeFailed, error: true });
   };
 
   return (
