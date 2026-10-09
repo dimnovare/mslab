@@ -10,7 +10,8 @@ import { expect, submitsForms, test } from "./test";
 // playwright.gate.config.ts` (it builds and starts the server itself, tests/e2e/gate.ts). Skipped in the main e2e run, whose
 // server shows the site as it is. Visitors get the coming-soon page at every address, in their language, and can sign up
 // for the newsletter there (the server action posts to the visitor's own address, which the gate answers with the same
-// page) and confirm it; an admin's sign-in sets the preview cookie and the whole site shows; logout ends it.
+// page; one step since 09.10, so the sign-up subscribes at once) and unsubscribe with the link of the welcome mail; an admin's sign-in sets
+// the preview cookie and the whole site shows; logout ends it.
 
 test.skip(!gateRun(), "the gate's own run: npx playwright test -c playwright.gate.config.ts");
 
@@ -81,7 +82,7 @@ test.describe("a visitor", () => {
     try {
       await page.getByLabel("Sinu e-post").fill(addr);
       await page.getByRole("button", { name: "Liitu" }).click();
-      await expect(page.locator("[data-newsletter-status]")).toContainText("Kontrolli oma postkasti");
+      await expect(page.locator("[data-newsletter-status]")).toContainText("Aitäh, oled liitunud!");
       expect((await storedSubscriber(addr))?.email).toBe(addr);
     } finally {
       await onLocalDb((sql) => sql`delete from subscribers where email = ${addr}`, { marksPages: false });
@@ -118,7 +119,7 @@ test.describe("a visitor", () => {
     await page.screenshot({ path: test.info().outputPath("tulekul-ru.png"), fullPage: true });
   });
 
-  test("signs up from any address (the server action is answered by the coming-soon page) and confirms: the notice shows there", async ({ page }, info) => {
+  test("signs up from any address (the server action is answered by the coming-soon page), is subscribed at once, and the unsubscribe link's notice shows there", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("gate", info.project.name);
     try {
@@ -126,19 +127,22 @@ test.describe("a visitor", () => {
       await page.getByLabel("Sinu e-post").fill(addr);
       await page.getByRole("button", { name: "Liitu" }).click();
       const status = page.locator("[data-newsletter-status]");
-      await expect(status).toContainText("Kontrolli oma postkasti");
+      await expect(status).toContainText("Aitäh, oled liitunud!");
       await expect(status).toBeFocused();
       const sub = await storedSubscriber(addr);
-      expect(sub).toMatchObject({ email: addr, locale: "et", confirmed: false });
+      expect(sub).toMatchObject({ email: addr, locale: "et", confirmed: true });
+      await expect(status).toContainText("Saatsime sulle tervituskirja.");
 
-      await page.goto(`/api/newsletter/confirm?t=${sub!.token}`);
+      // the unsubscribe link of the welcome mail passes the gate and lands on the coming-soon page with its notice
+      await page.goto(`/api/newsletter/loobu?t=${sub!.token}`);
       await expectComingSoon(page);
       const notice = page.locator("[data-flash-notice]");
-      await expect(notice).toContainText("Tere tulemast MS LABi!");
-      await expect(notice).toContainText("Sinu liitumine on kinnitatud.");
+      await expect(notice).toContainText("Oled uudiskirjast loobunud.");
+      await expect(notice).toContainText("Me ei saada sulle enam MS LABi uudiskirja.");
       await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe("/");
-      expect((await storedSubscriber(addr))?.confirmed).toBe(true);
+      expect(await storedSubscriber(addr)).toBeNull();
 
+      // the confirmation link of the old flow still passes too, and a wrong one says so
       await page.goto("/api/newsletter/confirm?t=not-a-real-token-0000000000");
       await expect(page.locator("[data-flash-notice='warn']")).toContainText("See kinnituslink ei kehti.");
     } finally {
@@ -189,7 +193,7 @@ test.describe("a visitor", () => {
       await page.goto("/ru/kontakt");
       await page.getByLabel("Ваш e-mail").fill(addr);
       await page.getByRole("button", { name: "Подписаться" }).click();
-      await expect(page.locator("[data-newsletter-status]")).toContainText("Проверьте почту");
+      await expect(page.locator("[data-newsletter-status]")).toContainText("Спасибо, вы подписались!");
       expect((await storedSubscriber(addr))?.locale).toBe("ru");
     } finally {
       await onLocalDb((sql) => sql`delete from subscribers where email = ${addr}`, { marksPages: false });
