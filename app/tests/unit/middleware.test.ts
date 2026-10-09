@@ -170,7 +170,7 @@ describe("locale middleware", () => {
   });
 
   test("admin, api, media, hub files and static paths are not rewritten", () => {
-    for (const p of ["/admin", "/admin/login", "/api/feedback", "/api/feedback/abc123def456gh", "/media/img/a.jpg", "/p/b/index.html", "/p/d/assets/logo.png", "/guide/og.jpg", "/guide/thumbs/a-d.jpg", "/_next/static/chunk.js", "/feedback.js", "/robots.txt", "/favicon.ico", "/icon.svg", "/brand/logo.png", "/seed/r1.jpg", "/og.png", "/og.jpg"])
+    for (const p of ["/admin", "/admin/login", "/api/feedback", "/api/feedback/abc123def456gh", "/media/img/a.jpg", "/p/b/index.html", "/p/d/assets/logo.png", "/guide/og.jpg", "/guide/thumbs/a-d.jpg", "/_next/static/chunk.js", "/feedback.js", "/robots.txt", "/favicon.ico", "/icon.svg", "/brand/logo.png", "/seed/r1.jpg", "/og.jpg"])
       expect(passesThrough(p), p).toBe(true);
   });
 
@@ -190,7 +190,7 @@ describe("locale middleware", () => {
   });
 
   test("paths that only start like the hub, a static file or the OG image are Estonian pages (here: the 404 page)", () => {
-    for (const p of ["/guidexyz", "/guides", "/p", "/feedback.json", "/feedback.jsx", "/robots.txt.bak", "/og.html", "/og.jpg.html", "/ogx", "/og.svg"])
+    for (const p of ["/guidexyz", "/guides", "/p", "/feedback.json", "/feedback.jsx", "/robots.txt.bak", "/og.html", "/og.jpg.html", "/ogx", "/og.svg", "/og.png"])
       expect(rewrittenTo(p), p).toBe("/et/leidmata");
   });
 

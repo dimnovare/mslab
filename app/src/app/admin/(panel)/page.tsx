@@ -160,7 +160,9 @@ export default async function Overview() {
                   </a>
                 </li>
                 <li>
-                  <a className={ui.row} href="/" target="_blank" rel="noopener">
+                  {/* The home page through the coming-soon gate, like the sidebar's and the top line's links: api/admin/preview
+                      gives this admin the preview cookie, then opens "/" (a plain <a>: it is an API route, not a page). */}
+                  <a className={ui.row} href="/api/admin/preview" target="_blank" rel="noopener">
                     <AdminIcon name="up" />
                     <span className={ui.rowLabel}>
                       {t.links.site} <span aria-hidden="true">↗</span>

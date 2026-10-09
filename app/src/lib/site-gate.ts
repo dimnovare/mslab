@@ -77,12 +77,17 @@ export function alwaysThrough(path: string): boolean {
   return THROUGH.test(path) && !UNCLEAN.test(path);
 }
 
-/** The q value of one Accept entry's parameters ("q=0.8" → 0.8; none → 1; anything unreadable → 0). */
+/** RFC 9110's qvalue: 0 to 1 with at most three decimals ("0", "0.", "0.000", "0.8", "1", "1.000"). */
+const QVALUE = /^q=(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)$/i;
+
+/**
+ * The q value of one Accept entry's parameters ("q=0.8" → 0.8). "q=0", "q=0.0" and "q=0.000" are 0: not acceptable. No q,
+ * or one that is not a qvalue ("q=", "q=abc", "q=1.5", "q=0.1234"), is the default of 1 (RFC 9110): a malformed weight
+ * is no weight, and never turns an acceptable range into an unacceptable one.
+ */
 function quality(params: string[]): number {
-  const q = params.map((p) => /^q=([0-9.]+)$/i.exec(p.trim())).find(Boolean);
-  if (!q) return 1;
-  const n = Number(q[1]);
-  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0;
+  const q = params.map((p) => QVALUE.exec(p.trim())).find(Boolean);
+  return q ? Number(q[1]) : 1;
 }
 
 /**
@@ -103,17 +108,22 @@ export function prefersHtml(accept: string | null | undefined): boolean {
 }
 
 /**
- * Is the request a browser opening the address as a page (a GET or HEAD that is a navigation, or whose Accept prefers
- * HTML) rather than a script's fetch or XHR? A link to an /api address (the account's login link in an e-mail) is opened
- * so, and gets the coming-soon page instead of raw JSON. So does that page's own server action (a POST with Next-Action,
- * which goes to the address the page was opened at): its newsletter form works there too. Any other request never does
- * (a form POST stays an API call). Only the kind of answer depends on it, never whether the gate opens.
+ * Is the request a browser opening the address as a page (a GET or HEAD that is a navigation) rather than a script's fetch
+ * or XHR? A link to an /api address (the account's login link in an e-mail) is opened so, and gets the coming-soon page
+ * instead of raw JSON. So does that page's own server action (a POST with Next-Action, which goes to the address the page
+ * was opened at): its newsletter form works there too. Any other request never does (a form POST stays an API call).
+ * Sec-Fetch-Mode, when the request has it, decides alone: "navigate" is a page, any other value (cors, no-cors,
+ * same-origin, …) is not, whatever Accept says (a script can send Accept: text/html, and a navigation can send an Accept that names no HTML).
+ * Only a request without it (an older browser; a header with no value counts as none) is judged by Accept. Only the kind
+ * of answer depends on it, never whether the gate opens.
  */
 export function opensAsPage(req: Pick<GateRequest, "method" | "fetchMode" | "accept" | "action">): boolean {
   const method = req.method.toUpperCase();
   if (method === "POST") return req.action === true;
   if (method !== "GET" && method !== "HEAD") return false;
-  return req.fetchMode?.trim().toLowerCase() === "navigate" || prefersHtml(req.accept);
+  const mode = req.fetchMode?.trim().toLowerCase();
+  if (mode) return mode === "navigate";
+  return prefersHtml(req.accept);
 }
 
 /** The coming-soon page for `path`: the Russian one for /ru…, the Estonian one for everything else. */
