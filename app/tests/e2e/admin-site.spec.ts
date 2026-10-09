@@ -460,6 +460,35 @@ test.describe("the newsletter popup (phase 2c)", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0); // … still none: signed up here
   });
 
+  test("the confirmed landing (/?uudiskiri=kinnitatud) shows no newsletter popup over the notice, even past the delay; this browser is marked signed up, so a reload of / still shows none", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/?uudiskiri=kinnitatud#kood=E2E-TERE");
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "ok");
+    await expect(page.locator("[data-flash-code]")).toContainText("E2E-TERE");
+    await page.waitForTimeout(1500); // well past the 300 ms delay of this describe
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBe("1");
+    expect(await page.evaluate(() => sessionStorage.getItem("mslab-camp"))).toBeNull(); // the popup did not use up the session's turn either
+    await page.reload(); // the address is plain "/" by now (FlashNotice took the parameter and the code out)
+    await page.waitForTimeout(1500);
+    await expect(page.getByRole("dialog")).toHaveCount(0); // signed up in this browser: still none
+  });
+
+  test("any other landing (/?uudiskiri=vigane) shows no popup on that load either, but marks nothing: the next visit gets it", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/?uudiskiri=vigane");
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "warn");
+    await page.waitForTimeout(1500);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBeNull();
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "Hea järgmine samm. Otse sinu postkasti." })).toBeVisible(); // the delay does work here
+  });
+
   test("Russian, at a phone's width: the sheet with the form fits (no overflow, 44 px targets); the campaign is not shown meanwhile; switched off, none", async ({ page }, info) => {
     test.skip(phone(info), "one popup row: desktop changes it (and sets the phone's width here)");
     await changing(["campaign"]);

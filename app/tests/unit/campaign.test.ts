@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { campaignCtaLabel, campaignDelay, campaignView, CAMPAIGN_DELAY_MS, CAMPAIGN_SEEN_KEY, NEWSLETTER_SIGNED_KEY, newsletterPopupView, popupFlags, popupShown } from "@/domain/campaign";
+import { campaignCtaLabel, campaignDelay, campaignView, CAMPAIGN_DELAY_MS, CAMPAIGN_SEEN_KEY, NEWSLETTER_LANDING_PARAM, NEWSLETTER_SIGNED_KEY, newsletterLanding, newsletterPopupView, popupFlags, popupShown } from "@/domain/campaign";
 import type { Campaign } from "@/db/schema";
 import { et } from "@/i18n/dict/et";
 import { ru } from "@/i18n/dict/ru";
@@ -90,6 +90,17 @@ describe("the newsletter popup (phase 2c)", () => {
 
   test("a sign-up from the popup is remembered under its own key", () => {
     expect(NEWSLETTER_SIGNED_KEY).toBe("mslab-nl");
+  });
+
+  test("the confirmation link's landing: ?uudiskiri= with any value, an empty one too, is a landing; no parameter is not", () => {
+    expect(NEWSLETTER_LANDING_PARAM).toBe("uudiskiri");
+    expect(newsletterLanding("?uudiskiri=kinnitatud")).toBe("kinnitatud");
+    expect(newsletterLanding("?utm=x&uudiskiri=vigane")).toBe("vigane");
+    expect(newsletterLanding("?uudiskiri=")).toBe("");
+    expect(newsletterLanding("?uudiskiri")).toBe("");
+    expect(newsletterLanding("")).toBeNull();
+    expect(newsletterLanding("?utm_source=x")).toBeNull();
+    expect(newsletterLanding("?Uudiskiri=kinnitatud")).toBeNull(); // the parameter is spelt as FlashNotice spells it
   });
 });
 

@@ -69,8 +69,16 @@ export function campaignView(c: Campaign | null | undefined, locale: Locale, cta
 /** What the newsletter popup's card shows (components/site/NewsletterPopupCard), in the page's language (phase 2c). */
 export type NewsletterPopupView = { image: string; kicker: string; title: string; text: string };
 
-/** localStorage key, set after a sign-up from the newsletter popup: this browser never sees that popup again (spec 5). */
+/** localStorage key, set after a sign-up from the newsletter popup, and by the confirmed landing: this browser never sees that popup again (spec 5). */
 export const NEWSLETTER_SIGNED_KEY = "mslab-nl";
+
+/** The query parameter the newsletter confirmation link lands on the home page with: ?uudiskiri=kinnitatud | vigane | viga (FlashNotice's `param`). */
+export const NEWSLETTER_LANDING_PARAM = "uudiskiri";
+
+/** The value of the landing parameter in an address's query string (`location.search`): any value, empty too; null when the address has none. */
+export function newsletterLanding(search: string): string | null {
+  return new URLSearchParams(search).get(NEWSLETTER_LANDING_PARAM);
+}
 
 /**
  * The newsletter popup's card for the home page (phase 2c), or null: no row, a switched-off one, another kind (the campaign: campaignView)

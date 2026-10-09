@@ -20,7 +20,7 @@ import { UpcomingStrip } from "@/components/site/UpcomingStrip";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { getHomeData, listUpcomingSessions } from "@/db/queries/public";
-import { campaignView, newsletterPopupView } from "@/domain/campaign";
+import { campaignView, NEWSLETTER_LANDING_PARAM, newsletterPopupView } from "@/domain/campaign";
 import { firstParagraph, nextSessionByCourse, nextSessions, pickHomeCourses } from "@/domain/home";
 import { linkFor } from "@/domain/site-editor";
 import { formatEUR } from "@/domain/money";
@@ -250,7 +250,7 @@ export default async function Home({ params }: Props) {
         }}
       />
 
-      <FlashNotice param="uudiskiri" notices={newsletterNotices} fragments={accountNotices} closeLabel={d.common.close} />
+      <FlashNotice param={NEWSLETTER_LANDING_PARAM} notices={newsletterNotices} fragments={accountNotices} closeLabel={d.common.close} />
 
       {campaign && (
         <CampaignPopup c={campaign} locale={locale} t={{ close: d.common.close, copy: d.campaign.copy, copied: d.campaign.copied, selected: d.campaign.selected }} />
