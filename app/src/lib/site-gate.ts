@@ -113,9 +113,9 @@ export function prefersHtml(accept: string | null | undefined): boolean {
  * instead of raw JSON. So does that page's own server action (a POST with Next-Action, which goes to the address the page
  * was opened at): its newsletter form works there too. Any other request never does (a form POST stays an API call).
  * Sec-Fetch-Mode, when the request has it, decides alone: "navigate" is a page, any other value (cors, no-cors,
- * same-origin, …) is not, whatever Accept says (a script can send Accept: text/html, and a navigation can send an Accept that names no HTML).
- * Only a request without it (an older browser; a header with no value counts as none) is judged by Accept. Only the kind
- * of answer depends on it, never whether the gate opens.
+ * same-origin, …) is not, whatever Accept says (a script can send Accept: text/html, and a navigation can send an
+ * Accept that names no HTML). Only a request without it (an older browser; a header with no value counts as none) is
+ * judged by Accept. Only the kind of answer depends on it, never whether the gate opens.
  */
 export function opensAsPage(req: Pick<GateRequest, "method" | "fetchMode" | "accept" | "action">): boolean {
   const method = req.method.toUpperCase();
