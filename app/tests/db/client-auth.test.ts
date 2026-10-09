@@ -4,7 +4,7 @@ import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { clients, clientSessions, courses, mailQuota, registrations, requests, subscribers } from "@/db/schema";
 import {
-  issueClientLogin, redeemClientLink, redeemClientCode, getClientSession, endClientSession, reserveLoginMail, CODE_ATTEMPTS,
+  issueClientLogin, redeemClientLink, redeemClientCode, getClientSession, endClientSession, reserveLoginMail, reserveNewsletterMail, NEWSLETTER_MAIL_DAILY_CAP, CODE_ATTEMPTS,
 } from "@/server/client-auth";
 import { loadDashboard, updateProfile } from "@/server/client-data";
 
@@ -93,6 +93,23 @@ test("daily mail cap", async () => {
   expect(await reserveLoginMail(db, T0, 2)).toBe(false);
   expect(await db.select().from(mailQuota)).toEqual([{ day: "2026-10-02", sent: 2 }]); // a refused mail is not counted
   expect(await reserveLoginMail(db, new Date("2026-10-03T10:00:00Z"), 2)).toBe(true);
+});
+
+test("the newsletter's own daily counter: a row of its own per day, its own cap, and neither counter touches the other", async () => {
+  const db = await makeTestDb();
+  expect(NEWSLETTER_MAIL_DAILY_CAP).toBe(25);
+  expect(await reserveNewsletterMail(db, T0, 2)).toBe(true);
+  expect(await reserveNewsletterMail(db, T0, 2)).toBe(true);
+  expect(await reserveNewsletterMail(db, T0, 2)).toBe(false);
+  // the shared counter is still empty for the same day, and a full newsletter counter leaves it alone (and the other way round)
+  expect(await reserveLoginMail(db, T0, 2)).toBe(true);
+  expect(await reserveLoginMail(db, T0, 2)).toBe(true);
+  expect(await reserveLoginMail(db, T0, 2)).toBe(false);
+  expect((await db.select().from(mailQuota)).sort((a, b) => a.day.localeCompare(b.day))).toEqual([{ day: "2026-10-02", sent: 2 }, { day: "2026-10-02:nl", sent: 2 }]);
+  expect(await reserveNewsletterMail(db, new Date("2026-10-03T10:00:00Z"), 2)).toBe(true); // the next day starts again
+  // the default cap is 25: the 26th is refused
+  for (let i = 0; i < NEWSLETTER_MAIL_DAILY_CAP; i++) expect(await reserveNewsletterMail(db, new Date("2026-10-04T10:00:00Z")), String(i)).toBe(true);
+  expect(await reserveNewsletterMail(db, new Date("2026-10-04T10:00:00Z"))).toBe(false);
 });
 
 test("a login links requests and the newsletter row by e-mail, and only those of that address", async () => {

@@ -5,7 +5,7 @@ import { clients, subscribers } from "@/db/schema";
 import { isSampleAddress, normalizeEmail } from "@/domain/email";
 import { welcomeCodeOf } from "@/domain/welcome-code";
 import { welcomeMail } from "./account-mail";
-import { CONFIRMATION_MAIL_DAILY_CAP, reserveLoginMail } from "./client-auth";
+import { reserveNewsletterMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { mailConfigured, sendMail, type Env } from "./notify";
 import { forgetKey } from "./ratelimit";
@@ -40,7 +40,7 @@ const WELCOME_ONCE_SEC = 365 * 24 * 60 * 60;
  * The welcome mail with the welcome code, after an address's first confirmation (spec 5). Never throws, and logs no address and no
  * code. No mail when: no code is set; the address is a sample one; Resend is not set up; the address had its welcome this year (a KV
  * mark, read first and written only once the day's quota has a place for the mail; a store that fails lets the mail go, as the other
- * limits do); the day's confirmation cap is reached (the mail_quota row, which never fails open — a capped day writes no mark, so a
+ * limits do); the newsletter's daily cap is reached (its own mail_quota row, shared with the sign-up confirmations, which never fails open — a capped day writes no mark, so a
  * later confirmation of that address can still bring it). A send that Resend refuses or that fails takes the mark away again, so that
  * address can still get its welcome (the place of the day's cap it spent stays spent).
  */
@@ -59,7 +59,7 @@ export async function sendWelcome(deps: WelcomeDeps, to: { email: string; locale
     } catch (e) {
       logFailure("[newsletter] welcome mark unavailable, sending", e);
     }
-    if (!(await reserveLoginMail(deps.db, deps.now, CONFIRMATION_MAIL_DAILY_CAP))) {
+    if (!(await reserveNewsletterMail(deps.db, deps.now))) {
       logNote("[newsletter] daily mail cap reached: no welcome e-mail");
       return;
     }

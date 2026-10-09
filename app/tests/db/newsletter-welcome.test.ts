@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { clients, clientSessions, mailQuota, settings, subscribers } from "@/db/schema";
 import { handleAccountApi, type AccountDeps } from "@/server/account-api";
-import { CLIENT_SESSION_TTL_MS, CONFIRMATION_MAIL_DAILY_CAP } from "@/server/client-auth";
+import { CLIENT_SESSION_TTL_MS, CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, NEWSLETTER_MAIL_DAILY_CAP } from "@/server/client-auth";
 import { clientNewsletter, confirmNewsletter, newsletterState, sendWelcome } from "@/server/newsletter";
 import type { Env } from "@/server/notify";
 import { newToken, sha256 } from "@/server/token";
@@ -84,16 +84,27 @@ test("never twice for one address: switched off and on again (a new row), the we
   expect((await db.select().from(mailQuota))[0].sent).toBe(1);
 });
 
-test("the day's confirmation cap reached: no welcome mail", async () => {
+test("the newsletter's own daily cap reached: no welcome mail; the shared counter full (the logins', the registrations' confirmations') does not stop it", async () => {
   const mails = outbox();
   vi.spyOn(console, "error").mockImplementation(() => {});
   await setCode("TERE10");
-  await db.insert(mailQuota).values({ day: NOW.toISOString().slice(0, 10), sent: CONFIRMATION_MAIL_DAILY_CAP });
+  const today = NOW.toISOString().slice(0, 10);
+  await db.insert(mailQuota).values({ day: `${today}:nl`, sent: NEWSLETTER_MAIL_DAILY_CAP });
   await db.insert(subscribers).values({ email: "uus@example.com", token: "c".repeat(43) });
   const c = confirm("c".repeat(43));
   await c.result;
   await c.run();
   expect(mails()).toEqual([]);
+  expect(await db.select().from(mailQuota).where(eq(mailQuota.day, `${today}:nl`))).toEqual([{ day: `${today}:nl`, sent: NEWSLETTER_MAIL_DAILY_CAP }]); // no place taken past the cap
+  // the other way round: the shared counter at its caps, the newsletter's own one open
+  await db.delete(mailQuota);
+  await db.insert(mailQuota).values({ day: today, sent: Math.max(CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP) });
+  await db.insert(subscribers).values({ email: "teine@example.com", token: "d".repeat(43) });
+  const d = confirm("d".repeat(43));
+  await d.result;
+  await d.run();
+  expect(mails().map((m) => m.to)).toEqual(["teine@example.com"]);
+  expect(await db.select().from(mailQuota).where(eq(mailQuota.day, `${today}:nl`))).toEqual([{ day: `${today}:nl`, sent: 1 }]);
 });
 
 test("newsletterState and clientNewsletter: yes / pending / no, whatever the stored case", async () => {

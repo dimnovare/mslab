@@ -32,7 +32,7 @@ import {
   type Summary,
 } from "./messages";
 import { registrationConfirmationMail, requestConfirmationMail, type LoginCode } from "./account-mail";
-import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail } from "./client-auth";
+import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail, reserveNewsletterMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { adminUrl, mailConfigured, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
@@ -151,13 +151,21 @@ async function submission<T>(
       console.info(`[forms] ${form}: stored; confirmation e-mail sent: ${sent}`);
     });
   }
-  // One task, in this order: the visitor's own confirmation (it carries the prepayment details) reserves its place of the day's mail cap
-  // first, then the newsletter's sign-up takes what is left. Two tasks side by side would race for the last place, and the marketing mail
-  // could win it. Neither function throws (each logs its own failure), so the sign-up always follows.
+  // One task, in this order: the visitor's own confirmation (it carries the prepayment details) first, then the newsletter's sign-up (a
+  // marketing mail). The two count on different daily counters now, so they no longer compete for a place; the order stays so that the
+  // transactional mail is always the first out. sendConfirmation and subscribeLater each catch their own failures, but whatever either
+  // does one day, a throw from the confirmation must never skip the sign-up the visitor ticked: it is caught here and logged (the error
+  // class and code only, never an address).
   const wish = out.subscribe;
   if (confirm || wish) {
     deps.later(async () => {
-      if (confirm) await sendConfirmation(deps, form, confirm);
+      if (confirm) {
+        try {
+          await sendConfirmation(deps, form, confirm);
+        } catch (e) {
+          logFailure(`[forms] ${form}: confirmation e-mail task failed`, e);
+        }
+      }
       if (wish) await subscribeLater(deps, form, wish);
     });
   }
@@ -471,9 +479,10 @@ function confirmationMail(siteUrl: string, sub: Pick<Subscriber, "email" | "toke
  * 1. a sample address (`@example.test`) is never mailed (the live checks register one);
  * 2. a deployment without Resend (local development, the e2e run) has nothing to send with;
  * 3. at most 3 confirmation e-mails per address and day (a KV counter under the hash of the address, which fails open);
- * 4. one place of the day's confirmation cap (the `mail_quota` row, which never fails open) — while the coming-soon gate is on, the
- *    sign-up is the only public form, and without the cap anyone could make the site mail every address they type. Over the cap, or
- *    with the quota failing, there is no e-mail.
+ * 4. one place of the newsletter's own daily counter (the `mail_quota` row "<day>:nl", 25 a day, which never fails open; the logins' and
+ *    the registrations' confirmations count elsewhere, client-auth.ts) — while the coming-soon gate is on, the sign-up is the only
+ *    public form, and without the cap anyone could make the site mail every address they type. Over the cap, or with the quota
+ *    failing, there is no e-mail.
  * `form` is the calling form's name, for the log lines.
  */
 async function subscribeAddress(deps: Deps, form: FormName, email: string, locale: "et" | "ru"): Promise<Mail | null> {
@@ -498,7 +507,7 @@ async function subscribeAddress(deps: Deps, form: FormName, email: string, local
     return null;
   }
   try {
-    if (!(await reserveLoginMail(deps.db, deps.now, CONFIRMATION_MAIL_DAILY_CAP))) {
+    if (!(await reserveNewsletterMail(deps.db, deps.now))) {
       logNote(`[forms] ${form}: daily mail cap reached: no confirmation e-mail`);
       return null;
     }
@@ -533,7 +542,7 @@ async function subscribeLater(deps: Deps, form: FormName, wish: { email: string;
  *
  * The confirmation e-mail goes the way the registrations' and requests' do (sendConfirmation): none to a sample address
  * (`@example.test`) or from a deployment without Resend, neither of which takes a place; at most 3 per address and day; and one
- * place of the day's confirmation cap — all of that in subscribeAddress, which the registration forms' newsletter box shares. Over
+ * place of the newsletter's daily cap — all of that in subscribeAddress, which the registration forms' newsletter box shares. Over
  * the cap, or with the quota failing, the address is stored and the answer is the same, with no e-mail.
  */
 export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionResult> {
