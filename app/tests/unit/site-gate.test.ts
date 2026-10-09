@@ -7,7 +7,7 @@ import { ROOT_FILES, ROOT_FOLDERS } from "@/lib/root-files";
 import { routeSitePath } from "@/lib/site-routing";
 
 // The coming-soon gate (hotfix 08.10): with SITE_GATE on, a visitor without the admins' preview cookie is answered with the
-// coming-soon page, whatever the address; the admin area, the sign-in, the crons and webhooks, the newsletter's confirm link and
+// coming-soon page, whatever the address; the admin area, the sign-in, the crons and webhooks, the newsletter's confirm and unsubscribe links and
 // the static files always go through. A pure function of the request's path, method and cookie and of the two settings.
 
 const SECRET = "preview-secret-for-tests-0123456789abcdef";
@@ -35,6 +35,7 @@ const THROUGH = [
   "/api/cron/sweep",
   "/api/bunny/webhook",
   "/api/newsletter/confirm",
+  "/api/newsletter/loobu", // the unsubscribe link of the welcome mail (one-step newsletter, 09.10)
   "/_next/static/chunks/main.js",
   "/_next/image",
   "/_next/webpack-hmr",
@@ -257,7 +258,7 @@ describe("gateDecision", () => {
   test("the method never opens the gate (a server action is a POST to the page's own address) and never closes it", async () => {
     for (const method of METHODS) {
       for (const path of ["/", "/konto/sisene", "/ru/kontakt", "/api/konto/request", "/api/feedback"]) expect(await kind(path, ON, undefined, method), `${method} ${path}`).toBe("gate");
-      for (const path of ["/admin/login", "/api/auth/logout", "/api/admin/upload", "/api/bunny/webhook", "/api/newsletter/confirm"])
+      for (const path of ["/admin/login", "/api/auth/logout", "/api/admin/upload", "/api/bunny/webhook", "/api/newsletter/confirm", "/api/newsletter/loobu"])
         expect(await kind(path, ON, undefined, method), `${method} ${path}`).toBe("pass");
     }
   });

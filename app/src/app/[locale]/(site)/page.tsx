@@ -100,11 +100,13 @@ export default async function Home({ params }: Props) {
   const trainer = trainerSettings(home.settings, locale);
   const trainerName = trainer.name || pick(bio?.title, locale);
 
-  // The newsletter confirmation link (/api/newsletter/confirm) lands here with ?uudiskiri=kinnitatud | vigane | viga.
-  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice); the first confirmation carries
+  // The newsletter's links land here with ?uudiskiri=loobutud (the unsubscribe link of the welcome mail), kinnitatud | vigane (the confirmation
+  // link of the old double opt-in) or viga (either one, when the database could not be reached).
+  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice); the first old-style confirmation carries
   // the welcome code in the fragment (#kood=…), which the notice shows (phase 2c): the page's HTML never holds the code.
   const nl = d.newsletter;
   const newsletterNotices: Record<string, FlashMessage> = {
+    loobutud: { tone: "ok", title: nl.unsubscribedTitle, text: nl.unsubscribedText },
     kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText, codeLine: nl.codeLine },
     vigane: { tone: "warn", title: nl.linkInvalid },
     viga: { tone: "warn", title: d.forms.errorGeneric },

@@ -22,6 +22,7 @@ vi.mock("@/server/actions/public", () => ({ subscribe: vi.fn() }));
 
 const notices: Record<string, FlashMessage> = {
   kinnitatud: { tone: "ok", title: "Uudiskiri on kinnitatud", codeLine: "Sinu kood: {code}" },
+  loobutud: { tone: "ok", title: "Oled uudiskirjast loobunud.", text: "Me ei saada sulle enam MS LABi uudiskirja." },
   vigane: { tone: "warn", title: "Link on vigane" },
   viga: { tone: "warn", title: "Midagi läks valesti." },
 };
@@ -34,7 +35,7 @@ const t: NewsletterPopupTexts = {
     notice: "Liitudes saad MS LABi uudiskirja.",
     privacy: "Privaatsus",
     sentTitle: "",
-    sentText: "Saatsime sulle kinnituslingi.",
+    sentText: "Saatsime sulle tervituskirja.",
     errorEmail: "Sisesta korrektne e-posti aadress.",
     errorTooMany: "Liiga palju katseid.",
     errorGeneric: "Midagi läks valesti.",
@@ -100,6 +101,24 @@ describe("the newsletter popup on the home page", () => {
     expect(sessionStorage.getItem("mslab-camp")).toBeNull(); // the popup did not even use up the session's turn
     expect(localStorage.getItem("mslab-nl")).toBe("1");
     expect(address()).toBe("/"); // FlashNotice took the parameter and the code out, as before
+  });
+
+  test("the unsubscribed landing (?uudiskiri=loobutud): the notice, no popup over it, and this browser is NOT marked signed up (only kinnitatud marks it); the next page load is an ordinary one", async () => {
+    await loadHome("/?uudiskiri=loobutud");
+    await wait(300);
+    expect($("[data-flash-notice]")?.getAttribute("data-flash-notice")).toBe("ok");
+    expect($("[data-flash-notice]")?.textContent).toContain("Oled uudiskirjast loobunud.");
+    expect($("[data-flash-notice]")?.textContent).toContain("Me ei saada sulle enam MS LABi uudiskirja.");
+    expect($("[data-flash-code]")).toBeNull();
+    expect($("[data-newsletter-popup]")).toBeNull();
+    expect(sessionStorage.getItem("mslab-camp")).toBeNull();
+    expect(localStorage.getItem("mslab-nl")).toBeNull();
+    expect(address()).toBe("/");
+    // she may sign up again: the next visit shows the popup (a signed-up mark from before would have kept it away; unsubscribing removes the reason for it)
+    await leave();
+    await loadHome("/");
+    await wait(200);
+    expect($("[data-newsletter-popup]")).not.toBeNull();
   });
 
   test("a reload of / in the same browser, and a visit from a new session: still none (she is signed up here)", async () => {

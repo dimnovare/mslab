@@ -6,9 +6,11 @@ import { serverKv } from "@/server/kv";
 import { logFailure } from "@/server/log";
 import { confirmNewsletter } from "@/server/newsletter";
 import { isPrefetch } from "@/server/prefetch";
+import { linkBase } from "@/server/site";
 
 /**
- * Newsletter double opt-in: the link in the confirmation e-mail (`?t=<token>`). Confirms the subscriber and sends the visitor to the
+ * The confirmation link of the old newsletter double opt-in (`?t=<token>`): since 09.10 the sign-up is one step and nothing creates a new
+ * confirmation mail, but links already sent are still in mailboxes and keep working. Confirms the subscriber and sends the visitor to the
  * home page in their language, which shows a notice: ?uudiskiri=kinnitatud (confirmed), =vigane (unknown token), =viga (the database
  * could not be reached). The first confirmation with a welcome code set (Seaded "Tervituskood", phase 2c) also mails the code after
  * the response and carries it in the fragment (#kood=<CODE>): the cached home page shows it from there, and no server or cache sees it.
@@ -22,11 +24,13 @@ export async function GET(request: Request): Promise<Response> {
   let page = "/";
   let code: string | null = null;
   try {
+    const env = { ...serverEnv(), KV: serverKv() };
     const result = await confirmNewsletter(
       {
         db: getDb(),
-        env: { ...serverEnv(), KV: serverKv() },
+        env,
         now: new Date(),
+        siteUrl: linkBase(url.origin, env.SITE_URL), // the base of the unsubscribe link in the welcome mail
         later: (task) => after(() => task().catch((e) => logFailure("[newsletter] welcome e-mail failed", e))),
       },
       url.searchParams.get("t") ?? "",

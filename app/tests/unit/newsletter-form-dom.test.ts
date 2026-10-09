@@ -24,7 +24,7 @@ const t: NewsletterFormTexts = {
   notice: "Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda.",
   privacy: "Privaatsus",
   sentTitle: "",
-  sentText: "Saatsime sulle kinnituslingi. Ava see oma postkastis.",
+  sentText: "Aitäh, oled liitunud! Saatsime sulle tervituskirja.",
   errorEmail: "Sisesta korrektne e-posti aadress.",
   errorTooMany: "Liiga palju katseid.",
   errorGeneric: "Midagi läks valesti.",
@@ -131,7 +131,7 @@ describe("sending", () => {
     await submit();
     const sent = mocks.subscribe.mock.calls[0][0];
     expect([sent.get("email"), sent.get("locale"), sent.get("website")]).toEqual(["kati@example.test", "et", ""]);
-    expect($("[data-newsletter-status]")?.textContent).toBe("Saatsime sulle kinnituslingi. Ava see oma postkastis.");
+    expect($("[data-newsletter-status]")?.textContent).toBe("Aitäh, oled liitunud! Saatsime sulle tervituskirja.");
     expect($("[data-newsletter-status] h3")).toBeNull();
     expect($("form")).toBeNull();
     expect(onSent).toHaveBeenCalledTimes(1);
@@ -141,10 +141,11 @@ describe("sending", () => {
 
   test("with a sentTitle the answer has its heading", async () => {
     mocks.subscribe.mockResolvedValue({ ok: true });
-    await mount({ t: { ...t, sentTitle: "Kontrolli oma postkasti" } });
+    await mount({ t: { ...t, sentTitle: "Aitäh, oled liitunud!", sentText: "Saatsime sulle tervituskirja." } });
     await type($<HTMLInputElement>("input[name='email']"), "kati@example.test");
     await submit();
-    expect($("[data-newsletter-status] h3")?.textContent).toBe("Kontrolli oma postkasti");
+    expect($("[data-newsletter-status] h3")?.textContent).toBe("Aitäh, oled liitunud!");
+    expect($("[data-newsletter-status] p")?.textContent).toBe("Saatsime sulle tervituskirja.");
   });
 
   test("a refused address: the error is on the e-mail field (which keeps its value and its error description), the button keeps the line; onSent is not told", async () => {

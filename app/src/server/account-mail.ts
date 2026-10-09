@@ -169,21 +169,26 @@ export function passwordChangedMail(email: string, locale: Locale, contactEmail:
 }
 
 /**
- * The welcome mail after an address's first newsletter confirmation (phase 2c, server/newsletter.ts sendWelcome): the welcome code
- * large (the login code's lilac box) and how to use it, with no button. Plain text and HTML. The caller never sends it to a sample
- * address or in development.
+ * The welcome mail to a newly subscribed address (one step since 09.10; server/newsletter.ts sendWelcome): the greeting and a line of thanks,
+ * then, only when Seaded has a "Tervituskood" (`code`; null for none), the code large (the login code's lilac box) and how to use it, and as
+ * the last line before the signature the way out: "loobu siit" with `unsubscribeLink`, the subscriber's own link (newsletter.ts
+ * unsubscribeUrl). No button. Plain text and HTML. The caller never sends it to a sample address or in development.
  */
-export function welcomeMail(email: string, code: string, locale: Locale): Mail {
+export function welcomeMail(email: string, code: string | null, locale: Locale, unsubscribeLink: string): Mail {
   const w = getDict(locale).mail.welcome;
   const mail = getDict(locale).account.mail;
-  const text = [mail.greeting, "", w.intro, "", w.codeIntro, "", code, "", w.use, w.invoice, "", mail.signature].join("\n");
+  const [before, after = ""] = w.unsubscribe.split("{link}");
+  const text = [
+    mail.greeting, "", w.intro, "",
+    ...(code ? [w.codeIntro, "", code, "", w.use, w.invoice, ""] : []),
+    fill(w.unsubscribe, { link: unsubscribeLink }), "",
+    mail.signature,
+  ].join("\n");
   const html = mailCard(w.subject, locale, [
     greetingRow(mail.greeting),
     paragraphRow(w.intro),
-    paragraphRow(w.codeIntro),
-    codeRow(code),
-    paragraphRow(w.use),
-    paragraphRow(w.invoice, 8),
+    ...(code ? [paragraphRow(w.codeIntro), codeRow(code), paragraphRow(w.use), paragraphRow(w.invoice, 8)] : []),
+    row(`padding:24px 28px 0;${textStyle(14)}`, `${esc(before)}<a href="${esc(unsubscribeLink)}" style="color:${INK};text-decoration:underline;word-break:break-all;">${esc(unsubscribeLink)}</a>${esc(after)}`),
     signatureRow(mail),
   ]);
   return { to: email, subject: w.subject, text, html };

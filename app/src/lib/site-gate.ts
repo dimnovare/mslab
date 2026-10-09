@@ -54,8 +54,8 @@ export function gateOn(value: string | undefined): boolean {
  * Addresses answered by the app itself, gate or not. Each ends at a path boundary or is one exact file, as in
  * lib/site-routing.ts ("/administrator" or "/admin.php" are gated):
  * - the admin area and its API, and signing in and out (api/auth: request, verify, logout);
- * - Vercel's daily cron, Bunny's webhook, and the newsletter's confirm link (it sends the visitor on to "/", the coming-soon
- *   page, which shows the notice);
+ * - Vercel's daily cron, Bunny's webhook, and the newsletter's links (api/newsletter: the unsubscribe link of the welcome mail and the old
+ *   confirm link; each sends the visitor on to "/", the coming-soon page, which shows the notice);
  * - Next.js's own files, the uploaded images (/media) and the static files at the root (lib/root-files.ts, the list the
  *   routing uses too: the logo, the icons, the link preview picture, robots.txt, the seed pictures, the review widget's
  *   script); tests/unit/site-gate.test.ts checks every entry of public/ against it. The design-review hub (public/guide,

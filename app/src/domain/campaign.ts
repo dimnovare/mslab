@@ -72,7 +72,7 @@ export type NewsletterPopupView = { image: string; kicker: string; title: string
 /** localStorage key, set after a sign-up from the newsletter popup, and by the confirmed landing: this browser never sees that popup again (spec 5). */
 export const NEWSLETTER_SIGNED_KEY = "mslab-nl";
 
-/** The query parameter the newsletter confirmation link lands on the home page with: ?uudiskiri=kinnitatud | vigane | viga (FlashNotice's `param`). */
+/** The query parameter the newsletter's links land on the home page with: ?uudiskiri=loobutud (the unsubscribe link), kinnitatud | vigane (the old confirmation link) | viga (FlashNotice's `param`). */
 export const NEWSLETTER_LANDING_PARAM = "uudiskiri";
 
 /** The value of the landing parameter in an address's query string (`location.search`): any value, empty too; null when the address has none. */

@@ -1,4 +1,4 @@
-// The site address used in links that leave the site (newsletter confirmation e-mail, admin link in Maria's
+// The site address used in links that leave the site (the newsletter's welcome mail with its unsubscribe link, admin link in Maria's
 // notifications). The request's own origin is used when it is one of ours, so a sign-up on the Vercel production URL
 // (before the domain switch) gets a link to that URL; anything else (a forged Host / Origin) falls back to SITE_URL.
 

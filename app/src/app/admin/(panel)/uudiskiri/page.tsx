@@ -21,7 +21,8 @@ type Props = { searchParams: Promise<Record<string, string | string[] | undefine
 const stamp = (d: Date) => `${formatDate(d, "et")} ${formatTime(d, "et")}`;
 
 /**
- * Newsletter subscribers (double opt-in): e-mail, language, consent time, confirmed or not, newest first, and the CSV
+ * Newsletter subscribers: e-mail, language, consent time, confirmed or not (new sign-ups are confirmed at once; "not" is a row of the old
+ * double opt-in that was never confirmed), newest first, and the CSV
  * downloads (confirmed only — the addresses a newsletter may go to — or all). 50 a page (?leht=); the CSV has all.
  */
 export default async function NewsletterPage({ searchParams }: Props) {

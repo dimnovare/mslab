@@ -551,8 +551,9 @@ async function profile(request: Request, deps: AccountDeps): Promise<Response> {
 
 /**
  * POST /uudiskiri `{ on }`: the account's address subscribes (confirmed: the login proved it) or unsubscribes. 200 `{ ok: true }`. Switched
- * on and confirmed now for the first time: the welcome mail with Seaded's code after the response (phase 2c; server/newsletter.ts
- * sendWelcome: once per address, never in development, never to a sample address).
+ * on and confirmed now for the first time: the welcome mail after the response (phase 2c; one step since 09.10, with Seaded's code when
+ * there is one and always with the unsubscribe link; server/newsletter.ts sendWelcome: once per address, never in development, never to a
+ * sample address). The row is confirmed at once, as the public forms' sign-up is: no confirmation mail on this path either.
  */
 async function newsletter(request: Request, deps: AccountDeps): Promise<Response> {
   const session = await requireClient(request, deps);

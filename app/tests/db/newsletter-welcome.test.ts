@@ -10,14 +10,16 @@ import { newToken, sha256 } from "@/server/token";
 import { fakeKv, stubFetch } from "../fakes";
 import { makeTestDb } from "./helpers";
 
-// Phase 2c (spec 5): the welcome code goes out after an address's first confirmation — the link (confirmNewsletter) or "Saada mulle
-// uudiskirja" in Minu andmed — once, in the address's language, only when Seaded has a code; never again for that address this year.
+// Phase 2c (spec 5), one step since 09.10: the welcome mail goes out to a newly subscribed address — the sign-up (actions.test.ts), "Saada mulle
+// uudiskirja" in Minu andmed, or a confirmation link of the old flow (confirmNewsletter, which still sends it only when Seaded has a code) — once,
+// in the address's language, with or without the code, and always with the unsubscribe link; never again for that address this year.
 // Mails go to a stubbed Resend (addresses at example.com: a sample address, @example.test, is never mailed).
 
 const NOW = new Date("2026-10-08T10:00:00Z");
 let db: Db;
 let kv: ReturnType<typeof fakeKv>;
-const env = (): Env => ({ KV: kv, MAIL_FROM: "MS LAB <info@send.example>", MARIA_EMAIL: "maria@example.test", SITE_URL: "https://mslab.example", RESEND_API_KEY: "re_test" });
+const SITE = "https://mslab.example";
+const env = (): Env => ({ KV: kv, MAIL_FROM: "MS LAB <info@send.example>", MARIA_EMAIL: "maria@example.test", SITE_URL: SITE, RESEND_API_KEY: "re_test" });
 
 beforeEach(async () => {
   db = await makeTestDb();
@@ -38,7 +40,7 @@ const setCode = (welcomeCode: string) => db.insert(settings).values({ key: "news
 /** confirmNewsletter with the work after the response collected; `run()` does it. */
 function confirm(token: string, now = NOW) {
   const tasks: (() => Promise<unknown>)[] = [];
-  const result = confirmNewsletter({ db, env: env(), now, later: (t) => void tasks.push(t) }, token);
+  const result = confirmNewsletter({ db, env: env(), now, siteUrl: SITE, later: (t) => void tasks.push(t) }, token);
   return { result, run: async () => Promise.all(tasks.splice(0).map((t) => t())) };
 }
 
@@ -51,6 +53,8 @@ test("the first confirmation with a code set: the code for the confirmed page an
   await first.run();
   expect(mails().map((m) => [m.to, m.subject])).toEqual([["uus@example.com", "Добро пожаловать в MS LAB!"]]);
   expect(mails()[0].text).toContain("TERE10");
+  expect(mails()[0].text).toContain(`${SITE}/api/newsletter/loobu?t=${"t".repeat(43)}`); // the unsubscribe link of the row, in the Russian line
+  expect(mails()[0].text).toContain("отпишитесь здесь:");
   const again = confirm("t".repeat(43), new Date(NOW.getTime() + 60_000));
   expect(await again.result).toEqual({ outcome: "kinnitatud", locale: "ru", code: null });
   await again.run();
@@ -124,7 +128,7 @@ test("Minu andmed: 'Saada mulle uudiskirja' on confirms at once and sends the we
   const raw = newToken();
   await db.insert(clientSessions).values({ idHash: await sha256(raw), clientId: kati.id, createdAt: NOW, expiresAt: new Date(NOW.getTime() + CLIENT_SESSION_TTL_MS) });
   const tasks: (() => Promise<unknown>)[] = [];
-  const deps: AccountDeps = { db, env: env(), now: NOW, siteUrl: "https://mslab.example", later: (t) => void tasks.push(t), dev: false };
+  const deps: AccountDeps = { db, env: env(), now: NOW, siteUrl: SITE, later: (t) => void tasks.push(t), dev: false };
   const post = async (on: boolean) => {
     const res = (await handleAccountApi(new Request("https://mslab.example/api/konto/uudiskiri", { method: "POST", headers: { cookie: `__Host-mslab_client=${raw}` }, body: JSON.stringify({ on }) }), deps))!;
     await Promise.all(tasks.splice(0).map((t) => t()));
@@ -145,7 +149,8 @@ test("a welcome mail that Resend refuses leaves no 'once a year' mark: the next 
   const f = stubFetch(() => (refuse ? Response.json({ name: "application_error", message: "down", statusCode: 500 }, { status: 500 }) : Response.json({ id: "email_1" })));
   const resend = () => f.calls.filter((c) => c.url.includes("resend"));
   await setCode("TERE10");
-  const deps = { db, env: env(), now: NOW };
+  await db.insert(subscribers).values({ email: "uus@example.com", token: "r".repeat(43), confirmedAt: NOW });
+  const deps = { db, env: env(), now: NOW, siteUrl: SITE };
   await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
   expect(resend()).toHaveLength(1); // tried, refused
   expect([...kv.store.keys()].filter((k) => k.startsWith("rl:welcome:"))).toEqual([]); // nothing marks the address as welcomed
@@ -167,7 +172,8 @@ test("a store without a delete forgets the mark by a put that expires at once (a
   let refuse = true;
   const f = stubFetch(() => (refuse ? Response.json({ name: "application_error", message: "down", statusCode: 500 }, { status: 500 }) : Response.json({ id: "email_1" })));
   await setCode("TERE10");
-  const deps = { db, env: env(), now: NOW };
+  await db.insert(subscribers).values({ email: "uus@example.com", token: "r".repeat(43), confirmedAt: NOW });
+  const deps = { db, env: env(), now: NOW, siteUrl: SITE };
   await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
   refuse = false;
   await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
@@ -194,4 +200,52 @@ test("the settings cannot be read after the first confirmation: still 'kinnitatu
   const lines = JSON.stringify((console.error as unknown as { mock: { calls: unknown[] } }).mock.calls);
   expect(lines).toContain("settings unavailable after the confirmation");
   expect(lines).not.toContain("uus@example.com");
+});
+
+test("sendWelcome without a code in Seaded: the mail goes out with no code lines, and with the unsubscribe line (since the one-step sign-up)", async () => {
+  const mails = outbox();
+  await setCode("");
+  await db.insert(subscribers).values({ email: "uus@example.com", locale: "et", token: "w".repeat(43), confirmedAt: NOW });
+  await sendWelcome({ db, env: env(), now: NOW, siteUrl: `${SITE}/` }, { email: "Uus@Example.com", locale: "et" });
+  expect(mails().map((m) => [m.to, m.subject])).toEqual([["uus@example.com", "Tere tulemast MS LABi!"]]);
+  const { text } = mails()[0];
+  expect(text).not.toContain("tervituskood");
+  expect(text).not.toContain("Lisa kood");
+  expect(text).toContain(`Kui sa ei liitunud ise või ei soovi enam MS LABi kirju, loobu siit: ${SITE}/api/newsletter/loobu?t=${"w".repeat(43)}`); // one slash, whatever the base ends with
+});
+
+test("sendWelcome for an address that has no row any more (it unsubscribed meanwhile): no mail, no place taken, no mark", async () => {
+  const mails = outbox();
+  await setCode("TERE10");
+  await sendWelcome({ db, env: env(), now: NOW, siteUrl: SITE }, { email: "uus@example.com", locale: "et" });
+  expect(mails()).toEqual([]);
+  expect(await db.select().from(mailQuota)).toEqual([]);
+  expect([...kv.store.keys()].filter((k) => k.startsWith("rl:welcome:"))).toEqual([]);
+});
+
+test("sendWelcome logs no address, no token and no code", async () => {
+  outbox();
+  await setCode("TERE10");
+  await db.insert(subscribers).values({ email: "uus@example.com", token: "z".repeat(43), confirmedAt: NOW });
+  await sendWelcome({ db, env: env(), now: NOW, siteUrl: SITE }, { email: "uus@example.com", locale: "et" });
+  const logged = JSON.stringify((console.info as unknown as { mock: { calls: unknown[] } }).mock.calls);
+  for (const secret of ["uus@example.com", "z".repeat(43), "TERE10"]) expect(logged).not.toContain(secret);
+});
+
+test("Minu andmed: switching the newsletter on with no code in Seaded sends the welcome mail without code lines, with the unsubscribe link of the new row", async () => {
+  const mails = outbox();
+  await setCode("");
+  const [kati] = await db.insert(clients).values({ email: "kati@example.com", locale: "ru" }).returning();
+  const raw = newToken();
+  await db.insert(clientSessions).values({ idHash: await sha256(raw), clientId: kati.id, createdAt: NOW, expiresAt: new Date(NOW.getTime() + CLIENT_SESSION_TTL_MS) });
+  const tasks: (() => Promise<unknown>)[] = [];
+  const deps: AccountDeps = { db, env: env(), now: NOW, siteUrl: SITE, later: (t) => void tasks.push(t), dev: false };
+  const res = (await handleAccountApi(new Request("https://mslab.example/api/konto/uudiskiri", { method: "POST", headers: { cookie: `__Host-mslab_client=${raw}` }, body: JSON.stringify({ on: true }) }), deps))!;
+  await Promise.all(tasks.splice(0).map((t) => t()));
+  expect(res.status).toBe(200);
+  const [row] = await db.select().from(subscribers).where(eq(subscribers.email, "kati@example.com"));
+  expect(row.confirmedAt).toEqual(NOW);
+  expect(mails().map((m) => [m.to, m.subject])).toEqual([["kati@example.com", "Добро пожаловать в\u00a0MS LAB!"]]);
+  expect(mails()[0].text).not.toContain("приветственный код");
+  expect(mails()[0].text).toContain(`${SITE}/api/newsletter/loobu?t=${row.token}`);
 });

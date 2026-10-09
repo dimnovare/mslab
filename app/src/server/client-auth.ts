@@ -19,9 +19,8 @@ export const CLIENT_LOGIN_CAP = 3;
  * - the shared one, the row "<day>": a login e-mail or a confirmation that carries a login code stops at 60, a confirmation without a
  *   code (registrations and requests, with the prepayment details) at 30. Every confirmation comes with Maria's own notification of the
  *   same submission, which this counter does not see, so 30 confirmations are about 60 mails; the last 30 of the 60 are left for sign-ins;
- * - the newsletter's own, the row "<day>:nl": the sign-up's confirmation link and the welcome mail share its 25 places, so a rush of
- *   sign-ups (two mails each) can never use up the places the registrations' and requests' confirmations and the logins need, nor
- *   the other way round. 60 + 25 = 85 is the most the two counters let out in a day, under Resend's 100.
+ * - the newsletter's own, the row "<day>:nl": the welcome mail (one for each sign-up) takes its 25 places, so a rush of sign-ups
+ *   can never use up the places the registrations' and requests' confirmations and the logins need, nor the other way round. 60 + 25 = 85 is the most the two counters let out in a day, under Resend's 100.
  */
 export const LOGIN_MAIL_DAILY_CAP = 60;
 export const CONFIRMATION_MAIL_DAILY_CAP = 30;
@@ -250,7 +249,7 @@ export async function reserveLoginMail(db: Q, now = new Date(), cap = LOGIN_MAIL
   return reserveMailPlace(db, dayOf(now), cap);
 }
 
-/** One more place of today's newsletter counter (the sign-up's confirmation link, the welcome mail), unless `cap` is reached. */
+/** One more place of today's newsletter counter (the welcome mail), unless `cap` is reached. */
 export async function reserveNewsletterMail(db: Q, now = new Date(), cap = NEWSLETTER_MAIL_DAILY_CAP): Promise<boolean> {
   return reserveMailPlace(db, dayOf(now) + NEWSLETTER_QUOTA_SUFFIX, cap);
 }

@@ -347,39 +347,34 @@ export const et = {
     submit: "Liitu",
     // The line under "Liitu", before the link "Privaatsus" (footer.privacy): the form's only purpose is the newsletter, so sending it is the consent.
     notice: "Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda.",
-    confirmTitle: "Kinnita oma e-post",
-    confirmText: "Saatsime sulle kinnituskirja. Vajuta kirjas olevale lingile, et liitumine lõpule viia.",
+    // The answer after "Liitu" (the footer, the coming-soon page): one step since 09.10, the address is subscribed and the welcome mail is on its way.
+    sentTitle: "Aitäh, oled liitunud!",
+    sentText: "Saatsime sulle tervituskirja.",
+    // the newsletter popup's answer after a sign-up (components/site/NewsletterPopup.tsx, phase 2c): title and line in one
+    popupSent: "Aitäh, oled liitunud! Saatsime sulle tervituskirja.",
+    // Home page notice after the unsubscribe link of the welcome mail (/?uudiskiri=loobutud).
+    unsubscribedTitle: "Oled uudiskirjast loobunud.",
+    unsubscribedText: "Me ei saada sulle enam MS LABi uudiskirja.",
+    // The notices after a confirmation link of the old flow, still in some mailboxes (/?uudiskiri=kinnitatud or =vigane).
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
     // the confirmed notice's line when Seaded has a welcome code (the confirmation link's #kood=…, phase 2c)
     codeLine: "Sinu tervituskood: {code}. Lisa kood registreerimisel lahtrisse „Sõnum“.",
-    sentTitle: "Kontrolli oma postkasti",
-    // the newsletter popup's answer after a sign-up (components/site/NewsletterPopup.tsx, phase 2c)
-    popupSent: "Saatsime sulle kinnituslingi. Ava see oma postkastis.",
-    // Home page notice after the confirmation link (/?uudiskiri=kinnitatud or =vigane).
     linkInvalid: "See kinnituslink ei kehti. Liitu uudiskirjaga uuesti lehe allosas.",
   },
 
-  // E-mails to visitors (plain text). {link} is the confirmation URL.
+  // E-mails to visitors. The newsletter's only mail is the welcome mail (server/account-mail.ts welcomeMail), sent as soon as the address is
+  // subscribed (one step, 09.10).
   mail: {
-    confirmSubject: "Kinnita MS LABi uudiskirjaga liitumine",
-    confirmText: [
-      "Tere!",
-      "",
-      "Aitäh, et soovid MS LABi uudiskirja. Liitumise kinnitamiseks ava see link:",
-      "{link}",
-      "",
-      "Kui sa ei soovinud uudiskirjaga liituda, jäta see kiri tähelepanuta — ilma kinnituseta me sulle uudiskirju ei saada.",
-      "",
-      "MS LAB Koolituskeskus",
-    ].join("\n"),
-    // The welcome mail after the first confirmation (server/account-mail.ts welcomeMail, phase 2c): the code is Seaded "Tervituskood".
     welcome: {
       subject: "Tere tulemast MS LABi!",
       intro: "Aitäh, et liitusid MS LABi uudiskirjaga.",
+      // the next three lines only when Seaded has a "Tervituskood"
       codeIntro: "Sinu tervituskood:",
       use: "Lisa kood registreerimisel lahtrisse „Sõnum“.",
       invoice: "Maria arvestab soodustuse sinu arvelt maha.",
+      // the last line before the signature; {link} is the unsubscribe URL (/api/newsletter/loobu?t=<the subscriber's token>)
+      unsubscribe: "Kui sa ei liitunud ise või ei soovi enam MS LABi kirju, loobu siit: {link}",
     },
   },
 

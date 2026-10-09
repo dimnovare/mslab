@@ -18,8 +18,8 @@ export type FlashMessage = {
 const NO_FRAGMENTS: Record<string, FlashMessage> = {};
 
 /**
- * A short notice after a redirect, fixed at the bottom of the screen until closed: the newsletter confirmation link →
- * /?uudiskiri=kinnitatud, and an account page that sends the visitor here with a fragment (/#konto-kustutatud after the
+ * A short notice after a redirect, fixed at the bottom of the screen until closed: the newsletter's links → /?uudiskiri=loobutud (the
+ * unsubscribe link of the welcome mail) and /?uudiskiri=kinnitatud (the old confirmation link), and an account page that sends the visitor here with a fragment (/#konto-kustutatud after the
  * account was deleted: lib/account-marks.ts). The page is cached and shared by every visitor, so the server renders only the
  * empty polite status region; the browser reads the address after hydration, puts the matching text into the region (so
  * screen readers announce it) and removes the parameter or the fragment from the address, so a reload or a shared link does
