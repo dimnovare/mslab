@@ -1,0 +1,24 @@
+/* The thin progress bar (4 px): the line colour with the ink filling it; on the dark "Pooleli" card paper on a faint paper track. Tokens only. */
+
+.bar {
+  height: 4px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--line);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink);
+}
+
+.bar[data-tone="dark"] {
+  background: color-mix(in srgb, var(--paper) 22%, transparent);
+}
+
+.bar[data-tone="dark"] span {
+  background: var(--paper);
+}

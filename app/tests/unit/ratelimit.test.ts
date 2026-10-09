@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { clientIp, normalizeIp, rateKey, rateLimit, RATE_LIMIT, RATE_WINDOW_SEC } from "@/server/ratelimit";
+import { belowLimit, clientIp, countFailure, normalizeIp, rateKey, rateLimit, RATE_LIMIT, RATE_WINDOW_SEC, releaseSlot, reserveSlot } from "@/server/ratelimit";
 import { fakeKv } from "../fakes";
 
 describe("rateLimit", () => {
@@ -88,4 +88,34 @@ describe("IPv6 buckets: one per /64", () => {
     expect(await rateLimit(kv, rateKey("contact", clientIp(h({ "x-forwarded-for": "2001:db8:1:3::1" }))!), 5, 600)).toBe(true);
     expect([...kv.store.keys()]).toEqual(["rl:contact:2001:db8:1:2::/64", "rl:contact:2001:db8:1:3::/64"]);
   });
+});
+
+test("the password lock's counters (phase 2c): belowLimit counts nothing; countFailure adds one and starts the window again", async () => {
+  const kv = fakeKv();
+  expect(await belowLimit(kv, "k", 2)).toBe(true);
+  await countFailure(kv, "k", 900);
+  await countFailure(kv, "k", 900);
+  expect([kv.store.get("k"), kv.ttl.get("k")]).toEqual(["2", 900]);
+  expect(await belowLimit(kv, "k", 2)).toBe(false);
+  expect(await belowLimit(kv, "k", 3)).toBe(true);
+});
+
+test("reserveSlot / releaseSlot (phase 2c fix): a store with atomic counters is asked for them; one without falls back to read-then-write", async () => {
+  // the atomic form: the tests' in-memory KV mirrors PgKv.reserve / release
+  const kv = fakeKv();
+  expect([await reserveSlot(kv, "k", 2, 900), await reserveSlot(kv, "k", 2, 900), await reserveSlot(kv, "k", 2, 900)]).toEqual([true, true, false]);
+  expect([kv.store.get("k"), kv.ttl.get("k")]).toEqual(["2", 900]);
+  await releaseSlot(kv, "k", 900);
+  expect(kv.store.get("k")).toBe("1");
+  await releaseSlot(kv, "k", 900);
+  await releaseSlot(kv, "k", 900);
+  expect(kv.store.get("k")).toBe("0"); // never below 0
+  // a store with get and put only (the fallback): the same answers, one request at a time
+  const plain = fakeKv();
+  const bare = { get: plain.get, put: plain.put };
+  expect([await reserveSlot(bare, "k", 2, 900), await reserveSlot(bare, "k", 2, 900), await reserveSlot(bare, "k", 2, 900)]).toEqual([true, true, false]);
+  await releaseSlot(bare, "k", 900);
+  await releaseSlot(bare, "k", 900);
+  await releaseSlot(bare, "k", 900);
+  expect(plain.store.get("k")).toBe("0");
 });

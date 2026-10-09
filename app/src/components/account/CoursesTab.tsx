@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import filters from "@/components/site/CatalogueFilters.module.css";
 import { Icon } from "@/components/site/Icon";
 import ui from "@/components/site/ui.module.css";
-import { cardKey, filterCards, firstName, isPastCard, showFilters, type CardFilter, type ContactCard } from "@/domain/account-cards";
+import { cardKey, filterCards, firstName, isPastCard, showFilters, type CardFilter, type ContactCard, type EcourseCard } from "@/domain/account-cards";
 import { fill } from "@/i18n/format";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
@@ -14,6 +14,7 @@ import { AccountCourseCard } from "./AccountCourseCard";
 import { AccountLoader, type Reload } from "./AccountLoader";
 import { CardSkeleton, GreetingSkeleton } from "./CardSkeleton";
 import { ChangeRequestDialog, type ChangeRequestEnd } from "./ChangeRequestDialog";
+import { ResumeCard, type ResumeProgress } from "./ResumeCard";
 import { isSent, pruneChangeRequests, rememberChangeRequest, sentChangeRequests, type SentRequest } from "./sent-requests";
 import type { CoursesTexts } from "./texts";
 import styles from "./CoursesTab.module.css";
@@ -43,9 +44,10 @@ type Props = {
 );
 
 /**
- * "Minu koolitused" (/konto): the greeting, the filter chips, the course cards (each with its one sentence and at most one
- * button), the empty state. With `data` it shows that (the admin's view, server-rendered); otherwise AccountLoader loads
- * the signed-in client's dashboard in the browser — the page itself is a static shell, the same for every visitor.
+ * "Minu koolitused" (/konto): the greeting, the dark 'Pooleli' card of the e-course she was busy with last (phase 2c), the filter
+ * chips, the course cards (each with its one sentence and at most one button), the empty state. With `data` it shows that (the
+ * admin's view, server-rendered); otherwise AccountLoader loads the signed-in client's dashboard in the browser — the page itself is
+ * a static shell, the same for every visitor.
  */
 export function CoursesTab(props: Props) {
   const { locale, t, now } = props;
@@ -72,6 +74,13 @@ function CoursesSkeleton() {
       </div>
     </div>
   );
+}
+
+/** The card and progress of the e-course the "Pooleli" card is for (the dashboard's `resume`), when it has a next lesson. */
+function resumeOf(data: Dashboard): { card: EcourseCard; progress: ResumeProgress } | null {
+  const card = data.resume === null ? undefined : data.cards.find((c): c is EcourseCard => c.kind === "ecourse" && c.course.slug === data.resume);
+  const progress = card?.progress;
+  return card && progress?.next ? { card, progress: { ...progress, next: progress.next } } : null;
 }
 
 function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboard; locale: Locale; t: CoursesTexts; readOnly: boolean; at?: string; reload?: Reload }) {
@@ -123,6 +132,7 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
   };
 
   const name = firstName(data.client.name);
+  const resume = resumeOf(data);
   // The chips show only while they can change what is seen; without them (the cards changed under a chosen chip, e.g.
   // a refused request turned the last upcoming one into a cancelled one) everything is shown, never an empty list.
   const chips = showFilters(data.cards, now);
@@ -155,6 +165,7 @@ function CoursesView({ data, locale, t, readOnly, at, reload }: { data: Dashboar
       ) : (
         <>
           <p className={styles.lead}>{t.lead}</p>
+          {resume && <ResumeCard card={resume.card} progress={resume.progress} locale={locale} t={t} readOnly={readOnly} />}
           {chips && (
             <div className={`${filters.pills} ${styles.chips}`} role="group" aria-label={t.filterLabel} data-account-filters="">
               {FILTERS.map((f) => (

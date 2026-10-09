@@ -9,12 +9,9 @@
   margin-bottom: clamp(28px, 3.5vw, 44px);
 }
 
-/* D .h1 in Jost */
+/* The H1 (the size: ui.pageTitle) */
 .title {
   margin: 0;
-  font: 400 clamp(40px, 6vw, 80px) / 1.02 var(--font-display);
-  letter-spacing: -0.02em;
-  text-wrap: balance;
 }
 
 .empty {

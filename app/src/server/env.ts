@@ -58,11 +58,11 @@ type RequiredName = "DATABASE_URL" | "SITE_URL" | "ADMIN_EMAILS" | "ADMIN_NAMES"
  */
 const REQUIRED: readonly [RequiredName, string][] = [
   ["DATABASE_URL", LOCAL_DATABASE_URL],
-  ["SITE_URL", "https://mslab.diipsolutions.eu"],
+  ["SITE_URL", "https://mslab.ee"],
   ["ADMIN_EMAILS", ""],
   ["ADMIN_NAMES", ""],
   ["MARIA_EMAIL", ""],
-  ["MAIL_FROM", "MS LAB <info@send.diipsolutions.eu>"],
+  ["MAIL_FROM", "MS LAB <info@send.mslab.ee>"],
 ];
 
 /** The error for a DATABASE_URL that cannot be used. It never holds the value. */

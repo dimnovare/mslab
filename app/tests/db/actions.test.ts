@@ -4,7 +4,7 @@ import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { clientLoginTokens, courses, courseSessions, mailQuota, practicePackages, registrations, requests, settings, subscribers } from "@/db/schema";
 import type { PublicChange } from "@/server/cache-targets";
-import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, issueClientLogin, redeemClientCode } from "@/server/client-auth";
+import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, NEWSLETTER_MAIL_DAILY_CAP, issueClientLogin, redeemClientCode } from "@/server/client-auth";
 import type { Env } from "@/server/notify";
 import { sha256 } from "@/server/token";
 import {
@@ -73,6 +73,7 @@ beforeEach(async () => {
   await db.delete(requests);
   await db.delete(subscribers);
   await db.delete(registrations).where(eq(registrations.email, "test@example.com"));
+  await db.delete(registrations).where(sql`email like 'nl-%'`);
   await db.delete(clientLoginTokens);
   await db.delete(mailQuota);
   await db.delete(settings).where(eq(settings.key, "prepayment"));
@@ -239,6 +240,19 @@ describe("honeypot and rate limit", () => {
     expect(await handleContact(deps, form({ name: "Bot", email: "bot@example.com", message: "spam", website: "x" }))).toEqual({ ok: true });
     expect(await db.select().from(requests)).toHaveLength(0);
     expect([...kv.store.keys()].filter((k) => k.startsWith("rl:"))).toEqual([]);
+  });
+
+  test("a filled honeypot on the newsletter sign-up answers like success, stores no subscriber, sends no mail and does not count", async () => {
+    const { mails } = outbox();
+    const { deps, kv, flush } = setup({ secrets: true });
+    expect(await handleSubscribe(deps, form({ email: "bot@example.com", locale: "et", website: "x" }))).toEqual({ ok: true });
+    await flush();
+    expect(await db.select().from(subscribers)).toHaveLength(0);
+    expect(mails()).toHaveLength(0);
+    expect([...kv.store.keys()].filter((k) => k.startsWith("rl:"))).toEqual([]);
+    // the same address without the honeypot is a normal sign-up (the test could fail: the form is otherwise good)
+    expect(await handleSubscribe(deps, form({ email: "bot@example.com", locale: "et" }))).toEqual({ ok: true });
+    expect(await db.select().from(subscribers)).toHaveLength(1);
   });
 
   test("5 submissions per form and IP in 10 minutes; the 6th gets form 'rate'", async () => {
@@ -478,15 +492,76 @@ describe("newsletter double opt-in", () => {
     expect(mails()).toHaveLength(3);
   });
 
-  test("confirmSubscriber sets confirmedAt once; unknown or malformed tokens are null", async () => {
+  describe("the newsletter's confirmation counts against its own daily counter (phase 2c, security)", () => {
+    // The newsletter's places are the `mail_quota` row "<day>:nl" (25 a day); the shared row "<day>" is the logins' and the registration and
+    // request confirmations' (60 / 30), and a sign-up neither takes from it nor is stopped by it.
+    const NL = "2026-10-01:nl";
+    const quotaToday = async () => Object.fromEntries((await db.select().from(mailQuota)).map((r) => [r.day, r.sent]));
+
+    test("below the cap a sign-up takes one place of the newsletter's counter, one for each mail", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: NL, sent: NEWSLETTER_MAIL_DAILY_CAP - 2 });
+      expect(await signUp(deps)).toEqual({ ok: true });
+      expect(await quotaToday()).toEqual({ [NL]: NEWSLETTER_MAIL_DAILY_CAP - 1 });
+      expect(await signUp(deps, "teine@example.com")).toEqual({ ok: true });
+      expect(await quotaToday()).toEqual({ [NL]: NEWSLETTER_MAIL_DAILY_CAP });
+      await flush();
+      expect(mails()).toHaveLength(2);
+    });
+
+    test("the cap reached: the address is stored and the answer is the same, but no e-mail goes out and no place is taken", async () => {
+      const { mails } = outbox();
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: NL, sent: NEWSLETTER_MAIL_DAILY_CAP });
+      expect(await signUp(deps)).toEqual({ ok: true });
+      await flush();
+      expect(await db.select().from(subscribers)).toHaveLength(1);
+      expect(mails()).toEqual([]);
+      expect(await quotaToday()).toEqual({ [NL]: NEWSLETTER_MAIL_DAILY_CAP });
+      expect(error).toHaveBeenCalledWith("[forms] subscribe: daily mail cap reached: no confirmation e-mail");
+      // the next day has places again
+      expect(await signUp({ ...deps, now: new Date("2026-10-02T10:00:00Z") }, "UUS@example.com")).toEqual({ ok: true });
+      await flush();
+      expect(mails().map((m) => m.to)).toEqual(["uus@example.com"]);
+    });
+
+    test("the shared counter full (the logins' 60) does not stop a newsletter confirmation, and the sign-up takes none of its places", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: "2026-10-01", sent: LOGIN_MAIL_DAILY_CAP });
+      expect(await signUp(deps)).toEqual({ ok: true });
+      await flush();
+      expect(mails().map((m) => m.to)).toEqual(["uus@example.com"]);
+      expect(await quotaToday()).toEqual({ "2026-10-01": LOGIN_MAIL_DAILY_CAP, [NL]: 1 });
+    });
+
+    test("a sample address is never mailed and takes no place; nor does a deployment without Resend", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      expect(await signUp(deps, "kati@example.test")).toEqual({ ok: true });
+      await flush();
+      expect(await db.select().from(subscribers)).toHaveLength(1);
+      expect(mails()).toEqual([]);
+      expect(await quotaToday()).toEqual({});
+      const bare = setup();
+      expect(await signUp(bare.deps, "mari@example.com")).toEqual({ ok: true });
+      await bare.flush();
+      expect(mails()).toEqual([]);
+      expect(await quotaToday()).toEqual({});
+    });
+  });
+
+  test("confirmSubscriber sets confirmedAt once and says whether this was the first time; unknown or malformed tokens are null", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const { deps } = setup();
     await signUp(deps);
     const [sub] = await db.select().from(subscribers);
     const first = await confirmSubscriber(db, sub.token, new Date("2026-10-03T00:00:00Z"));
-    expect(first?.confirmedAt).toEqual(new Date("2026-10-03T00:00:00Z"));
+    expect(first).toMatchObject({ first: true, sub: { confirmedAt: new Date("2026-10-03T00:00:00Z") } });
     const again = await confirmSubscriber(db, sub.token, new Date("2026-10-04T00:00:00Z"));
-    expect(again?.confirmedAt).toEqual(new Date("2026-10-03T00:00:00Z"));
+    expect(again).toMatchObject({ first: false, sub: { confirmedAt: new Date("2026-10-03T00:00:00Z") } });
     expect(await confirmSubscriber(db, "x".repeat(43), NOW)).toBeNull();
     expect(await confirmSubscriber(db, "", NOW)).toBeNull();
     expect(await confirmSubscriber(db, "' or 1=1 --", NOW)).toBeNull();
@@ -653,9 +728,10 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
       expect(to(mails(), "test@example.com")).toHaveLength(3);
     });
 
-    test("the day's caps: 60 for mails with a login code, 30 for confirmations without one (each is paired with Maria's notification, which is not counted; Resend Free sends 100)", async () => {
+    test("the day's caps: 60 for mails with a login code, 30 for confirmations without one (each is paired with Maria's notification, which is not counted; Resend Free sends 100), and the newsletter's own 25", async () => {
       expect(LOGIN_MAIL_DAILY_CAP).toBe(60);
       expect(CONFIRMATION_MAIL_DAILY_CAP).toBe(30);
+      expect(NEWSLETTER_MAIL_DAILY_CAP).toBe(25);
       // the 30th of the day is the last confirmation without a code
       const { mails } = outbox();
       await db.insert(mailQuota).values({ day: "2026-10-01", sent: 30 });
@@ -691,6 +767,18 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
       await flush();
       expect(to(mails(), "test@example.com")).toHaveLength(1);
       expect(await quota()).toEqual([CONFIRMATION_MAIL_DAILY_CAP]);
+    });
+
+    test("a full newsletter counter does not stop a registration confirmation, with a login code or without, and the confirmation takes none of its places", async () => {
+      const { mails } = outbox();
+      await db.insert(mailQuota).values({ day: "2026-10-01:nl", sent: NEWSLETTER_MAIL_DAILY_CAP });
+      const { deps, flush } = setup({ secrets: true });
+      await handleRegistration(deps, group({ locale: "et" }));
+      await handleRegistration(deps, group({ locale: "et", account: "on", session: String(ids.other), email: "test@example.com" }));
+      await flush();
+      expect(to(mails(), "test@example.com")).toHaveLength(2);
+      const byDay = Object.fromEntries((await db.select().from(mailQuota)).map((r) => [r.day, r.sent]));
+      expect(byDay).toEqual({ "2026-10-01": 2, "2026-10-01:nl": NEWSLETTER_MAIL_DAILY_CAP });
     });
 
     test("a mail with a login code uses the login cap (60), not the confirmation cap: it goes out at 30..59 and stops at 60", async () => {
@@ -864,5 +952,182 @@ describe("confirmation e-mails to the visitor (phase 2a Task 10)", () => {
     expect(await db.select().from(clientLoginTokens)).toHaveLength(0); // no login row burnt
     expect(await quota()).toEqual([]); // no quota unit burnt
     expect(await db.select().from(registrations).where(eq(registrations.email, "test@example.com"))).toHaveLength(1);
+  });
+});
+
+describe("the newsletter consent on the registration forms (phase 2c)", () => {
+  const groupFields = (email: string, extra: Record<string, string> = {}) => ({
+    course: "kulmud", session: String(s.id), name: "Kati Tamm", email, phone: "+372 5555 5555", payment: "full", terms: "on", locale: "et", ...extra,
+  });
+  const CONFIRM_SUBJECT = "Kinnita MS LABi uudiskirjaga liitumine";
+  const newsletterMails = (mails: { to: string; subject: string }[], to: string) => mails.filter((m) => m.to === to && m.subject === CONFIRM_SUBJECT);
+
+  test("ticked on a group registration: the registration is stored, then an unconfirmed subscriber and the confirmation mail; the message is kept", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    expect(await handleRegistration(deps, form(groupFields("nl-reg@example.com", { newsletter: "on", message: "Kood TERE10" })))).toEqual({ ok: true });
+    await flush();
+    const [reg] = await db.select().from(registrations).where(eq(registrations.email, "nl-reg@example.com"));
+    expect(reg.message).toBe("Kood TERE10");
+    const [sub] = await db.select().from(subscribers).where(eq(subscribers.email, "nl-reg@example.com"));
+    expect(sub).toMatchObject({ locale: "et", confirmedAt: null });
+    expect(mails().filter((m) => m.to === "nl-reg@example.com").map((m) => m.subject)).toContain("Kinnita MS LABi uudiskirjaga liitumine");
+  });
+
+  test("not ticked: no subscriber; an address already confirmed: nothing new; on the waitlist and the purchase wish too", async () => {
+    const { deps, flush } = setup({ secrets: true });
+    outbox();
+    await handleRegistration(deps, form(groupFields("nl-none@example.com")));
+    await db.insert(subscribers).values({ email: "nl-done@example.com", token: "d1", confirmedAt: NOW });
+    await handleWaitlist(deps, form({ session: String(ids.full), name: "Kati", email: "nl-done@example.com", locale: "et", newsletter: "on" }));
+    await handlePurchaseInterest(deps, form({ course: "e-kulmud", email: "nl-cart@example.com", locale: "ru", newsletter: "on" }));
+    await flush();
+    const rows = await db.select({ email: subscribers.email, locale: subscribers.locale, confirmed: subscribers.confirmedAt }).from(subscribers);
+    expect(rows.map((r) => r.email).sort()).toEqual(["nl-cart@example.com", "nl-done@example.com"]);
+    expect(rows.find((r) => r.email === "nl-cart@example.com")).toMatchObject({ locale: "ru", confirmed: null });
+  });
+
+  test("a failure of the sign-up never fails the registration (it runs after the answer, and is only logged)", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { deps, flush } = setup();
+    await db.execute(sql`alter table subscribers rename to subscribers_away`);
+    try {
+      expect(await handleRegistration(deps, form(groupFields("nl-fail@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+      await flush();
+      const logged = errors.mock.calls.flat().map(String).join("\n");
+      expect(logged).toContain("[forms] register: newsletter sign-up failed: DrizzleQueryError (code 42P01)");
+      expect(logged).not.toContain("nl-fail@example.com"); // the log line holds the error class and code, never the address
+      expect(logged).not.toContain("example.com");
+    } finally {
+      await db.execute(sql`alter table subscribers_away rename to subscribers`);
+    }
+    expect(await db.select().from(registrations).where(eq(registrations.email, "nl-fail@example.com"))).toHaveLength(1);
+  });
+
+  test("a sample address (@example.test) ticked: its unconfirmed row, and no mail (as the forms' own confirmations)", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    expect(await handleRegistration(deps, form(groupFields("nl-sample@example.test", { newsletter: "on" })))).toEqual({ ok: true });
+    await flush();
+    expect(await db.select({ email: subscribers.email, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-sample@example.test", confirmed: null }]);
+    expect(mails().filter((m) => m.to === "nl-sample@example.test")).toEqual([]);
+  });
+
+  // The registration forms' box and the newsletter's own forms share one sign-up (subscribeAddress), so its four guards hold for both.
+  describe("the sign-up's guards hold for the registration forms' box too", () => {
+    const quota = async () => (await db.select().from(mailQuota)).map((r) => [r.day, r.sent]);
+
+    const NL = "2026-10-01:nl";
+    const quotaMap = async () => Object.fromEntries((await db.select().from(mailQuota)).map((r) => [r.day, r.sent]));
+
+    test("the newsletter's cap reached: the subscriber is stored, no newsletter mail goes out and no place is taken", async () => {
+      const { mails } = outbox();
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: NL, sent: NEWSLETTER_MAIL_DAILY_CAP });
+      expect(await handleRegistration(deps, form(groupFields("nl-cap@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+      await flush();
+      expect(await db.select().from(registrations).where(eq(registrations.email, "nl-cap@example.com"))).toHaveLength(1);
+      expect(await db.select({ email: subscribers.email, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-cap@example.com", confirmed: null }]);
+      expect(newsletterMails(mails(), "nl-cap@example.com")).toEqual([]);
+      expect(mails().filter((m) => m.to === "nl-cap@example.com")).toHaveLength(1); // the registration's own confirmation is not stopped by it
+      expect(await quotaMap()).toEqual({ "2026-10-01": 1, [NL]: NEWSLETTER_MAIL_DAILY_CAP });
+      expect(error).toHaveBeenCalledWith("[forms] register: daily mail cap reached: no confirmation e-mail");
+    });
+
+    test("below the cap the newsletter mail takes a place of the newsletter's counter, the waitlist confirmation one of the shared counter", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      await db.insert(mailQuota).values({ day: NL, sent: NEWSLETTER_MAIL_DAILY_CAP - 2 });
+      expect(await handleWaitlist(deps, form({ session: String(ids.full), name: "Kati", email: "nl-wait@example.com", locale: "et", newsletter: "on" }))).toEqual({ ok: true });
+      await flush();
+      expect(newsletterMails(mails(), "nl-wait@example.com")).toHaveLength(1);
+      expect(await quotaMap()).toEqual({ "2026-10-01": 1, [NL]: NEWSLETTER_MAIL_DAILY_CAP - 1 });
+    });
+
+    test("at most 3 newsletter confirmations per address and day, however the sign-ups came", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup({ secrets: true });
+      for (let i = 0; i < 3; i++) await handleSubscribe({ ...deps, ip: `10.0.1.${i}` }, form({ email: "nl-many@example.com", locale: "et" }));
+      expect(await handleRegistration(deps, form(groupFields("nl-many@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+      await flush();
+      expect(newsletterMails(mails(), "nl-many@example.com")).toHaveLength(3);
+      expect(await db.select().from(subscribers)).toHaveLength(1);
+    });
+
+    test("a deployment without Resend (local development): the row is stored, nothing is sent, nothing is counted", async () => {
+      const { mails } = outbox();
+      const { deps, flush } = setup();
+      expect(await handleRegistration(deps, form(groupFields("nl-dev@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+      await flush();
+      expect(await db.select({ email: subscribers.email }).from(subscribers)).toEqual([{ email: "nl-dev@example.com" }]);
+      expect(mails()).toEqual([]);
+      expect(await quota()).toEqual([]);
+    });
+
+    test("the shared counter at its last place does not cost the newsletter its mail: the registration's confirmation takes that place and goes first, then the newsletter's own counter is asked", async () => {
+      const { mails } = outbox();
+      // the visitor confirmation's own counter is the slow store here, as it can be on a bad day: the two mails still go in this order
+      const kv = fakeKv({ "tg:chat": "42" });
+      const get = kv.get;
+      kv.get = async (key: string) => {
+        if (key.startsWith("rl:visitor-confirm:")) await new Promise((resolve) => setTimeout(resolve, 60));
+        return get(key);
+      };
+      const { deps, flush } = setup({ secrets: true, kv });
+      await db.insert(mailQuota).values({ day: "2026-10-01", sent: CONFIRMATION_MAIL_DAILY_CAP - 1 });
+      expect(await handleRegistration(deps, form(groupFields("nl-last@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+      await flush();
+      expect(mails().filter((m) => m.to === "nl-last@example.com").map((m) => m.subject)).toEqual(["Registreering on vastu võetud — Kulmude baaskoolitus", CONFIRM_SUBJECT]);
+      expect(await db.select({ email: subscribers.email, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-last@example.com", confirmed: null }]);
+      expect(await quotaMap()).toEqual({ "2026-10-01": CONFIRMATION_MAIL_DAILY_CAP, [NL]: 1 });
+    });
+  });
+
+  test("the confirmation's own work throwing (not only failing quietly) cannot skip the newsletter sign-up: it is logged without the address and the sign-up still runs", async () => {
+    const { mails } = outbox();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { deps } = setup({ secrets: true });
+    const tasks: (() => Promise<unknown>)[] = [];
+    const queued = { ...deps, later: (task: () => Promise<unknown>) => void tasks.push(task) };
+    expect(await handleRegistration(queued, form(groupFields("nl-throw@example.com", { newsletter: "on" })))).toEqual({ ok: true });
+    expect(tasks).toHaveLength(2); // Maria's notification, then the visitor's confirmation and the sign-up as one task
+    // The first look at the Resend key (sendConfirmation's own, before its try) throws, as a bug there one day might; the later ones do not.
+    let armed = true;
+    Object.defineProperty(queued.env, "RESEND_API_KEY", {
+      get() {
+        if (!armed) return "re_test";
+        armed = false;
+        throw new Error("boom nl-throw@example.com");
+      },
+    });
+    await expect(tasks[1]()).resolves.toBeUndefined();
+    expect(await db.select({ email: subscribers.email, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-throw@example.com", confirmed: null }]);
+    expect(newsletterMails(mails(), "nl-throw@example.com")).toHaveLength(1);
+    const logged = error.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("[forms] register: confirmation e-mail task failed: Error");
+    expect(logged).not.toContain("nl-throw@example.com");
+  });
+
+  test("the individual request: the sign-up follows in the visitor's language, and the stored request does not carry the box", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    expect(await handleIndividual(deps, form({ course: "kulmud", name: "Kati", email: "nl-ind@example.com", phone: "+372 5555 5555", period: "detsember", terms: "on", locale: "ru", newsletter: "on" }))).toEqual({ ok: true });
+    await flush();
+    expect(await db.select({ email: subscribers.email, locale: subscribers.locale, confirmed: subscribers.confirmedAt }).from(subscribers)).toEqual([{ email: "nl-ind@example.com", locale: "ru", confirmed: null }]);
+    expect(mails().filter((m) => m.to === "nl-ind@example.com" && m.subject === "Подтвердите подписку на рассылку MS LAB")).toHaveLength(1);
+    const [row] = await db.select().from(requests);
+    expect(row.payload).not.toHaveProperty("wantsNewsletter");
+  });
+
+  test("Maria's notification of a group registration shows the message; without one, no 'Sõnum' line", async () => {
+    const { mails } = outbox();
+    const { deps, flush } = setup({ secrets: true });
+    await handleRegistration(deps, form(groupFields("nl-msg@example.com", { message: "Kood TERE10" })));
+    await handleRegistration(deps, form(groupFields("nl-nomsg@example.com")));
+    await flush();
+    const maria = mails().filter((m) => m.to === "maria@example.com");
+    expect(maria.find((m) => m.text.includes("nl-msg@example.com"))?.text).toContain("Sõnum:\nKood TERE10");
+    expect(maria.find((m) => m.text.includes("nl-nomsg@example.com"))?.text).not.toContain("Sõnum");
   });
 });

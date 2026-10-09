@@ -9,7 +9,7 @@ import { fill } from "@/i18n/format";
 import type { Locale } from "@/i18n/locales";
 import { forgetAccountFavourites } from "@/lib/favourites";
 import { sendJson } from "@/lib/json-request";
-import { forwardsSignedIn, readLoginAddress } from "./login-address";
+import { PASSWORD_MARK, forwardsSignedIn, readLoginAddress } from "./login-address";
 import { PENDING_KEY, hasAccountHint, rememberEmail, rememberedEmail } from "./useAccount";
 import styles from "./LoginForm.module.css";
 
@@ -26,7 +26,9 @@ const KEEP_CODE_STEP_MS = 29 * 60_000;
 type SendError = "email" | "rate" | "server";
 /** `short`: Enter (a phone's "Go") with fewer than six digits. */
 type CodeError = "short" | "code" | "expired" | "rate" | "server";
-type FocusTarget = "email" | "code" | "resend" | "typo";
+type FocusTarget = "email" | "code" | "resend" | "typo" | "password";
+/** The password step's one sentence under the fields: a malformed address, any wrong answer, the lock, or a failure of ours. */
+type PasswordError = "email" | "wrong" | "locked" | "server";
 type Pending = { sentTo: string; sentAt: number };
 
 /**
@@ -71,7 +73,9 @@ function withBold(template: string, name: string, value: string): React.ReactNod
 
 /**
  * The login page (/konto/sisene, spec 2.1 rules 1, 3, 8): the e-mail → "Saada kood" → the 6-digit code from the e-mail →
- * "Logi sisse". No password and no other step.
+ * "Logi sisse". Below the e-mail step a quiet "Sisene parooliga" opens the e-mail and password step (phase 2c; the fragment `#parool`
+ * keeps it for a reload), with "Logi sisse" and "Saada mulle hoopis kood" back: POST /api/konto/parool-login, one sentence for every
+ * wrong answer, another for the lock. The code is the default; the password is optional (Minu andmed).
  *
  * - The field starts with the last e-mail used in this browser; the address is trimmed and lower-cased, and a common
  *   domain typo ("gmial.com") asks "Kas mõtlesid …?" first: "Jah, paranda" corrects it and sends, "Ei, saada nii" sends as typed.
@@ -102,7 +106,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   // false in the server's HTML and while it hydrates, true once this form handles its own submit: before that a tap posts
   // the plain form (method="post", nothing in the address) and the page simply opens again. `data-login-ready` says so.
   const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
-  const [step, setStep] = useState<"email" | "code">("email");
+  const [step, setStep] = useState<"email" | "code" | "password">("email");
   const [email, setEmail] = useState("");
   const [banner, setBanner] = useState<"link" | "server" | null>(null);
   const [typo, setTypo] = useState<string | null>(null);
@@ -117,6 +121,8 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   const [askedAgain, setAskedAgain] = useState(false);
   const [resendAt, setResendAt] = useState(0);
   const [now, setNow] = useState(0);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<PasswordError | null>(null);
 
   // One request at a time (a double tap, the sixth digit and Enter): a ref, so a second call in the same tick sees it.
   const busy = useRef(false);
@@ -124,19 +130,30 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
   const codeRef = useRef<HTMLInputElement>(null);
   const resendRef = useRef<HTMLButtonElement>(null);
   const typoRef = useRef<HTMLButtonElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   // Where the focus goes once the render that shows it is on screen: kept until that element exists (an effect may run
   // before the state that shows it has rendered, as Strict Mode's second run in development does).
   const focusAfterRender = useRef<FocusTarget | null>(null);
   useEffect(() => {
     const target = focusAfterRender.current;
-    const element = target && { email: emailRef, code: codeRef, resend: resendRef, typo: typoRef }[target].current;
+    const element = target && { email: emailRef, code: codeRef, resend: resendRef, typo: typoRef, password: passwordRef }[target].current;
     if (!element) return;
     focusAfterRender.current = null;
     element.focus();
   });
 
+  /**
+   * The address with or without the password step's fragment (history.replaceState: no new entry, the page is not loaded again). Off takes
+   * away `#parool` only: any other fragment is not ours.
+   */
+  const markPasswordStep = (on: boolean) => {
+    if (!on && window.location.hash !== `#${PASSWORD_MARK}`) return;
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${on ? `#${PASSWORD_MARK}` : ""}`);
+  };
+
   /** Opens the code step for `address`, the code sent at `sentAt` (null: nothing was sent from this tab, a new code can be asked for at once). */
   function showCodeStep(address: string, sentAt: number | null): void {
+    markPasswordStep(false); // the address says what the step is: a code step never has #parool
     setNow(Date.now());
     setResendAt(sentAt === null ? 0 : sentAt + RESEND_AFTER_MS);
     setSentTo(address);
@@ -242,6 +259,10 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
       setBanner(problem); // the notice belongs to the e-mail step: a new code is what it asks for
       return;
     }
+    if (window.location.hash === `#${PASSWORD_MARK}`) {
+      setStep("password"); // "Sisene parooliga" kept for a reload (#parool); the e-mail is the remembered one
+      return;
+    }
     if (again && saved) {
       void send(saved);
       return;
@@ -312,6 +333,63 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     focusAfterRender.current = "email";
   };
 
+  /** "Sisene parooliga": the e-mail and password step (#parool, kept for a reload). Not while a request is out (a code on its way would open its own step). */
+  const toPassword = () => {
+    if (busy.current) return;
+    setStep("password");
+    setPassword("");
+    setPasswordError(null);
+    setSendError(null);
+    setTypo(null);
+    setBanner(null);
+    markPasswordStep(true);
+    focusAfterRender.current = email ? "password" : "email";
+  };
+
+  /** "Saada mulle hoopis kood": back to the e-mail step (the code), the address without #parool. */
+  const toCode = () => {
+    setStep("email");
+    setPassword("");
+    setPasswordError(null);
+    markPasswordStep(false);
+    focusAfterRender.current = "email";
+  };
+
+  /** The e-mail and password: signs in and opens "Minu konto", or says what to do (every wrong answer is the same sentence). */
+  async function signInWithPassword(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (busy.current) return;
+    const address = normalizeEmail(email);
+    setEmail(address);
+    if (!isEmail(address)) {
+      setPasswordError("email");
+      focusAfterRender.current = "email";
+      return;
+    }
+    if (!password) {
+      setPasswordError("wrong");
+      focusAfterRender.current = "password";
+      return;
+    }
+    busy.current = true;
+    setChecking(true);
+    setPasswordError(null);
+    const { status, data } = await sendJson("/api/konto/parool-login", { email: address, password, locale });
+    if (status === 200 && data.ok === true) {
+      keepPendingCode(null); // a code step this tab kept is of no use now: it must not come back after a logout
+      rememberEmail(address);
+      forgetAccountFavourites(); // a previous session's copy of the favourites must not show for this account
+      // replace, as for the code: Back from "Minu konto" never returns to this form
+      window.location.replace(locale === "ru" ? "/ru/konto" : "/konto");
+      return;
+    }
+    busy.current = false;
+    setChecking(false);
+    setPasswordError(status === 400 ? "wrong" : status === 429 ? "locked" : "server");
+    if (status === 400) setPassword(""); // a wrong password is typed again; after the lock or a failure of ours the same one can be tried
+    focusAfterRender.current = "password";
+  }
+
   const secondsLeft = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const sendErrorText = sendError === "email" ? t.badEmail : sendError === "rate" ? t.rate : sendError === "server" ? t.server : "";
   const codeMessage = codeError
@@ -319,6 +397,7 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
     : resent
       ? t.resent
       : "";
+  const passwordMessage = passwordError ? { email: t.badEmail, wrong: t.passwordWrong, locked: t.passwordLocked, server: t.server }[passwordError] : "";
   const messageClass = codeError === "short" ? styles.note : codeError ? styles.error : styles.status;
 
   return (
@@ -327,65 +406,130 @@ export function LoginForm({ locale, t }: { locale: Locale; t: LoginTexts }) {
         <h1 className={styles.title}>{t.title}</h1>
 
         {step === "email" ? (
-          <form method="post" noValidate onSubmit={submitEmail} data-login-email="">
-            {banner && (
-              <p className={styles.notice} role="status" data-login-banner={banner}>
-                {banner === "link" ? t.linkExpired : t.server}
-              </p>
-            )}
-            <div className={styles.field}>
-              <label htmlFor={`${id}-email`}>{t.email}</label>
-              <input
-                ref={emailRef}
-                id={`${id}-email`}
-                name="email"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                autoCapitalize="none"
-                spellCheck={false}
-                maxLength={254}
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setTypo(null);
-                  setSendError(null);
-                }}
-                aria-invalid={sendError === "email" ? true : undefined}
-                aria-describedby={`${id}-email-message`}
-              />
-              <p id={`${id}-email-message`} className={styles.error} aria-live="polite">
-                {sendErrorText}
-              </p>
-            </div>
-            {typo ? (
-              <div className={styles.typo} role="group" aria-labelledby={`${id}-typo`} data-login-typo="">
-                <p id={`${id}-typo`}>{withBold(t.typo, "fixed", typo)}</p>
-                <div className={styles.choices}>
-                  <button
-                    ref={typoRef}
-                    type="button"
-                    className={ui.btn}
-                    aria-disabled={sending || undefined}
-                    onClick={() => {
-                      setEmail(typo);
-                      void send(typo);
-                    }}
-                  >
-                    {t.typoYes}
-                  </button>
-                  <button type="button" className={ui.btnOutline} aria-disabled={sending || undefined} onClick={() => void send(normalizeEmail(email))}>
-                    {t.typoNo}
-                  </button>
-                </div>
+          <>
+            <form method="post" noValidate onSubmit={submitEmail} data-login-email="">
+              {banner && (
+                <p className={styles.notice} role="status" data-login-banner={banner}>
+                  {banner === "link" ? t.linkExpired : t.server}
+                </p>
+              )}
+              <div className={styles.field}>
+                <label htmlFor={`${id}-email`}>{t.email}</label>
+                <input
+                  ref={emailRef}
+                  id={`${id}-email`}
+                  name="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={254}
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setTypo(null);
+                    setSendError(null);
+                  }}
+                  aria-invalid={sendError === "email" ? true : undefined}
+                  aria-describedby={`${id}-email-message`}
+                />
+                <p id={`${id}-email-message`} className={styles.error} aria-live="polite">
+                  {sendErrorText}
+                </p>
               </div>
-            ) : (
-              <button type="submit" className={`${ui.btn} ${ui.btnFull}`} aria-disabled={sending || undefined}>
-                {t.send}
+              {typo ? (
+                <div className={styles.typo} role="group" aria-labelledby={`${id}-typo`} data-login-typo="">
+                  <p id={`${id}-typo`}>{withBold(t.typo, "fixed", typo)}</p>
+                  <div className={styles.choices}>
+                    <button
+                      ref={typoRef}
+                      type="button"
+                      className={ui.btn}
+                      aria-disabled={sending || undefined}
+                      onClick={() => {
+                        setEmail(typo);
+                        void send(typo);
+                      }}
+                    >
+                      {t.typoYes}
+                    </button>
+                    <button type="button" className={ui.btnOutline} aria-disabled={sending || undefined} onClick={() => void send(normalizeEmail(email))}>
+                      {t.typoNo}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button type="submit" className={`${ui.btn} ${ui.btnFull}`} aria-disabled={sending || undefined}>
+                  {t.send}
+                  <Icon name="arrow" />
+                </button>
+              )}
+            </form>
+            <div className={styles.actions}>
+              <button type="button" className={styles.textButton} onClick={toPassword} data-login-to-password="">
+                {t.toPassword}
+              </button>
+            </div>
+          </>
+        ) : step === "password" ? (
+          <>
+            <form method="post" noValidate onSubmit={(e) => void signInWithPassword(e)} data-login-password="">
+              <div className={styles.field}>
+                <label htmlFor={`${id}-pw-email`}>{t.email}</label>
+                <input
+                  ref={emailRef}
+                  id={`${id}-pw-email`}
+                  name="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={254}
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setPasswordError(null);
+                  }}
+                  aria-invalid={passwordError === "email" ? true : undefined}
+                  aria-describedby={`${id}-pw-message`}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor={`${id}-password`}>{t.password}</label>
+                <input
+                  ref={passwordRef}
+                  id={`${id}-password`}
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  maxLength={400}
+                  value={password}
+                  readOnly={checking}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError(null);
+                  }}
+                  aria-invalid={passwordError === "wrong" ? true : undefined}
+                  aria-describedby={`${id}-pw-message`}
+                  aria-busy={checking || undefined}
+                />
+                <p id={`${id}-pw-message`} className={styles.error} aria-live="polite" data-login-password-error="">
+                  {passwordMessage}
+                </p>
+              </div>
+              <button type="submit" className={`${ui.btn} ${ui.btnFull}`} aria-disabled={checking || undefined}>
+                {t.submit}
                 <Icon name="arrow" />
               </button>
-            )}
-          </form>
+            </form>
+            <div className={styles.actions}>
+              <button type="button" className={styles.textButton} onClick={toCode} data-login-to-code="">
+                {t.toCode}
+              </button>
+            </div>
+          </>
         ) : (
           <form
             method="post"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { campaignCtaLabel, campaignDelay, campaignView, CAMPAIGN_DELAY_MS, CAMPAIGN_SEEN_KEY } from "@/domain/campaign";
+import { campaignCtaLabel, campaignDelay, campaignView, CAMPAIGN_DELAY_MS, CAMPAIGN_SEEN_KEY, NEWSLETTER_LANDING_PARAM, NEWSLETTER_SIGNED_KEY, newsletterLanding, newsletterPopupView, popupFlags, popupShown } from "@/domain/campaign";
 import type { Campaign } from "@/db/schema";
 import { et } from "@/i18n/dict/et";
 import { ru } from "@/i18n/dict/ru";
@@ -7,6 +7,7 @@ import { ru } from "@/i18n/dict/ru";
 const row = (patch: Partial<Campaign> = {}): Campaign => ({
   id: 1,
   active: true,
+  kind: "campaign",
   kicker: { et: "Talvine pakkumine" },
   title: { et: "−15% Lash Lift BOTOX koolitusele", ru: "−15% на курс Lash Lift BOTOX" },
   text: { et: "Kehtib registreerumisel kuni 30.11." },
@@ -64,5 +65,56 @@ describe("campaign popup", () => {
     expect(campaignDelay(250)).toBe(250);
     expect(campaignDelay(0)).toBe(0);
     for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY, "300", null, {}]) expect(campaignDelay(bad), String(bad)).toBe(6000);
+  });
+});
+
+describe("the newsletter popup (phase 2c)", () => {
+  const nl = (over: Partial<Campaign> = {}): Campaign => ({ ...row(), id: 2, kind: "newsletter", code: "", ctaLabel: { et: "" }, ctaHref: "", ...over });
+
+  test("its card: the picture, kicker, title and text in the page's language (no code, no button)", () => {
+    expect(newsletterPopupView(nl({ kicker: { et: "MS LABi kirjad", ru: "Письма MS LAB" }, title: { et: "Hea järgmine samm.", ru: "Ваш следующий шаг." }, text: { et: "Tekst" } }), "ru")).toEqual({
+      image: "/media/img/0b6f3b7e-2c4d-4f7a-9a59-3d7c2f1e8a10.jpg",
+      kicker: "Письма MS LAB",
+      title: "Ваш следующий шаг.",
+      text: "Tekst",
+    });
+  });
+
+  test("none for a switched-off row, a missing one, one without a title, or the campaign's row; and the campaign card is never the newsletter's", () => {
+    expect(newsletterPopupView(nl({ active: false }), "et")).toBeNull();
+    expect(newsletterPopupView(null, "et")).toBeNull();
+    expect(newsletterPopupView(nl({ title: { et: " " } }), "et")).toBeNull();
+    expect(newsletterPopupView(row(), "et")).toBeNull();
+    expect(campaignView(nl(), "et", et.campaign.cta)).toBeNull();
+  });
+
+  test("a sign-up from the popup is remembered under its own key", () => {
+    expect(NEWSLETTER_SIGNED_KEY).toBe("mslab-nl");
+  });
+
+  test("the confirmation link's landing: ?uudiskiri= with any value, an empty one too, is a landing; no parameter is not", () => {
+    expect(NEWSLETTER_LANDING_PARAM).toBe("uudiskiri");
+    expect(newsletterLanding("?uudiskiri=kinnitatud")).toBe("kinnitatud");
+    expect(newsletterLanding("?utm=x&uudiskiri=vigane")).toBe("vigane");
+    expect(newsletterLanding("?uudiskiri=")).toBe("");
+    expect(newsletterLanding("?uudiskiri")).toBe("");
+    expect(newsletterLanding("")).toBeNull();
+    expect(newsletterLanding("?utm_source=x")).toBeNull();
+    expect(newsletterLanding("?Uudiskiri=kinnitatud")).toBeNull(); // the parameter is spelt as FlashNotice spells it
+  });
+});
+
+describe("Lehel näidatakse: one popup or none (phase 2c)", () => {
+  test("the choice from the two rows' flags (both on cannot be stored; the campaign wins if it ever were)", () => {
+    expect(popupShown(true, false)).toBe("campaign");
+    expect(popupShown(false, true)).toBe("newsletter");
+    expect(popupShown(false, false)).toBe("off");
+    expect(popupShown(true, true)).toBe("campaign");
+  });
+
+  test("the flags for a choice: at most one on", () => {
+    expect(popupFlags("campaign")).toEqual({ campaign: true, newsletter: false });
+    expect(popupFlags("newsletter")).toEqual({ campaign: false, newsletter: true });
+    expect(popupFlags("off")).toEqual({ campaign: false, newsletter: false });
   });
 });

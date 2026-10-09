@@ -19,7 +19,8 @@ export type HomeData = {
   practice: PracticePackage[];
   pages: Record<string, Page>;
   settings: Record<string, unknown>;
-  campaign: Campaign | null;
+  /** The popup the home page shows: the one active `campaign` row, of either kind (phase 2c); null when every popup is off. */
+  popup: Campaign | null;
 };
 
 /** Number of newest posts shown in the home page blog carousel. */
@@ -137,9 +138,9 @@ export async function getSettings(db: Db): Promise<Record<string, unknown>> {
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-/** Everything the home page needs in one call. The campaign is null when it is switched off. The e-course terms (account-only) are not part of it. */
+/** Everything the home page needs in one call. The popup is the active one of the campaign and the newsletter popup, or null. The e-course terms (account-only) are not part of it. */
 export async function getHomeData(db: Db): Promise<HomeData> {
-  const [slides, courseList, faqItems, postList, practice, pageRows, settingsMap, campaignRow] = await Promise.all([
+  const [slides, courseList, faqItems, postList, practice, pageRows, settingsMap, popupRow] = await Promise.all([
     db.select().from(heroSlides).where(eq(heroSlides.active, true)).orderBy(asc(heroSlides.sort), asc(heroSlides.id)),
     listPublishedCourses(db),
     db.select().from(faq).orderBy(asc(faq.sort), asc(faq.id)),
@@ -147,7 +148,7 @@ export async function getHomeData(db: Db): Promise<HomeData> {
     getPracticePackages(db),
     db.select().from(pages).where(ne(pages.key, TERMS_PAGE_KEY)),
     getSettings(db),
-    db.select().from(campaign).where(eq(campaign.id, 1)).limit(1),
+    db.select().from(campaign).where(eq(campaign.active, true)).limit(1),
   ]);
   return {
     slides,
@@ -157,6 +158,6 @@ export async function getHomeData(db: Db): Promise<HomeData> {
     practice,
     pages: Object.fromEntries(pageRows.map((p) => [p.key, p])),
     settings: settingsMap,
-    campaign: campaignRow[0]?.active ? campaignRow[0] : null,
+    popup: popupRow[0] ?? null,
   };
 }

@@ -50,7 +50,7 @@ export default async function PracticePage({ params }: Props) {
     <>
       <header className={`${ui.wrap} ${styles.head}`}>
         <p className={`${ui.eyebrow} ${styles.eyebrow}`}>{p.onlyParnuShort}</p>
-        <h1 className={styles.title}>{p.title}</h1>
+        <h1 className={`${ui.pageTitle} ${styles.title}`}>{p.title}</h1>
         <p className={styles.where} data-practice-where="">
           <Icon name="pin" size={18} className={styles.pin} />
           {p.onlyParnu}

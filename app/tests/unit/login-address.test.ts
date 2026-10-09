@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { forwardsSignedIn, readLoginAddress, SIGNED_OUT_MARK } from "@/components/account/login-address";
+import { forwardsSignedIn, PASSWORD_MARK, readLoginAddress, SIGNED_OUT_MARK } from "@/components/account/login-address";
 
 // What the login page reads from its address (components/account/login-address.ts): the parameters live in the fragment, and the
 // query is read too, for links already out there. Either way they are removed from the address afterwards.
@@ -77,6 +77,19 @@ describe("the signed-out mark (#valja=1, from an account page that found the ses
     expect(SIGNED_OUT_MARK).toBe("valja=1");
     expect(read(`#${SIGNED_OUT_MARK}`)).toEqual({ problem: null, again: false, email: "", code: false, cleaned: "/konto/sisene" });
     expect(readLoginAddress(`http://localhost:3000/ru/konto/sisene#${SIGNED_OUT_MARK}`)).toMatchObject({ cleaned: "/ru/konto/sisene" });
+  });
+});
+
+describe("the password step's mark (#parool, kept in the address for a reload)", () => {
+  test("it is an anchor, no parameter: reading the address finds nothing and cleans nothing, so the mark stays", () => {
+    expect(PASSWORD_MARK).toBe("parool");
+    expect(read(`#${PASSWORD_MARK}`)).toEqual({ problem: null, again: false, email: "", code: false, cleaned: null });
+    expect(readLoginAddress(`http://localhost:3000/ru/konto/sisene#${PASSWORD_MARK}`)).toEqual({ problem: null, again: false, email: "", code: false, cleaned: null });
+  });
+
+  test("signed in, the page still sends the browser on to Minu konto (the password is for signing in)", () => {
+    expect(forwardsSignedIn(`${BASE}#${PASSWORD_MARK}`, true, "kati@example.test")).toBe(true);
+    expect(forwardsSignedIn(`${BASE}#${PASSWORD_MARK}`, false, "kati@example.test")).toBe(false);
   });
 });
 

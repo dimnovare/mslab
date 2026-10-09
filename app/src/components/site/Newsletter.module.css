@@ -1,20 +1,22 @@
-/* Prototype B .newsletter: lilac surface with white / ink / lilac (Maria C10), now inside the footer (H13). */
+/* Prototype B .newsletter: lilac surface with white / ink / lilac (Maria C10). Three things share this file:
+   - the footer's card (Newsletter, phase 2c): a narrow card in the footer's right column — the title, the text, then the
+     e-mail, "Liitu" and the consent under each other. The label is for screen readers (the field's placeholder shows the
+     shape). Its rules are the ones written under `.newsletter`;
+   - the sign-up itself (NewsletterForm), also used on the coming-soon page (app/tulekul/[locale]) in its wide, one-row
+     form: the rules without `.newsletter` are that form, the card's own sizes are the `.newsletter …` overrides;
+   - the same sign-up in the home page's newsletter popup (NewsletterPopupCard, phase 2c), on the paper card: the `[data-newsletter-card] …`
+     rules at the end. */
 
-/* Capped like B, where the block sat in a 1600px .wrap with 100px sides (1400px): on wide screens it does not run
-   across the whole footer, and it stays centred over the link columns. */
+/* The card */
 .newsletter {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 60px;
-  align-items: center;
-  max-width: 1400px;
-  margin-inline: auto;
-  padding: 60px;
-  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 24px;
+  border-radius: 20px;
   background: var(--lilac);
   color: var(--ink);
   font-family: var(--font-body);
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 .eyebrow {
@@ -22,7 +24,7 @@
   align-items: center;
   gap: 10px;
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.025em;
 }
 
@@ -35,21 +37,20 @@
 }
 
 .title {
-  margin: 20px 0 0;
-  font: 400 43px/1.09 var(--font-display);
+  margin: 8px 0 0;
+  font: 400 28px/1.08 var(--font-display);
   letter-spacing: -0.01em;
 }
 
+.form {
+  margin-top: 8px;
+}
+
+/* The sign-up (NewsletterForm): the wide form of the coming-soon page; the card's own sizes are the `.newsletter …` rules at the end. */
 .text {
   max-width: 520px;
   margin: 16px 0 0;
   font-size: 13px;
-}
-
-.form {
-  justify-self: end;
-  width: 100%;
-  max-width: 620px; /* wide screens: the field does not stretch across the whole footer */
 }
 
 .label {
@@ -130,15 +131,17 @@
 }
 
 /* The quiet line under the button (there is no consent box: sending the form is the consent). The privacy link in it is a
-   44px-high target (touch targets): the line it sits on grows to that height. */
+   44px-high target (touch targets): the line it sits on grows to that height. The admin's picture of the form (`preview`) has the
+   word as a span, `.privacyWord`, with the same look, so the picture is as tall as the popup. */
 .notice {
   margin: 3px 0 0;
   color: #61555d;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
-.notice a {
+.notice a,
+.privacyWord {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -176,39 +179,69 @@
   overflow: hidden;
 }
 
-@media (max-width: 1180px) {
-  .newsletter {
-    gap: 35px;
-    padding: 40px;
-  }
+/* The card's sizes for the sign-up: one narrow column (the label for screen readers only). The rules above stay the coming-soon
+   page's wide form (and its media query below). */
+.newsletter .text {
+  max-width: none;
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
-@media (max-width: 900px) {
-  .newsletter {
-    grid-template-columns: 1fr;
-    gap: 25px;
-  }
+.newsletter .label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
-  .form {
-    justify-self: stretch;
-    max-width: none;
-  }
+.newsletter .row {
+  flex-direction: column;
+  margin-top: 0;
+}
+
+.newsletter .input {
+  min-height: 46px;
+  padding: 12px 18px;
+}
+
+.newsletter .submit {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 24px;
+}
+
+.newsletter .check {
+  margin-top: 2px;
+  padding-block: 10px;
+}
+
+/* The newsletter popup's card (phase 2c, the form on white paper in the card's narrow column, which also holds the Russian button): the
+   e-mail above the button as in the footer's card, the label stays visible (the popup has room), and the answer after a sign-up reads
+   as the card's own text. */
+[data-newsletter-card] .row {
+  flex-direction: column;
+}
+
+[data-newsletter-card] .submit {
+  width: 100%;
+}
+
+[data-newsletter-card] .text {
+  max-width: none;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
 }
 
 @media (max-width: 640px) {
-  .newsletter {
-    padding: 30px 23px;
-  }
-
-  .title {
-    font-size: clamp(28px, 8.7vw, 35px); /* B 35px; keeps "Hea järgmine samm." on one line at 360-390px */
-  }
-
   .row {
     flex-direction: column;
   }
 
   .input {
-    font-size: 16px;
+    font-size: 16px; /* no zoom on focus in iOS */
   }
 }

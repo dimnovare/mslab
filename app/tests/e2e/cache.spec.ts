@@ -173,7 +173,8 @@ test("the account's pages come from the cache with no Set-Cookie, for a signed-i
 // do, then asking with a query by GET, HEAD and POST: each must answer 303 and not be kept; then the address without a query is asked
 // until two answers in a row come from the cache, as a page and as the navigation payload (RSC: 1), and neither may name the query.
 const PROBE_QUERY = "viga=link&korda=1&email=probe%40example.test";
-const LEAKS = /probe|viga|korda/;
+// The probe's own values, not the bare words: "viga" and "korda" are ordinary Estonian ("mitu korda", the password texts of phase 2c).
+const LEAKS = /probe|viga=link|korda=1|"viga":"link"|"korda":"1"/;
 /** The first mention of the probe's query with the text around it ("" when there is none), for the failure message. */
 const leak = (text: string): string => {
   const at = text.search(LEAKS);

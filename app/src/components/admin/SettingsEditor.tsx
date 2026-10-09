@@ -2,6 +2,7 @@
 
 import { useId, useRef } from "react";
 import { SITE_LIMITS, type ContactDraft, type PageDraft, type PrepaymentDraft } from "@/domain/site-editor";
+import { WELCOME_CODE_MAX } from "@/domain/welcome-code";
 import { adminEt } from "@/i18n/dict/admin";
 import { saveSettings } from "@/server/actions/admin-site";
 import type { SettingsValues } from "@/server/admin-site";
@@ -15,7 +16,8 @@ import styles from "./site-editor.module.css";
 
 /**
  * Seaded: the contact details and social links (footer, contact page; social links https only), the newsletter's
- * welcome discount (footer text), the prepayment instructions (where students pay; shown on their unpaid contact-course
+ * welcome discount (footer text) and welcome code ("Tervituskood": mailed after the first confirmation, shown on the
+ * confirmed notice; phase 2c), the prepayment instructions (where students pay; shown on their unpaid contact-course
  * cards only when the receiver and the IBAN are filled in), the legal pages (privacy, terms) in ET / RU, the e-course terms
  * (the text a student accepts before opening an e-course; account-only, so no link to a public page) and the admin
  * addresses, read-only.
@@ -87,11 +89,20 @@ export function SettingsEditor({ initial, admins }: { initial: Loaded<SettingsVa
             <TextField
               label={t.discount}
               value={d.draft.newsletter.discountLabel}
-              onChange={(discountLabel) => d.set("newsletter", { discountLabel })}
+              onChange={(discountLabel) => d.set("newsletter", { ...d.draft.newsletter, discountLabel })}
               maxLength={SITE_LIMITS.discount}
               hint={t.discountHint}
               error={d.err("newsletter.discountLabel")}
               name="newsletter.discountLabel"
+            />
+            <TextField
+              label={t.welcomeCode}
+              value={d.draft.newsletter.welcomeCode}
+              onChange={(welcomeCode) => d.set("newsletter", { ...d.draft.newsletter, welcomeCode })}
+              maxLength={WELCOME_CODE_MAX}
+              hint={t.welcomeCodeHint}
+              error={d.err("newsletter.welcomeCode")}
+              name="newsletter.welcomeCode"
             />
           </div>
         </section>

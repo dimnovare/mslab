@@ -98,6 +98,17 @@
   margin-top: 22px;
 }
 
+/* the newsletter popup's form in place of the code and the button (NewsletterPopupCard, phase 2c) */
+.signup {
+  margin-top: 18px;
+}
+
+/* The form's own class there (POPUP_FORM_CLASS): the gap above it is .signup's 18px alone. The default class of the form, the footer
+   block's column, has a margin of its own on top, which would add to it (a flex item's margin does not collapse with its child's). */
+.signupForm {
+  margin-top: 0;
+}
+
 @container (min-width: 640px) {
   .camp {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);

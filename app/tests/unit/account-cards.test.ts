@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  cardKey, cardTag, cardTitle, cardWhen, filterCards, firstName, hasPrepayment, isPastCard, nextStep, paymentReference, showFilters, sortCards,
-  type AccountCard, type ContactCard, type EcourseCard, type IndividualCard, type PrepaymentInfo, type RequestCard, type WaitlistCard,
+  cardKey, cardTag, cardTitle, cardWhen, filterCards, firstName, hasPrepayment, isPastCard, nextStep, paymentReference, resumeSlug, showFilters, sortCards,
+  type AccountCard, type ContactCard, type EcourseCard, type EcourseProgress, type IndividualCard, type PrepaymentInfo, type RequestCard, type WaitlistCard,
 } from "@/domain/account-cards";
 import { fill } from "@/i18n/format";
 import { getDict } from "@/i18n/locales";
@@ -319,5 +319,31 @@ describe("the dashboard's view helpers", () => {
     expect(showFilters([contact(), ecourse()], NOW)).toBe(false); // all ahead: Möödunud would show nothing
     expect(showFilters([over, request({ handled: true })], NOW)).toBe(false); // all over
     expect(showFilters([contact(), over], NOW)).toBe(true);
+  });
+});
+
+describe("resumeSlug: the e-course of the 'Pooleli' card (phase 2c)", () => {
+  const NOW_D = new Date("2026-10-08T10:00:00.000Z");
+  const progress = (done: number, total: number): EcourseProgress => ({ done, total, next: done < total ? { lessonId: done + 1, title: { et: `L${done + 1}` }, moduleTitle: { et: "M" } } : null });
+  const card = (slug: string, p: EcourseProgress | null | undefined, over: Record<string, unknown> = {}) =>
+    ({ kind: "ecourse", course: { slug, title: { et: slug } }, grantedAt: "2026-10-01T09:00:00.000Z", expiresAt: "2027-04-01T09:00:00.000Z", revoked: false, progress: p, ...over }) as AccountCard;
+
+  test("the open, unfinished e-course she did something in last", () => {
+    const cards = [card("a", progress(1, 3)), card("b", progress(2, 5))];
+    expect(resumeSlug(cards, new Map([["a", 100], ["b", 200]]), NOW_D)).toBe("b");
+    expect(resumeSlug(cards, new Map([["a", 300], ["b", 200]]), NOW_D)).toBe("a");
+  });
+
+  test("with no activity in any of them: the first such course in the cards' order (it says 'Alusta')", () => {
+    expect(resumeSlug([card("a", progress(0, 3)), card("b", progress(0, 2))], new Map(), NOW_D)).toBe("a");
+    expect(resumeSlug([card("a", progress(0, 3)), card("b", progress(1, 2))], new Map([["b", 5]]), NOW_D)).toBe("b");
+  });
+
+  test("none for a finished course, one without lessons, an ended access, or none at all", () => {
+    expect(resumeSlug([card("a", progress(3, 3))], new Map([["a", 1]]), NOW_D)).toBeNull();
+    expect(resumeSlug([card("a", null), card("b", undefined)], new Map(), NOW_D)).toBeNull();
+    expect(resumeSlug([card("a", progress(1, 3), { revoked: true })], new Map([["a", 1]]), NOW_D)).toBeNull();
+    expect(resumeSlug([card("a", progress(1, 3), { expiresAt: "2026-10-01T00:00:00.000Z" })], new Map(), NOW_D)).toBeNull();
+    expect(resumeSlug([], new Map(), NOW_D)).toBeNull();
   });
 });

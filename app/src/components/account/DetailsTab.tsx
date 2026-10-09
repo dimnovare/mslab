@@ -8,6 +8,7 @@ import { DELETED_MARK, SAVED_MARK } from "@/lib/account-marks";
 import { isDone, sendJson } from "@/lib/json-request";
 import type { ClientProfile, Dashboard } from "@/server/client-data";
 import { AccountLoader, type Reload } from "./AccountLoader";
+import { PasswordSection } from "./PasswordSection";
 import { ACCOUNT_EVENT, forgetAccountMemory } from "./useAccount";
 import type { DetailsTexts } from "./texts";
 import choices from "./ChangeRequestDialog.module.css";
@@ -25,7 +26,8 @@ const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
 
 /**
  * "Minu andmed" (/konto/andmed): the e-mail (the login's, not editable), name and phone (both optional) and the account's language
- * with one "Salvesta"; the newsletter switch, which saves at once; at the very bottom "Kustuta konto" with its one confirmation step.
+ * with one "Salvesta"; the newsletter switch, which saves at once; the optional password (phase 2c, PasswordSection); at the very
+ * bottom "Kustuta konto" with its one confirmation step.
  * The page itself is a static shell: AccountLoader loads the dashboard (GET /api/konto), whose `client` is the profile.
  */
 export function DetailsTab({ locale, t }: { locale: Locale; t: DetailsTexts }) {
@@ -248,6 +250,8 @@ function DetailsView({ client, locale, t, reload }: { client: ClientProfile; loc
             {newsletterStatus?.text ?? ""}
           </p>
         </div>
+
+        <PasswordSection email={client.email} setAt={client.passwordSetAt} locale={locale} t={t.password} reload={reload} />
 
         <div className={styles.danger}>
           {confirming ? (

@@ -26,10 +26,11 @@ const contact = (registrationId: number, over: Partial<ContactCard> = {}): Conta
   status: "confirmed", paymentChoice: "full", priceCents: 35000, paidCents: 35000, createdAt: NOW, ...over,
 });
 const dashboard = (cards: AccountCard[]): Dashboard => ({
-  client: { email: "kati@example.test", name: "Kati", phone: "", locale: "et", newsletter: false },
+  client: { email: "kati@example.test", name: "Kati", phone: "", locale: "et", newsletter: false, passwordSetAt: null },
   cards,
   favourites: [],
   prepayment: null,
+  resume: null,
 });
 
 const d = getDict("et");

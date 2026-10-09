@@ -10,6 +10,7 @@ import {
   readCampaign,
   readFaq,
   readGallery,
+  readNewsletterPopup,
   readPackage,
   readPackages,
   readPage,
@@ -34,6 +35,7 @@ import {
   copyI18n,
   faqDraft,
   newsletterDraft,
+  newsletterPopupDraft,
   normalizeIban,
   isIban,
   packageDraft,
@@ -47,6 +49,7 @@ import {
   type ContactDraft,
   type FaqDraft,
   type NewsletterDraft,
+  type NewsletterPopupDraft,
   type PackageDraft,
   type PrepaymentDraft,
   type PageDraft,
@@ -55,6 +58,7 @@ import {
   type TrainerDraft,
   type WorkDraft,
 } from "@/domain/site-editor";
+import { isWelcomeCode, normalizeWelcomeCode, WELCOME_CODE_MAX } from "@/domain/welcome-code";
 import type { I18n } from "@/i18n/field";
 import { isSlug, SLUG_MAX, slugify } from "@/lib/slug";
 import { contentVersion } from "@/lib/version";
@@ -357,7 +361,7 @@ const trainerParts: Parts = {
 export const loadTrainer = async (q: Q) => (await loadParts(q, trainerParts)) as SavedParts & { values: TrainerValues };
 export const saveTrainerForm = (db: Db, formData: FormData) => saveParts(db, trainerParts, formData);
 
-// ---------- Kampaania (prototype D adminCamp + image upload) ----------
+// ---------- Hüpikaken (prototype D adminCamp + image upload; phase 2c: the newsletter popup, one shown at a time) ----------
 
 const CODE = /^[A-Z0-9-]*$/;
 
@@ -379,15 +383,33 @@ const campaignParts: Parts = {
       const ctaLabel = c.text(`${p}ctaLabel`, v.ctaLabel, L.ctaLabel) ?? { et: CAMPAIGN_CTA }; // M4
       const ctaHref = c.href(`${p}ctaHref`, v.ctaHref, { required: true });
       const imageKey = c.image(`${p}imageKey`, v.imageKey, { required: v.active });
-      return async (tx) => void (await upsertCampaign(tx, { active: v.active, kicker: orEmpty(kicker), title: orEmpty(title), text: orEmpty(body), code, ctaLabel, ctaHref, imageKey }));
+      return async (tx) => void (await upsertCampaign(tx, { active: v.active, kicker: orEmpty(kicker), title: orEmpty(title), text: orEmpty(body), code, ctaLabel, ctaHref, imageKey }, "campaign"));
+    },
+  }),
+  // Hüpikaken's newsletter popup (phase 2c): a shown one needs its title and its picture; its code, button text and link stay empty.
+  // Both parts lock `campaign` and run in the save's one transaction; each write switches the other popup off before it switches its
+  // own on (upsertCampaign), so saving both parts, in either order, or one alone, leaves at most one row active (campaign_one_active).
+  newsletter: part<NewsletterPopupDraft>({
+    tables: ["campaign"],
+    schema: z.object({ active: z.boolean(), kicker: i18n, title: i18n, text: i18n, imageKey: text(400) }),
+    read: readNewsletterPopup,
+    draft: (stored) => newsletterPopupDraft(stored as Campaign | null),
+    check: (c, v, name) => {
+      const p = `${name}.`;
+      const title = c.text(`${p}title`, v.title, L.campaignTitle, { required: v.active });
+      const kicker = c.text(`${p}kicker`, v.kicker, L.campaignKicker);
+      const body = c.text(`${p}text`, v.text, L.campaignText);
+      const imageKey = c.image(`${p}imageKey`, v.imageKey, { required: v.active });
+      return async (tx) =>
+        void (await upsertCampaign(tx, { active: v.active, kicker: orEmpty(kicker), title: orEmpty(title), text: orEmpty(body), code: "", ctaLabel: { et: "" }, ctaHref: "", imageKey }, "newsletter"));
     },
   }),
 };
 
-export const loadCampaign = async (q: Q) => (await loadParts(q, campaignParts)) as SavedParts & { values: { campaign: CampaignDraft } };
+export const loadCampaign = async (q: Q) => (await loadParts(q, campaignParts)) as SavedParts & { values: { campaign: CampaignDraft; newsletter: NewsletterPopupDraft } };
 export const saveCampaignForm = (db: Db, formData: FormData) => saveParts(db, campaignParts, formData);
 
-// ---------- Seaded: contact details, newsletter discount, prepayment instructions, legal pages, the e-course terms ----------
+// ---------- Seaded: contact details, newsletter discount and welcome code, prepayment instructions, legal pages, the e-course terms ----------
 
 export type SettingsValues = {
   contact: ContactDraft;
@@ -417,14 +439,19 @@ const settingsParts: Parts = {
       return (tx, stored) => setSetting(tx, "contact", { ...obj(stored), ...values });
     },
   }),
-  newsletter: part<NewsletterDraft>({
+  // the editor always sends welcomeCode; a body without it (an older page) keeps the stored one
+  newsletter: part<{ discountLabel: string; welcomeCode?: string }>({
     tables: ["settings"],
-    schema: z.object({ discountLabel: text(400) }),
+    schema: z.object({ discountLabel: text(400), welcomeCode: text(400).optional() }),
     read: (q) => readSetting(q, "newsletter"),
     draft: newsletterDraft,
     check: (c, v, name) => {
       const discountLabel = c.plain(`${name}.discountLabel`, v.discountLabel, L.discount, { required: true });
-      return (tx, stored) => setSetting(tx, "newsletter", { ...obj(stored), discountLabel });
+      // "Tervituskood" (phase 2c): A–Z, 0–9 and "-", at most 30, stored in capitals; empty = no welcome code
+      const welcomeCode = v.welcomeCode === undefined ? undefined : normalizeWelcomeCode(v.welcomeCode);
+      if (welcomeCode !== undefined && welcomeCode.length > WELCOME_CODE_MAX) c.fail(`${name}.welcomeCode`, "tooLong");
+      else if (welcomeCode !== undefined && !isWelcomeCode(welcomeCode)) c.fail(`${name}.welcomeCode`, "codeFormat");
+      return (tx, stored) => setSetting(tx, "newsletter", { ...obj(stored), discountLabel, ...(welcomeCode === undefined ? {} : { welcomeCode }) });
     },
   }),
   // "Ettemaksu juhised": where students pay the prepayment (account-only: the unpaid contact-course cards). Every field may

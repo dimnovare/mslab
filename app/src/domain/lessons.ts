@@ -46,6 +46,54 @@ export function resumeAt(watchedSec: number, durationSec: number, done: boolean)
   return Math.max(0, Math.min(Math.floor(watchedSec), durationSec - 5));
 }
 
+/** The top playback speed of Bunny's player (its speed menu stops at 2×): watching can move on at most this fast. */
+export const TOP_SPEED = 2;
+/** Seconds a report may run ahead of the clock: the 15 s report interval, the time the player takes to start, a slow network. */
+export const PROGRESS_SLACK_SEC = 30;
+
+/**
+ * A progress report against the stored row (spec 3, the server's rule): the seconds kept and the new progress clock. `clockAt` is the
+ * moment up to which her watching time has been used: the watched seconds may grow by at most (now − clockAt) × 2 + 30, and a raise
+ * of r seconds moves the clock r / 2 seconds on. A report past that is clamped, never refused (a late or out-of-order report raises
+ * nothing). Without a clock (a row from before phase 2c, or no row) the clock starts now: the report may raise the seconds by 30.
+ * So all her raises since the lesson was opened add up to at most twice the time it has been open plus 30 s, however often she
+ * reports: a lesson cannot be completed in less than about half its length, even if the player let her scrub ahead.
+ */
+export function acceptProgress(stored: { watchedSec: number; clockAt: Date | null }, reportedSec: number, now: Date): { watchedSec: number; clockAt: Date } {
+  const clock = stored.clockAt ?? now;
+  const allowed = Math.max(0, ((now.getTime() - clock.getTime()) / 1000) * TOP_SPEED + PROGRESS_SLACK_SEC);
+  const watchedSec = Math.max(stored.watchedSec, Math.min(Math.floor(reportedSec), Math.floor(stored.watchedSec + allowed)));
+  return { watchedSec, clockAt: new Date(clock.getTime() + ((watchedSec - stored.watchedSec) / TOP_SPEED) * 1000) };
+}
+
+/** The progress clock when a video lesson is opened: now, unless her time is used up beyond now (then it stays: no new 30 s by reopening). */
+export function openedClock(clockAt: Date | null, now: Date): Date {
+  return clockAt !== null && clockAt > now ? clockAt : now;
+}
+
+/** How far past the furthest point watched a timeupdate may be and still count (Bunny reports a few times a second; 2× moves about 1 s). */
+export const SEEK_TOLERANCE_SEC = 3;
+/** "ended" counts as the end of the video only this close to it. */
+export const END_TOLERANCE_SEC = 5;
+
+/** One timeupdate's effect: the new furthest point, and where to send the player back to (null: nowhere). */
+export type SeekStep = { furthest: number; back: number | null };
+
+/**
+ * The seek lock (spec 3, the player's side): a timeupdate at most 3 s past `furthest` counts (furthest grows, capped at the length); one
+ * further on is a jump forward, so the player goes back to `furthest` (Player.js setCurrentTime) and furthest stays. An earlier second
+ * (a rewind) changes nothing. The server's progress clock (acceptProgress) is the real rule; this keeps an honest player honest.
+ */
+export function seekStep(furthest: number, seconds: number, durationSec: number): SeekStep {
+  if (seconds > furthest + SEEK_TOLERANCE_SEC) return { furthest, back: furthest };
+  return { furthest: Math.max(furthest, Math.min(seconds, durationSec)), back: null };
+}
+
+/** The furthest point after "ended": the whole length when it was already within 5 s of the end, else unchanged. */
+export function endedAt(furthest: number, durationSec: number): number {
+  return furthest >= durationSec - END_TOLERANCE_SEC ? durationSec : furthest;
+}
+
 /** A video's length as the admin reads it: "12:34", "1:02:03". */
 export function formatDuration(totalSec: number): string {
   const s = Math.max(0, Math.round(totalSec));

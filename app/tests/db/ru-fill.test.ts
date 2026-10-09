@@ -71,8 +71,8 @@ describe("plan and apply on a database seeded before round 2", () => {
     for (const p of await db.select().from(posts)) await db.update(posts).set({ title: etOnly(p.title) as never, excerpt: etOnly(p.excerpt) as never, body: etOnly(p.body) as never }).where(eq(posts.id, p.id));
     await db.delete(pages).where(eq(pages.key, "trainer_teaser"));
     for (const p of await db.select().from(pages)) if (p.key !== "privacy" && p.key !== "terms" && p.key !== "center_story" && p.key !== "course_terms") await db.update(pages).set({ title: etOnly(p.title) as never, body: etOnly(p.body) as never }).where(eq(pages.key, p.key));
-    const [camp] = await db.select().from(campaign);
-    await db.update(campaign).set({ kicker: etOnly(camp.kicker) as never, title: etOnly(camp.title) as never, text: etOnly(camp.text) as never, ctaLabel: etOnly(camp.ctaLabel) as never });
+    const [camp] = await db.select().from(campaign).where(eq(campaign.id, 1));
+    await db.update(campaign).set({ kicker: etOnly(camp.kicker) as never, title: etOnly(camp.title) as never, text: etOnly(camp.text) as never, ctaLabel: etOnly(camp.ctaLabel) as never }).where(eq(campaign.id, 1));
     const [t] = await db.select().from(settings).where(eq(settings.key, "trainer"));
     await db.update(settings).set({ value: { ...(t.value as object), name: "Maria Sosnina", stats: OLD_TRAINER_STATS } }).where(eq(settings.key, "trainer"));
     for (const p of await db.select().from(practicePackages)) await db.update(practicePackages).set({ durationLabel: etOnly(p.durationLabel) as never }).where(eq(practicePackages.code, p.code));

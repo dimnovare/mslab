@@ -11,6 +11,7 @@ import { pick } from "@/i18n/field";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import type { EcourseView as EcourseData } from "@/server/client-data";
+import { ProgressBar } from "./ProgressBar";
 import type { EcourseTexts } from "./texts";
 import page from "./EcoursePage.module.css";
 import styles from "./EcourseView.module.css";
@@ -78,9 +79,7 @@ export function EcourseView({
             {progressText}
           </p>
           {/* named by the line above (not a second copy of its text) */}
-          <div className={styles.bar} role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-labelledby={progressId}>
-            <span style={{ width: `${(done / total) * 100}%` }} />
-          </div>
+          <ProgressBar done={done} total={total} labelledBy={progressId} />
           {next !== null &&
             (readOnly ? (
               <span className={`${ui.btn} ${styles.next}`} aria-disabled="true" data-ecourse-next="">

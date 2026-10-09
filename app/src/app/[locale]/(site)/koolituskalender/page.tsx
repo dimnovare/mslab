@@ -68,7 +68,7 @@ export default async function CalendarPage({ params }: Props) {
   return (
     <div className={`${ui.wrap} ${styles.page}`}>
       <header className={styles.head}>
-        <h1 className={styles.title}>{c.title}</h1>
+        <h1 className={`${ui.pageTitle} ${styles.title}`}>{c.title}</h1>
         <p className={styles.lead}>{c.lead}</p>
       </header>
       <CalendarList
@@ -91,6 +91,7 @@ export default async function CalendarPage({ params }: Props) {
             lead: d.forms.waitlistLead,
             name: d.forms.name,
             email: d.forms.email,
+            newsletterConsent: d.forms.newsletterConsent,
             submit: d.forms.waitlistSubmit,
             sending: d.forms.sending,
             sent: d.forms.waitlistSent,

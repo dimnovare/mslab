@@ -7,7 +7,7 @@ import {
   clientFavourites, clientLoginTokens, clients, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, subscribers,
   termsAcceptances,
 } from "@/db/schema";
-import { PREPAYMENT_KEY, parsePrepayment, sortCards, type AccountCard, type PrepaymentInfo } from "@/domain/account-cards";
+import { PREPAYMENT_KEY, parsePrepayment, resumeSlug, sortCards, type AccountCard, type EcourseCard, type PrepaymentInfo } from "@/domain/account-cards";
 import { upcomingFrom } from "@/domain/calendar";
 import { DEFAULT_TERMS_VERSION, TERMS_PAGE_KEY, TERMS_VERSION_KEY } from "@/domain/course-terms";
 import { nextSessionByCourse } from "@/domain/home";
@@ -18,7 +18,7 @@ import type { I18n } from "@/i18n/field";
 import { href } from "@/i18n/href";
 import { getDict, type Locale } from "@/i18n/locales";
 import { lockAddress } from "./client-auth";
-import { courseOutline, type OutlineModule } from "./lesson-outline";
+import { courseOutline, ecourseProgress, progressActivity, type OutlineModule } from "./lesson-outline";
 import { newToken } from "./token";
 
 // What a signed-in client sees and may change, for the JSON endpoints under /api/konto (account-api.ts) and the admin's
@@ -29,7 +29,15 @@ import { newToken } from "./token";
 /** At most this much of a request's text goes onto its card ("what was asked"). */
 const DETAIL_MAX = 200;
 
-export type ClientProfile = { email: string; name: string; phone: string; locale: "et" | "ru"; newsletter: boolean };
+export type ClientProfile = {
+  email: string;
+  name: string;
+  phone: string;
+  locale: "et" | "ru";
+  newsletter: boolean;
+  /** When her password was last set or changed (ISO); null without one (phase 2c). Never the hash. */
+  passwordSetAt: string | null;
+};
 
 export type Dashboard = {
   client: ClientProfile;
@@ -38,6 +46,8 @@ export type Dashboard = {
   favourites: string[];
   /** Where to pay; null when the admin has not filled it in (the cards then say Maria sends an invoice). */
   prepayment: PrepaymentInfo | null;
+  /** The slug of the e-course the "Pooleli" card is for (domain/account-cards.ts resumeSlug); null: no card. */
+  resume: string | null;
 };
 
 export type EcourseView = {
@@ -64,7 +74,11 @@ export async function courseTermsVersion(db: Db): Promise<string> {
 
 // ---------- the dashboard ----------
 
-/** Six small queries, run together: registrations (with session and course), requests, e-course access, favourites, the client, the prepayment setting. */
+/**
+ * Six small queries, run together: registrations (with session and course), requests, e-course access, favourites, the client, the prepayment setting;
+ * then, for each open e-course, its lessons (two queries each) and her last lesson activity (one query), for the cards' progress and the
+ * "Pooleli" card (`resume`).
+ */
 export async function loadDashboard(db: Db, clientId: number, now: Date): Promise<Dashboard | null> {
   const [regRows, requestRows, accessRows, favourites, [client], prepayment] = await Promise.all([
     db
@@ -116,7 +130,7 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
       )
       .where(and(eq(requests.clientId, clientId), inArray(requests.kind, ["individual", "practice", "waitlist"]))),
     db
-      .select({ grantedAt: courseAccess.grantedAt, expiresAt: courseAccess.expiresAt, revokedAt: courseAccess.revokedAt, slug: courses.slug, title: courses.title })
+      .select({ courseId: courseAccess.courseId, grantedAt: courseAccess.grantedAt, expiresAt: courseAccess.expiresAt, revokedAt: courseAccess.revokedAt, slug: courses.slug, title: courses.title })
       .from(courseAccess)
       .innerJoin(courses, eq(courseAccess.courseId, courses.id))
       .where(eq(courseAccess.clientId, clientId)),
@@ -130,6 +144,9 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
         // a confirmed subscriber of the account's address (rows may hold the address in any case). Written out: in a single-table query
         // Drizzle prints a column without its table, which inside the subquery would be the subscriber's own column.
         newsletter: sql<boolean>`exists (select 1 from subscribers s where lower(s.email) = clients.email and s.confirmed_at is not null)`,
+        // whether there is a password, and when it was set: the hash itself is never selected
+        hasPassword: sql<boolean>`${clients.passwordHash} is not null`,
+        passwordChangedAt: clients.passwordChangedAt,
       })
       .from(clients)
       .where(eq(clients.id, clientId))
@@ -179,15 +196,30 @@ export async function loadDashboard(db: Db, clientId: number, now: Date): Promis
       });
     }
   }
+  // each open e-course's lessons (visible ones only), and when she last did anything in each course's lessons (phase 2c)
+  const open = accessRows.filter((a) => a.revokedAt === null && a.expiresAt > now);
+  const [outlines, activity] = await Promise.all([Promise.all(open.map((a) => courseOutline(db, a.courseId, clientId))), progressActivity(db, clientId)]);
+  const progressOf = new Map(open.map((a, i) => [a.slug, ecourseProgress(outlines[i])]));
   for (const a of accessRows) {
-    cards.push({ kind: "ecourse", course: { slug: a.slug, title: a.title }, grantedAt: iso(a.grantedAt), expiresAt: iso(a.expiresAt), revoked: a.revokedAt !== null });
+    const card: EcourseCard = { kind: "ecourse", course: { slug: a.slug, title: a.title }, grantedAt: iso(a.grantedAt), expiresAt: iso(a.expiresAt), revoked: a.revokedAt !== null };
+    if (progressOf.has(a.slug)) card.progress = progressOf.get(a.slug) ?? null;
+    cards.push(card);
   }
+  const sorted = sortCards(cards, now);
+  const lastAt = new Map(open.flatMap((a) => {
+    const at = activity.get(a.courseId);
+    return at ? [[a.slug, at.getTime()] as const] : [];
+  }));
 
   return {
-    client: { email: client.email, name: client.name, phone: client.phone, locale: client.locale, newsletter: client.newsletter },
-    cards: sortCards(cards, now),
+    client: {
+      email: client.email, name: client.name, phone: client.phone, locale: client.locale, newsletter: client.newsletter,
+      passwordSetAt: client.hasPassword && client.passwordChangedAt ? iso(client.passwordChangedAt) : null,
+    },
+    cards: sorted,
     favourites,
     prepayment: parsePrepayment(prepayment),
+    resume: resumeSlug(sorted, lastAt, now),
   };
 }
 

@@ -22,11 +22,30 @@ const onSessionEnd = vi.fn();
 
 /** The player's window (the iframe's contentWindow): what the page posts to it is kept in `posted`. */
 const playerWindow = { postMessage: (m: unknown) => posted.push(JSON.parse(String(m))) };
-/** A message from the player's iframe (a Player.js JSON string), from `origin` and the window `source`. */
-const fromPlayer = (event: string, value?: unknown, origin = ORIGIN, source: unknown = playerWindow) =>
+/** One Player.js message from the player's iframe as it is (a JSON string), from `origin` and the window `source`. */
+const send = (event: string, value?: unknown, origin = ORIGIN, source: unknown = playerWindow) =>
   act(async () => {
     window.dispatchEvent(new MessageEvent("message", { origin, source: source as Window, data: JSON.stringify({ context: "player.js", version: "0.0.11", event, value }) }));
   });
+/** Where the player's own timeupdates have got to since its last "ready", and the length they gave. */
+let at = 0;
+let length = 100;
+/**
+ * A message from the player as a playing video sends it: a timeupdate further on than the last comes after one for every second on
+ * the way (Bunny's player reports a few times a second; the page takes back a jump of more than 3 s), and "ended" after the video
+ * has played to its end. Lower seconds (a rewind) and every other message go as they are. `send` sends one message as it is.
+ */
+async function fromPlayer(event: string, value?: unknown, origin = ORIGIN, source: unknown = playerWindow): Promise<void> {
+  if (event === "ready") at = 0;
+  const v = value as { seconds?: unknown; duration?: unknown } | null | undefined;
+  if (event === "timeupdate" && typeof v?.duration === "number") length = v.duration;
+  const to = event === "timeupdate" ? (typeof v?.seconds === "number" ? v.seconds : null) : event === "ended" ? length : null;
+  if (to !== null) {
+    for (let s = Math.floor(at) + 1; s < to; s++) await send("timeupdate", { seconds: s, duration: length }, origin, source);
+    at = Math.max(at, to);
+  }
+  await send(event, value, origin, source);
+}
 const tick = (ms: number) =>
   act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
@@ -42,6 +61,8 @@ beforeEach(async () => {
   fetchMock.mockReset().mockResolvedValue(Response.json({ ok: true, done: false, next: 8 }));
   vi.stubGlobal("fetch", fetchMock);
   posted.length = 0;
+  at = 0;
+  length = 100;
   Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => playerWindow });
   onProgress.mockReset();
   onSessionEnd.mockReset();
@@ -570,4 +591,72 @@ test("the shape changes nothing else: the same iframe, the watermark inside the 
   expect(frame.querySelector("iframe")?.getAttribute("src")).toBe(VIDEO.embedUrl);
   expect(frame.querySelector("[data-watermark]")?.textContent).toBe("kati@example.test");
   expect(container.querySelectorAll("[data-fullscreen]")).toHaveLength(1);
+});
+
+// ---- phase 2c: the seek lock (spec 3) ----
+
+test("seek lock: a timeupdate more than 3 s past the furthest point is taken back (setCurrentTime to it) and not counted; within 3 s it counts", async () => {
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 10, duration: 100 });
+  posted.length = 0;
+  await send("timeupdate", { seconds: 13, duration: 100 }); // 3 s on: fine
+  expect(posted).toEqual([]);
+  await send("timeupdate", { seconds: 60, duration: 100 }); // the slider dragged far ahead
+  expect(posted).toEqual([{ context: "player.js", version: "0.0.11", method: "setCurrentTime", value: 13 }]);
+  await fromPlayer("pause");
+  await tick(0);
+  expect(progressPosts()).toEqual([{ watchedSec: 13 }]);
+});
+
+test("seek lock: the line under the player says how far one may skip, for 6 s; rewinding is free and says nothing", async () => {
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 20, duration: 100 });
+  const note = container.querySelector("[data-seek-note]")!;
+  expect([note.getAttribute("role"), note.textContent]).toEqual(["status", ""]);
+  await send("timeupdate", { seconds: 5, duration: 100 }); // back: free
+  expect(note.textContent).toBe("");
+  await send("timeupdate", { seconds: 50, duration: 100 });
+  expect(note.textContent).toBe("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
+  await tick(5_999);
+  expect(note.textContent).not.toBe("");
+  await tick(1);
+  expect(note.textContent).toBe("");
+});
+
+test("ended counts as the end only within 5 s of it", async () => {
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 50, duration: 100 });
+  await send("ended");
+  await tick(0);
+  expect(progressPosts()).toEqual([{ watchedSec: 50 }]); // not 100
+  await fromPlayer("timeupdate", { seconds: 95, duration: 100 });
+  await send("ended");
+  await tick(0);
+  expect(progressPosts().at(-1)).toEqual({ watchedSec: 100 });
+});
+
+test("a lesson already done is not locked: skipping ahead is free (she has watched it)", async () => {
+  await remount({ done: true });
+  await fromPlayer("ready", {});
+  posted.length = 0;
+  await send("timeupdate", { seconds: 80, duration: 100 });
+  expect(posted).toEqual([]);
+  expect(container.querySelector("[data-seek-note]")?.textContent).toBe("");
+});
+
+test("resumed at the saved second: the lock counts from there", async () => {
+  await remount({ video: { ...VIDEO, resumeAt: 42 } });
+  await fromPlayer("ready", {});
+  posted.length = 0;
+  await send("timeupdate", { seconds: 44, duration: 100 });
+  await send("timeupdate", { seconds: 70, duration: 100 });
+  expect(posted.map((m) => [m.method, m.value])).toEqual([["setCurrentTime", 44]]);
+});
+
+test("Russian: the seek line in Russian", async () => {
+  await act(async () => root.render(createElement(LessonPlayer, { ...props(), key: "ru", t: lessonTexts(getDict("ru")) })));
+  await fromPlayer("ready", {});
+  await fromPlayer("timeupdate", { seconds: 10, duration: 100 });
+  await send("timeupdate", { seconds: 70, duration: 100 });
+  expect(container.querySelector("[data-seek-note]")?.textContent).toBe("Перемотать вперёд можно только до места, до которого вы досмотрели.");
 });

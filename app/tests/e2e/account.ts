@@ -329,6 +329,14 @@ export async function storedClient(email: string): Promise<{ id: number; name: s
   return row ?? null;
 }
 
+/** The stored password of an address (phase 2c): the scrypt hash and the time of its last change; both null without one. */
+export async function storedPassword(email: string): Promise<{ hash: string | null; changedAt: Date | null }> {
+  const [row] = await localDb(
+    (sql) => sql<{ hash: string | null; changedAt: Date | null }[]>`select password_hash as hash, password_changed_at as "changedAt" from clients where email = ${email}`,
+  );
+  return row ?? { hash: null, changedAt: null };
+}
+
 /** The newsletter row of an address (any case), or null. */
 export async function storedNewsletter(email: string): Promise<{ email: string; confirmed: boolean; clientId: number | null } | null> {
   const [row] = await localDb(
@@ -347,4 +355,9 @@ export async function endClientSessions(clientId: number): Promise<void> {
 export async function storedRegistration(id: number): Promise<{ clientId: number | null; email: string; name: string } | null> {
   const [row] = await localDb((sql) => sql<{ clientId: number | null; email: string; name: string }[]>`select client_id as "clientId", email, name from registrations where id = ${id}`);
   return row ?? null;
+}
+
+/** The password lock's counter of an address (phase 2c: rl:pw-mail:<sha256 of the address>, 15 minutes) cleared, so a test starts without one. */
+export async function clearPasswordLock(email: string): Promise<void> {
+  await localDb((sql) => sql`delete from kv_entries where key = ${`rl:pw-mail:${sha256Hex(email.trim().toLowerCase())}`}`);
 }

@@ -7,10 +7,12 @@ import ui from "@/components/site/ui.module.css";
 import {
   cardKey, cardTag, cardTitle, cardWhen, isPastCard, nextStep, type AccountCard, type ContactCard, type PrepaymentInfo as PaySettings,
 } from "@/domain/account-cards";
+import { fill } from "@/i18n/format";
 import { href } from "@/i18n/href";
 import type { Locale } from "@/i18n/locales";
 import { NextStepLine } from "./NextStepLine";
 import { PrepaymentInfo } from "./PrepaymentInfo";
+import { ProgressBar } from "./ProgressBar";
 import type { CoursesTexts } from "./texts";
 import styles from "./AccountCourseCard.module.css";
 
@@ -38,6 +40,7 @@ const focusOnMount = (el: HTMLElement | null) => el?.focus();
  * - pay → "Vaata juhiseid" opens the prepayment instructions in place;
  * - changeRequest → "Tühista või muuda aega" opens the dialog (after sending: "Saadetud. Maria võtab sinuga ühendust.");
  * - openCourse → "Ava koolitus" → /konto/kursus/{slug}.
+ * An open e-course with lessons shows '{done} / {total}' with the e-course page's bar, or 'Läbitud ✓' (phase 2c).
  * `readOnly`: the button is there but aria-disabled, and does nothing.
  */
 export function AccountCourseCard({ card, now, locale, t, pay, readOnly, sent, focusSent, onChangeRequest }: CardProps) {
@@ -47,6 +50,7 @@ export function AccountCourseCard({ card, now, locale, t, pay, readOnly, sent, f
   const panelId = useId();
   const when = cardWhen(card, locale);
   const action = step.action;
+  const progress = card.kind === "ecourse" && !isPastCard(card, now) ? (card.progress ?? null) : null;
 
   let button: React.ReactNode = null;
   if (action.kind === "pay") {
@@ -115,6 +119,22 @@ export function AccountCourseCard({ card, now, locale, t, pay, readOnly, sent, f
         </p>
       )}
       <NextStepLine className={styles.next} step={step} texts={t.next} />
+      {progress && (
+        <div className={styles.progress} data-card-progress="">
+          {progress.done === progress.total ? (
+            <p className={styles.finished} data-card-finished="">
+              {t.finished}
+            </p>
+          ) : (
+            <>
+              <p className={styles.count} aria-hidden="true">
+                {fill(t.lessonCount, { done: progress.done, total: progress.total })}
+              </p>
+              <ProgressBar done={progress.done} total={progress.total} label={fill(t.resumeProgress, { done: progress.done, total: progress.total })} />
+            </>
+          )}
+        </div>
+      )}
       {button && <div className={styles.foot}>{button}</div>}
       {action.kind === "pay" && open && !readOnly && pay && (
         <PrepaymentInfo id={panelId} pay={pay} registrationId={action.registrationId} amount={step.vars.amount} t={t.payment} />

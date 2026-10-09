@@ -10,8 +10,9 @@ import styles from "./BlogCarousel.module.css";
 export type BlogCard = { slug: string; href: string; title: string; excerpt: string; date: string; category: string; cover: string };
 
 /**
- * Prototype D dark blog panel (`blogp` + `newsDark`, H16): heading, a scroll-snap row of cards that open the full
- * post, "Kõik postitused" and previous / next buttons (aria-disabled at the ends: they keep keyboard focus).
+ * The home page's news block (prototype D's blog row, phase 2c: a light band like 'Kuidas soovid õppida?'): heading, a
+ * scroll-snap row of cards that open the full post, "Kõik postitused" and previous / next buttons (aria-disabled at the
+ * ends: they keep keyboard focus).
  */
 export function BlogCarousel({
   t,
@@ -58,47 +59,45 @@ export function BlogCarousel({
   if (posts.length === 0) return null;
 
   return (
-    <section className={styles.section} aria-labelledby={`${id}-title`}>
+    <section className={styles.section} aria-labelledby={`${id}-title`} data-news-band="">
       <div className={ui.wrap}>
-        <div className={styles.panel}>
-          <div className={styles.head}>
-            <div>
-              <p className={`${ui.caps} ${styles.eyebrow}`}>{t.eyebrow}</p>
-              <h2 id={`${id}-title`} className={ui.h2}>
-                {t.title}
-              </h2>
-            </div>
-            <p className={styles.lead}>{t.lead}</p>
+        <div className={styles.head}>
+          <div>
+            <p className={ui.caps}>{t.eyebrow}</p>
+            <h2 id={`${id}-title`} className={ui.h2}>
+              {t.title}
+            </h2>
           </div>
-          <div className={styles.rule} />
-          <div ref={track} className={styles.track} tabIndex={0} role="group" aria-label={t.carouselLabel}>
-            {posts.map((p) => (
-              <Link key={p.slug} className={styles.card} href={p.href}>
-                <span className={styles.photo}>
-                  {p.cover && <Image className={styles.image} src={p.cover} alt="" fill unoptimized sizes="(max-width: 640px) 80vw, 340px" />}
+          <p className={styles.lead}>{t.lead}</p>
+        </div>
+        <div className={styles.rule} />
+        <div ref={track} className={styles.track} tabIndex={0} role="group" aria-label={t.carouselLabel}>
+          {posts.map((p) => (
+            <Link key={p.slug} className={styles.card} href={p.href}>
+              <span className={styles.photo}>
+                {p.cover && <Image className={styles.image} src={p.cover} alt="" fill unoptimized sizes="(max-width: 640px) 80vw, 340px" />}
+              </span>
+              <div className={styles.body}>
+                <span className={styles.meta}>
+                  {p.date} · {p.category}
                 </span>
-                <div className={styles.body}>
-                  <span className={styles.meta}>
-                    {p.date} · {p.category}
-                  </span>
-                  <h3 className={styles.title}>{p.title}</h3>
-                  <span className={styles.excerpt}>{p.excerpt}</span>
-                </div>
-              </Link>
-            ))}
-          </div>
-          <div className={styles.foot}>
-            <Link className={ui.more} href={allHref}>
-              {t.all}
+                <h3 className={styles.title}>{p.title}</h3>
+                <span className={styles.excerpt}>{p.excerpt}</span>
+              </div>
             </Link>
-            <div className={styles.buttons}>
-              <button type="button" aria-label={t.prev} aria-disabled={edges.start || undefined} onClick={() => scroll(-1)}>
-                <Icon name="chevronLeft" size={16} />
-              </button>
-              <button type="button" aria-label={t.next} aria-disabled={edges.end || undefined} onClick={() => scroll(1)}>
-                <Icon name="chevronRight" size={16} />
-              </button>
-            </div>
+          ))}
+        </div>
+        <div className={styles.foot}>
+          <Link className={ui.more} href={allHref}>
+            {t.all}
+          </Link>
+          <div className={styles.buttons}>
+            <button type="button" aria-label={t.prev} aria-disabled={edges.start || undefined} onClick={() => scroll(-1)}>
+              <Icon name="chevronLeft" size={16} />
+            </button>
+            <button type="button" aria-label={t.next} aria-disabled={edges.end || undefined} onClick={() => scroll(1)}>
+              <Icon name="chevronRight" size={16} />
+            </button>
           </div>
         </div>
       </div>

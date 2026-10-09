@@ -11,6 +11,7 @@ import { FlashNotice, type FlashMessage } from "@/components/site/FlashNotice";
 import { FormatsBlock, type FormatTab } from "@/components/site/FormatsBlock";
 import { Hero, type HeroSlideView } from "@/components/site/Hero";
 import { Icon } from "@/components/site/Icon";
+import { NewsletterPopup } from "@/components/site/NewsletterPopup";
 import { PracticeBlock } from "@/components/site/PracticeBlock";
 import { trainerSettings } from "@/components/site/settings";
 import { Statement } from "@/components/site/Statement";
@@ -19,7 +20,7 @@ import { UpcomingStrip } from "@/components/site/UpcomingStrip";
 import ui from "@/components/site/ui.module.css";
 import { getDb } from "@/db/client";
 import { getHomeData, listUpcomingSessions } from "@/db/queries/public";
-import { campaignView } from "@/domain/campaign";
+import { campaignView, NEWSLETTER_LANDING_PARAM, newsletterPopupView } from "@/domain/campaign";
 import { firstParagraph, nextSessionByCourse, nextSessions, pickHomeCourses } from "@/domain/home";
 import { linkFor } from "@/domain/site-editor";
 import { formatEUR } from "@/domain/money";
@@ -88,8 +89,10 @@ export default async function Home({ params }: Props) {
     { key: "h", name: f.hybrid.name, question: f.hybrid.question, definition: f.hybrid.definition },
   ];
 
-  // The campaign popup (Task 14): this page is / and /ru, the only pages that show it; null when switched off.
-  const campaign = campaignView(home.campaign, locale, d.campaign.cta);
+  // The home page's popup (Task 14; phase 2c): the one the admin shows, the campaign or the newsletter sign-up; none when off.
+  // This page is / and /ru, the only pages that show it.
+  const campaign = campaignView(home.popup, locale, d.campaign.cta);
+  const newsletterPopup = newsletterPopupView(home.popup, locale);
 
   const statement = home.pages.statement;
   const bio = home.pages.trainer_bio;
@@ -98,10 +101,11 @@ export default async function Home({ params }: Props) {
   const trainerName = trainer.name || pick(bio?.title, locale);
 
   // The newsletter confirmation link (/api/newsletter/confirm) lands here with ?uudiskiri=kinnitatud | vigane | viga.
-  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice).
+  // The page is cached for every visitor, so the notice picks its text in the browser (FlashNotice); the first confirmation carries
+  // the welcome code in the fragment (#kood=…), which the notice shows (phase 2c): the page's HTML never holds the code.
   const nl = d.newsletter;
   const newsletterNotices: Record<string, FlashMessage> = {
-    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText },
+    kinnitatud: { tone: "ok", title: nl.confirmedTitle, text: nl.confirmedText, codeLine: nl.codeLine },
     vigane: { tone: "warn", title: nl.linkInvalid },
     viga: { tone: "warn", title: d.forms.errorGeneric },
   };
@@ -246,10 +250,32 @@ export default async function Home({ params }: Props) {
         }}
       />
 
-      <FlashNotice param="uudiskiri" notices={newsletterNotices} fragments={accountNotices} closeLabel={d.common.close} />
+      <FlashNotice param={NEWSLETTER_LANDING_PARAM} notices={newsletterNotices} fragments={accountNotices} closeLabel={d.common.close} />
 
       {campaign && (
         <CampaignPopup c={campaign} locale={locale} t={{ close: d.common.close, copy: d.campaign.copy, copied: d.campaign.copied, selected: d.campaign.selected }} />
+      )}
+
+      {newsletterPopup && (
+        <NewsletterPopup
+          n={newsletterPopup}
+          locale={locale}
+          t={{
+            close: d.common.close,
+            form: {
+              emailLabel: d.newsletter.emailLabel,
+              emailPlaceholder: d.newsletter.emailPlaceholder,
+              submit: d.newsletter.submit,
+              notice: d.newsletter.notice,
+              privacy: d.footer.privacy,
+              sentTitle: "",
+              sentText: d.newsletter.popupSent,
+              errorEmail: d.forms.errorEmail,
+              errorTooMany: d.forms.errorTooMany,
+              errorGeneric: d.forms.errorGeneric,
+            },
+          }}
+        />
       )}
     </>
   );

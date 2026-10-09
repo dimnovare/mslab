@@ -61,12 +61,17 @@ export const groupRegistrationFormSchema = z.object({
   courseSessionId: id,
   ...contactCourseFields,
   paymentChoice: z.enum(["full", "half"]),
+  /** "Soovin MS LABi uudiseid ja pakkumisi" (phase 2c): ticked, the newsletter's own sign-up follows the registration. */
+  wantsNewsletter: flag,
+  /** The optional "Sõnum" (phase 2c): the welcome code is written there. */
+  message: z.string().trim().max(MAX.message).default(""),
 });
 
 /** Individual contact course: a request to Maria with the preferred period; she agrees the time and payment (P12). */
 export const individualSchema = z.object({
   course: slug,
   ...contactCourseFields,
+  wantsNewsletter: flag,
   preferredPeriod: line(MAX.period),
   message: z.string().trim().max(MAX.message).default(""),
 });
@@ -74,7 +79,7 @@ export const individualSchema = z.object({
 export const contactSchema = z.object({ name: line(MAX.name), email, message: text(MAX.message), locale });
 
 /** E-learning cart before payment exists (P9): "let me know" e-mail. Stored as a contact request. */
-export const purchaseInterestSchema = z.object({ course: slug, email, locale });
+export const purchaseInterestSchema = z.object({ course: slug, email, locale, wantsNewsletter: flag });
 
 export const practiceSchema = z.object({
   package: z.string().trim().regex(/^[A-Za-z0-9_-]{1,20}$/),
@@ -86,7 +91,7 @@ export const practiceSchema = z.object({
   locale,
 });
 
-export const waitlistSchema = z.object({ session: id, name: line(MAX.name), email, locale });
+export const waitlistSchema = z.object({ session: id, name: line(MAX.name), email, locale, wantsNewsletter: flag });
 
 /** The newsletter's own sign-up: sending it is the consent (the time is stored), so there is no consent field. */
 export const subscribeSchema = z.object({ email, locale });
@@ -128,7 +133,7 @@ function parseForm<S extends z.ZodType>(
 }
 
 const same = (...names: string[]) => Object.fromEntries(names.map((n) => [n, n]));
-const contactCourseForm = { ...same("course", "name", "email", "phone", "terms", "locale"), wantsModelHelp: "modelHelp", wantsAccount: "account" };
+const contactCourseForm = { ...same("course", "name", "email", "phone", "terms", "locale"), wantsModelHelp: "modelHelp", wantsAccount: "account", wantsNewsletter: "newsletter" };
 const slugPlacement: Placement = { course: ["form", "invalid"] };
 
 /** Contact message (home, /kontakt). Fields: name, email, message, locale. */
@@ -137,26 +142,31 @@ export const parseContact = (fd: FormData) => parseForm(contactSchema, fd, same(
 /** Newsletter. Fields: email, locale (a "consent" field an older page may still send is not read). */
 export const parseSubscribe = (fd: FormData) => parseForm(subscribeSchema, fd, same("email", "locale"));
 
-/** Group registration. Fields: course (slug), session, name, email, phone, payment, modelHelp, account, terms, locale. */
+/**
+ * Group registration. Fields: course (slug), session, name, email, phone, payment, modelHelp, account, newsletter ("Soovin MS LABi
+ * uudiseid ja pakkumisi", phase 2c), message (optional, phase 2c), terms, locale.
+ */
 export const parseGroupRegistration = (fd: FormData) =>
-  parseForm(groupRegistrationFormSchema, fd, { ...contactCourseForm, courseSessionId: "session", paymentChoice: "payment" }, {
+  parseForm(groupRegistrationFormSchema, fd, { ...contactCourseForm, courseSessionId: "session", paymentChoice: "payment", message: "message" }, {
     ...slugPlacement,
     courseSessionId: ["session", "required"],
     paymentChoice: ["payment", "required"],
   });
 
-/** Individual request. Fields as the group form without session and payment, plus period and message (optional). */
+/** Individual request. Fields as the group form without session and payment, plus period and message (optional); newsletter as there. */
 export const parseIndividual = (fd: FormData) =>
   parseForm(individualSchema, fd, { ...contactCourseForm, preferredPeriod: "period", message: "message" }, {
     ...slugPlacement,
     preferredPeriod: ["period", "required"],
   });
 
-/** Cart "let me know". Fields: course (slug), email, locale. */
-export const parsePurchaseInterest = (fd: FormData) => parseForm(purchaseInterestSchema, fd, same("course", "email", "locale"), slugPlacement);
+/** Cart "let me know". Fields: course (slug), email, newsletter ("Soovin MS LABi uudiseid ja pakkumisi", phase 2c), locale. */
+export const parsePurchaseInterest = (fd: FormData) =>
+  parseForm(purchaseInterestSchema, fd, { ...same("course", "email", "locale"), wantsNewsletter: "newsletter" }, slugPlacement);
 
 /** Practice request. Fields: package, name, email, phone, course (optional), times, locale. */
 export const parsePractice = (fd: FormData) => parseForm(practiceSchema, fd, same("package", "name", "email", "phone", "course", "times", "locale"));
 
-/** Waitlist for a full session. Fields: session, name, email, locale. */
-export const parseWaitlist = (fd: FormData) => parseForm(waitlistSchema, fd, same("session", "name", "email", "locale"), { session: ["form", "invalid"] });
+/** Waitlist for a full session. Fields: session, name, email, newsletter ("Soovin MS LABi uudiseid ja pakkumisi", phase 2c), locale. */
+export const parseWaitlist = (fd: FormData) =>
+  parseForm(waitlistSchema, fd, { ...same("session", "name", "email", "locale"), wantsNewsletter: "newsletter" }, { session: ["form", "invalid"] });

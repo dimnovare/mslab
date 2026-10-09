@@ -3,8 +3,8 @@
 // (lib/site-gate.ts: always through), so the two cannot drift apart. tests/unit/site-gate.test.ts checks every entry of
 // public/ against it. The design-review hub (public/guide, public/p) is not here: it has its own rules in both.
 
-/** Files at the root, matched by their whole name ("/og.jpg", never "/og.jpg.bak"). og.png: the link preview's other format. */
-export const ROOT_FILES = ["favicon.ico", "icon.svg", "robots.txt", "og.jpg", "og.png", "feedback.js"] as const;
+/** Files at the root, matched by their whole name ("/og.jpg", never "/og.jpg.bak"). Each one exists (the link preview is og.jpg only). */
+export const ROOT_FILES = ["favicon.ico", "icon.svg", "robots.txt", "og.jpg", "feedback.js"] as const;
 
 /** Folders at the root whose files are all served ("/brand/logo.png"; the bare "/brand" is not a file). */
 export const ROOT_FOLDERS = ["brand", "seed"] as const;

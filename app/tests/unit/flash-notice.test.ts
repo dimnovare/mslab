@@ -95,4 +95,20 @@ describe("FlashNotice", () => {
     await act(async () => (region().querySelector("button[aria-label='Sulge']") as HTMLButtonElement).click());
     expect(region().textContent).toBe("");
   });
+
+  test("the confirmed notice with a welcome code from the fragment (#kood=…, phase 2c): the line with the code, and the fragment goes; a code of another shape is ignored", async () => {
+    const withCode: Record<string, FlashMessage> = {
+      kinnitatud: { tone: "ok", title: "Tere tulemast MS LABi!", text: "Sinu liitumine on kinnitatud.", codeLine: "Sinu tervituskood: {code}." },
+    };
+    const render = async (at: string) => {
+      window.history.replaceState(null, "", at);
+      await act(async () => root.render(createElement(FlashNotice, { key: at, param: "uudiskiri", notices: withCode, closeLabel: "Sulge" })));
+    };
+    await render("/?uudiskiri=kinnitatud#kood=TERE-10");
+    expect(document.querySelector("[data-flash-code]")?.textContent).toBe("Sinu tervituskood: TERE-10.");
+    expect(address()).toBe("/");
+    await render("/?uudiskiri=kinnitatud#kood=<b>x</b>");
+    expect(document.querySelector("[data-flash-code]")).toBeNull();
+    expect(region().textContent).toContain("Tere tulemast MS LABi!");
+  });
 });

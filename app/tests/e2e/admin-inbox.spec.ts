@@ -19,7 +19,7 @@ import {
 // fixtures.ts, an unpublished fixture course with its own session) and deletes again. The guard tests are GET-only and
 // also run against a deployment.
 
-const MENU = ["Ülevaade", "Koolitused", "Kalender", "Registreerimised", "Õpilased", "Päringud", "Praktika", "Avaleht", "Koolitaja", "Uudised", "Kampaania", "Uudiskiri", "Seaded"];
+const MENU = ["Ülevaade", "Koolitused", "Kalender", "Registreerimised", "Õpilased", "Päringud", "Praktika", "Avaleht", "Koolitaja", "Uudised", "Hüpikaken", "Uudiskiri", "Seaded"];
 
 const created = { tokens: new Set<string>(), sessions: new Set<string>() };
 let fx: AdminFixtures | null = null;
@@ -84,6 +84,12 @@ test.describe("signed in", () => {
     await expect(page.locator('[data-stat="awaiting"]')).toHaveAttribute("href", "/admin/registreerimised?staatus=ootab");
     for (const key of ["contact", "interest", "individual", "practice", "waitlist"]) await expect(page.locator(`[data-inbox="${key}"]`)).toContainText("tegemata");
     await expect(page.getByRole("link", { name: "Lae alla kinnitatud tellijad (CSV)" })).toHaveAttribute("href", "/api/admin/subscribers.csv?kinnitatud=1");
+    // "Kiirlingid → Vaata lehte ↗" goes through api/admin/preview like the sidebar's and the top line's: with the coming-soon
+    // gate on, a plain "/" would show the coming-soon page to an admin who has no preview cookie yet
+    const quickSite = page.locator('section[aria-labelledby="links-title"]').getByRole("link", { name: /Vaata lehte/ });
+    await expect(quickSite).toHaveAttribute("href", "/api/admin/preview");
+    await expect(quickSite).toHaveAttribute("target", "_blank");
+    await expect(quickSite).toHaveAttribute("rel", "noopener");
     expect(await noOverflow(page)).toBe(true);
 
     const nav = await menu(page, isMobile);
@@ -109,7 +115,7 @@ test.describe("signed in", () => {
       ["Avaleht", "/admin/avaleht", "Avaleht", "[data-home-editor]"],
       ["Koolitaja", "/admin/koolitaja", "Koolitaja", "[data-trainer-editor]"],
       ["Uudised", "/admin/uudised", "Uudised", "[data-add-post]"],
-      ["Kampaania", "/admin/kampaania", "Kampaania hüpikaken", "[data-campaign-editor]"],
+      ["Hüpikaken", "/admin/kampaania", "Hüpikaken", "[data-campaign-editor]"],
       ["Seaded", "/admin/seaded", "Seaded", "[data-settings-editor]"],
     ] as const;
     for (const [label, path, h1, marker] of sections) {

@@ -1,8 +1,8 @@
-/* The e-course page after the terms are accepted: one muted line for the end of the access; the progress line, a thin bar (4 px,
-   the line colour with the ink filling it) and the one button; the numbered modules of the public course page (CourseLists.module.css:
-   the rows between thin lines, the number in mono, the title in Jost), each folding open to its lessons (a native details element
-   with the FAQ's round "+" mark), and the lessons indented under the module's title: a state icon, the title (a link while open or
-   done) and, under the first locked one, the lock sentence. Every row is at least 44 px tall and long titles wrap. The page and its
+/* The e-course page after the terms are accepted: one muted line for the end of the access; the progress line, the thin bar
+   (ProgressBar.module.css) and the one button; the numbered modules of the public course page (CourseLists.module.css: the rows
+   between thin lines, the number in mono, the title in Jost), each folding open to its lessons (a native details element with the
+   FAQ's round "+" mark), and the lessons indented under the module's title: a state icon, the title (a link while open or done)
+   and, under the first locked one, the lock sentence. Every row is at least 44 px tall and long titles wrap. The page and its
    title are EcoursePage.module.css's. Tokens only. */
 
 .access {
@@ -20,21 +20,6 @@
   margin: 0;
   color: var(--ink-soft);
   font: 500 15px/1.5 var(--font-body);
-}
-
-.bar {
-  height: 4px;
-  margin-top: 10px;
-  overflow: hidden;
-  border-radius: 99px;
-  background: var(--line);
-}
-
-.bar span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--ink);
 }
 
 .next {

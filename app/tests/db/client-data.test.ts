@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import type { Db } from "@/db/client";
 import {
   clientFavourites, clientLoginTokens, clients, clientSessions, courseAccess, courses, courseSessions, pages, practicePackages, registrations, requests, settings,
-  subscribers, termsAcceptances,
+  lessonProgress, lessons, subscribers, termsAcceptances,
 } from "@/db/schema";
 import { nextStep, parsePrepayment } from "@/domain/account-cards";
 import {
@@ -96,7 +96,7 @@ describe("loadDashboard", () => {
     await grant(kati.id, f.online.id);
 
     const dash = (await loadDashboard(db, kati.id, NOW))!;
-    expect(dash.client).toEqual({ email: "kati@example.test", name: "", phone: "", locale: "et", newsletter: false });
+    expect(dash.client).toEqual({ email: "kati@example.test", name: "", phone: "", locale: "et", newsletter: false, passwordSetAt: null });
     expect(dash.favourites).toEqual([]);
     expect(dash.prepayment).toBeNull();
 
@@ -242,7 +242,7 @@ describe("loadDashboard", () => {
     // open ones newest grant first, then over ones the most recent first
     expect(cards.map((c) => c.kind === "ecourse" && c.course.slug)).toEqual(["peidus-kursus", "veebikursus", "kolmas-kursus", "teine-kursus"]);
     expect(cards.map((c) => nextStep(c, NOW, null).key)).toEqual(["openCourse", "openCourse", "accessEnded", "accessEnded"]);
-    expect(cards[1]).toEqual({ kind: "ecourse", course: { slug: "veebikursus", title: { et: "Veebikursus" } }, grantedAt: at(-10).toISOString(), expiresAt: at(170).toISOString(), revoked: false });
+    expect(cards[1]).toEqual({ kind: "ecourse", course: { slug: "veebikursus", title: { et: "Veebikursus" } }, grantedAt: at(-10).toISOString(), expiresAt: at(170).toISOString(), revoked: false, progress: null });
     expect(cards[2]).toMatchObject({ revoked: true });
   });
 
@@ -256,7 +256,7 @@ describe("loadDashboard", () => {
     await db.insert(subscribers).values({ email: "Kati@Example.TEST", token: "t1", confirmedAt: at(-2) }); // stored in another case
     const dash = (await loadDashboard(db, kati.id, NOW))!;
     expect(dash.favourites).toEqual(["veebikursus", "kulmude-lami"]);
-    expect(dash.client).toEqual({ email: "kati@example.test", name: "Kati", phone: "+3725551234", locale: "ru", newsletter: true });
+    expect(dash.client).toEqual({ email: "kati@example.test", name: "Kati", phone: "+3725551234", locale: "ru", newsletter: true, passwordSetAt: null });
   });
 
   test("a subscriber still waiting for confirmation is not 'on'", async () => {
@@ -693,5 +693,60 @@ describe("deleteClient", () => {
     const kati = await client();
     expect(await deleteClient(db, kati.id)).not.toBeNull();
     expect(await deleteClient(db, kati.id)).toBeNull();
+  });
+});
+
+describe("e-course progress on the dashboard (phase 2c)", () => {
+  /** An e-course of `n` text lessons in one module "M" (L1…Ln), published. */
+  async function lessonCourse(slug: string, n: number) {
+    const [course] = await db.insert(courses).values({ ...base, slug, type: "e_learning", title: { et: slug }, published: true, price: 100 }).returning();
+    const [m] = await addModules(db, course.id, [{ et: "M" }]);
+    const list = [];
+    for (let i = 1; i <= n; i++) list.push((await db.insert(lessons).values({ moduleId: m.id, position: i, title: { et: `L${i}` }, kind: "text" }).returning())[0]);
+    return { course, lessons: list };
+  }
+
+  test("an open e-course carries done of total and the next lesson with its module; one without lessons null; an ended or revoked access none", async () => {
+    const kati = await client();
+    const a = await lessonCourse("kursus-a", 3);
+    await grant(kati.id, a.course.id);
+    await grant(kati.id, f.online.id); // modules, no lessons
+    const ended = await lessonCourse("kursus-vana", 1);
+    await grant(kati.id, ended.course.id, { expiresAt: at(-1), grantedAt: at(-30) });
+    const revoked = await lessonCourse("kursus-tuhistatud", 2); // lessons, but the access was revoked: not open
+    await grant(kati.id, revoked.course.id, { revokedAt: at(-1), grantedAt: at(-20) });
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: a.lessons[0].id, doneAt: NOW });
+    const { cards } = (await loadDashboard(db, kati.id, NOW))!;
+    const card = (slug: string) => cards.find((c) => c.kind === "ecourse" && c.course.slug === slug)!;
+    expect(card("kursus-a")).toMatchObject({ progress: { done: 1, total: 3, next: { lessonId: a.lessons[1].id, title: { et: "L2" }, moduleTitle: { et: "M" } } } });
+    expect(card("veebikursus")).toMatchObject({ progress: null });
+    expect(card("kursus-vana")).not.toHaveProperty("progress");
+    expect(card("kursus-tuhistatud")).toMatchObject({ revoked: true });
+    expect(card("kursus-tuhistatud")).not.toHaveProperty("progress");
+  });
+
+  test("the 'Pooleli' card is for the e-course she did something in last; with no activity the first open one with lessons; none when all are finished", async () => {
+    const kati = await client();
+    const a = await lessonCourse("kursus-a", 2);
+    const b = await lessonCourse("kursus-b", 2);
+    await grant(kati.id, a.course.id, { grantedAt: at(-3) });
+    await grant(kati.id, b.course.id, { grantedAt: at(-2) });
+    // a revoked access with lessons and the freshest activity of all: never chosen
+    const revoked = await lessonCourse("kursus-tuhistatud", 2);
+    await grant(kati.id, revoked.course.id, { revokedAt: at(-1), grantedAt: at(-1) });
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: revoked.lessons[0].id, updatedAt: NOW });
+    const resume = async () => (await loadDashboard(db, kati.id, NOW))!.resume;
+    expect(await resume()).toBe("kursus-b"); // no activity in a and b: the cards' order, the newest grant first
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: a.lessons[0].id, updatedAt: at(-1) });
+    expect(await resume()).toBe("kursus-a");
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: b.lessons[0].id, updatedAt: NOW });
+    expect(await resume()).toBe("kursus-b");
+    // b finished: back to a; both finished: none
+    await db.update(lessonProgress).set({ doneAt: NOW }).where(eq(lessonProgress.lessonId, b.lessons[0].id));
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: b.lessons[1].id, doneAt: NOW, updatedAt: NOW });
+    expect(await resume()).toBe("kursus-a");
+    await db.update(lessonProgress).set({ doneAt: NOW }).where(eq(lessonProgress.lessonId, a.lessons[0].id));
+    await db.insert(lessonProgress).values({ clientId: kati.id, lessonId: a.lessons[1].id, doneAt: NOW });
+    expect(await resume()).toBeNull();
   });
 });

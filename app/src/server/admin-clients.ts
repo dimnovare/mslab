@@ -13,6 +13,7 @@ import { parseRowId } from "@/lib/row-id";
 import { linkClientRecords, lockAddress } from "./client-auth";
 import { field } from "./edit-check";
 import { courseOutline } from "./lesson-outline";
+import { newsletterState, type NewsletterState } from "./newsletter";
 
 // The admin's Õpilased (students): the list, one student's drawer, adding a student by e-mail, and e-course access
 // ("Ava ligipääs" / "Lõpeta ligipääs"). Callers have already checked the admin session (server/actions/admin-clients.ts
@@ -101,6 +102,8 @@ export type ClientDetail = {
   requests: ClientRequestRow[];
   access: ClientAccessRow[];
   terms: { courseTitle: I18n; version: string; acceptedAt: Date }[];
+  /** Her address's newsletter (phase 2c): confirmed, waiting for its confirmation, or none. */
+  newsletter: NewsletterState;
 };
 
 /** Everything the student's drawer shows, or null when there is no such student. Newest first in every list. */
@@ -136,6 +139,7 @@ export async function clientDetail(db: Db, id: number, now: Date = new Date()): 
       .orderBy(desc(termsAcceptances.acceptedAt)),
   ]);
   if (!client) return null;
+  const newsletter = await newsletterState(db, client.email);
   // each e-course's lessons for her: done of total, and the first lesson she cannot open yet ("Ava järgmine õppetund")
   const outlines = await Promise.all(access.map((a) => courseOutline(db, a.courseId, id)));
   return {
@@ -152,6 +156,7 @@ export async function clientDetail(db: Db, id: number, now: Date = new Date()): 
       };
     }),
     terms,
+    newsletter,
   };
 }
 

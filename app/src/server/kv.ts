@@ -13,6 +13,7 @@ export class PgKv implements TextKv, FeedbackKv {
   constructor(
     private readonly db: Db,
     private readonly now: () => Date = () => new Date(),
+    private readonly opts: { sweep?: boolean } = {},
   ) {}
 
   /** Rows that have no expiry or have not reached it. */
@@ -29,11 +30,50 @@ export class PgKv implements TextKv, FeedbackKv {
    * Stores the value; `expirationTtl` is in seconds. Without it the entry never expires (a put replaces an earlier expiry,
    * as in Cloudflare KV). A put with a TTL also deletes the expired rows: the rate limit rows hold visitors' IP addresses,
    * which must not outlive their window (the partial index on expires_at keeps that delete cheap).
+   * `sweep: false` (a store on a caller's transaction: the password lock, account-api.ts): no sweep, which would hold the expired rows'
+   * locks until that transaction ends and could deadlock with another login's; the next put elsewhere, or the daily cron, sweeps.
    */
   async put(key: string, value: string, opts: { expirationTtl?: number } = {}): Promise<void> {
     const expiresAt = opts.expirationTtl ? new Date(this.now().getTime() + opts.expirationTtl * 1000) : null;
     await this.db.insert(kvEntries).values({ key, value, expiresAt }).onConflictDoUpdate({ target: kvEntries.key, set: { value, expiresAt } });
-    if (expiresAt) await this.sweep();
+    if (expiresAt && this.opts.sweep !== false) await this.sweep();
+  }
+
+  /**
+   * Takes one of `limit` slots under `key` in ONE statement (phase 2c: the password login's per-IP limit): inserts `1` with the window's
+   * expiry (`windowSec` from now); on a row already there, an expired one starts again at `1`, a live one below `limit` counts one more
+   * and renews the expiry, and one at `limit` is left exactly as it is. No row comes back for that last case: false. Concurrent calls for
+   * one key take their turns on the row (Postgres re-reads it after the other's commit), so no two of them can take the same slot and
+   * no count is lost, which a get followed by a put cannot promise. Sweeps like a put with a TTL (the keys hold addresses), unless
+   * `sweep: false`.
+   */
+  async reserve(key: string, limit: number, windowSec: number): Promise<boolean> {
+    const now = this.now();
+    const nowSql = sql`${now.toISOString()}::timestamptz`;
+    const expiresAt = new Date(now.getTime() + windowSec * 1000);
+    // (The cast: on the Db union, returning(fields) has no common overload.)
+    const rows = await (this.db as PostgresJsDatabase<typeof schema>)
+      .insert(kvEntries)
+      .values({ key, value: "1", expiresAt })
+      .onConflictDoUpdate({
+        target: kvEntries.key,
+        set: { value: sql`case when ${kvEntries.expiresAt} <= ${nowSql} then '1' else (${kvEntries.value}::int + 1)::text end`, expiresAt },
+        setWhere: sql`${kvEntries.expiresAt} <= ${nowSql} or ${kvEntries.value}::int < ${limit}`,
+      })
+      .returning({ one: sql<number>`1` });
+    if (this.opts.sweep !== false) await this.sweep();
+    return rows.length > 0;
+  }
+
+  /**
+   * Gives one slot of `key` back (reserve above): one statement, never below 0, the expiry untouched (it is the one the last reserve set).
+   * A row that has expired, or no row, is left alone: the count then belongs to a window that is not this one.
+   */
+  async release(key: string): Promise<void> {
+    await this.db
+      .update(kvEntries)
+      .set({ value: sql`(${kvEntries.value}::int - 1)::text` })
+      .where(and(eq(kvEntries.key, key), sql`${kvEntries.value}::int > 0`, this.live()));
   }
 
   async delete(key: string): Promise<void> {

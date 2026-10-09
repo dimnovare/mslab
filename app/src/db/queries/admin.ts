@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import type { Db, Q } from "../client";
-import { campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessons, pages, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
-import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
+import { campaign, courseAccess, courseImages, courseModules, courseSessions, courses, faq, galleryItems, heroSlides, lessons, pages, POPUP_ID, posts, practicePackages, registrations, requests, settings, subscribers } from "../schema";
+import type { Campaign, Course, CourseImage, CourseSession, FaqItem, GalleryItem, HeroSlide, Page, PopupKind, Post, PracticePackage, Registration, Request as RequestRow, Subscriber } from "../schema";
 import { pageInfo, PAGE_SIZE, type PageInfo } from "@/domain/paging";
 import { registrationPrice, registrationStatusAfterPayment, type RegStatus } from "@/domain/registration";
 import type { I18n } from "@/i18n/field";
@@ -19,7 +19,7 @@ export type HeroSlideInput = WithOptionalId<Insert<typeof heroSlides>>;
 export type FaqInput = WithOptionalId<Insert<typeof faq>>;
 export type PostInput = WithOptionalId<Insert<typeof posts>>;
 export type PageInput = Insert<typeof pages>;
-export type CampaignInput = Omit<Insert<typeof campaign>, "id">;
+export type CampaignInput = Omit<Insert<typeof campaign>, "id" | "kind">;
 export type ImageInput = { key: string; alt?: I18n | null };
 export type RegistrationRow = Registration & { course: Course; courseSession: CourseSession | null };
 /** `ids`: only these registrations; `clientId`: only the ones linked to that client (the admin's Õpilased drawer). */
@@ -507,9 +507,14 @@ export async function replaceGallery(db: Q, group: string, items: ImageInput[]):
   });
 }
 
-/** The campaign popup is a single row (id 1). */
-export async function upsertCampaign(db: Q, input: CampaignInput): Promise<Campaign> {
-  const [row] = await db.insert(campaign).values({ ...input, id: 1 }).onConflictDoUpdate({ target: campaign.id, set: input }).returning();
+/**
+ * A popup's fixed row (POPUP_ID: the campaign 1, the newsletter popup 2): one row per kind. At most one popup is shown (the partial
+ * unique index campaign_one_active): switching one on switches the other off first, in the caller's transaction.
+ */
+export async function upsertCampaign(db: Q, input: CampaignInput, kind: PopupKind = "campaign"): Promise<Campaign> {
+  const id = POPUP_ID[kind];
+  if (input.active) await db.update(campaign).set({ active: false }).where(and(ne(campaign.id, id), eq(campaign.active, true)));
+  const [row] = await db.insert(campaign).values({ ...input, id, kind }).onConflictDoUpdate({ target: campaign.id, set: { ...input, kind } }).returning();
   return row;
 }
 

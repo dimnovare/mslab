@@ -44,7 +44,9 @@ describe("group registration form", () => {
         paymentChoice: "half",
         wantsModelHelp: true,
         wantsAccount: false,
+        wantsNewsletter: false,
         terms: "on",
+        message: "",
         locale: "et",
       },
     });
@@ -128,7 +130,7 @@ describe("contact, newsletter, cart, practice, waitlist", () => {
   test("waitlist: name, e-mail and the session", () => {
     expect(parseWaitlist(form({ session: "12", name: "Test", email: "test@example.com" }))).toEqual({
       ok: true,
-      data: { session: 12, name: "Test", email: "test@example.com", locale: "et" },
+      data: { session: 12, name: "Test", email: "test@example.com", locale: "et", wantsNewsletter: false },
     });
     expect(errors(parseWaitlist(form({ session: "abc", name: "", email: "nope" })))).toEqual({ form: "invalid", name: "required", email: "invalid" });
   });
@@ -153,4 +155,53 @@ test("honeypot: anything in `website` is spam", () => {
   expect(isSpam(form({ website: "" }))).toBe(false);
   expect(isSpam(form({}))).toBe(false);
   expect(isSpam(form({ website: "http://spam.example" }))).toBe(true);
+});
+
+describe("the newsletter consent and the group form's message (phase 2c)", () => {
+  const fd = (fields: Record<string, string>) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.set(k, v);
+    return f;
+  };
+  const group = { course: "kulmud", session: "4", name: "Kati", email: "kati@example.com", phone: "+372 5555 5555", payment: "full", terms: "on", locale: "et" };
+
+  test("'newsletter' ticked is wantsNewsletter true; absent false — on the group, individual, purchase and waitlist forms", () => {
+    const g = parseGroupRegistration(fd({ ...group, newsletter: "on" }));
+    expect(g.ok && g.data.wantsNewsletter).toBe(true);
+    const g2 = parseGroupRegistration(fd(group));
+    expect(g2.ok && g2.data.wantsNewsletter).toBe(false);
+    const i = parseIndividual(fd({ course: "kulmud", name: "Kati", email: "kati@example.com", phone: "+372 5555 5555", period: "detsember", terms: "on", locale: "et", newsletter: "on" }));
+    expect(i.ok && i.data.wantsNewsletter).toBe(true);
+    const p = parsePurchaseInterest(fd({ course: "e-kulmud", email: "kati@example.com", locale: "ru", newsletter: "on" }));
+    expect(p.ok && p.data.wantsNewsletter).toBe(true);
+    const w = parseWaitlist(fd({ session: "4", name: "Kati", email: "kati@example.com", locale: "et" }));
+    expect(w.ok && w.data.wantsNewsletter).toBe(false);
+  });
+
+  test("only 'on' ticks the box: '', 'off' and 'true' are false, on all four forms", () => {
+    const individual = { course: "kulmud", name: "Kati", email: "kati@example.com", phone: "+372 5555 5555", period: "detsember", terms: "on", locale: "et" };
+    const forms = [
+      (n: string) => parseGroupRegistration(fd({ ...group, newsletter: n })),
+      (n: string) => parseIndividual(fd({ ...individual, newsletter: n })),
+      (n: string) => parsePurchaseInterest(fd({ course: "e-kulmud", email: "kati@example.com", locale: "ru", newsletter: n })),
+      (n: string) => parseWaitlist(fd({ session: "4", name: "Kati", email: "kati@example.com", locale: "et", newsletter: n })),
+    ];
+    for (const parse of forms)
+      for (const value of ["", "off", "true", "ON", "1", "yes"]) {
+        const r = parse(value);
+        expect(r.ok && r.data.wantsNewsletter, `"${value}"`).toBe(false);
+      }
+    for (const parse of forms) {
+      const r = parse("on");
+      expect(r.ok && r.data.wantsNewsletter).toBe(true);
+    }
+  });
+
+  test("the group form's optional message: trimmed, at most 2000", () => {
+    const g = parseGroupRegistration(fd({ ...group, message: "  Kood TERE10  " }));
+    expect(g.ok && g.data.message).toBe("Kood TERE10");
+    const none = parseGroupRegistration(fd(group));
+    expect(none.ok && none.data.message).toBe("");
+    expect(parseGroupRegistration(fd({ ...group, message: "x".repeat(2001) })).ok).toBe(false);
+  });
 });

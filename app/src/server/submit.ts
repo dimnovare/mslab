@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { readSetting } from "@/db/queries/public";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
@@ -32,7 +32,7 @@ import {
   type Summary,
 } from "./messages";
 import { registrationConfirmationMail, requestConfirmationMail, type LoginCode } from "./account-mail";
-import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail } from "./client-auth";
+import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail, reserveNewsletterMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { adminUrl, mailConfigured, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
@@ -83,7 +83,17 @@ const VISITOR_MAILS_PER_ADDRESS_PER_DAY = 3;
  */
 type Confirmation = { email: string; wantsAccount: boolean; prepare: () => Promise<(login: LoginCode | null) => Mail> };
 
-type Stored = { result: ActionResult; notify?: Summary & { replyTo?: string }; mail?: Mail; confirm?: Confirmation };
+/**
+ * What a handler stored and what follows the answer. `subscribe`: "Soovin MS LABi uudiseid ja pakkumisi" was ticked on a registration
+ * form (phase 2c), so the newsletter's own sign-up runs after the response (subscribeLater).
+ */
+type Stored = {
+  result: ActionResult;
+  notify?: Summary & { replyTo?: string };
+  mail?: Mail;
+  confirm?: Confirmation;
+  subscribe?: { email: string; locale: "et" | "ru" };
+};
 
 /** A rate limit that fails open: when KV is unavailable (or over its daily write quota) the submission goes through. */
 async function allowed(env: Env, key: string, limit: number, windowSec: number): Promise<boolean> {
@@ -141,7 +151,24 @@ async function submission<T>(
       console.info(`[forms] ${form}: stored; confirmation e-mail sent: ${sent}`);
     });
   }
-  if (confirm) deps.later(() => sendConfirmation(deps, form, confirm));
+  // One task, in this order: the visitor's own confirmation (it carries the prepayment details) first, then the newsletter's sign-up (a
+  // marketing mail). The two count on different daily counters now, so they no longer compete for a place; the order stays so that the
+  // transactional mail is always the first out. sendConfirmation and subscribeLater each catch their own failures, but whatever either
+  // does one day, a throw from the confirmation must never skip the sign-up the visitor ticked: it is caught here and logged (the error
+  // class and code only, never an address).
+  const wish = out.subscribe;
+  if (confirm || wish) {
+    deps.later(async () => {
+      if (confirm) {
+        try {
+          await sendConfirmation(deps, form, confirm);
+        } catch (e) {
+          logFailure(`[forms] ${form}: confirmation e-mail task failed`, e);
+        }
+      }
+      if (wish) await subscribeLater(deps, form, wish);
+    });
+  }
   return out.result;
 }
 
@@ -275,7 +302,7 @@ async function sessionWithSeats(db: Db, id: number): Promise<(CourseSession & { 
 
 /** Group registration for one session of a contact course (P12–P16). */
 export function handleRegistration(deps: Deps, formData: FormData): Promise<ActionResult> {
-  return submission(deps, "register", formData, parseGroupRegistration, async ({ course: slug, courseSessionId, terms: _terms, ...data }) => {
+  return submission(deps, "register", formData, parseGroupRegistration, async ({ course: slug, courseSessionId, terms: _terms, wantsNewsletter, ...data }) => {
     void _terms;
     const course = await contactCourse(deps.db, slug);
     if (!course || course.priceGroup == null) return { result: fail({ form: "invalid" }) };
@@ -286,7 +313,7 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
       return { result: fail({ session: "unavailable" }) };
     if (seatState(session, session.confirmed) === "full") return { result: fail({ session: "full" }) };
 
-    const registration = await createRegistration(deps.db, { ...data, courseId: course.id, courseSessionId: session.id, kind: "group", preferredPeriod: "", message: "" });
+    const registration = await createRegistration(deps.db, { ...data, courseId: course.id, courseSessionId: session.id, kind: "group", preferredPeriod: "" });
     await deps.changed?.({ kind: "seats", course: course.slug });
     const summary = registrationSummary(
       { ...data, course: pick(course.title, "et"), startsAt: session.startsAt, city: session.city, venue: session.venue },
@@ -313,7 +340,7 @@ export function handleRegistration(deps: Deps, formData: FormData): Promise<Acti
           });
       },
     };
-    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm, subscribe: wantsNewsletter ? { email: data.email, locale: data.locale } : undefined };
   });
 }
 
@@ -337,7 +364,7 @@ async function storeRequest(db: Db, kind: RequestKind, payload: Payload & { emai
 
 /** Individual contact course: a request to Maria with the preferred period; no payment choice (P12). */
 export function handleIndividual(deps: Deps, formData: FormData): Promise<ActionResult> {
-  return submission(deps, "individual", formData, parseIndividual, async ({ course: slug, terms: _terms, ...data }) => {
+  return submission(deps, "individual", formData, parseIndividual, async ({ course: slug, terms: _terms, wantsNewsletter, ...data }) => {
     void _terms;
     const course = await contactCourse(deps.db, slug);
     if (!course || course.priceIndividual == null) return { result: fail({ form: "invalid" }) };
@@ -348,7 +375,7 @@ export function handleIndividual(deps: Deps, formData: FormData): Promise<Action
       wantsAccount: data.wantsAccount,
       prepare: async () => (login) => requestConfirmationMail({ siteUrl: deps.siteUrl, email: data.email, name: data.name, locale: data.locale, kind: "individual", title: course.title, login }),
     };
-    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm, subscribe: wantsNewsletter ? { email: data.email, locale: data.locale } : undefined };
   });
 }
 
@@ -362,7 +389,7 @@ export function handleContact(deps: Deps, formData: FormData): Promise<ActionRes
 
 /** E-learning cart before payment exists (P9): a contact request { course, intent: "purchase", email }. */
 export function handlePurchaseInterest(deps: Deps, formData: FormData): Promise<ActionResult> {
-  return submission(deps, "interest", formData, parsePurchaseInterest, async ({ course: slug, email, locale }) => {
+  return submission(deps, "interest", formData, parsePurchaseInterest, async ({ course: slug, email, locale, wantsNewsletter }) => {
     const [course] = await deps.db
       .select()
       .from(courses)
@@ -370,7 +397,11 @@ export function handlePurchaseInterest(deps: Deps, formData: FormData): Promise<
       .limit(1);
     if (!course) return { result: fail({ form: "invalid" }) };
     await storeRequest(deps.db, "contact", { course: slug, intent: "purchase", email, locale });
-    return { result: OK, notify: { ...purchaseInterestSummary({ course: pick(course.title, "et"), email, locale }, admin(deps)), replyTo: email } };
+    return {
+      result: OK,
+      notify: { ...purchaseInterestSummary({ course: pick(course.title, "et"), email, locale }, admin(deps)), replyTo: email },
+      subscribe: wantsNewsletter ? { email, locale } : undefined,
+    };
   });
 }
 
@@ -393,7 +424,7 @@ export function handlePractice(deps: Deps, formData: FormData): Promise<ActionRe
 
 /** Waitlist for a (full) calendar session. */
 export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionResult> {
-  return submission(deps, "waitlist", formData, parseWaitlist, async ({ session: sessionId, ...data }) => {
+  return submission(deps, "waitlist", formData, parseWaitlist, async ({ session: sessionId, wantsNewsletter, ...data }) => {
     const [row] = await deps.db
       .select({ session: courseSessions, course: courses })
       .from(courseSessions)
@@ -425,7 +456,7 @@ export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionRe
           session: { startsAt: session.startsAt, city: session.city ?? "", venue: session.venue ?? "" },
         }),
     };
-    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm };
+    return { result: OK, notify: { ...summary, replyTo: data.email }, confirm, subscribe: wantsNewsletter ? { email: data.email, locale: data.locale } : undefined };
   });
 }
 
@@ -440,38 +471,95 @@ function confirmationMail(siteUrl: string, sub: Pick<Subscriber, "email" | "toke
 }
 
 /**
+ * The newsletter's own sign-up of `email` (lower-cased by the forms), shared by handleSubscribe (the footer, the popup, the coming-soon
+ * page) and subscribeLater (the registration forms' box). A new address is stored unconfirmed, an unconfirmed one gets a new consent
+ * time, a confirmed one nothing. The consent is the sign-up itself: `consentAt` is the time of the submission. Returns the
+ * confirmation mail to send, or null when there is none. The guards run after the row is stored, so each of them still leaves the
+ * address signed up, and each ends the work quietly:
+ * 1. a sample address (`@example.test`) is never mailed (the live checks register one);
+ * 2. a deployment without Resend (local development, the e2e run) has nothing to send with;
+ * 3. at most 3 confirmation e-mails per address and day (a KV counter under the hash of the address, which fails open);
+ * 4. one place of the newsletter's own daily counter (the `mail_quota` row "<day>:nl", 25 a day, which never fails open; the logins' and
+ *    the registrations' confirmations count elsewhere, client-auth.ts) — while the coming-soon gate is on, the sign-up is the only
+ *    public form, and without the cap anyone could make the site mail every address they type. Over the cap, or with the quota
+ *    failing, there is no e-mail.
+ * `form` is the calling form's name, for the log lines.
+ */
+async function subscribeAddress(deps: Deps, form: FormName, email: string, locale: "et" | "ru"): Promise<Mail | null> {
+  const [created] = await deps.db
+    .insert(subscribers)
+    .values({ email, locale, token: newToken(), consentAt: deps.now, clientId: accountOf(normalizeEmail(email)) })
+    .onConflictDoNothing({ target: subscribers.email })
+    .returning();
+  let sub: Subscriber | undefined = created;
+  if (!sub) {
+    const [existing] = await deps.db.select().from(subscribers).where(eq(subscribers.email, email)).limit(1);
+    if (!existing || existing.confirmedAt) return null;
+    [sub] = await deps.db.update(subscribers).set({ consentAt: deps.now, locale }).where(eq(subscribers.id, existing.id)).returning();
+  }
+  if (isSampleAddress(email)) {
+    console.info(`[forms] ${form}: stored; confirmation e-mail skipped (sample address)`);
+    return null;
+  }
+  if (!mailConfigured(deps.env)) return null;
+  if (!(await allowed(deps.env, `rl:confirm:${await sha256(email)}`, CONFIRM_MAILS_PER_DAY, 24 * 60 * 60))) {
+    console.info(`[forms] ${form}: confirmation e-mails for this address are paused for today`);
+    return null;
+  }
+  try {
+    if (!(await reserveNewsletterMail(deps.db, deps.now))) {
+      logNote(`[forms] ${form}: daily mail cap reached: no confirmation e-mail`);
+      return null;
+    }
+  } catch (e) {
+    logFailure(`[forms] ${form}: mail quota unavailable, no confirmation e-mail`, e);
+    return null;
+  }
+  return confirmationMail(deps.siteUrl, sub);
+}
+
+/**
+ * "Soovin MS LABi uudiseid ja pakkumisi" ticked on a registration form (phase 2c): the newsletter's own sign-up (subscribeAddress,
+ * with all its guards) after the answer. Never throws: the registration is stored whatever happens here, and a failure is logged
+ * without the address.
+ */
+async function subscribeLater(deps: Deps, form: FormName, wish: { email: string; locale: "et" | "ru" }): Promise<void> {
+  try {
+    const mail = await subscribeAddress(deps, form, wish.email, wish.locale);
+    if (!mail) return;
+    const sent = await sendMail(deps.env, mail);
+    console.info(`[forms] ${form}: newsletter confirmation e-mail sent: ${sent}`);
+  } catch (e) {
+    logFailure(`[forms] ${form}: newsletter sign-up failed`, e);
+  }
+}
+
+/**
  * Newsletter sign-up. The answer is always the same "check your inbox", so the form never tells whether an address
  * is already subscribed. A new address is stored unconfirmed and gets the confirmation link; an unconfirmed one gets
  * the same link again (new consent time); a confirmed one gets nothing. The consent is the sign-up itself (there is no
  * consent box): `consentAt` is the time of the submission.
+ *
+ * The confirmation e-mail goes the way the registrations' and requests' do (sendConfirmation): none to a sample address
+ * (`@example.test`) or from a deployment without Resend, neither of which takes a place; at most 3 per address and day; and one
+ * place of the newsletter's daily cap — all of that in subscribeAddress, which the registration forms' newsletter box shares. Over
+ * the cap, or with the quota failing, the address is stored and the answer is the same, with no e-mail.
  */
 export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionResult> {
   return submission(deps, "subscribe", formData, parseSubscribe, async ({ email, locale }) => {
-    const [created] = await deps.db
-      .insert(subscribers)
-      .values({ email, locale, token: newToken(), consentAt: deps.now, clientId: accountOf(normalizeEmail(email)) })
-      .onConflictDoNothing({ target: subscribers.email })
-      .returning();
-    let sub: Subscriber | undefined = created;
-    if (!sub) {
-      const [existing] = await deps.db.select().from(subscribers).where(eq(subscribers.email, email)).limit(1);
-      if (!existing || existing.confirmedAt) return { result: OK };
-      [sub] = await deps.db.update(subscribers).set({ consentAt: deps.now, locale }).where(eq(subscribers.id, existing.id)).returning();
-    }
-    if (!(await allowed(deps.env, `rl:confirm:${await sha256(email)}`, CONFIRM_MAILS_PER_DAY, 24 * 60 * 60))) {
-      console.info("[forms] subscribe: confirmation e-mails for this address are paused for today");
-      return { result: OK };
-    }
-    return { result: OK, mail: confirmationMail(deps.siteUrl, sub) };
+    const mail = await subscribeAddress(deps, "subscribe", email, locale);
+    return mail ? { result: OK, mail } : { result: OK };
   });
 }
 
-/** The confirmation link: sets `confirmedAt` once (later clicks keep the first time). null = unknown token. */
-export async function confirmSubscriber(db: Db, token: string, now: Date): Promise<Subscriber | null> {
+/**
+ * The confirmation link: sets `confirmedAt` once (later clicks keep the first time). `first` is true for the click that confirmed it
+ * (the welcome mail follows that one only, server/newsletter.ts). null = unknown token.
+ */
+export async function confirmSubscriber(db: Db, token: string, now: Date): Promise<{ sub: Subscriber; first: boolean } | null> {
   if (!isTokenShape(token)) return null;
+  const [confirmed] = await db.update(subscribers).set({ confirmedAt: now }).where(and(eq(subscribers.token, token), isNull(subscribers.confirmedAt))).returning();
+  if (confirmed) return { sub: confirmed, first: true };
   const [row] = await db.select().from(subscribers).where(eq(subscribers.token, token)).limit(1);
-  if (!row) return null;
-  if (row.confirmedAt) return row;
-  const [updated] = await db.update(subscribers).set({ confirmedAt: now }).where(eq(subscribers.id, row.id)).returning();
-  return updated ?? row;
+  return row ? { sub: row, first: false } : null;
 }

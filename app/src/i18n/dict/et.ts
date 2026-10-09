@@ -287,6 +287,8 @@ export const et = {
     // Contact-course registration extras (P11, P14, P16)
     modelHelp: "Soovin koolituskeskuse abi modellide leidmisel",
     createAccount: "Loo mulle kohe konto MS LAB keskkonda",
+    // the registration forms' newsletter consent (phase 2c): unticked; ticked, the newsletter's own sign-up follows
+    newsletterConsent: "Soovin MS LABi uudiseid ja pakkumisi",
     paymentLabel: "Tasumine",
     payFull: "100% kohe",
     payHalf: "50% registreerimisel + 50% koolituspäeval",
@@ -349,7 +351,11 @@ export const et = {
     confirmText: "Saatsime sulle kinnituskirja. Vajuta kirjas olevale lingile, et liitumine lõpule viia.",
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",
+    // the confirmed notice's line when Seaded has a welcome code (the confirmation link's #kood=…, phase 2c)
+    codeLine: "Sinu tervituskood: {code}. Lisa kood registreerimisel lahtrisse „Sõnum“.",
     sentTitle: "Kontrolli oma postkasti",
+    // the newsletter popup's answer after a sign-up (components/site/NewsletterPopup.tsx, phase 2c)
+    popupSent: "Saatsime sulle kinnituslingi. Ava see oma postkastis.",
     // Home page notice after the confirmation link (/?uudiskiri=kinnitatud or =vigane).
     linkInvalid: "See kinnituslink ei kehti. Liitu uudiskirjaga uuesti lehe allosas.",
   },
@@ -367,6 +373,14 @@ export const et = {
       "",
       "MS LAB Koolituskeskus",
     ].join("\n"),
+    // The welcome mail after the first confirmation (server/account-mail.ts welcomeMail, phase 2c): the code is Seaded "Tervituskood".
+    welcome: {
+      subject: "Tere tulemast MS LABi!",
+      intro: "Aitäh, et liitusid MS LABi uudiskirjaga.",
+      codeIntro: "Sinu tervituskood:",
+      use: "Lisa kood registreerimisel lahtrisse „Sõnum“.",
+      invoice: "Maria arvestab soodustuse sinu arvelt maha.",
+    },
   },
 
   // /ostukorv: e-learning purchase placeholder until bank-link payment arrives (P9).
@@ -433,6 +447,14 @@ export const et = {
       line: "Sinu MS LAB konto on kustutatud.",
       kept: "Sinu registreeringud jäävad Mariale alles.",
     },
+    // The mail after the password was set, changed or removed (account-mail.ts passwordChangedMail, phase 2c): {email} is Maria's
+    // address from Seaded (the contact), `notYou` the line without one.
+    passwordMail: {
+      subject: "MS LABi konto parool on muudetud",
+      line: "Sinu MS LABi konto parool on muudetud.",
+      notYou: "Kui see polnud sina, kirjuta kohe Mariale.",
+      notYouAt: "Kui see polnud sina, kirjuta kohe Mariale: {email}",
+    },
     // The one sentence on each course card (domain/account-cards.ts nextStep): `{amount}` and `{rest}` are euros ("175 €"),
     // `{date}` the last day of an e-course access ("22.03.2027"). A session's date, time and place are on the card's own
     // line, so the sentences do not repeat them.
@@ -482,6 +504,16 @@ export const et = {
       open: "Ava koolitus",
       empty: "Sul ei ole veel koolitusi.",
       browse: "Vaata koolitusi",
+      // The dark "Pooleli" card at the top (components/account/ResumeCard.tsx) and the e-course cards' lessons (phase 2c): {module} and
+      // {lesson} are the next lesson's module and title, {done} and {total} count the lessons. "Jätka" ("Alusta" before the first one is
+      // done) opens the next lesson; a finished course says "Läbitud ✓".
+      resumeTag: "Pooleli",
+      resumeWhere: "{module} · {lesson}",
+      resumeProgress: "{done} / {total} õppetundi tehtud",
+      resumeContinue: "Jätka",
+      resumeBegin: "Alusta",
+      lessonCount: "{done} / {total}",
+      finished: "Läbitud ✓",
       loading: "Laadin koolitusi…",
       // where to pay the prepayment (components/account/PrepaymentInfo.tsx); "Selgitus" is the bank transfer's explanation field
       payment: {
@@ -534,6 +566,12 @@ export const et = {
       // account enumeration), and an address with 3 logins in 30 minutes gets none for a while (server/client-auth.ts CLIENT_LOGIN_CAP)
       noMail: "Kui kirja ei tule, proovi poole tunni pärast uuesti.",
       changeEmail: "Muuda e-posti",
+      // the password (phase 2c): a quiet link under the e-mail step, its own step (#parool), and the way back to the code
+      toPassword: "Sisene parooliga",
+      password: "Parool",
+      toCode: "Saada mulle hoopis kood",
+      passwordWrong: "E-post või parool ei sobi.",
+      passwordLocked: "Liiga palju katseid. Proovi 15 minuti pärast uuesti või sisene koodiga.",
       wrongCode: "Kood ei sobi. Proovi uuesti.",
       expired: "Kood on aegunud. Saada uus kood.",
       // #viga=link: the e-mail's button was used already, or is older than 30 minutes
@@ -576,6 +614,7 @@ export const et = {
     },
     // one lesson /konto/kursus/<slug>/<lesson> (components/account/LessonPage.tsx, LessonPlayer.tsx): one button, "Järgmine õppetund"
     // (or "Märgi tehtuks" in its place while a text lesson is not done), and a quiet way back. {name} is a file's name, {title} the lesson's.
+    // `seekLocked`: the line under the player after a jump forward was taken back (phase 2c).
     lesson: {
       back: "Tagasi koolitusele",
       next: "Järgmine õppetund",
@@ -592,6 +631,7 @@ export const et = {
       fullscreen: "Täisekraan",
       exitFullscreen: "Välju täisekraanist",
       video: "Video: {title}",
+      seekLocked: "Edasi saab kerida kuni kohani, kuhu oled jõudnud.",
     },
     // "Lemmikud" /konto/lemmikud (components/account/FavouritesTab.tsx): the hearted courses as the catalogue's cards, each with ♡ to
     // take it off. {title} is a course's title (the button's name for a screen reader, and what was taken off).
@@ -606,7 +646,7 @@ export const et = {
       loading: "Laadin lemmikuid…",
     },
     // "Minu andmed" /konto/andmed (components/account/DetailsTab.tsx): name, phone and language with one "Salvesta"; the newsletter
-    // switch saves at once; "Kustuta konto" at the very bottom with one confirmation step. Each language's name is in that language.
+    // switch saves at once; the optional password; "Kustuta konto" at the very bottom with one confirmation step. Each language's name is in that language.
     details: {
       title: "Sinu andmed",
       email: "E-post",
@@ -625,6 +665,30 @@ export const et = {
       deleteFailed: "Kustutamine ei õnnestunud. Proovi uuesti.",
       // the home page's notice after the deletion (/#konto-kustutatud)
       deleted: "Konto on kustutatud.",
+      // "Parool" (components/account/PasswordSection.tsx, phase 2c): optional, next to the e-mail code. {date} is the last change.
+      password: {
+        title: "Parool",
+        none: "Saad soovi korral määrata parooli ja siseneda edaspidi e-posti ja parooliga. Kood töötab alati edasi.",
+        isSet: "Parool on määratud (muudetud {date}).",
+        set: "Määra parool",
+        change: "Muuda parooli",
+        remove: "Eemalda parool",
+        newPassword: "Uus parool",
+        repeat: "Korda parooli",
+        save: "Salvesta parool",
+        cancel: "Tühista",
+        short: "Parool peab olema vähemalt 10 märki.",
+        long: "Parool võib olla kuni 200 märki.",
+        email: "Parool ei tohi olla sinu e-posti aadress.",
+        mismatch: "Paroolid ei ühti.",
+        saved: "Parool on salvestatud.",
+        removed: "Parool on eemaldatud.",
+        removeQuestion: "Kas eemaldame parooli? Saad edasi siseneda koodiga.",
+        removeYes: "Jah, eemalda",
+        failed: "Ei õnnestunud salvestada. Proovi uuesti.",
+        removeFailed: "Ei õnnestunud eemaldada. Proovi uuesti.",
+        rate: "Oled parooli juba mitu korda muutnud. Proovi tunni aja pärast uuesti.",
+      },
       loading: "Laadin andmeid…",
     },
   },

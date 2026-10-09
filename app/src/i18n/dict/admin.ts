@@ -105,7 +105,7 @@ export const adminEt = {
     home: "Avaleht",
     trainer: "Koolitaja",
     news: "Uudised",
-    campaign: "Kampaania",
+    campaign: "Hüpikaken",
     newsletter: "Uudiskiri",
     settings: "Seaded",
   },
@@ -306,6 +306,9 @@ export const adminEt = {
       notFound: "Seda õpilast ei leitud.",
       noName: "Nimi puudub",
       created: "Konto loodud {date}",
+      // her address's newsletter (phase 2c)
+      newsletter: "Uudiskiri: {state}",
+      newsletterStates: { yes: "jah", pending: "ootab kinnitust", no: "ei" },
       phone: "Telefon",
       locale: "Keel",
       viewAs: "Vaata tema vaadet",
@@ -903,14 +906,17 @@ export const adminEt = {
     },
   },
 
-  // Prototype D adminCamp ("Kampaania hüpikaken"), Maria C38/C42 ("Meeldib, jätame.") + C43 (image upload), M3, M4.
+  // Hüpikaken (prototype D adminCamp, Maria C38/C42 ("Meeldib, jätame.") + C43 (image upload), M3, M4; phase 2c: what the home page shows, and the
+  // newsletter popup's texts and picture). Owner wording 08.10: "Avalehel", and no "nõusolek" in the newsletter lead.
   campaign: {
     eyebrow: "Turundus",
-    title: "Kampaania hüpikaken",
-    lead: "Esilehel kord külastuse jooksul kuvatav pakkumine. Muuda teksti, koodi ja pilti ise — ostukorvis, tundides ja testides seda ei kuvata.",
+    title: "Hüpikaken",
+    lead: "Avalehel kord külastuse jooksul kuvatav aken: kampaania pakkumine või uudiskirjaga liitumine. Korraga on näha üks või mitte ükski.",
+    shown: "Lehel näidatakse",
+    shownOptions: { campaign: "Kampaania", newsletter: "Uudiskiri", off: "Väljas" },
     form: "Kampaania",
-    active: "Kampaania on aktiivne",
-    activeHint: "Välja lülitatud kampaaniat avalehel ei näidata.",
+    newsletterForm: "Uudiskiri",
+    newsletterLead: "Hüpikaknas on e-posti väli ja „Liitu“. Tervituskood saadetakse alles pärast kinnitamist (Seaded → Tervituskood), aknas seda ei näidata.",
     kicker: "Silt",
     titleField: "Pealkiri",
     text: "Tekst",
@@ -923,17 +929,24 @@ export const adminEt = {
     image: "Pilt",
     preview: "Eelvaade",
     previewNote: "Nii näeb hüpikaken välja avalehel. Laiemal ekraanil on pilt teksti kõrval.",
-    off: "Kampaania on välja lülitatud: avalehel seda ei näidata.",
+    off: "Seda akent avalehel praegu ei näidata.",
     copy: "Kopeeri",
     close: "Sulge",
     rules: "Reeglid",
-    rulesList: ["Kuvatakse esilehel 6 sekundi pärast", "Kord külastuse jooksul", "Mitte ostukorvis, tundides ega testides", "Sulgub Esc, ✕ või taustale vajutades, telefonis ka alla libistades"],
+    rulesList: [
+      "Kuvatakse avalehel 6 sekundi pärast",
+      "Kord külastuse jooksul",
+      "Korraga üks aken: kampaania või uudiskiri",
+      "Uudiskirja akent ei näidata enam brauseris, kust sellega liituti",
+      "Mitte ostukorvis, tundides ega testides",
+      "Sulgub Esc, ✕ või taustale vajutades, telefonis ka alla libistades",
+    ],
   },
 
   settings: {
     eyebrow: "Seaded",
     title: "Seaded",
-    lead: "Kontaktandmed, sotsiaalmeedia lingid, uudiskirja soodustus, ettemaksu juhised, õigustekstid ja e-koolituse tingimused.",
+    lead: "Kontaktandmed, sotsiaalmeedia lingid, uudiskirja soodustus ja tervituskood, ettemaksu juhised, õigustekstid ja e-koolituse tingimused.",
     contact: "Kontaktandmed",
     contactLead: "Jaluses ja kontaktilehel. Tühja välja ei näidata.",
     email: "E-post",
@@ -946,6 +959,8 @@ export const adminEt = {
     newsletter: "Uudiskiri",
     discount: "Tervitussoodustus",
     discountHint: "Jaluse uudiskirja plokis: „… {discount} tervitussoodustus sinu esimesele koolitusele.“ Näiteks 10%.",
+    welcomeCode: "Tervituskood",
+    welcomeCodeHint: "Saadetakse tervituskirjas pärast uudiskirja kinnitamist ja näidatakse avalehel kinnitusteates; hüpikaknas seda ei näidata. Tühjaks jättes koodi ei saadeta. Tähed A–Z, numbrid ja sidekriips, kuni 30 märki.",
     // where students pay the prepayment: on the unpaid contact-course cards of their account (never on a public page)
     prepayment: "Ettemaksu juhised",
     prepaymentLead: "Õpilase kontol, kontaktkoolituse kaardil, mis ootab ettemaksu.",

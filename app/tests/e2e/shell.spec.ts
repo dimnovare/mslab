@@ -12,18 +12,17 @@ test.describe("desktop", () => {
     await expect(header.getByRole("link", { name: "Koolitused" })).toBeVisible();
     await expect(header.getByRole("link", { name: "Logi sisse" })).toBeVisible();
     const navFont = await header.getByRole("link", { name: "Koolitused" }).evaluate((el) => getComputedStyle(el).fontFamily);
-    expect(navFont).toMatch(/Manrope/i);
+    expect(navFont).toMatch(/Jost/i); // phase 2c: the menu in Jost
     await page.mouse.wheel(0, 900); await page.waitForTimeout(400);
     expect(await header.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
     await expect(page.locator("footer").getByText("Otse sinu postkasti.")).toBeVisible();
     await page.goto("/ru"); await expect(page.locator("header").getByRole("link", { name: "Курсы" })).toBeVisible();
   });
 
-  test("menu, login and language switch are Manrope 500 15px (G4)", async ({ page }) => {
+  test("login and language switch are Manrope 500 15px (G4); the menu is Jost (phase 2c, look.spec.ts)", async ({ page }) => {
     await page.goto("/");
     const header = page.locator("header");
     for (const el of [
-      header.getByRole("navigation").getByRole("link", { name: "Praktika" }),
       header.getByRole("link", { name: "Logi sisse" }),
       header.getByRole("link", { name: /Vaheta keelt/ }),
     ]) {
@@ -80,15 +79,18 @@ test.describe("desktop", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
   });
 
-  test("the newsletter card is capped at 1400 px and centred on wide screens (item 8)", async ({ page }) => {
+  test("the newsletter card is the footer's right third, not stretched across it, on wide screens (phase 2c: it was capped at 1400 px and centred, item 8)", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1300 });
     await page.goto("/konto/sisene");
-    const card = page.locator("footer section").filter({ has: page.locator("[data-newsletter-form]") });
+    const card = page.locator("footer [data-footer-newsletter]");
+    const links = page.locator("footer").getByRole("link", { name: "Kõik koolitused" });
     const box = (await card.boundingBox())!;
-    expect(box.width).toBe(1400);
-    expect(Math.round(box.x)).toBe((2560 - 1400) / 2);
+    expect(Math.round(box.x + box.width)).toBe(2560 - 100); // the footer's side padding (--page) is 100 px from 1818 px up
+    expect(box.width).toBeGreaterThan(700);
+    expect(box.width).toBeLessThan(800); // about a third of the 2360 px inside the padding, minus its share of the gap
+    expect(box.x).toBeGreaterThan((await links.boundingBox())!.x);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect.poll(async () => (await card.boundingBox())!.width).toBeLessThan(1400); // narrower screens: the footer's width
+    await expect.poll(async () => (await card.boundingBox())!.width).toBeLessThan(box.width); // narrower screens: the footer's width
   });
 
   test("unknown paths show a localized 404 inside the shell", async ({ page }) => {

@@ -64,7 +64,7 @@ describe("GET /api/cron/sweep", () => {
     vi.stubEnv("CRON_SECRET", SECRET);
     vi.spyOn(console, "info").mockImplementation(() => {});
     await accountRows(db, new Date());
-    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 1, sessions: 2, mailDays: 1, ...NO_VIDEOS });
+    expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 1, logins: 1, sessions: 2, mailDays: 2, ...NO_VIDEOS });
     expect(await (await call(`Bearer ${SECRET}`)).json()).toEqual({ ok: true, deleted: 0, logins: 0, sessions: 0, mailDays: 0, ...NO_VIDEOS });
   });
 
@@ -131,18 +131,22 @@ async function accountRows(db: Db, now: Date): Promise<void> {
     { idHash: "live", clientId: c.id, expiresAt: t(170 * DAY) },
   ]);
   const day = (offset: number) => t(offset * DAY).toISOString().slice(0, 10);
-  await db.insert(mailQuota).values([{ day: day(-8), sent: 9 }, { day: day(-7), sent: 7 }, { day: day(0), sent: 1 }]);
+  // (the newsletter's own counter is the same day with ":nl" after it)
+  await db.insert(mailQuota).values([
+    { day: day(-8), sent: 9 }, { day: day(-7), sent: 7 }, { day: day(0), sent: 1 },
+    { day: `${day(-8)}:nl`, sent: 4 }, { day: `${day(-7)}:nl`, sent: 3 }, { day: `${day(0)}:nl`, sent: 2 },
+  ]);
 }
 
 describe("sweepClientRows", () => {
   test("deletes login codes past their time (they hold the address in plain text), sessions over for more than 30 days, mail counters older than 7 days; says how many", async () => {
     const now = new Date("2026-10-10T03:00:00Z");
     await accountRows(db, now);
-    expect(await sweepClientRows(db, now)).toEqual({ logins: 1, sessions: 2, mailDays: 1 });
+    expect(await sweepClientRows(db, now)).toEqual({ logins: 1, sessions: 2, mailDays: 2 });
     expect((await db.select().from(clientLoginTokens)).map((r) => r.hash)).toEqual(["live"]);
     // a session ended (replaced) 29 days ago still tells its device "Sinu konto avati teises seadmes"
     expect((await db.select().from(clientSessions)).map((r) => r.idHash).sort()).toEqual(["ended-29", "expired-1", "live"]);
-    expect((await db.select().from(mailQuota)).map((r) => r.day).sort()).toEqual(["2026-10-03", "2026-10-10"]);
+    expect((await db.select().from(mailQuota)).map((r) => r.day).sort()).toEqual(["2026-10-03", "2026-10-03:nl", "2026-10-10", "2026-10-10:nl"]);
     expect(await db.select().from(clients)).toHaveLength(1); // the account itself stays
     expect(await sweepClientRows(db, now)).toEqual({ logins: 0, sessions: 0, mailDays: 0 });
   });

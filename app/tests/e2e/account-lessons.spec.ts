@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { clientEmail, endClientSessions, insertClient, signInAsClient, takeTerms } from "./account";
 import { E2E_BUNNY } from "./bunny-values";
 import { LOCK_WAIT_MS, onLocalDb, removeClientRows } from "./fixtures";
-import { dropVideo, insertLessonCourse, markDone, removeLessonFile, setVideoShape, type LessonCourse } from "./lessons";
+import { backdateClock, dropVideo, insertLessonCourse, markDone, removeLessonFile, setVideoShape, type LessonCourse } from "./lessons";
 import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
 
@@ -157,6 +157,7 @@ test("a video lesson: the fake Bunny's frame with the e-mail over it; played to 
     window.dispatchEvent(new Event("focus"));
     document.dispatchEvent(new Event("visibilitychange"));
   });
+  await backdateClock(c.clientId, c.lessons.video);
   await page.frameLocator("[data-player] iframe").getByRole("button", { name: "Mängi lõpuni" }).click();
   await expect(page.locator("[data-lesson-done]")).toHaveText("Õppetund tehtud ✓");
   await expect(next).toHaveAttribute("href", lessonPath(c, c.lessons.text));

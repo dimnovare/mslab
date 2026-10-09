@@ -47,8 +47,15 @@ export const readPackages = (q: Q): Promise<PracticePackage[]> => q.select().fro
 export const readGallery = (q: Q, group: string): Promise<GalleryItem[]> =>
   q.select().from(galleryItems).where(eq(galleryItems.group, group)).orderBy(asc(galleryItems.sort), asc(galleryItems.id));
 
+/** The campaign popup's row (kind "campaign"). */
 export async function readCampaign(q: Q): Promise<Campaign | null> {
-  const [row] = await q.select().from(campaign).where(eq(campaign.id, 1)).limit(1);
+  const [row] = await q.select().from(campaign).where(eq(campaign.kind, "campaign")).limit(1);
+  return row ?? null;
+}
+
+/** The newsletter popup's row (kind "newsletter", phase 2c). */
+export async function readNewsletterPopup(q: Q): Promise<Campaign | null> {
+  const [row] = await q.select().from(campaign).where(eq(campaign.kind, "newsletter")).limit(1);
   return row ?? null;
 }
 

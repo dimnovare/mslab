@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { makeTestDb } from "./helpers";
 import type { Db } from "@/db/client";
 import { campaign, faq, galleryItems, heroSlides, pages, posts, practicePackages, settings } from "@/db/schema";
@@ -332,7 +332,7 @@ describe("campaign (D adminCamp + image upload, M3–M5)", () => {
     expect(c.values.campaign).toMatchObject({ active: true, code: "TALV15", ctaLabel: { et: "Leia enda koolitus" }, imageKey: "/seed/lash-editorial.jpg" });
     const value = { ...clone(c.values.campaign), imageKey: UPLOAD, code: " kevad-20 ", ctaLabel: { et: " " }, title: { et: "−20% kevadel", ru: "−20% весной" } };
     expect(await saveCampaignForm(db, form({ campaign: { version: c.versions.campaign, value } }))).toMatchObject({ ok: true });
-    const [row] = await db.select().from(campaign);
+    const [row] = await db.select().from(campaign).where(eq(campaign.id, 1));
     expect(row).toMatchObject({ imageKey: UPLOAD, code: "KEVAD-20", ctaLabel: { et: "Leia enda koolitus" }, title: { et: "−20% kevadel", ru: "−20% весной" }, active: true });
   });
 
@@ -346,7 +346,110 @@ describe("campaign (D adminCamp + image upload, M3–M5)", () => {
       "campaign.code": "codeFormat",
     });
     expect(await saveCampaignForm(db, form({ campaign: { version: c.versions.campaign, value: { ...base, active: false, imageKey: "", title: { et: "" } } } }))).toMatchObject({ ok: true });
-    expect((await getHomeData(db)).campaign).toBeNull();
+    expect((await getHomeData(db)).popup).toBeNull();
+  });
+
+  test("Hüpikaken: both parts load; choosing Uudiskiri switches the campaign off and the newsletter on in one save; Väljas both off", async () => {
+    const p = await loadCampaign(db);
+    expect(p.values.newsletter).toMatchObject({ active: false, kicker: { et: "MS LABi kirjad", ru: "Письма MS LAB" }, imageKey: "/seed/gift-bag-serum.jpg" });
+    const flags = async () => (await db.select({ id: campaign.id, active: campaign.active }).from(campaign).orderBy(asc(campaign.id))).map((r) => r.active);
+    expect(await flags()).toEqual([true, false]);
+    const both = (c: boolean, n: boolean) =>
+      form({
+        campaign: { version: p.versions.campaign, value: { ...clone(p.values.campaign), active: c } },
+        newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: n } },
+      });
+    expect(await saveCampaignForm(db, both(false, true))).toMatchObject({ ok: true });
+    expect(await flags()).toEqual([false, true]);
+    expect((await getHomeData(db)).popup).toMatchObject({ kind: "newsletter" });
+    const q = await loadCampaign(db);
+    expect(await saveCampaignForm(db, form({ newsletter: { version: q.versions.newsletter, value: { ...clone(q.values.newsletter), active: false } } }))).toMatchObject({ ok: true });
+    expect(await flags()).toEqual([false, false]);
+    expect((await getHomeData(db)).popup).toBeNull();
+  });
+
+  test("a shown newsletter popup needs its title and picture; a switched-off one may stay unfinished", async () => {
+    const p = await loadCampaign(db);
+    const nl = (value: object) => form({ newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), ...value } } });
+    expect(fieldsOf(await saveCampaignForm(db, nl({ active: true, title: { et: "" }, imageKey: "" })))).toEqual({ "newsletter.title": "required", "newsletter.imageKey": "imageRequired" });
+    expect(await saveCampaignForm(db, nl({ active: false, title: { et: "" }, imageKey: "" }))).toMatchObject({ ok: true });
+  });
+
+  // The first test above sends the campaign part first, so the campaign is already off (in the same transaction) when the newsletter
+  // popup is switched on: it passes even without upsertCampaign's "switch the other popup off first". These do not: the popup
+  // switched on is written while the other one is still on, and campaign_one_active refuses a second active row.
+  describe("at most one popup shown, whichever part is saved or written first", () => {
+    const flags = async () => (await db.select({ id: campaign.id, active: campaign.active }).from(campaign).orderBy(asc(campaign.id))).map((r) => r.active);
+
+    test("only the newsletter part, switched on, while the campaign is still on: the campaign goes off in the same save", async () => {
+      const p = await loadCampaign(db);
+      expect(await flags()).toEqual([true, false]);
+      const r = await saveCampaignForm(db, form({ newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: true } } }));
+      expect(r).toMatchObject({ ok: true });
+      expect(await flags()).toEqual([false, true]);
+    });
+
+    test("only the campaign part, switched on, while the newsletter popup is on: the newsletter popup goes off", async () => {
+      const p = await loadCampaign(db);
+      await saveCampaignForm(db, form({ newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: true } } }));
+      const q = await loadCampaign(db);
+      expect(await flags()).toEqual([false, true]);
+      expect(await saveCampaignForm(db, form({ campaign: { version: q.versions.campaign, value: { ...clone(q.values.campaign), active: true } } }))).toMatchObject({ ok: true });
+      expect(await flags()).toEqual([true, false]);
+    });
+
+    test("both parts in the other order (the newsletter popup first): the same result", async () => {
+      const p = await loadCampaign(db);
+      const r = await saveCampaignForm(
+        db,
+        form({
+          newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: true } },
+          campaign: { version: p.versions.campaign, value: { ...clone(p.values.campaign), active: false } },
+        }),
+      );
+      expect(r).toMatchObject({ ok: true });
+      expect(await flags()).toEqual([false, true]);
+    });
+
+    test("a forged draft with both on is not a database error: the part written last wins, one popup is shown", async () => {
+      const p = await loadCampaign(db);
+      const r = await saveCampaignForm(
+        db,
+        form({
+          campaign: { version: p.versions.campaign, value: { ...clone(p.values.campaign), active: true } },
+          newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: true } },
+        }),
+      );
+      expect(r).toMatchObject({ ok: true });
+      expect((await flags()).filter(Boolean)).toHaveLength(1);
+    });
+
+    test("one stale part, nothing written: another save changed the newsletter popup, so the campaign's switch-off in the same save is not stored either", async () => {
+      const p = await loadCampaign(db);
+      await db.update(campaign).set({ title: { et: "Kellegi teine salvestus" } }).where(eq(campaign.id, 2));
+      const r = await saveCampaignForm(
+        db,
+        form({
+          campaign: { version: p.versions.campaign, value: { ...clone(p.values.campaign), active: false } },
+          newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: true } },
+        }),
+      );
+      expect(r).toEqual({ ok: false, error: "stale" });
+      expect(await flags()).toEqual([true, false]);
+    });
+
+    test("one refused part, nothing written: the campaign stays on (its own switch-off is not saved) when the newsletter popup is switched on without its picture", async () => {
+      const p = await loadCampaign(db);
+      const r = await saveCampaignForm(
+        db,
+        form({
+          campaign: { version: p.versions.campaign, value: { ...clone(p.values.campaign), active: false } },
+          newsletter: { version: p.versions.newsletter, value: { ...clone(p.values.newsletter), active: true, imageKey: "" } },
+        }),
+      );
+      expect(fieldsOf(r)).toEqual({ "newsletter.imageKey": "imageRequired" });
+      expect(await flags()).toEqual([true, false]);
+    });
   });
 });
 
@@ -382,8 +485,20 @@ describe("settings", () => {
       }),
     );
     expect(r).toMatchObject({ ok: true });
-    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%" });
+    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%", welcomeCode: "" });
     expect(await getPage(db, "privacy")).toMatchObject({ title: { et: "Privaatsuspoliitika" }, body: { et: "Esimene.\n\nTeine.", ru: "Первый." } });
+  });
+
+  test("Tervituskood: stored in capitals next to the discount; another shape or over 30 is refused; a save without it keeps it", async () => {
+    const s = await loadSettings(db);
+    const save = (value: object) => saveSettingsForm(db, form({ newsletter: { version: s.versions.newsletter, value } }));
+    expect(fieldsOf(await save({ discountLabel: "10%", welcomeCode: "tere 10" }))).toEqual({ "newsletter.welcomeCode": "codeFormat" });
+    expect(fieldsOf(await save({ discountLabel: "10%", welcomeCode: "A".repeat(31) }))).toEqual({ "newsletter.welcomeCode": "tooLong" });
+    expect(await save({ discountLabel: "10%", welcomeCode: " tere-10 " })).toMatchObject({ ok: true });
+    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "10%", welcomeCode: "TERE-10" });
+    const t = await loadSettings(db);
+    expect(await saveSettingsForm(db, form({ newsletter: { version: t.versions.newsletter, value: { discountLabel: "15%" } } }))).toMatchObject({ ok: true });
+    expect((await getSettings(db)).newsletter).toEqual({ discountLabel: "15%", welcomeCode: "TERE-10" });
   });
 
   describe("E-koolituse tingimused (course_terms)", () => {
@@ -599,7 +714,7 @@ describe("missing rows", () => {
     await db.delete(settings).where(eq(settings.key, "newsletter"));
     const s = await loadSettings(db);
     expect(s.values.terms).toEqual({ title: { et: "" }, body: { et: "" } });
-    expect(s.values.newsletter).toEqual({ discountLabel: "" });
+    expect(s.values.newsletter).toEqual({ discountLabel: "", welcomeCode: "" });
     const r = await saveSettingsForm(
       db,
       form({ terms: { version: s.versions.terms, value: { title: { et: "Tingimused" }, body: { et: "Tekst." } } }, newsletter: { version: s.versions.newsletter, value: { discountLabel: "10%" } } }),

@@ -18,10 +18,11 @@ declare global {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const dashboard = (over: Partial<ClientProfile> = {}): Dashboard => ({
-  client: { email: "kati@example.test", name: "Kati Tamm", phone: "", locale: "et", newsletter: false, ...over },
+  client: { email: "kati@example.test", name: "Kati Tamm", phone: "", locale: "et", newsletter: false, passwordSetAt: null, ...over },
   cards: [],
   favourites: [],
   prepayment: null,
+  resume: null,
 });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -275,5 +276,288 @@ describe("Kustuta konto", () => {
     answer = () => Promise.resolve(json(401, { ok: false, reason: "none" }));
     await click($("[data-delete-yes]"));
     expect(gets()).toHaveLength(2);
+  });
+});
+
+describe("Parool (phase 2c)", () => {
+  const savePassword = async () => {
+    await act(async () => $<HTMLFormElement>("[data-password-form]")!.requestSubmit());
+    await settle();
+  };
+  const passwordFields = () => [...document.querySelectorAll<HTMLInputElement>("[data-password-form] input[type=password]")];
+
+  test("without a password: the sentence and 'Määra parool'; the form asks twice; too short, not the same, or the e-mail is said here and nothing is sent; Tühista closes it", async () => {
+    api();
+    await mount();
+    expect($("[data-password-state]")?.textContent).toBe("Saad soovi korral määrata parooli ja siseneda edaspidi e-posti ja parooliga. Kood töötab alati edasi.");
+    await click($("[data-password-set]"));
+    const [first, second] = passwordFields();
+    expect([first.getAttribute("autocomplete"), second.getAttribute("autocomplete")]).toEqual(["new-password", "new-password"]);
+    expect(document.activeElement).toBe(first);
+    await type(first, "lühike");
+    await type(second, "lühike");
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Parool peab olema vähemalt 10 märki.");
+    await type(first, "pikk-parool-2026");
+    await type(second, "pikk-parool-2025");
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Paroolid ei ühti.");
+    await type(first, "kati@example.test");
+    await type(second, "kati@example.test");
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Parool ei tohi olla sinu e-posti aadress.");
+    expect(sent("/api/konto/parool")).toEqual([]);
+    await click($("[data-password-cancel]"));
+    expect($("[data-password-form]")).toBeNull();
+    expect(document.activeElement).toBe($("[data-password-set]"));
+  });
+
+  test("saved: 'Parool on määratud (muudetud {date}).' with 'Muuda parooli' and 'Eemalda parool', and 'Parool on salvestatud.'", async () => {
+    api({}, { "/api/konto/parool": async () => json(200, { ok: true, passwordSetAt: "2026-10-08T10:00:00.000Z" }) });
+    await mount();
+    await click($("[data-password-set]"));
+    const [first, second] = passwordFields();
+    await type(first, "pikk-parool-2026");
+    await type(second, "pikk-parool-2026");
+    await savePassword();
+    expect(sent("/api/konto/parool")).toEqual([{ password: "pikk-parool-2026" }]);
+    expect($("[data-password-state]")?.textContent).toBe("Parool on määratud (muudetud 08.10.2026).");
+    expect($("[data-password-status]")?.textContent).toBe("Parool on salvestatud.");
+    expect($("[data-password-change]")?.textContent).toBe("Muuda parooli");
+    expect($("[data-password-remove]")?.textContent).toBe("Eemalda parool");
+    expect(document.activeElement).toBe($("[data-password-change]")); // the form is gone: the focus goes to the button that opens it again
+  });
+
+  test("the server's refusals: the e-mail rule, the hour's limit; a failure of ours", async () => {
+    let answer = json(400, { ok: false, error: "email" });
+    api({}, { "/api/konto/parool": async () => answer });
+    await mount();
+    await click($("[data-password-set]"));
+    const [first, second] = passwordFields();
+    await type(first, "pikk-parool-2026");
+    await type(second, "pikk-parool-2026");
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Parool ei tohi olla sinu e-posti aadress.");
+    answer = json(429, { ok: false, error: "rate" });
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Oled parooli juba mitu korda muutnud. Proovi tunni aja pärast uuesti.");
+    answer = json(500, { ok: false, error: "server" });
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Ei õnnestunud salvestada. Proovi uuesti.");
+  });
+
+  test("with a password: 'Eemalda parool' asks once; 'Jah, eemalda' sends DELETE and the sentence without one comes back", async () => {
+    api({ passwordSetAt: "2026-10-01T09:00:00.000Z" });
+    await mount();
+    expect($("[data-password-state]")?.textContent).toBe("Parool on määratud (muudetud 01.10.2026).");
+    await click($("[data-password-remove]"));
+    expect($("[data-password-confirm]")?.textContent).toContain("Kas eemaldame parooli? Saad edasi siseneda koodiga.");
+    await click($("[data-password-remove-yes]"));
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/konto/parool" && init?.method === "DELETE")).toBe(true);
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("none");
+    expect($("[data-password-status]")?.textContent).toBe("Parool on eemaldatud.");
+  });
+
+  test("Russian", async () => {
+    api({ locale: "ru", passwordSetAt: "2026-10-01T09:00:00.000Z" });
+    await mount("ru");
+    expect($("[data-password-state]")?.textContent).toBe("Пароль задан (изменён 01.10.2026).");
+  });
+});
+
+describe("Parool: the rest of the behaviour", () => {
+  const savePassword = async () => {
+    await act(async () => $<HTMLFormElement>("[data-password-form]")!.requestSubmit());
+    await settle();
+  };
+  const passwordFields = () => [...document.querySelectorAll<HTMLInputElement>("[data-password-form] input[type=password]")];
+  const SET = { passwordSetAt: "2026-10-01T09:00:00.000Z" };
+
+  test("the part sits between the newsletter switch and 'Kustuta konto'", async () => {
+    api();
+    await mount();
+    const [newsletter, password, danger] = ["[data-details-newsletter]", "[data-details-password]", "[data-delete-account]"].map((s) => $(s)!);
+    expect(newsletter.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(password.compareDocumentPosition(danger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(password.tagName).toBe("SECTION");
+    expect(password.getAttribute("aria-labelledby")).not.toBeNull();
+    expect($(`#${CSS.escape(password.getAttribute("aria-labelledby")!)}`)?.textContent).toBe("Parool");
+  });
+
+  test("the form is accessible: two labelled fields, the error is read (alert) and tied to both, invalid until typed again; 'Salvesta parool' is not the primary button", async () => {
+    api();
+    await mount();
+    await click($("[data-password-set]"));
+    const [first, second] = passwordFields();
+    expect(document.querySelector(`label[for='${first.id}']`)?.textContent).toBe("Uus parool");
+    expect(document.querySelector(`label[for='${second.id}']`)?.textContent).toBe("Korda parooli");
+    expect($("[data-password-save]")?.className).toMatch(/btnOutline/);
+    expect($("[data-details-save]")?.className).not.toMatch(/btnOutline/); // the profile's "Salvesta" stays the one primary button
+    expect($("[data-password-error]")?.getAttribute("role")).toBe("alert");
+    expect(first.hasAttribute("aria-invalid")).toBe(false);
+    await savePassword(); // empty: too short
+    const describedBy = $("[data-password-error]")!.id;
+    expect([first, second].map((f) => [f.getAttribute("aria-describedby"), f.getAttribute("aria-invalid")])).toEqual([
+      [describedBy, "true"],
+      [describedBy, "true"],
+    ]);
+    await type(first, "x");
+    expect($("[data-password-error]")?.textContent).toBe("");
+    expect(first.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  test("the server's own short / long answers are said too; a 200 without the date is a failure of ours", async () => {
+    let answer = json(400, { ok: false, error: "short" });
+    api({}, { "/api/konto/parool": async () => answer });
+    await mount();
+    await click($("[data-password-set]"));
+    const [first, second] = passwordFields();
+    await type(first, "pikk-parool-2026");
+    await type(second, "pikk-parool-2026");
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Parool peab olema vähemalt 10 märki.");
+    answer = json(400, { ok: false, error: "long" });
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Parool võib olla kuni 200 märki.");
+    answer = json(200, { ok: true });
+    await savePassword();
+    expect($("[data-password-error]")?.textContent).toBe("Ei õnnestunud salvestada. Proovi uuesti.");
+    expect($("[data-password-form]")).not.toBeNull();
+  });
+
+  test("one change at a time: a second submit while the first is on its way sends nothing", async () => {
+    let release: (r: Response) => void = () => {};
+    api({}, { "/api/konto/parool": () => new Promise<Response>((resolve) => (release = resolve)) });
+    await mount();
+    await click($("[data-password-set]"));
+    const [first, second] = passwordFields();
+    await type(first, "pikk-parool-2026");
+    await type(second, "pikk-parool-2026");
+    await savePassword();
+    expect($("[data-password-save]")?.getAttribute("aria-disabled")).toBe("true");
+    await savePassword();
+    expect(sent("/api/konto/parool")).toHaveLength(1);
+    await act(async () => release(json(200, { ok: true, passwordSetAt: "2026-10-08T10:00:00.000Z" })));
+    await settle();
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("set");
+  });
+
+  test("a removal on its way: 'Muuda parooli' opens no form (the answer would close it); the answer then ends the removal as asked", async () => {
+    let release: (r: Response) => void = () => {};
+    api(SET, { "/api/konto/parool": () => new Promise<Response>((resolve) => (release = resolve)) });
+    await mount();
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-remove-yes]")?.getAttribute("aria-disabled")).toBe("true");
+    await click($("[data-password-change]"));
+    expect($("[data-password-form]")).toBeNull();
+    expect($("[data-password-confirm]")).not.toBeNull();
+    await act(async () => release(json(200, { ok: true })));
+    await settle();
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("none");
+    expect($("[data-password-form]")).toBeNull();
+    expect($("[data-password-status]")?.textContent).toBe("Parool on eemaldatud.");
+  });
+
+  test("a failed removal says 'Ei õnnestunud eemaldada.' (not the saving's words), keeps the question and the password; the retry works", async () => {
+    let answer = json(500, { ok: false, error: "server" });
+    api(SET, { "/api/konto/parool": async () => answer });
+    await mount();
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe("Ei õnnestunud eemaldada. Proovi uuesti.");
+    expect($("[data-password-status]")?.className).toMatch(/error/);
+    expect($("[data-password-confirm]")).not.toBeNull();
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("set");
+    answer = json(200, { ok: true });
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("none");
+    expect($("[data-password-status]")?.textContent).toBe("Parool on eemaldatud.");
+    expect($("[data-password-status]")?.className).not.toMatch(/error/);
+    expect(document.activeElement).toBe($("[data-password-set]"));
+  });
+
+  test("a removal over the hour's limit (429 rate) says the limit's sentence, in the error style, and keeps the question and the password; other failures keep 'Ei õnnestunud eemaldada.'", async () => {
+    let answer = json(429, { ok: false, error: "rate" });
+    api(SET, { "/api/konto/parool": async () => answer });
+    await mount();
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe("Oled parooli juba mitu korda muutnud. Proovi tunni aja pärast uuesti.");
+    expect($("[data-password-status]")?.className).toMatch(/error/);
+    expect($("[data-password-confirm]")).not.toBeNull();
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("set");
+    answer = json(500, { ok: false, error: "server" });
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe("Ei õnnestunud eemaldada. Proovi uuesti.");
+  });
+
+  test("the same limit in Russian", async () => {
+    api({ ...SET, locale: "ru" }, { "/api/konto/parool": async () => json(429, { ok: false, error: "rate" }) });
+    await mount("ru");
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-status]")?.textContent).toBe(getDict("ru").account.details.password.rate);
+    expect($("[data-password-status]")?.textContent).toMatch(/[а-я]/);
+  });
+
+  test("the question takes the focus; Tühista and Esc give it back to 'Eemalda parool' and send nothing", async () => {
+    api(SET);
+    await mount();
+    await click($("[data-password-remove]"));
+    const step = $("[data-password-confirm]");
+    expect(document.activeElement).toBe(step);
+    expect(step?.getAttribute("role")).toBe("group");
+    expect($(`#${CSS.escape(step!.getAttribute("aria-labelledby")!)}`)?.textContent).toBe("Kas eemaldame parooli? Saad edasi siseneda koodiga.");
+    expect([...step!.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Jah, eemalda", "Tühista"]);
+    await click($("[data-password-remove-no]"));
+    expect($("[data-password-confirm]")).toBeNull();
+    expect(document.activeElement).toBe($("[data-password-remove]"));
+    await click($("[data-password-remove]"));
+    await act(async () => $("[data-password-confirm]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await settle();
+    expect($("[data-password-confirm]")).toBeNull();
+    expect(document.activeElement).toBe($("[data-password-remove]"));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+  });
+
+  test("'Muuda parooli' opens the same form; Tühista gives the focus back to it", async () => {
+    api(SET);
+    await mount();
+    await click($("[data-password-change]"));
+    expect($("[data-password-form]")).not.toBeNull();
+    expect($("[data-password-state]")).toBeNull();
+    expect(document.activeElement).toBe(passwordFields()[0]);
+    await click($("[data-password-cancel]"));
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("set");
+    expect(document.activeElement).toBe($("[data-password-change]"));
+  });
+
+  test("a 401 on saving or removing loads the page's data again", async () => {
+    vi.spyOn(window.location, "replace").mockImplementation(() => {});
+    api(SET, { "/api/konto/parool": async () => json(401, { ok: false, reason: "none" }) });
+    await mount();
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect(gets()).toHaveLength(2);
+    await click($("[data-password-remove-no]"));
+    await click($("[data-password-change]"));
+    const [first, second] = passwordFields();
+    await type(first, "pikk-parool-2026");
+    await type(second, "pikk-parool-2026");
+    await savePassword();
+    expect(gets()).toHaveLength(3);
+  });
+
+  test("Russian: the strings, with a no-break space after one-letter words (в, с, к, о, у)", async () => {
+    api({ locale: "ru" });
+    await mount("ru");
+    expect($("[data-password-state]")?.textContent).toBe("При желании вы можете задать пароль и входить по e-mail и паролю. Вход по коду всегда остаётся доступным.");
+    expect($("[data-password-set]")?.textContent).toBe("Задать пароль");
+    const { password } = getDict("ru").account.details;
+    expect(Object.values(password).filter((text) => /(^|\s)[вскоуВСКОУ] \S/.test(text))).toEqual([]);
+    expect(password.removeFailed).toBe("Не удалось удалить. Попробуйте ещё раз.");
+    expect(password.email).toBe("Пароль не может совпадать с\u00a0вашим e-mail.");
+    expect(password.removeQuestion).toBe("Удалить пароль? Вы сможете входить с\u00a0кодом.");
   });
 });

@@ -10,6 +10,7 @@
    between the corners, so prefers-reduced-motion has nothing to turn off. Tokens only. */
 
 .player {
+  position: relative; /* the seek line, enlarged, lies over the stage from here (the browser's :fullscreen is fixed anyway; [data-expanded] too) */
   display: flex;
   flex-direction: column;
 }
@@ -92,6 +93,42 @@
   display: flex;
   justify-content: flex-end;
   padding: 8px 0;
+}
+
+/* the line under the picture after a jump forward was taken back: a polite live region, empty (no height) otherwise. At normal size it
+   is a line of the page under the picture: only what is below it makes room, the picture never moves. */
+.seekNote {
+  margin: 0;
+  color: var(--ink-soft);
+  font: 400 14px/1.5 var(--font-body);
+}
+
+.seekNote:not(:empty) {
+  padding-top: 8px;
+}
+
+/* Enlarged, the line is out of the flow: over the top of the stage, so the stage and the picture in it keep their size when it comes
+   and goes (a picture limited by the screen's height, a phone on its side, would shrink for 6 s while the student drags Bunny's slider
+   and the controls moved under her finger). At the top, clear of Bunny's control bar at the bottom of the picture and of our button;
+   a dark pill so that it reads on any picture; it takes no clicks. No animation: prefers-reduced-motion has nothing to turn off. */
+.player:fullscreen .seekNote,
+.player[data-expanded] .seekNote {
+  position: absolute;
+  inset: 8px 0 auto;
+  z-index: 3;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin-inline: auto;
+  color: var(--paper);
+  text-align: center;
+  pointer-events: none;
+}
+
+.player:fullscreen .seekNote:not(:empty),
+.player[data-expanded] .seekNote:not(:empty) {
+  padding: 6px 14px;
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--ink) 82%, transparent);
 }
 
 .player:fullscreen,

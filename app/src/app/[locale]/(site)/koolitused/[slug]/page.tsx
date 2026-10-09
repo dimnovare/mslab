@@ -246,6 +246,7 @@ export default async function CoursePage({ params }: Props) {
                   payInstalmentNote: d.forms.payInstalmentNote,
                   modelHelp: d.forms.modelHelp,
                   createAccount: d.forms.createAccount,
+                  newsletterConsent: d.forms.newsletterConsent,
                   terms: d.forms.terms,
                   termsLink: { label: d.footer.terms, href: to("/tingimused") },
                   preferredPeriod: d.forms.preferredPeriod,

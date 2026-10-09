@@ -56,6 +56,24 @@
   font: 400 16px/1.5 var(--font-body);
 }
 
+/* an open e-course's lessons (phase 2c): "{done} / {total}" and the e-course page's thin bar, or "Läbitud ✓" */
+.progress {
+  align-self: stretch;
+  margin-top: 14px;
+}
+
+.count {
+  margin: 0;
+  color: var(--ink-soft);
+  font: 500 13px/1.5 var(--font-body);
+}
+
+.finished {
+  margin: 0;
+  color: var(--ok);
+  font: 600 14px/1.5 var(--font-body);
+}
+
 .foot {
   margin-top: 20px;
 }

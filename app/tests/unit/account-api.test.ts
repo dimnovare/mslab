@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { HEAD } from "@/app/api/konto/[[...path]]/route";
+import { DELETE, HEAD, PATCH, POST } from "@/app/api/konto/[[...path]]/route";
 import type { Db } from "@/db/client";
 import { deletionMail, esc, loginMail, verifyLink } from "@/server/account-mail";
 import { accountResponse, clearedCookies, handleAccountApi, sessionCookies, type AccountDeps } from "@/server/account-api";
@@ -53,6 +53,7 @@ describe("routing and the cross-site check", () => {
       // known paths with the wrong method
       post("/", {}), req("/lemmikud/merge"), req("/andmed"), post("/andmed", {}), req("/uudiskiri"), req("/muutmine"), req("/tingimused"), req("/kustuta"),
       req("/kustuta", { method: "DELETE" }), req("/lemmikud", { method: "PATCH" }),
+      req("/parool"), req("/parool", { method: "PATCH" }), req("/parool-login"),
       // the e-course path: one slug only, GET only
       post("/kursus/x", {}), req("/kursus"), req("/kursus/"), req("/kursus/x", { method: "PATCH" }), req("/Kursus/x"), req("/lemmikud/"),
       // the lesson paths: /kursus/<slug>/<lesson>[/progress | /tehtud | /fail/<file>], each with its own method
@@ -69,7 +70,7 @@ describe("routing and the cross-site check", () => {
 
   test("a cross-site POST, PATCH or DELETE is refused with 403 before anything else", async () => {
     for (const method of ["POST", "PATCH", "DELETE", "PUT"])
-      for (const path of ["/login", "/code", "/logout", "/andmed", "/nothing"]) {
+      for (const path of ["/login", "/code", "/logout", "/andmed", "/parool", "/parool-login", "/nothing"]) {
         const res = (await handleAccountApi(req(path, { method, headers: { origin: "https://evil.example" }, body: "{}" }), deps()))!;
         expect(res.status, `${method} ${path}`).toBe(403);
         expect(await res.json()).toEqual({ ok: false });
@@ -92,6 +93,11 @@ describe("the route's HEAD", () => {
     expect(res.headers.get("allow")).toBe("GET");
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(await res.text()).toBe("");
+  });
+
+  test("DELETE (phase 2c: DELETE /parool) goes to the same router as POST and PATCH: Next.js answers 405 for a method the route does not export", () => {
+    expect(DELETE).toBe(POST);
+    expect(PATCH).toBe(POST);
   });
 });
 
@@ -192,6 +198,7 @@ describe("the data endpoints without a session", () => {
     ["PATCH", "/andmed", { name: "Kati", phone: "", locale: "et" }], ["POST", "/uudiskiri", { on: true }],
     ["POST", "/muutmine", { registrationId: 1, kind: "cancel", message: "" }], ["POST", "/tingimused", { slug: "veebikursus" }],
     ["POST", "/kustuta", { confirm: true }], ["POST", "/kustuta", "not json"],
+    ["POST", "/parool", { password: "pikk-parool-2026" }], ["DELETE", "/parool"],
   ];
 
   test.each(endpoints)("%s %s: 401 none, the hint cookie cleared, nothing sent or used", async (method, path, body) => {
@@ -433,4 +440,35 @@ describe("deletion e-mail", () => {
 
 test("esc is exported for the other mails: nothing it returns can open a tag or end an attribute", () => {
   expect(esc(`<a href="x">&'`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
+});
+
+describe("the password login without a database (phase 2c)", () => {
+  test("a body that cannot be a login: the same 400 { error: 'password' } as a wrong password, private, before the database", async () => {
+    for (const body of [{}, { email: "kati@example.test" }, { email: "pole-aadress", password: "pikk-parool-2026" }, { password: "pikk-parool-2026" }, "not json"]) {
+      const res = (await handleAccountApi(post("/parool-login", body), deps()))!;
+      expect([res.status, await res.json()], JSON.stringify(body)).toEqual([400, { ok: false, error: "password" }]);
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+    }
+  });
+
+  const IP_HEADERS = { "x-forwarded-for": "203.0.113.9" };
+  const withKv = (kv: ReturnType<typeof fakeKv>) => deps({ env: { ...deps().env, KV: kv } });
+
+  test("the IP at its limit is refused first, the right password too: 429 locked, private, before the database, and nothing is counted", async () => {
+    const kv = fakeKv({ "rl:pw-ip:203.0.113.9": "20" });
+    const res = (await handleAccountApi(post("/parool-login", { email: "kati@example.test", password: "pikk-parool-2026" }, IP_HEADERS), withKv(kv)))!;
+    expect([res.status, await res.json()]).toEqual([429, { ok: false, error: "locked" }]);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect([...kv.store]).toEqual([["rl:pw-ip:203.0.113.9", "20"]]);
+  });
+
+  test("a body that cannot be a login takes the IP's slot like any failure (it is the count), and a store that fails lets it through", async () => {
+    const kv = fakeKv();
+    const res = (await handleAccountApi(post("/parool-login", { email: "kati@example.test" }, IP_HEADERS), withKv(kv)))!;
+    expect(res.status).toBe(400);
+    expect([...kv.store]).toEqual([["rl:pw-ip:203.0.113.9", "1"]]);
+    const down = async (): Promise<never> => { throw new Error("kv down"); };
+    const broken = deps({ env: { ...deps().env, KV: { get: down, put: down, reserve: down, release: down } } });
+    expect((await handleAccountApi(post("/parool-login", { email: "kati@example.test" }, IP_HEADERS), broken))!.status).toBe(400);
+  });
 });

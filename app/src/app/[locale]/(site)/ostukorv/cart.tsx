@@ -88,6 +88,7 @@ export async function Cart({ locale, slug }: { locale: Locale; slug: string }) {
             locale={locale}
             t={{
               email: d.forms.email,
+              newsletterConsent: d.forms.newsletterConsent,
               submit: d.forms.interestSubmit,
               sending: d.forms.sending,
               sent: d.forms.interestSent,

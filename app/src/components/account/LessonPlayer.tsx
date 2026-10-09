@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import ui from "@/components/site/ui.module.css";
-import { videoAspect, type VideoShape } from "@/domain/lessons";
+import { endedAt, seekStep, videoAspect, type VideoShape } from "@/domain/lessons";
 import { fill } from "@/i18n/format";
 import { PLAYER_EVENTS, playerCommand, readPlayerMessage, secondsOf } from "./player-js";
 import type { LessonTexts } from "./texts";
@@ -14,6 +14,8 @@ export const PROGRESS_EVERY_MS = 15_000;
 export const WATERMARK_MOVE_MS = 60_000;
 /** No "ready" from the player in this time: "Video ei lae. Proovi hiljem uuesti." (spec 7). */
 export const READY_TIMEOUT_MS = 20_000;
+/** The line under the player after a jump forward was taken back stays this long (spec 3). */
+export const SEEK_NOTE_MS = 6000;
 
 type Props = {
   slug: string;
@@ -46,7 +48,9 @@ type Sent = "taken" | "later" | "refused";
  * on the wrapper: a wide video fills the column, an upright or square one (`data-upright`) is centred with its height capped (CSS).
  * Enlarged, the frame is the largest box of that shape that fits the screen, in its middle, the size of the picture, so the
  * watermark's corners are the picture's (not black bars around it). Progress: the furthest second reached, reported every 15 s
- * when it moved, and at pause and end.
+ * when it moved, and at pause and end. A timeupdate more than 3 s past the furthest point is a jump forward: the player is sent
+ * back there (Player.js setCurrentTime) and a line under it says how far one may skip, for 6 s; rewinding and speed stay free, and a
+ * lesson already done is not locked (domain/lessons.ts seekStep).
  *
  * The reports never trouble the student. A report the server cannot take now (408, 429, 5xx) or that gets no answer keeps the
  * furthest second, which goes with the next 15 s report (no retry in between, not even at pause or end); one refused for good (403
@@ -78,6 +82,7 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress, 
   const [corner, setCorner] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [seekNote, setSeekNote] = useState(false);
   // Only the player's own frame may talk to the page: its window, from https://player.mediadelivery.net (the origin of the URL the
   // server signed; the e2e run's fake Bunny gives its own address there, a setting server/bunny.ts ignores on Vercel).
   const origin = new URL(video.embedUrl).origin;
@@ -150,6 +155,14 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress, 
       }
     };
 
+    let noteTimer: number | undefined;
+    /** "Edasi saab kerida kuni kohani, kuhu oled jõudnud." under the player, for 6 s (a second jump starts the 6 s again). */
+    const showSeekNote = () => {
+      setSeekNote(true);
+      window.clearTimeout(noteTimer);
+      noteTimer = window.setTimeout(() => setSeekNote(false), SEEK_NOTE_MS);
+    };
+
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== origin || !frame.current || e.source !== frame.current.contentWindow) return;
       const message = readPlayerMessage(e.data);
@@ -160,11 +173,19 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress, 
         for (const event of PLAYER_EVENTS) frame.current.contentWindow?.postMessage(playerCommand("addEventListener", event, `mslab-${event}`), origin);
       } else if (message.event === "timeupdate") {
         const seconds = secondsOf(message.value);
-        if (seconds !== null && seconds > furthest.current) furthest.current = Math.min(seconds, video.durationSec);
+        if (seconds === null) return;
+        // a lesson that is done (or refused for good) reports nothing more: skipping ahead is free
+        if (finished.current) return;
+        const step = seekStep(furthest.current, seconds, video.durationSec);
+        furthest.current = step.furthest;
+        if (step.back !== null) {
+          frame.current.contentWindow?.postMessage(playerCommand("setCurrentTime", step.back), origin);
+          showSeekNote();
+        }
       } else if (message.event === "pause") {
         void report();
       } else if (message.event === "ended") {
-        furthest.current = video.durationSec;
+        furthest.current = endedAt(furthest.current, video.durationSec);
         void report();
       }
     };
@@ -193,6 +214,7 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress, 
       leave(); // the player goes away inside the site (a link to the next lesson): no pagehide comes
       disposed = true;
       clearInterval(timer);
+      window.clearTimeout(noteTimer);
       window.removeEventListener("message", onMessage);
       window.removeEventListener("pagehide", leave);
       document.removeEventListener("visibilitychange", onHidden);
@@ -293,6 +315,10 @@ function Player({ slug, lessonId, title, video, watermark, done, t, onProgress, 
           </div>
         </div>
       </div>
+      {/* in the page from the start, empty: the sentence is announced when a jump forward was taken back */}
+      <p className={styles.seekNote} role="status" data-seek-note="">
+        {seekNote ? t.seekLocked : ""}
+      </p>
       {/* no "Täisekraan" next to a video that does not load; still the way out when the student is already in it */}
       {(!broken || big) && (
         <div className={styles.bar}>

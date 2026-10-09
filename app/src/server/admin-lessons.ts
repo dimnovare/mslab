@@ -1,4 +1,4 @@
-import { asc, count, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { courseModules, courses, lessonFiles, lessonProgress, lessons, type LessonKind, type VideoStatus } from "@/db/schema";
 import { dropVideo, moveLesson, type ModuleLayout } from "@/domain/lessons";
@@ -13,6 +13,9 @@ import { Check, field, invalid, type EditResult } from "./edit-check";
 // (`returning()`): on the Db union, returning(fields) has no common overload.
 
 export const LESSON_LIMITS = { title: 120, body: 5000 } as const;
+
+/** A progress row that is progress: watched, done, or opened by an admin ("Ava järgmine õppetund"). A row with only the progress clock (phase 2c: the lesson GET writes it) is none. */
+const HAS_PROGRESS = sql`(${lessonProgress.watchedSec} > 0 or ${lessonProgress.doneAt} is not null or ${lessonProgress.unlockedBy} is not null)`;
 
 /** A form field's row id (lib/row-id.ts parseRowId), or null when it is missing or not one. */
 const idOf = (value: string | null): number | null => (value === null ? null : parseRowId(value));
@@ -54,7 +57,7 @@ export async function listCourseLessons(db: Db, courseId: number): Promise<Admin
         videoStatus: lessons.videoStatus,
         durationSec: lessons.durationSec,
         replacedVideoId: lessons.replacedVideoId,
-        inUse: sql<boolean>`exists (select 1 from lesson_progress p where p.lesson_id = ${lessons.id})`,
+        inUse: sql<boolean>`exists (select 1 from ${lessonProgress} where ${lessonProgress.lessonId} = ${lessons.id} and ${HAS_PROGRESS})`,
       })
       .from(lessons)
       .innerJoin(courseModules, eq(lessons.moduleId, courseModules.id))
@@ -258,8 +261,9 @@ export type LessonCleanup = { videoIds: string[]; fileKeys: string[] };
 const NOTHING: LessonCleanup = { videoIds: [], fileKeys: [] };
 
 /**
- * "Kustuta õppetund": field id. Refused (inUse) once any student has a progress row for it — then it can only be hidden, so the counts
- * stay honest (spec 7). The lesson and its file rows go (cascade); `cleanup` names its videos and files for removeLessonMedia.
+ * "Kustuta õppetund": field id. Refused (inUse) once any student has progress on it (watched, done or opened by an admin; a row with
+ * only the progress clock is none) — then it can only be hidden, so the counts stay honest (spec 7). The lesson and its file rows go
+ * (cascade); `cleanup` names its videos and files for removeLessonMedia.
  */
 export async function deleteLessonForm(db: Db, fd: FormData): Promise<{ result: EditResult; cleanup: LessonCleanup }> {
   const id = idOf(field(fd, "id"));
@@ -267,7 +271,7 @@ export async function deleteLessonForm(db: Db, fd: FormData): Promise<{ result: 
   return db.transaction(async (tx): Promise<{ result: EditResult; cleanup: LessonCleanup }> => {
     const [row] = await tx.select({ videoId: lessons.videoId, replacedVideoId: lessons.replacedVideoId }).from(lessons).where(eq(lessons.id, id)).for("update");
     if (!row) return { result: { ok: false, error: "notFound" }, cleanup: NOTHING };
-    const [{ n }] = await tx.select({ n: count() }).from(lessonProgress).where(eq(lessonProgress.lessonId, id));
+    const [{ n }] = await tx.select({ n: count() }).from(lessonProgress).where(and(eq(lessonProgress.lessonId, id), HAS_PROGRESS));
     if (Number(n) > 0) return { result: { ok: false, error: "inUse" }, cleanup: NOTHING };
     const files = await tx.select({ key: lessonFiles.r2Key }).from(lessonFiles).where(eq(lessonFiles.lessonId, id)).orderBy(asc(lessonFiles.position), asc(lessonFiles.id));
     await tx.delete(lessons).where(eq(lessons.id, id));

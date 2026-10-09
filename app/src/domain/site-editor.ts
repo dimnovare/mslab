@@ -3,6 +3,7 @@
 // the stored-value → draft conversions, the limits, and the checks for links and focal points. Pure: no database, no
 // React.
 
+import type { Campaign } from "@/db/schema";
 import type { I18n } from "@/i18n/field";
 import { compactIban } from "./account-cards";
 import { centsToInput } from "./money";
@@ -291,14 +292,23 @@ export function campaignDraft(c: CampaignDraft | null): CampaignDraft {
   };
 }
 
+/** Hüpikaken's newsletter popup (phase 2c): shown or not, and its kicker, title, text and picture (no code and no button: it has the form). */
+export type NewsletterPopupDraft = { active: boolean; kicker: I18n; title: I18n; text: I18n; imageKey: string };
+
+export function newsletterPopupDraft(c: Campaign | null): NewsletterPopupDraft {
+  if (!c) return { active: false, kicker: empty(), title: empty(), text: empty(), imageKey: "" };
+  return { active: c.active, kicker: copyI18n(c.kicker), title: copyI18n(c.title), text: copyI18n(c.text), imageKey: c.imageKey };
+}
+
 export type ContactDraft = { email: string; phone: string; address: string; instagram: string; facebook: string };
 export function contactDraft(value: unknown): ContactDraft {
   const c = obj(value);
   return { email: str(c.email), phone: str(c.phone), address: str(c.address), instagram: str(c.instagram), facebook: str(c.facebook) };
 }
 
-export type NewsletterDraft = { discountLabel: string };
-export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountLabel: str(obj(value).discountLabel) });
+/** Seaded "Uudiskiri" (settings key "newsletter"): the discount label and the welcome code ("Tervituskood", phase 2c; "" = none). */
+export type NewsletterDraft = { discountLabel: string; welcomeCode: string };
+export const newsletterDraft = (value: unknown): NewsletterDraft => ({ discountLabel: str(obj(value).discountLabel), welcomeCode: str(obj(value).welcomeCode) });
 
 /** Seaded "Ettemaksu juhised" (settings key "prepayment"): where students pay, shown on their unpaid contact-course cards. */
 export type PrepaymentDraft = { receiver: string; iban: string; bank: string; referencePrefix: string };

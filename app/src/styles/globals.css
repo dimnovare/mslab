@@ -35,11 +35,12 @@ h3 {
 /* The account's pages (AccountShell, data-account-shell) have "Saada mulle uudiskirja" in Minu andmed: the footer's newsletter form
    (Newsletter, data-footer-newsletter) is not shown under them, so there are never two ways to subscribe on one screen. CSS only:
    the static pages read nothing on the server, and the frame is in their HTML, so nothing moves after the page has loaded. The
-   link columns that follow lose the room they kept under the form. */
+   link columns then take the whole footer. */
 body:has([data-account-shell]) [data-footer-newsletter] {
   display: none;
 }
 
-body:has([data-account-shell]) [data-footer-newsletter] + * {
-  margin-top: 0;
+body:has([data-account-shell]) [data-footer-top] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "links";
 }

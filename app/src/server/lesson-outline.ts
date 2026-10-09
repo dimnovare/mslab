@@ -1,6 +1,7 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, max, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { courseModules, lessonProgress, lessons } from "@/db/schema";
+import type { EcourseProgress } from "@/domain/account-cards";
 import { courseProgress, lessonStates, type CourseProgress, type LessonState, type OrderedLesson } from "@/domain/lessons";
 import type { I18n } from "@/i18n/field";
 
@@ -37,4 +38,28 @@ export async function courseOutline(db: Db, courseId: number, clientId: number):
     lessons: list,
     progress: courseProgress(ordered),
   };
+}
+
+/** One e-course's lessons for the dashboard (phase 2c): done of total and the next lesson with its module's title; null without visible lessons. */
+export function ecourseProgress(outline: CourseOutline): EcourseProgress | null {
+  const { done, total, next } = outline.progress;
+  if (total === 0) return null;
+  const lesson = next === null ? undefined : outline.lessons.find((l) => l.id === next);
+  const owner = lesson ? outline.modules.find((m) => m.id === lesson.moduleId) : undefined;
+  return { done, total, next: lesson && owner ? { lessonId: lesson.id, title: lesson.title, moduleTitle: owner.title } : null };
+}
+
+/**
+ * When she last did anything in each course's lessons (phase 2c, the "Pooleli" card): course id → the latest write of her progress
+ * rows (a lesson opened, watched, marked done, or opened for her by an admin). One query.
+ */
+export async function progressActivity(db: Db, clientId: number): Promise<Map<number, Date>> {
+  const rows = await db
+    .select({ courseId: courseModules.courseId, at: max(lessonProgress.updatedAt) })
+    .from(lessonProgress)
+    .innerJoin(lessons, eq(lessons.id, lessonProgress.lessonId))
+    .innerJoin(courseModules, eq(courseModules.id, lessons.moduleId))
+    .where(eq(lessonProgress.clientId, clientId))
+    .groupBy(courseModules.courseId);
+  return new Map(rows.flatMap((r) => (r.at ? [[r.courseId, r.at] as const] : [])));
 }

@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
-import type { BrowserContext, Page, Route, TestInfo } from "@playwright/test";
+import type { BrowserContext, Locator, Page, Route, TestInfo } from "@playwright/test";
 import { submitsForms, test, expect } from "./test";
 import { LOCAL_ADMINS } from "../local-secrets";
 import { adminReady, signInAsAdmin } from "./admin-login";
-import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows } from "./fixtures";
+import { onLocalDb, POST_SLUG_PREFIX, removeAdminRows, removePostRows, snapshotRows, storedSubscriber, testEmail } from "./fixtures";
 
 // Task 13B: the site content editors (home page, practice, trainer, news, campaign, settings), each followed through to
 // the public site. They change shared seed content, so they run after every other test (playwright.config.ts: the
@@ -344,7 +344,8 @@ test.describe("campaign (M2–M5)", () => {
     await signIn(page, context, visitorIp);
     await page.goto("/admin/kampaania");
     await adminReady(page);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kampaania hüpikaken");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hüpikaken");
+    const camp = page.locator('[data-popup-section="campaign"]'); // the page has two editors: the campaign's fields
     const preview = page.locator("[data-campaign-preview]");
     await expect(preview.getByRole("heading")).toHaveText("−15% Lash Lift BOTOX koolitusele");
     await expect(page.getByText("Mitte praegu")).toHaveCount(0); // M3
@@ -357,12 +358,12 @@ test.describe("campaign (M2–M5)", () => {
     expect(src).toMatch(/^img\/[0-9a-f-]{36}\.jpg$/);
     await expect(preview.locator("img")).toHaveAttribute("src", `/media/${src}`);
     // the texts follow in the preview, ET and RU
-    await page.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E kampaania");
+    await camp.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E kampaania");
     await expect(preview.getByRole("heading")).toHaveText("E2E kampaania");
-    await page.getByRole("textbox", { name: "Sooduskood", exact: true }).fill("e2e-10");
+    await camp.getByRole("textbox", { name: "Sooduskood", exact: true }).fill("e2e-10");
     await expect(preview.locator("[data-campaign-code]")).toHaveText("E2E-10");
     // a script link: refused, nothing saved
-    const href = page.getByRole("combobox", { name: "Nupp viib", exact: true });
+    const href = camp.getByRole("combobox", { name: "Nupp viib", exact: true });
     await href.fill("javascript:alert(1)");
     await page.getByRole("button", { name: "Salvesta", exact: true }).click();
     await expect(status(page)).toHaveText("Kontrolli märgitud välju.");
@@ -370,9 +371,9 @@ test.describe("campaign (M2–M5)", () => {
     expect(await one((sql) => sql<{ image: string }[]>`select image_key as image from campaign where id = 1`)).toEqual({ image: "/seed/lash-editorial.jpg" });
     await href.fill("/koolitused/lash-lift-botox");
     // an empty button text in both languages: "Leia enda koolitus" (M4); the seed's Russian text is cleared too
-    await page.getByRole("textbox", { name: "Nupu tekst (eesti keeles)", exact: true }).fill("");
-    await page.getByRole("group", { name: "Keel: Nupu tekst" }).getByRole("button", { name: /^RU/ }).click();
-    await page.getByRole("textbox", { name: "Nupu tekst (vene keeles)", exact: true }).fill("");
+    await camp.getByRole("textbox", { name: "Nupu tekst (eesti keeles)", exact: true }).fill("");
+    await camp.getByRole("group", { name: "Keel: Nupu tekst" }).getByRole("button", { name: /^RU/ }).click();
+    await camp.getByRole("textbox", { name: "Nupu tekst (vene keeles)", exact: true }).fill("");
     await save(page);
 
     const stored = await one((sql) => sql<{ image: string; code: string; cta: { et: string }; title: { et: string } }[]>`select image_key as image, code, cta_label as cta, title from campaign where id = 1`);
@@ -413,6 +414,139 @@ test.describe("campaign (M2–M5)", () => {
   });
 });
 
+test.describe("the newsletter popup (phase 2c)", () => {
+  test.use({ campaignPopup: 300 });
+
+  /** The space between the bottom of a text and the top of the form under it, in px. */
+  const gapAboveForm = async (text: Locator, form: Locator) => {
+    const [t, f] = [await text.boundingBox(), await form.boundingBox()];
+    return f!.y - (t!.y + t!.height);
+  };
+
+  /** The newsletter popup shown instead of the campaign (at most one active: the campaign first goes off). */
+  const showNewsletter = () =>
+    onLocalDb(async (sql) => {
+      await sql`update campaign set active = false where id = 1`;
+      await sql`update campaign set active = true where id = 2`;
+    });
+
+  test("it opens on the home page with its texts and the form; a sign-up says so inside and is never shown again in this browser", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/");
+    const popup = page.getByRole("dialog", { name: "Hea järgmine samm. Otse sinu postkasti." });
+    await expect(popup).toBeVisible();
+    await expect(popup.locator("[data-newsletter-card] img")).toHaveAttribute("src", "/seed/gift-bag-serum.jpg");
+    await expect(popup.getByText("MS LABi kirjad")).toBeVisible();
+    await expect(popup.locator("[data-campaign-code]")).toHaveCount(0); // no code in the popup: it comes after the confirmation
+    // no consent box (owner decision 08.10): the line under the button says signing up is the consent, with the privacy link
+    await expect(popup.getByRole("checkbox")).toHaveCount(0);
+    const notice = popup.locator("[data-newsletter-notice]");
+    await expect(notice).toHaveText("Liitudes saad MS LABi uudiskirja. Saad igal ajal loobuda. Privaatsus");
+    await expect(notice.getByRole("link", { name: "Privaatsus" })).toHaveAttribute("href", "/privaatsus");
+    // the gap between the text and the form is the card's own 18 px (the form adds no margin of its own on top of it); polled: the card rises into place first
+    await expect.poll(() => gapAboveForm(popup.getByText("Uued koolitused, kasulikud mõtted"), popup.locator("[data-newsletter-form]"))).toBeCloseTo(18, 0);
+    const addr = testEmail("nl-popup", info.project.name);
+    await popup.getByLabel("Sinu e-post").fill(addr);
+    await popup.getByRole("button", { name: "Liitu" }).click();
+    await expect(popup.locator("[data-newsletter-status]")).toHaveText("Saatsime sulle kinnituslingi. Ava see oma postkastis.");
+    expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBe("1");
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => sessionStorage.removeItem("mslab-camp")); // a new browser session …
+    await page.reload();
+    await page.waitForTimeout(1200);
+    await expect(page.getByRole("dialog")).toHaveCount(0); // … still none: signed up here
+  });
+
+  test("the confirmed landing (/?uudiskiri=kinnitatud) shows no newsletter popup over the notice, even past the delay; this browser is marked signed up, so a reload of / still shows none", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/?uudiskiri=kinnitatud#kood=E2E-TERE");
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "ok");
+    await expect(page.locator("[data-flash-code]")).toContainText("E2E-TERE");
+    await page.waitForTimeout(1500); // well past the 300 ms delay of this describe
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBe("1");
+    expect(await page.evaluate(() => sessionStorage.getItem("mslab-camp"))).toBeNull(); // the popup did not use up the session's turn either
+    await page.reload(); // the address is plain "/" by now (FlashNotice took the parameter and the code out)
+    await page.waitForTimeout(1500);
+    await expect(page.getByRole("dialog")).toHaveCount(0); // signed up in this browser: still none
+  });
+
+  test("any other landing (/?uudiskiri=vigane) shows no popup on that load either, but marks nothing: the next visit gets it", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/?uudiskiri=vigane");
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "warn");
+    await page.waitForTimeout(1500);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBeNull();
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "Hea järgmine samm. Otse sinu postkasti." })).toBeVisible(); // the delay does work here
+  });
+
+  test("Russian, at a phone's width: the sheet with the form fits (no overflow, 44 px targets); the campaign is not shown meanwhile; switched off, none", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it (and sets the phone's width here)");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/ru");
+    const popup = page.getByRole("dialog", { name: "Ваш следующий шаг. В вашем почтовом ящике." });
+    await expect(popup).toBeVisible();
+    const submit = popup.getByRole("button", { name: "Подписаться" });
+    await expect(submit).toBeVisible();
+    expect((await submit.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const link = popup.locator("[data-newsletter-notice]").getByRole("link", { name: "Конфиденциальность" });
+    await expect(link).toHaveAttribute("href", "/ru/privaatsus");
+    expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    expect(await popup.locator("[data-newsletter-panel]").evaluate((p) => p.scrollWidth <= p.clientWidth)).toBe(true);
+    await expect(page.getByRole("dialog", { name: "−15% на курс Lash Lift BOTOX" })).toHaveCount(0);
+    await onLocalDb((sql) => sql`update campaign set active = false`);
+    await page.evaluate(() => sessionStorage.removeItem("mslab-camp"));
+    await page.goto("/");
+    await page.waitForTimeout(1200);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
+  test("Hüpikaken: 'Lehel näidatakse' Uudiskiri, its texts and the preview, saved; the home page shows it; Väljas shows none", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/kampaania");
+    await adminReady(page);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hüpikaken");
+    const shown = page.getByRole("group", { name: "Lehel näidatakse" });
+    await expect(shown.getByRole("radio", { name: "Kampaania" })).toBeChecked();
+    await shown.getByRole("radio", { name: "Uudiskiri" }).check();
+    const nl = page.locator('[data-popup-section="newsletter"]');
+    await nl.getByRole("textbox", { name: "Pealkiri (eesti keeles)", exact: true }).fill("E2E uudiskiri");
+    const preview = page.locator("[data-newsletter-preview]");
+    await expect(preview.getByRole("heading")).toHaveText("E2E uudiskiri");
+    await expect(preview.getByRole("button", { name: "Liitu" })).toBeVisible();
+    await expect(page.locator("[data-campaign-editor] form")).toHaveCount(0); // the preview's form is a picture: no form inside the editor's
+    // the picture is as tall as the popup: the same gap above the form, and the privacy word (a span, not a link) makes the line 44 px high like the link
+    await expect.poll(() => gapAboveForm(preview.getByText("Uued koolitused, kasulikud mõtted"), preview.locator("[data-newsletter-form]"))).toBeCloseTo(18, 0);
+    await expect(preview.locator("[data-newsletter-notice] a")).toHaveCount(0);
+    expect((await preview.locator("[data-newsletter-notice]").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await save(page);
+    const rows = await onLocalDb((sql) => sql<{ id: number; active: boolean }[]>`select id, active from campaign order by id`);
+    expect(rows.map((r) => r.active)).toEqual([false, true]);
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "E2E uudiskiri" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.goto("/admin/kampaania");
+    await adminReady(page);
+    await page.getByRole("group", { name: "Lehel näidatakse" }).getByRole("radio", { name: "Väljas" }).check();
+    await save(page);
+    expect((await onLocalDb((sql) => sql<{ active: boolean }[]>`select active from campaign order by id`)).map((r) => r.active)).toEqual([false, false]);
+  });
+});
+
 test.describe("settings", () => {
   test("contact links (https only) and the newsletter discount reach the footer and the contact page", async ({ page, context, visitorIp }, info) => {
     test.skip(phone(info), "desktop changes the contact settings; the phone project the privacy page");
@@ -438,6 +572,26 @@ test.describe("settings", () => {
     await expect(footer.getByText(/15% tervitussoodustus/)).toBeVisible();
     await page.goto("/kontakt");
     await expect(page.locator("[data-contact-details]").getByRole("link", { name: /instagram\.com\/mslab\.e2e/ })).toBeVisible();
+  });
+
+  test("Tervituskood: saved in Seaded; the first confirmation link lands on the home page with the code, the second without", async ({ page, context, visitorIp }, info) => {
+    test.skip(phone(info), "desktop changes the newsletter setting");
+    await changing(["settings", { column: "key", value: "newsletter" }]);
+    await signIn(page, context, visitorIp);
+    await page.goto("/admin/seaded");
+    await adminReady(page);
+    await page.getByRole("textbox", { name: "Tervituskood", exact: true }).fill("e2e-tere");
+    await save(page);
+    expect(await one((sql) => sql<{ code: string }[]>`select value->>'welcomeCode' as code from settings where key = 'newsletter'`)).toEqual({ code: "E2E-TERE" });
+    const addr = testEmail("welcome", info.project.name);
+    const token = "w".repeat(40) + info.project.name.slice(0, 3).padEnd(3, "x");
+    await onLocalDb((sql) => sql`insert into subscribers (email, locale, token) values (${addr}, 'et', ${token})`, { marksPages: false });
+    await page.goto(`/api/newsletter/confirm?t=${token}`);
+    await expect(page.locator("[data-flash-code]")).toHaveText("Sinu tervituskood: E2E-TERE. Lisa kood registreerimisel lahtrisse „Sõnum“.");
+    expect(new URL(page.url()).hash).toBe(""); // the fragment is gone from the address
+    await page.goto(`/api/newsletter/confirm?t=${token}`);
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "ok");
+    await expect(page.locator("[data-flash-code]")).toHaveCount(0);
   });
 
   test("the privacy page in two paragraphs, text typed during a save is kept; the admin addresses are shown, not editable", async ({ page, context, visitorIp }, info) => {

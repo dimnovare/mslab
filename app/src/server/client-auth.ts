@@ -4,6 +4,7 @@ import type { Db, Q } from "@/db/client";
 import * as schema from "@/db/schema";
 import { clientLoginTokens, clients, clientSessions, mailQuota, registrations, requests, subscribers } from "@/db/schema";
 import { normalizeEmail } from "@/domain/email";
+import { DUMMY_HASH, verifyPassword } from "./password";
 import { isTokenShape, newToken, sha256 } from "./token";
 
 export const CLIENT_COOKIE = "__Host-mslab_client";
@@ -13,14 +14,20 @@ export const CLIENT_SESSION_TTL_MS = 180 * 86_400_000;
 export const CODE_ATTEMPTS = 5;
 export const CLIENT_LOGIN_CAP = 3;
 /**
- * The day's mails to visitors share one counter (the `mail_quota` row; Resend Free sends 100 a day, form notifications to Maria
- * included): a login e-mail or a confirmation that carries a login code stops at 60, a confirmation without a code at 30. Every
- * confirmation comes with Maria's own notification of the same submission, which this counter does not see, so 30 confirmations
- * are about 60 mails; the last 30 of the 60 are left for sign-ins. (Interim: one counter for every mail the site sends, with a
- * hard cap below 100 and a share per kind, is on the launch checklist.)
+ * The day's mails to visitors are counted on two `mail_quota` counters (Resend Free sends 100 a day, form notifications to Maria
+ * included, so the caps leave room for them):
+ * - the shared one, the row "<day>": a login e-mail or a confirmation that carries a login code stops at 60, a confirmation without a
+ *   code (registrations and requests, with the prepayment details) at 30. Every confirmation comes with Maria's own notification of the
+ *   same submission, which this counter does not see, so 30 confirmations are about 60 mails; the last 30 of the 60 are left for sign-ins;
+ * - the newsletter's own, the row "<day>:nl": the sign-up's confirmation link and the welcome mail share its 25 places, so a rush of
+ *   sign-ups (two mails each) can never use up the places the registrations' and requests' confirmations and the logins need, nor
+ *   the other way round. 60 + 25 = 85 is the most the two counters let out in a day, under Resend's 100.
  */
 export const LOGIN_MAIL_DAILY_CAP = 60;
 export const CONFIRMATION_MAIL_DAILY_CAP = 30;
+export const NEWSLETTER_MAIL_DAILY_CAP = 25;
+/** What follows the date in the `mail_quota` row of the newsletter's counter. */
+const NEWSLETTER_QUOTA_SUFFIX = ":nl";
 /** Renew the session expiry at most once a day (fewer writes). */
 const RENEW_AFTER_MS = 86_400_000;
 
@@ -70,7 +77,7 @@ export async function issueClientLogin(db: Db, email: string, now = new Date()):
  * language of the page the login was asked for) is the language of a client created here; an existing client keeps its own.
  */
 async function startSession(t: Db, address: string, now: Date, newClientLocale?: "et" | "ru"): Promise<ClientLogin> {
-  await lockAddress(t, address); // both callers already hold it (re-entrant, no wait); kept so no future caller can skip it
+  await lockAddress(t, address); // the three callers (link, code, password) hold it already (re-entrant, no wait); kept so no future caller can skip it
   const [existing] = await t.select().from(clients).where(eq(clients.email, address)).limit(1);
   const client = existing ?? (await t.insert(clients).values({ email: address, ...(newClientLocale ? { locale: newClientLocale } : {}) }).returning())[0];
   await t.update(clientSessions).set({ endedAt: now, endReason: "replaced" })
@@ -128,6 +135,48 @@ export async function redeemClientCode(db: Db, email: string, code: string, now 
 }
 
 /**
+ * Runs `fn` in a transaction that holds the login lock of `address` (normalised already) until it ends: whatever changes what a login
+ * for that address reads or does (the password's set and removal, client-password.ts) takes its turn with the logins, never in the
+ * middle of one.
+ */
+export async function underAddressLock<T>(db: Db, address: string, fn: (t: Db) => Promise<T>): Promise<T> {
+  return tx(db, async (t) => {
+    await lockAddress(t, address);
+    return fn(t);
+  });
+}
+
+/**
+ * The password login's lock for one address (account-api.ts passwordLogin, phase 2c): its counter, on the login's transaction `t`.
+ * `open()`: may this attempt be checked; `failed()`: count it as a failure.
+ */
+export type PasswordGate = (t: Db) => { open(): Promise<boolean>; failed(): Promise<void> };
+
+/**
+ * The session for an e-mail and the password set in Minu andmed (phase 2c); null: an unknown address, no password set and a wrong
+ * password alike; "locked": the gate is shut. The gate is required: there is no way to ask for a password check that is not counted
+ * and limited. Everything runs in one transaction under the address lock, so the attempts for one address go one after another, and
+ * attempts sent in parallel cannot pass the gate together: the gate is asked first (a locked attempt checks nothing and counts
+ * nothing), then scrypt runs every time — against a fixed dummy hash when there is no password to check — so the answer takes as
+ * long whatever the address, and a failure is counted before the lock is let go. The session is the code's (startSession: the
+ * one-device rule). Never a new client.
+ */
+export async function redeemClientPassword(db: Db, email: string, password: string, now: Date, gate: PasswordGate): Promise<ClientLogin | "locked" | null> {
+  const address = normalizeEmail(email);
+  return tx(db, async (t) => {
+    await lockAddress(t, address);
+    const lock = gate(t);
+    if (!(await lock.open())) return "locked";
+    const [row] = await t.select({ hash: clients.passwordHash }).from(clients).where(eq(clients.email, address)).limit(1);
+    const stored = row?.hash ?? null;
+    const matches = await verifyPassword(password, stored ?? DUMMY_HASH);
+    if (matches && stored !== null) return startSession(t, address, now);
+    await lock.failed();
+    return null;
+  });
+}
+
+/**
  * The session of a cookie value: its client, or why it is over (`ended`). A live session is renewed (180 days from now) at most
  * once a day; `renewed` says it was, and then the caller must send the cookies again (api: account-api.ts requireClient), or the
  * browser drops them 180 days after the login however often the student comes back.
@@ -168,7 +217,8 @@ const MAIL_QUOTA_KEEP_DAYS = 7;
  * - `logins`: login codes and links past their 30 minutes. They hold the address in plain text; issueClientLogin deletes them too,
  *   but only when somebody asks for a login;
  * - `sessions`: sessions ended (logout, replaced) or run out more than 30 days ago;
- * - `mailDays`: the `mail_quota` rows of days more than a week before today (UTC, as the counter's own day).
+ * - `mailDays`: the `mail_quota` rows of days more than a week before today (UTC, as the counter's own day), the newsletter's
+ *   "<day>:nl" rows with them (the date is the row's first 10 characters).
  * A failing database throws.
  */
 export async function sweepClientRows(db: Db, now: Date = new Date()): Promise<{ logins: number; sessions: number; mailDays: number }> {
@@ -180,18 +230,29 @@ export async function sweepClientRows(db: Db, now: Date = new Date()): Promise<{
   const [logins, sessions, mailDays] = await Promise.all([
     q.delete(clientLoginTokens).where(lte(clientLoginTokens.expiresAt, now)).returning(one),
     q.delete(clientSessions).where(or(lt(clientSessions.endedAt, before), lt(clientSessions.expiresAt, before))).returning(one),
-    q.delete(mailQuota).where(lt(mailQuota.day, oldestDay)).returning(one),
+    q.delete(mailQuota).where(lt(sql`left(${mailQuota.day}, 10)`, oldestDay)).returning(one),
   ]);
   return { logins: logins.length, sessions: sessions.length, mailDays: mailDays.length };
 }
 
-/** One more login e-mail today, unless `cap` is reached (the row cannot fail open like the rate limits). */
-export async function reserveLoginMail(db: Q, now = new Date(), cap = LOGIN_MAIL_DAILY_CAP): Promise<boolean> {
-  const day = now.toISOString().slice(0, 10);
-  const rows = await db.insert(mailQuota).values({ day, sent: 1 })
+/** One more place of the `mail_quota` row `key`, unless `cap` is reached (the row cannot fail open like the rate limits). */
+async function reserveMailPlace(db: Q, key: string, cap: number): Promise<boolean> {
+  const rows = await db.insert(mailQuota).values({ day: key, sent: 1 })
     .onConflictDoUpdate({ target: mailQuota.day, set: { sent: sql`${mailQuota.sent} + 1` }, setWhere: sql`${mailQuota.sent} < ${cap}` })
     .returning();
   return rows.length > 0;
+}
+
+const dayOf = (now: Date) => now.toISOString().slice(0, 10);
+
+/** One more place of today's shared counter (a login e-mail, a confirmation of a registration or request), unless `cap` is reached. */
+export async function reserveLoginMail(db: Q, now = new Date(), cap = LOGIN_MAIL_DAILY_CAP): Promise<boolean> {
+  return reserveMailPlace(db, dayOf(now), cap);
+}
+
+/** One more place of today's newsletter counter (the sign-up's confirmation link, the welcome mail), unless `cap` is reached. */
+export async function reserveNewsletterMail(db: Q, now = new Date(), cap = NEWSLETTER_MAIL_DAILY_CAP): Promise<boolean> {
+  return reserveMailPlace(db, dayOf(now) + NEWSLETTER_QUOTA_SUFFIX, cap);
 }
 
 /**

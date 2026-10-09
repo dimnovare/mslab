@@ -135,7 +135,7 @@ describe("admin menu (prototype B sidebar, A1)", () => {
       "Avaleht",
       "Koolitaja",
       "Uudised",
-      "Kampaania",
+      "Hüpikaken",
       "Uudiskiri",
       "Seaded",
     ]);

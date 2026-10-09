@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
-import { clientEmail, expireLogins, knownLoginCode, signInAsClient } from "./account";
+import { clearPasswordLock, clientEmail, expireLogins, insertClient, knownLoginCode, signInAsClient } from "./account";
 import { onLocalDb, removeClientRows } from "./fixtures";
+import { smallTargets } from "./targets";
 import { LOCAL_URL, TARGET } from "./target";
 import { submitsForms, test, expect } from "./test";
 
@@ -721,3 +722,165 @@ test("a hint the server could not clear still does not loop: the account page ma
   expect((await context.cookies()).some((c) => c.name === "mslab_in"), "the hint is still there").toBe(true);
   expect(loads).toEqual([LOGIN, "/konto", LOGIN]);
 });
+
+// ---------- the password (phase 2c, Task 14): "Sisene parooliga" ----------
+
+test("a password (phase 2c): set in Minu andmed; after logging out 'Sisene parooliga' signs in with it; a wrong one says so; 5 wrong ones lock it", async ({ page }, info) => {
+  submitsForms();
+  const email = clientEmail("password", info.project.name);
+  await removeClientRows(email);
+  await clearPasswordLock(email);
+  await insertClient(email);
+  try {
+    await signInAsClient(page, email);
+    await page.goto("/konto/andmed");
+    await page.getByRole("button", { name: "Määra parool" }).click();
+    await page.getByLabel("Uus parool").fill("pikk-parool-2026");
+    await page.getByLabel("Korda parooli").fill("pikk-parool-2026");
+    await page.getByRole("button", { name: "Salvesta parool" }).click();
+    await expect(page.locator("[data-password-status]")).toHaveText("Parool on salvestatud.");
+    await page.evaluate(() => fetch("/api/konto/logout", { method: "POST" }));
+
+    await openLogin(page);
+    await page.getByRole("button", { name: "Sisene parooliga" }).click();
+    await expect(page).toHaveURL(/\/konto\/sisene#parool$/);
+    await emailField(page).fill(email);
+    await page.getByLabel("Parool", { exact: true }).fill("vale-parool-2026");
+    await page.getByRole("button", { name: "Logi sisse", exact: true }).click();
+    await expect(page.locator("[data-login-password-error]")).toHaveText("E-post või parool ei sobi.");
+    await expect(page.getByLabel("Parool", { exact: true })).toHaveValue(""); // the wrong password is gone ...
+    await expect(page.getByLabel("Parool", { exact: true })).toBeFocused(); // ... and the field is ready for the next one
+    await expect(page.getByLabel("Parool", { exact: true })).toHaveAccessibleDescription("E-post või parool ei sobi.");
+    await page.reload(); // the step stays (#parool)
+    await expect(page.locator("[data-login-step]")).toHaveAttribute("data-login-step", "password");
+    await emailField(page).fill(email);
+    await page.getByLabel("Parool", { exact: true }).fill("pikk-parool-2026");
+    await page.getByRole("button", { name: "Logi sisse", exact: true }).click();
+    await expect(page).toHaveURL(/\/konto$/);
+    await expect(page.locator(DASHBOARD)).toBeVisible();
+
+    // the lock: 5 wrong ones (one above) and then even the right one is refused for 15 minutes
+    await page.evaluate(() => fetch("/api/konto/logout", { method: "POST" }));
+    await openLogin(page, `${LOGIN}#parool`);
+    await emailField(page).fill(email);
+    for (let i = 0; i < 4; i++) {
+      await page.getByLabel("Parool", { exact: true }).fill(`vale-${i}-parool-2026`);
+      await page.getByRole("button", { name: "Logi sisse", exact: true }).click();
+      await expect(page.locator("[data-login-password-error]")).toHaveText("E-post või parool ei sobi.");
+    }
+    await page.getByLabel("Parool", { exact: true }).fill("pikk-parool-2026");
+    await page.getByRole("button", { name: "Logi sisse", exact: true }).click();
+    await expect(page.locator("[data-login-password-error]")).toHaveText("Liiga palju katseid. Proovi 15 minuti pärast uuesti või sisene koodiga.");
+    await page.getByRole("button", { name: "Saada mulle hoopis kood" }).click();
+    await expect(page.locator("[data-login-step]")).toHaveAttribute("data-login-step", "email");
+    expect(new URL(page.url()).hash).toBe("");
+  } finally {
+    await clearPasswordLock(email);
+    await removeClientRows(email);
+  }
+});
+
+test("the password never leaves the request: not in the address, the storage or the history, while it is typed and while the request is out; the fields pair user name and password for a password manager", async ({ page }) => {
+  const SECRET = "salajane-parool-2026";
+  const sent: { url: string; body: string }[] = [];
+  // the request is held (the answer waits for `release`), so everything below can be looked at while the password is still typed
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/konto/parool-login", async (route) => {
+    sent.push({ url: route.request().url(), body: route.request().postData() ?? "" });
+    await held;
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, error: "password" }) });
+  });
+  /** Where the browser could keep the password: the address, both storages, the history entry's state and the cookies. */
+  const leaks = () =>
+    page.evaluate(
+      (secret) => ({
+        address: location.href.includes(secret),
+        storage: JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]).includes(secret),
+        history: JSON.stringify(history.state ?? null).includes(secret),
+        cookies: document.cookie.includes(secret),
+      }),
+      SECRET,
+    );
+  const none = { address: false, storage: false, history: false, cookies: false };
+
+  await openLogin(page, `${LOGIN}#parool`);
+  const password = page.getByLabel("Parool", { exact: true });
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(password).toHaveAttribute("autocomplete", "current-password");
+  await expect(emailField(page)).toHaveAttribute("autocomplete", "username"); // the user name of the password, as a password manager pairs them
+  await emailField(page).fill("e2e-client-password-leak@example.test");
+  await password.fill(SECRET);
+  await expect(password).toHaveValue(SECRET);
+  expect(await leaks(), "typed, nothing sent yet").toEqual(none);
+
+  await page.getByRole("button", { name: "Logi sisse", exact: true }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  await expect(password).toHaveValue(SECRET); // still typed (read-only), the answer is on hold
+  expect(await leaks(), "the request is out").toEqual(none);
+  // React keeps a controlled field's value in the markup (the value attribute) while it is typed: the password is in the page then, in the
+  // field only. What is guaranteed is the list above and that it is gone from the page when the answer empties the field (below).
+  expect(sent[0].url).not.toContain(SECRET);
+  expect(JSON.parse(sent[0].body)).toEqual({ email: "e2e-client-password-leak@example.test", password: SECRET, locale: "et" });
+
+  release();
+  await expect(page.locator("[data-login-password-error]")).toHaveText("E-post või parool ei sobi.");
+  await expect(password).toHaveValue("");
+  expect(await leaks(), "after a wrong answer").toEqual(none);
+  expect(await page.content(), "a wrong answer empties the field: the password is nowhere in the page").not.toContain(SECRET);
+
+  // the way back to the code: its e-mail field keeps the autocomplete it had before the password step existed
+  await page.getByRole("button", { name: "Saada mulle hoopis kood" }).click();
+  await expect(emailField(page)).toHaveAttribute("autocomplete", "email");
+});
+
+/** The password step and the link to it at 390, 834 and 1440 px, in both languages: no overflow, no control under 44 px, nothing outside the screen. */
+for (const [language, prefix] of [["Estonian", ""], ["Russian", "/ru"]] as const) {
+  test(`the password step in ${language} holds at 390, 834 and 1440 px: the link, the step, a wrong answer and the lock (no overflow, targets of 44 px)`, async ({ page }, info) => {
+    const ru = prefix === "/ru";
+    const words = ru
+      ? { to: "Войти с паролем", code: "Лучше пришлите мне код", wrong: "E-mail или пароль не подходят.", locked: "Слишком много попыток. Попробуйте через 15 минут или войдите с кодом.", submit: "Войти", password: "Пароль", email: "E-mail" }
+      : { to: "Sisene parooliga", code: "Saada mulle hoopis kood", wrong: "E-post või parool ei sobi.", locked: "Liiga palju katseid. Proovi 15 minuti pärast uuesti või sisene koodiga.", submit: "Logi sisse", password: "Parool", email: "E-post" };
+    let answer: 400 | 429 = 400;
+    await page.route("**/api/konto/parool-login", (route) =>
+      route.fulfill({ status: answer, contentType: "application/json", body: JSON.stringify({ ok: false, error: answer === 400 ? "password" : "locked" }) }),
+    );
+    const own = info.project.use.viewport!;
+    const holds = async (label: string) => {
+      for (const width of [390, 834, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        const box = (await page.locator("[data-login-step]").boundingBox())!;
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${label}: no horizontal overflow at ${width}`).toBe(true);
+        expect(await smallTargets(page.locator("[data-login-step]")), `${label}: every control is 44 px or taller at ${width}`).toEqual([]);
+        expect(box.x >= 0 && box.x + box.width <= width, `${label}: the page is on the screen at ${width}`).toBe(true);
+      }
+      await page.setViewportSize(own);
+    };
+
+    await openLogin(page, `${prefix}${LOGIN}`);
+    await expect(page.getByRole("button", { name: words.to, exact: true })).toBeVisible();
+    await holds(`${language} / the e-mail step with the link`);
+
+    await page.getByRole("button", { name: words.to, exact: true }).click();
+    await expect(page).toHaveURL(/#parool$/);
+    await expect(page.getByRole("button", { name: words.code, exact: true })).toBeVisible();
+    await holds(`${language} / the password step`);
+
+    await page.getByLabel(words.email, { exact: true }).fill("e2e-client-layout-check@example.test");
+    await page.getByLabel(words.password, { exact: true }).fill("vale-parool-2026");
+    await page.getByRole("button", { name: words.submit, exact: true }).click();
+    await expect(page.locator("[data-login-password-error]")).toHaveText(words.wrong);
+    await holds(`${language} / a wrong answer`);
+
+    answer = 429;
+    await page.getByLabel(words.password, { exact: true }).fill("vale-parool-2026");
+    await page.getByRole("button", { name: words.submit, exact: true }).click();
+    await expect(page.locator("[data-login-password-error]")).toHaveText(words.locked);
+    await expect(page.getByRole("button", { name: words.code, exact: true })).toBeVisible(); // the way out of a lock stays on the page
+    await holds(`${language} / the lock`);
+
+    await page.getByRole("button", { name: words.code, exact: true }).click();
+    await expect(page.locator("[data-login-step]")).toHaveAttribute("data-login-step", "email");
+    expect(new URL(page.url()).hash).toBe("");
+  });
+}

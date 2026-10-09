@@ -1,8 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { signPreview } from "@/lib/preview-cookie";
-import { alwaysThrough, GATE_PAGES, gateDecision, gateOn, type GateEnv } from "@/lib/site-gate";
+import { alwaysThrough, GATE_PAGES, gateDecision, gateOn, opensAsPage, prefersHtml, type GateEnv } from "@/lib/site-gate";
 import { ROOT_FILES, ROOT_FOLDERS } from "@/lib/root-files";
 import { routeSitePath } from "@/lib/site-routing";
 
@@ -203,6 +203,57 @@ describe("gateDecision", () => {
     expect(await gateDecision({ path: "/api/konto/me", method: "POST", cookie: undefined, action: true }, ON, NOW)).toMatchObject({ kind: "gate" });
   });
 
+  test("Sec-Fetch-Mode comes first: 'navigate' is a page whatever Accept says; any other value is not a page whatever Accept says", () => {
+    const page = (fetchMode: string | null | undefined, accept: string | null | undefined, method = "GET") => opensAsPage({ method, fetchMode, accept });
+    for (const accept of ["*/*", "application/json", "text/plain", "", null, undefined, BROWSER_ACCEPT, "application/json, text/html"]) {
+      expect(page("navigate", accept), `navigate ${accept}`).toBe(true);
+      expect(page("Navigate", accept, "HEAD"), `Navigate ${accept}`).toBe(true);
+      expect(page(" navigate ", accept), `" navigate " ${accept}`).toBe(true);
+    }
+    for (const fetchMode of ["cors", "no-cors", "same-origin", "websocket", "nested-navigate", "navigat", "x"])
+      for (const accept of ["text/html", BROWSER_ACCEPT, "text/html, application/json", "*/*", null, undefined])
+        expect(page(fetchMode, accept), `${fetchMode} ${accept}`).toBe(false);
+    // only an absent header (or one with no value) falls back to Accept
+    for (const fetchMode of [null, undefined, "", "  "]) {
+      expect(page(fetchMode, "text/html"), `${JSON.stringify(fetchMode)} text/html`).toBe(true);
+      expect(page(fetchMode, BROWSER_ACCEPT), `${JSON.stringify(fetchMode)} browser`).toBe(true);
+      expect(page(fetchMode, "*/*"), `${JSON.stringify(fetchMode)} */*`).toBe(false);
+      expect(page(fetchMode, "application/json, text/html"), `${JSON.stringify(fetchMode)} json first`).toBe(false);
+      expect(page(fetchMode, null), `${JSON.stringify(fetchMode)} no Accept`).toBe(false);
+    }
+    // the method rules stay: a write is never a page, a server action (POST + Next-Action) is
+    expect(opensAsPage({ method: "POST", fetchMode: "navigate", accept: BROWSER_ACCEPT })).toBe(false);
+    expect(opensAsPage({ method: "POST", fetchMode: "cors", accept: "text/x-component", action: true })).toBe(true);
+    expect(opensAsPage({ method: "PUT", fetchMode: "navigate", accept: "text/html" })).toBe(false);
+  });
+
+  test("a script that sends Accept: text/html with a fetch (Sec-Fetch-Mode: cors) still gets the 404 JSON; a navigation with Accept: */* gets the page", async () => {
+    expect(await asked("/api/konto/me", "GET", { fetchMode: "cors", accept: "text/html" })).toMatchObject({ kind: "gate", json: true });
+    expect(await asked("/api/konto/me", "GET", { fetchMode: "same-origin", accept: BROWSER_ACCEPT })).toMatchObject({ kind: "gate", json: true });
+    expect(await asked("/api/konto/verify", "GET", { fetchMode: "navigate", accept: "*/*" })).toEqual({ kind: "gate", page: "/tulekul/et", json: false });
+    expect(await asked("/api/konto/verify", "GET", { fetchMode: "navigate", accept: "application/json" })).toMatchObject({ json: false });
+  });
+
+  test("an Accept range with q=0 is 'not acceptable'; q=0.0 and q=0.000 too; a malformed q keeps the default of 1 (RFC 9110)", () => {
+    for (const q of ["q=0", "q=0.0", "q=0.00", "q=0.000", "Q=0", "q=0.", "q=0 ", " q=0"]) {
+      expect(prefersHtml(`text/html;${q}`), q).toBe(false); // the only HTML range is not acceptable
+      expect(prefersHtml(`text/html;${q}, application/json`), q).toBe(false);
+      expect(prefersHtml(`application/json;${q}, text/html`), q).toBe(true); // JSON is the one that is out
+      expect(prefersHtml(`application/json;${q}, text/html;q=0.1`), q).toBe(true);
+      expect(prefersHtml(`text/html;level=1;${q}`), q).toBe(false); // other parameters before it
+    }
+    // a small non-zero q is acceptable, only weighed against JSON
+    for (const q of ["q=0.001", "q=0.1", "q=1", "q=1.0", "q=1.000"]) expect(prefersHtml(`text/html;${q}`), q).toBe(true);
+    expect(prefersHtml("text/html;q=0.001, application/json;q=0.002")).toBe(false);
+    // a malformed q is no q at all: the default of 1 (not 0, not a crash)
+    for (const q of ["q=", "q=abc", "q=.", "q=..", "q=1.2.3", "q=1.5", "q=2", "q=0.1234", "q=-1", "q = 0", "q=1e-9", "q=00", "q=0x1"]) {
+      expect(prefersHtml(`text/html;${q}`), q).toBe(true);
+      expect(prefersHtml(`text/html;${q}, application/json`), q).toBe(true); // 1 against 1, HTML listed first
+      expect(prefersHtml(`application/json, text/html;${q}`), q).toBe(false); // 1 against 1, JSON listed first
+      expect(prefersHtml(`application/json;${q}, text/html;q=0.5`), q).toBe(false); // JSON at 1 beats HTML at 0.5
+    }
+  });
+
   test("the method never opens the gate (a server action is a POST to the page's own address) and never closes it", async () => {
     for (const method of METHODS) {
       for (const path of ["/", "/konto/sisene", "/ru/kontakt", "/api/konto/request", "/api/feedback"]) expect(await kind(path, ON, undefined, method), `${method} ${path}`).toBe("gate");
@@ -263,8 +314,13 @@ describe("the coming-soon page itself", () => {
 describe("one list of static files for the routing and the gate (lib/root-files.ts)", () => {
   const served = (path: string) => routeSitePath(path, new URLSearchParams()).kind === "other";
 
-  test("every file and folder of the list is served as it is AND goes through the gate; og.png included", () => {
-    expect(ROOT_FILES).toContain("og.png");
+  test("every file of the list exists (public/, or app/icon.svg), and so does every folder: no entry for a file that is not there (og.png was one)", () => {
+    expect(ROOT_FILES).not.toContain("og.png"); // the link preview is og.jpg only
+    for (const name of ROOT_FILES) expect(existsSync(join(process.cwd(), name === "icon.svg" ? "src/app" : "public", name)), name).toBe(true);
+    for (const folder of ROOT_FOLDERS) expect(existsSync(join(process.cwd(), "public", folder)), folder).toBe(true);
+  });
+
+  test("every file and folder of the list is served as it is AND goes through the gate", () => {
     for (const name of ROOT_FILES) {
       expect(served(`/${name}`), name).toBe(true);
       expect(alwaysThrough(`/${name}`), name).toBe(true);
@@ -280,6 +336,7 @@ describe("one list of static files for the routing and the gate (lib/root-files.
       ...ROOT_FILES.flatMap((name) => [`/${name}.bak`, `/${name}x`, `/x${name}`, `/${name}/x`, `/ru/${name}`, `/x/${name}`]),
       ...ROOT_FOLDERS.flatMap((folder) => [`/${folder}`, `/${folder}x/a.png`, `/x/${folder}/a.png`]),
       "/og.gif",
+      "/og.png", // no such file: the 404 page, and gated
       "/ogXjpg",
       "/favicon.ico.php",
     ];

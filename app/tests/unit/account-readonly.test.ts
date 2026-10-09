@@ -26,7 +26,7 @@ const contact = (registrationId: number, over: Partial<ContactCard> = {}): Conta
 });
 
 const dashboard: Dashboard = {
-  client: { email: "kati@example.test", name: "Kati", phone: "", locale: "et", newsletter: false },
+  client: { email: "kati@example.test", name: "Kati", phone: "", locale: "et", newsletter: false, passwordSetAt: null },
   cards: [
     contact(7, { status: "awaiting_prepayment", paymentChoice: "half", paidCents: 0 }),
     contact(8),
@@ -34,6 +34,7 @@ const dashboard: Dashboard = {
   ],
   favourites: [],
   prepayment: { receiver: "MS LAB OÜ", iban: "EE00 0000 0000 0000 0000", bank: "", referencePrefix: "MS" },
+  resume: null,
 };
 
 const d = getDict("et");

@@ -2,6 +2,7 @@ import type { Frame, Page, Request } from "@playwright/test";
 import { clientEmail, signInAsClient, takeTerms } from "./account";
 import { E2E_BUNNY } from "./bunny-values";
 import { LOCK_WAIT_MS, removeClientRows } from "./fixtures";
+import { backdateClock } from "./lessons";
 import { insertPlayerLesson, openPlayerHarness, readyLesson, setProgress, storedProgress, type FakeShape } from "./player-harness";
 import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
@@ -13,7 +14,8 @@ import { submitsForms, test, expect } from "./test";
 // fullscreen with the Fullscreen API and without it (an iPhone), with the watermark on the picture in every corner, upright and
 // sideways; the resume point; and (Task 8b) an upright video (1080 × 1920 in the fake Bunny, stored by the app through the webhook
 // and handed to the player by the lesson API): the frame has its shape, is capped in height and centred at normal size, and is the
-// largest upright box that fits, centred, when enlarged, with the watermark on the picture each time. Clients are sample addresses (`e2e-client-…@example.test`, never
+// largest upright box that fits, centred, when enlarged, with the watermark on the picture each time; and (phase 2c) the seek lock: a
+// jump forward is sent back to the furthest point watched, with the line under the player. Clients are sample addresses (`e2e-client-…@example.test`, never
 // mailed); the lesson API checks the course terms, so the terms are taken (takeTerms) just for reading the lesson.
 
 const made = new Set<string>();
@@ -72,6 +74,12 @@ const subscribed = (frame: Frame) =>
 /** Posts a Player.js event from `frame`'s window to its parent, as the player would. */
 const postFromPlayer = (frame: Frame, event: string, value?: unknown) =>
   frame.evaluate(([e, v]) => parent.postMessage(JSON.stringify({ context: "player.js", version: "0.0.11", event: e, value: v }), "*"), [event, value] as const);
+
+/** The fake player playing from `from` to `to`: Player.js timeupdates a second apart, as a playing video sends them (the seek lock takes back a jump of more than 3 s). */
+async function playFrom(frame: Frame, from: number, to: number, duration = 125) {
+  for (let s = Math.floor(from) + 1; s < to; s++) await postFromPlayer(frame, "timeupdate", { seconds: s, duration });
+  await postFromPlayer(frame, "timeupdate", { seconds: to, duration });
+}
 
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
@@ -177,6 +185,7 @@ test("the player: Bunny's frame (the fake) with the student's e-mail over it, pl
   expect(await mark.evaluate((e) => getComputedStyle(e).pointerEvents)).toBe("none");
 
   await subscribed(await fakeFrame(page));
+  await backdateClock(lesson.clientId, lesson.lessonId);
   await page.frameLocator("[data-player] iframe").getByRole("button", { name: "Mängi lõpuni" }).click();
   await expect(page.locator("[data-harness-done]")).toHaveText("Õppetund tehtud ✓");
   expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 125, done: true });
@@ -200,8 +209,8 @@ test("only the player's frame is heard (its origin and its window); leaving the 
   });
   // the player at 30.6 s, then the student leaves (no pause): the report goes out as the page goes away (Playwright no longer sees
   // a request of a page being unloaded, so the database is the witness; one report and not two: lesson-player.test.ts)
-  await postFromPlayer(fake, "timeupdate", { seconds: 30.6, duration: 125 });
-  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toBeNull();
+  await playFrom(fake, 0, 30.6);
+  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 0, done: false });
   await page.goto("/konto");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 30, done: false });
 });
@@ -221,7 +230,7 @@ test("no word from Bunny (a token it refuses): 'Video ei lae. Proovi hiljem uues
   await expect(page.locator("[data-player-frame] [role=status]")).toHaveText("Video ei lae. Proovi hiljem uuesti."); // the live region
   await expect(error).toBeInViewport();
   await expect(page.locator("[data-fullscreen]")).toHaveCount(0); // no "Täisekraan" for a video that does not load
-  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toBeNull();
+  expect(await storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 0, done: false });
 });
 
 test("our fullscreen: the wrapper fills the screen with the picture in its middle and the watermark on it; the same button leaves it", async ({ page }, info) => {
@@ -299,7 +308,7 @@ test("resume: the frame starts at the saved second (t=40) and the reports begin 
   // within the saved second: nothing to say; past it: reported (the messages are handled in order)
   await postFromPlayer(fake, "timeupdate", { seconds: 40.8, duration: 125 });
   await postFromPlayer(fake, "pause");
-  await postFromPlayer(fake, "timeupdate", { seconds: 45.2, duration: 125 });
+  await playFrom(fake, 40.8, 45.2);
   await postFromPlayer(fake, "pause");
   await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 45, done: false });
   expect(reports).toEqual([{ watchedSec: 45 }]);
@@ -397,3 +406,114 @@ test("a video stored with a quarter turn (1920 × 1080, rotation 90: a phone hel
   const { view } = await student(page, "turned", info.project.name, { shape: { width: 1920, height: 1080, rotation: 90 } });
   expect(view.video.shape).toEqual({ width: 1080, height: 1920 });
 });
+
+test("the seek lock: a jump forward is taken back to the furthest point watched (setCurrentTime), with the line under the player; rewinding is free", async ({ page }, info) => {
+  const { lesson, view } = await student(page, "seek", info.project.name);
+  const reports = progressReports(page, lesson.lessonId);
+  await openPlayerHarness(page, lesson, view);
+  const fake = await fakeFrame(page);
+  await subscribed(fake);
+  await playFrom(fake, 0, 6);
+  const pictureBefore = (await playerBoxes(page)).frame;
+  await postFromPlayer(fake, "timeupdate", { seconds: 90, duration: 125 }); // the slider dragged far ahead
+  await expect.poll(() => fake.evaluate(() => (window as unknown as { __seeks?: number[] }).__seeks ?? [])).toEqual([6]);
+  const note = page.locator("[data-seek-note]");
+  await expect(note).toHaveText("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
+  expect((await playerBoxes(page)).frame, "the picture does not move as the line comes").toEqual(pictureBefore); // only what is under it makes room
+  await postFromPlayer(fake, "timeupdate", { seconds: 2, duration: 125 }); // back: free
+  await postFromPlayer(fake, "pause");
+  await expect.poll(() => storedProgress(lesson.clientId, lesson.lessonId)).toEqual({ watchedSec: 6, done: false });
+  expect(reports).toEqual([{ watchedSec: 6 }]);
+  await expect(note).toHaveText("", { timeout: 8_000 }); // gone after 6 s
+  expect(await noOverflow(page)).toBe(true);
+});
+
+/** What the line must not move while the student drags the slider: the player's boxes and the fullscreen button's (the mark's corner too). */
+async function layoutOf(page: Page) {
+  const { wrapper, stage, frame, iframe, mark, corner } = await playerBoxes(page);
+  return { wrapper, stage, frame, iframe, mark, corner, button: box((await page.locator("[data-fullscreen]").boundingBox())!) };
+}
+
+type Layout = Awaited<ReturnType<typeof layoutOf>>;
+
+/** The largest difference, in pixels, between two layouts' boxes (Infinity when the mark is in another corner). */
+function layoutDistance(a: Layout, b: Layout): number {
+  if (a.corner !== b.corner) return Infinity;
+  let most = 0;
+  for (const part of ["wrapper", "stage", "frame", "iframe", "mark", "button"] as const)
+    for (const side of ["x", "y", "w", "h"] as const) most = Math.max(most, Math.abs(a[part][side] - b[part][side]));
+  return most;
+}
+
+/**
+ * The layout once it has stopped changing by itself, so that only the line can move anything between two readings: the pointer is
+ * taken off the button (its hover lift, translateY(-2px) over 0.2 s, would be in the button's box, and a click's :active scale before
+ * it), the fonts are loaded (the watermark's Manrope 600 may still be landing, and it sizes the mark), every transition has ended, and
+ * two readings 50 ms apart are the same. Under load each of these can still be going on a second after the click that enlarged it.
+ */
+async function settledLayout(page: Page, pointer: { x: number; y: number }): Promise<Layout> {
+  await page.mouse.move(pointer.x, pointer.y);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)));
+  });
+  let last = await layoutOf(page);
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(50);
+    const next = await layoutOf(page);
+    if (layoutDistance(next, last) < 0.01) return next;
+    last = next;
+  }
+  throw new Error(`e2e: the player's layout does not settle: ${JSON.stringify(last)}`);
+}
+
+/** The same layout, to within half a pixel. */
+function expectSameLayout(actual: Layout, expected: Layout, message: string): void {
+  for (const part of ["wrapper", "stage", "frame", "iframe", "mark", "button"] as const)
+    for (const side of ["x", "y", "w", "h"] as const)
+      expect(Math.abs(actual[part][side] - expected[part][side]), `${message}: ${part}.${side} is ${JSON.stringify(actual[part])}, was ${JSON.stringify(expected[part])}`).toBeLessThanOrEqual(0.5);
+  expect(actual.corner, message).toBe(expected.corner);
+}
+
+// fix round 1: an enlarged player (the browser's fullscreen, or the wrapper over the window) is as high as the screen, so a picture that
+// the screen's height limits (a phone on its side) would shrink when a line that took room from the stage comes and grow back after
+// 6 s, under the pointer that is dragging Bunny's slider. The line is out of the flow there: nothing moves as it comes and goes.
+// (The window cannot be resized while the browser is in fullscreen, so each size is its own test.)
+for (const mode of ["fullscreen", "cover"] as const) {
+  for (const size of [{ width: 844, height: 390 }, { width: 390, height: 844 }]) {
+    const how = mode === "cover" ? "no Fullscreen API" : "the browser's fullscreen";
+    test(`the seek line leaves the picture alone, enlarged (${how}) at ${size.width} × ${size.height}: the frame, the stage and the button stay where they are as the line comes and goes`, async ({ page }, info) => {
+      const { lesson, view } = await student(page, `seekbox-${mode}-${size.width}`, info.project.name);
+      if (mode === "cover")
+        await page.addInitScript(() => {
+          delete (Element.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+        });
+      await page.clock.install();
+      await page.setViewportSize(size);
+      await openPlayerHarness(page, lesson, view);
+      const fake = await fakeFrame(page);
+      await subscribed(fake);
+      await page.locator("[data-fullscreen]").click();
+      if (mode === "cover") await expect(page.locator("[data-player]")).toHaveAttribute("data-expanded", "");
+      else await expect.poll(() => page.evaluate(() => document.fullscreenElement?.hasAttribute("data-player") ?? false)).toBe(true);
+      const note = page.locator("[data-seek-note]");
+      await expect(note).toHaveText("");
+      await playFrom(fake, 0, 6);
+      const pointer = { x: size.width / 2, y: size.height / 2 }; // over the picture, as when she drags the slider
+      const before = await settledLayout(page, pointer);
+      await postFromPlayer(fake, "timeupdate", { seconds: 90, duration: 125 }); // the slider dragged far ahead
+      await expect(note).toHaveText("Edasi saab kerida kuni kohani, kuhu oled jõudnud.");
+      const shown = await settledLayout(page, pointer);
+      expectSameLayout(shown, before, "nothing moves as the line comes");
+      // the line itself: on the screen and inside the player, clear of the button, taking no clicks
+      const line = box((await note.boundingBox())!);
+      expect(line.x >= 0 && line.x + line.w <= size.width + 0.5 && line.y >= 0, `the line is on the screen ${JSON.stringify(line)}`).toBe(true);
+      expect(line.x >= shown.wrapper.x - 0.5 && line.x + line.w <= shown.wrapper.x + shown.wrapper.w + 0.5, "the line is inside the player").toBe(true);
+      expect(line.y + line.h <= shown.button.y + 0.5, "the line is clear of the button").toBe(true);
+      expect(await note.evaluate((e) => getComputedStyle(e).pointerEvents)).toBe("none");
+      await page.clock.fastForward(6_000);
+      await expect(note).toHaveText("");
+      expectSameLayout(await settledLayout(page, pointer), before, "nothing moves as the line goes");
+    });
+  }
+}

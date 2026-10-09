@@ -1,12 +1,14 @@
-/* Prototype B .footer, with the newsletter block (Newsletter.module.css) placed above the link columns. */
+/* Prototype B .footer, half its old height (phase 2c, Maria 06.10): one block — the link columns at the left (about 2/3), the
+   newsletter card (Newsletter.module.css) at the right (about 1/3) — and the bottom line. The card is first in the page: below
+   900 px the two stack with the card on top. B's footer greys are kept as they were. */
 
 .footer {
   margin-top: 80px;
-  padding: 66px var(--page);
+  padding: 40px var(--page) 20px;
   background: var(--ink);
   color: #fff;
   font-family: var(--font-body);
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 :where(.footer) a {
@@ -14,25 +16,36 @@
   text-decoration: none;
 }
 
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-areas: "links news";
+  gap: 40px;
+  align-items: start;
+}
+
+.top > [data-footer-newsletter] {
+  grid-area: news;
+}
+
 .main {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1.3fr;
-  gap: 40px;
-  margin-top: 66px;
+  grid-area: links;
+  grid-template-columns: 1.4fr 1fr 1fr 1.3fr;
+  gap: 28px;
 }
 
 .logo {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  justify-content: center;
-  width: 168px;
-  height: 66px;
+  width: 140px;
+  height: 55px;
 }
 
 .logo img {
   display: block;
-  width: 166px;
+  width: 138px;
   height: auto;
   filter: invert(1);
   mix-blend-mode: screen;
@@ -40,22 +53,22 @@
 
 .text {
   max-width: 220px;
-  margin: 20px 0 0;
+  margin: 12px 0 0;
   color: #b7afb3;
   font-size: 12px;
 }
 
 .title {
-  margin: 0 0 22px;
+  margin: 0 0 12px;
   color: #fff;
-  font: 500 12px/1.65 var(--font-body);
+  font: 500 12px/1.6 var(--font-body);
   letter-spacing: normal;
 }
 
 .link {
   display: block;
   width: fit-content;
-  margin-bottom: 9px;
+  margin-bottom: 6px;
   color: #c9c1c5;
   font-size: 12px;
 }
@@ -65,19 +78,19 @@
 }
 
 .contact {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .cta {
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
 .bottom {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  margin-top: 50px;
-  padding-top: 23px;
+  margin-top: 20px;
+  padding-top: 14px;
   border-top: 1px solid #494347;
   color: #a9a0a5;
   font-size: 10px;
@@ -94,15 +107,7 @@
 
 @media (max-width: 1180px) {
   .main {
-    grid-template-columns: 1.5fr 1fr 1fr;
-  }
-
-  .main > div:last-child {
-    grid-column: 1 / -1;
-  }
-
-  .main > div:last-child .text {
-    max-width: none;
+    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -117,42 +122,40 @@
 
   .contact,
   .cta {
-    margin-top: 8px;
+    margin-top: 4px;
   }
 
   .title {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 899px) {
+  .top {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "news"
+      "links";
+    gap: 36px;
   }
 }
 
 @media (max-width: 640px) {
   .footer {
     margin-top: 40px;
-    padding: 45px var(--page);
+    padding: 36px var(--page) 20px;
   }
 
   .main {
-    grid-template-columns: 1fr 1fr;
-    gap: 30px;
-    margin-top: 45px;
+    gap: 24px;
   }
 
   .main > div:first-child {
     grid-column: 1 / -1;
   }
 
-  .logo {
-    width: 140px;
-    height: 55px;
-  }
-
-  .logo img {
-    width: 138px;
-  }
-
   .bottom {
     flex-direction: column;
     gap: 10px;
-    margin-top: 30px;
   }
 }

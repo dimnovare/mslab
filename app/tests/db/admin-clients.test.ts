@@ -186,6 +186,15 @@ describe("clientDetail", () => {
     expect([await clientLabel(db, a.id), await clientLabel(db, b.id), await clientLabel(db, c.id), await clientLabel(db, 999_999)]).toEqual(["Anu", "Berit Saar", "c@example.test", null]);
   });
 
+  test("the drawer's newsletter line: yes, waiting for confirmation, or no (phase 2c)", async () => {
+    const kati = await client("kati@example.test");
+    expect((await clientDetail(db, kati.id, NOW))!.newsletter).toBe("no");
+    await db.insert(subscribers).values({ email: "Kati@example.test", token: "n1" });
+    expect((await clientDetail(db, kati.id, NOW))!.newsletter).toBe("pending");
+    await db.update(subscribers).set({ confirmedAt: NOW });
+    expect((await clientDetail(db, kati.id, NOW))!.newsletter).toBe("yes");
+  });
+
   test("the e-courses to pick from: e-learning only, drafts too, in the public order, with today + their access months (12 without)", async () => {
     expect(await listEcourses(db, NOW)).toEqual([
       { id: ecourse.id, title: { et: "Kulmumeistri e-koolitus" }, published: true, accessMonths: 6, until: "2027-04-04" },
@@ -291,7 +300,7 @@ describe("e-course access", () => {
     await grantAccess(db, { clientId: summer.id, courseId: ecourse.id, until: "2027-07-01", by: ADMIN, now: NOW });
     expect((await db.select().from(courseAccess).where(eq(courseAccess.clientId, summer.id)))[0].expiresAt.toISOString()).toBe("2027-07-01T20:59:59.999Z"); // UTC+3
     const dash = (await loadDashboard(db, kati.id, NOW))!;
-    expect(dash.cards).toEqual([{ kind: "ecourse", course: { slug: "e-kulm", title: { et: "Kulmumeistri e-koolitus" } }, grantedAt: NOW.toISOString(), expiresAt: "2027-04-04T20:59:59.999Z", revoked: false }]);
+    expect(dash.cards).toEqual([{ kind: "ecourse", course: { slug: "e-kulm", title: { et: "Kulmumeistri e-koolitus" } }, grantedAt: NOW.toISOString(), expiresAt: "2027-04-04T20:59:59.999Z", revoked: false, progress: null }]);
     // a draft e-course can be granted (bought before it is published)
     expect(await grantAccess(db, { clientId: kati.id, courseId: draftEcourse.id, until: "2026-10-04", by: ADMIN, now: NOW })).toEqual({ ok: true });
   });
