@@ -355,6 +355,12 @@ export const et = {
     // Home page notice after the unsubscribe link of the welcome mail (/?uudiskiri=loobutud).
     unsubscribedTitle: "Oled uudiskirjast loobunud.",
     unsubscribedText: "Me ei saada sulle enam MS LABi uudiskirja.",
+    // The page behind the unsubscribe link (GET /api/newsletter/loobu?t=…, server/unsubscribe-page.ts): the link only opens it, the button unsubscribes.
+    unsubscribePage: {
+      heading: "Uudiskirjast loobumine",
+      lead: "Vajuta nuppu, et MS LABi uudiskirjast loobuda.",
+      button: "Loobu uudiskirjast",
+    },
     // The notices after a confirmation link of the old flow, still in some mailboxes (/?uudiskiri=kinnitatud or =vigane).
     confirmedTitle: "Tere tulemast MS LABi!",
     confirmedText: "Sinu liitumine on kinnitatud.",

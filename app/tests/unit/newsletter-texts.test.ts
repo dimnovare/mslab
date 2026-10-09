@@ -48,6 +48,21 @@ describe("the notice after the unsubscribe link (?uudiskiri=loobutud)", () => {
   });
 });
 
+describe("the page behind the unsubscribe link (GET /api/newsletter/loobu)", () => {
+  test("Estonian and Russian: heading, lead and the one button", () => {
+    expect(et.newsletter.unsubscribePage).toEqual({
+      heading: "Uudiskirjast loobumine",
+      lead: "Vajuta nuppu, et MS LABi uudiskirjast loobuda.",
+      button: "Loobu uudiskirjast",
+    });
+    expect(ru.newsletter.unsubscribePage).toEqual({
+      heading: "Отказ от рассылки",
+      lead: "Нажмите кнопку, чтобы отписаться от рассылки MS LAB.",
+      button: "Отписаться от рассылки",
+    });
+  });
+});
+
 describe("Russian typography in the new strings", () => {
   const strings: [string, string][] = [
     ["newsletter.sentTitle", ru.newsletter.sentTitle],
@@ -56,6 +71,9 @@ describe("Russian typography in the new strings", () => {
     ["newsletter.unsubscribedTitle", ru.newsletter.unsubscribedTitle],
     ["newsletter.unsubscribedText", ru.newsletter.unsubscribedText],
     ["mail.welcome.unsubscribe", ru.mail.welcome.unsubscribe],
+    ["newsletter.unsubscribePage.heading", ru.newsletter.unsubscribePage.heading],
+    ["newsletter.unsubscribePage.lead", ru.newsletter.unsubscribePage.lead],
+    ["newsletter.unsubscribePage.button", ru.newsletter.unsubscribePage.button],
   ];
 
   test("no one-letter preposition (в, с, к, о, у) is followed by an ordinary space: it takes a no-break space", () => {

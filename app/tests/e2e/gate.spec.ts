@@ -133,8 +133,12 @@ test.describe("a visitor", () => {
       expect(sub).toMatchObject({ email: addr, locale: "et", confirmed: true });
       await expect(status).toContainText("Saatsime sulle tervituskirja.");
 
-      // the unsubscribe link of the welcome mail passes the gate and lands on the coming-soon page with its notice
+      // the unsubscribe link of the welcome mail passes the gate and opens its own page (not the coming-soon page); the button then lands on
+      // the coming-soon page with the notice
       await page.goto(`/api/newsletter/loobu?t=${sub!.token}`);
+      await expect(page.getByRole("heading", { name: "Uudiskirjast loobumine" })).toBeVisible();
+      expect((await storedSubscriber(addr))?.confirmed).toBe(true); // opening the link unsubscribes no one
+      await page.getByRole("button", { name: "Loobu uudiskirjast" }).click();
       await expectComingSoon(page);
       const notice = page.locator("[data-flash-notice]");
       await expect(notice).toContainText("Oled uudiskirjast loobunud.");

@@ -93,7 +93,7 @@ test.describe("newsletter", () => {
     }
   });
 
-  test("sign-up with the e-mail alone: announced in the status region, stored confirmed at once; the unsubscribe link of the welcome mail removes it", async ({ page }, info) => {
+  test("sign-up with the e-mail alone: announced in the status region, stored confirmed at once; the unsubscribe link of the welcome mail opens a page, and its button removes the row", async ({ page }, info) => {
     submitsForms();
     const addr = testEmail("nl", info.project.name);
     await page.goto("/koolitused");
@@ -111,7 +111,11 @@ test.describe("newsletter", () => {
     test.skip(!LOCAL_FIXTURES, "reads the unsubscribe token from the local database");
     const sub = await storedSubscriber(addr); // stored lowercased
     expect(sub).toMatchObject({ email: addr, locale: "et", confirmed: true });
-    await page.goto(`/api/newsletter/loobu?t=${sub!.token}`); // the link the welcome mail carries
+    await page.goto(`/api/newsletter/loobu?t=${sub!.token}`); // the link the welcome mail carries: it only opens a page
+    await expect(page.getByRole("heading", { name: "Uudiskirjast loobumine" })).toBeVisible();
+    await expect(page.getByText("Vajuta nuppu, et MS LABi uudiskirjast loobuda.")).toBeVisible();
+    expect((await storedSubscriber(addr))?.confirmed).toBe(true); // a mail gateway that opens the link unsubscribes no one
+    await page.getByRole("button", { name: "Loobu uudiskirjast" }).click();
     const notice = page.locator("[data-flash-notice]");
     await expect(notice).toContainText("Oled uudiskirjast loobunud.");
     await expect(notice).toContainText("Me ei saada sulle enam MS LABi uudiskirja.");
@@ -122,6 +126,18 @@ test.describe("newsletter", () => {
     expect(await storedSubscriber(addr)).toBeNull();
     await notice.getByRole("button", { name: "Sulge" }).click();
     await expect(notice).toBeEmpty();
+  });
+
+  test("the unsubscribe page fits 390, 834 and 1440 px wide: no horizontal overflow, the button is a 44px target", async ({ page }) => {
+    for (const [width, height] of [[390, 844], [834, 1112], [1440, 900]]) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/api/newsletter/loobu?t=not-a-real-token-0000000000"); // a token that belongs to no row: the page is the same
+      const button = page.getByRole("button", { name: "Loobu uudiskirjast" });
+      await expect(button).toBeVisible();
+      expect((await button.boundingBox())!.height, `at ${width}`).toBeGreaterThanOrEqual(44);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `at ${width}`).toBeLessThanOrEqual(0);
+    }
   });
 
   test("a confirmation link of the old flow still works: the unconfirmed row is confirmed and the notice says so", async ({ page }, info) => {
@@ -166,6 +182,10 @@ test.describe("newsletter", () => {
     const sub = await storedSubscriber(addr);
     expect(sub).toMatchObject({ locale: "ru", confirmed: true });
     await page.goto(`/api/newsletter/loobu?t=${sub!.token}`);
+    await expect(page.getByRole("heading", { name: "Отказ от рассылки" })).toBeVisible(); // the row's language
+    await expect(page.getByText("Нажмите кнопку, чтобы отписаться от рассылки MS LAB.")).toBeVisible();
+    expect((await storedSubscriber(addr))?.confirmed).toBe(true);
+    await page.getByRole("button", { name: "Отписаться от рассылки" }).click();
     const notice = page.locator("[data-flash-notice]");
     await expect(notice).toContainText("Вы отписались от рассылки.");
     await expect(notice).toContainText("Мы больше не будем присылать вам рассылку MS LAB.");
@@ -174,6 +194,7 @@ test.describe("newsletter", () => {
 
     // unsubscribing reveals nothing: an unknown link gets the same answer, in Estonian
     await page.goto("/api/newsletter/loobu?t=not-a-real-token-0000000000");
+    await page.getByRole("button", { name: "Loobu uudiskirjast" }).click();
     await expect(page.locator("[data-flash-notice='ok']")).toContainText("Oled uudiskirjast loobunud.");
     await expect.poll(() => new URL(page.url()).pathname).toBe("/");
 

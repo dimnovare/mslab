@@ -35,7 +35,7 @@ export async function clientNewsletter(db: Db, clientId: number): Promise<{ emai
 /** `siteUrl`: the base of the links in the mail (the allow-listed request origin, else SITE_URL; server/site.ts linkBase). */
 export type WelcomeDeps = { db: Db; env: Env; now: Date; siteUrl: string };
 
-/** The unsubscribe link of the welcome mail: the subscriber's own token, on the site's address (GET /api/newsletter/loobu). */
+/** The unsubscribe link of the welcome mail: the subscriber's own token, on the site's address (GET /api/newsletter/loobu opens a page with a button; the button's POST unsubscribes). */
 export const unsubscribeUrl = (siteUrl: string, token: string) => `${siteUrl.replace(/\/+$/, "")}/api/newsletter/loobu?t=${encodeURIComponent(token)}`;
 
 /** The token of an address's subscriber row (the address may be stored in any case), or null: no row. */
@@ -106,8 +106,19 @@ export async function sendWelcome(deps: WelcomeDeps, to: { email: string; locale
 }
 
 /**
- * The unsubscribe link (/api/newsletter/loobu?t=<token>): deletes the subscriber's row, and says which language she gets the answer in.
- * null = no such row (an unknown or malformed token, or the link used before): nothing is deleted, and the caller answers the same.
+ * The language of the row a token belongs to (the page behind the unsubscribe link is shown in it), or null: a malformed token or no such row.
+ * Only reads.
+ */
+export async function subscriberLocale(db: Db, token: string): Promise<"et" | "ru" | null> {
+  if (!isTokenShape(token)) return null;
+  const [row] = await db.select({ locale: subscribers.locale }).from(subscribers).where(eq(subscribers.token, token)).limit(1);
+  return row ? (row.locale === "ru" ? "ru" : "et") : null;
+}
+
+/**
+ * The button of the unsubscribe page (POST /api/newsletter/loobu, the only thing that unsubscribes): deletes the subscriber's row, and says
+ * which language she gets the answer in. null = no such row (an unknown or malformed token, or the button pressed before): nothing is
+ * deleted, and the caller answers the same.
  */
 export async function unsubscribeByToken(db: Db, token: string): Promise<{ locale: "et" | "ru" } | null> {
   if (!isTokenShape(token)) return null;
