@@ -356,3 +356,8 @@ export async function storedRegistration(id: number): Promise<{ clientId: number
   const [row] = await localDb((sql) => sql<{ clientId: number | null; email: string; name: string }[]>`select client_id as "clientId", email, name from registrations where id = ${id}`);
   return row ?? null;
 }
+
+/** The password lock's counter of an address (phase 2c: rl:pw-mail:<sha256 of the address>, 15 minutes) cleared, so a test starts without one. */
+export async function clearPasswordLock(email: string): Promise<void> {
+  await localDb((sql) => sql`delete from kv_entries where key = ${`rl:pw-mail:${sha256Hex(email.trim().toLowerCase())}`}`);
+}

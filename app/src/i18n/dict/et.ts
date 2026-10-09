@@ -566,6 +566,12 @@ export const et = {
       // account enumeration), and an address with 3 logins in 30 minutes gets none for a while (server/client-auth.ts CLIENT_LOGIN_CAP)
       noMail: "Kui kirja ei tule, proovi poole tunni pärast uuesti.",
       changeEmail: "Muuda e-posti",
+      // the password (phase 2c): a quiet link under the e-mail step, its own step (#parool), and the way back to the code
+      toPassword: "Sisene parooliga",
+      password: "Parool",
+      toCode: "Saada mulle hoopis kood",
+      passwordWrong: "E-post või parool ei sobi.",
+      passwordLocked: "Liiga palju katseid. Proovi 15 minuti pärast uuesti või sisene koodiga.",
       wrongCode: "Kood ei sobi. Proovi uuesti.",
       expired: "Kood on aegunud. Saada uus kood.",
       // #viga=link: the e-mail's button was used already, or is older than 30 minutes

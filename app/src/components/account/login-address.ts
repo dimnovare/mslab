@@ -16,6 +16,9 @@ const KNOWN = ["viga", "korda", "email", "kood", "valja"] as const;
  */
 export const SIGNED_OUT_MARK = "valja=1";
 
+/** The login page's password step (phase 2c): the fragment `#parool`, so that a reload opens it again. Not a parameter: it is left in the address. */
+export const PASSWORD_MARK = "parool";
+
 export type LoginAddress = {
   /** `viga`: the e-mail's button was used already or is too old (`link`), or our database failed (`server`). */
   problem: "link" | "server" | null;

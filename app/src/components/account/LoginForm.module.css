@@ -170,6 +170,11 @@
   gap: 12px 26px;
 }
 
+/* "Sisene parooliga" under the e-mail step, "Saada mulle hoopis kood" under the password step: one quiet text button under the form */
+form + .actions {
+  margin-top: 14px;
+}
+
 /* B .link as a button: "Saada uus kood", "Muuda e-posti" */
 .textButton {
   display: inline-flex;
