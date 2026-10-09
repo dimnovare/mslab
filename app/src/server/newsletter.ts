@@ -8,6 +8,7 @@ import { welcomeMail } from "./account-mail";
 import { CONFIRMATION_MAIL_DAILY_CAP, reserveLoginMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { mailConfigured, sendMail, type Env } from "./notify";
+import { forgetKey } from "./ratelimit";
 import { confirmSubscriber } from "./submit";
 import { sha256 } from "./token";
 
@@ -40,7 +41,8 @@ const WELCOME_ONCE_SEC = 365 * 24 * 60 * 60;
  * code. No mail when: no code is set; the address is a sample one; Resend is not set up; the address had its welcome this year (a KV
  * mark, read first and written only once the day's quota has a place for the mail; a store that fails lets the mail go, as the other
  * limits do); the day's confirmation cap is reached (the mail_quota row, which never fails open — a capped day writes no mark, so a
- * later confirmation of that address can still bring it).
+ * later confirmation of that address can still bring it). A send that Resend refuses or that fails takes the mark away again, so that
+ * address can still get its welcome (the place of the day's cap it spent stays spent).
  */
 export async function sendWelcome(deps: WelcomeDeps, to: { email: string; locale: string }): Promise<void> {
   try {
@@ -66,8 +68,22 @@ export async function sendWelcome(deps: WelcomeDeps, to: { email: string; locale
     } catch (e) {
       logFailure("[newsletter] welcome mark not written", e);
     }
-    const sent = await sendMail(deps.env, welcomeMail(address, code, to.locale === "ru" ? "ru" : "et"));
+    let sent = false;
+    try {
+      sent = await sendMail(deps.env, welcomeMail(address, code, to.locale === "ru" ? "ru" : "et"));
+    } catch (e) {
+      logFailure("[newsletter] welcome e-mail failed to send", e);
+    }
     console.info(`[newsletter] welcome e-mail sent: ${sent}`);
+    if (!sent) {
+      // Resend refused or failed: the mark must not keep her from the welcome for a year (the Minu andmed path loses the code, too). The
+      // cap place spent above stays spent: the attempt did reach Resend, and a mail that keeps failing must not be retried without limit.
+      try {
+        await forgetKey(deps.env.KV, mark);
+      } catch (e) {
+        logFailure("[newsletter] welcome mark not removed", e);
+      }
+    }
   } catch (e) {
     logFailure("[newsletter] welcome e-mail failed", e);
   }
@@ -86,9 +102,16 @@ export async function confirmNewsletter(
   if (!confirmed) return { outcome: "vigane", locale: "et", code: null };
   const locale = confirmed.sub.locale === "ru" ? "ru" : "et";
   if (!confirmed.first) return { outcome: "kinnitatud", locale, code: null };
-  const code = welcomeCodeOf(await readSetting(deps.db, "newsletter"));
-  if (!code) return { outcome: "kinnitatud", locale, code: null };
+  // The confirmation has stood by now, and the next click is no longer "first": a failing settings read must not turn this answer into
+  // an error or drop the welcome mail. The page then shows no code (the mail still carries it: sendWelcome reads the setting itself).
+  let code = "";
+  try {
+    code = welcomeCodeOf(await readSetting(deps.db, "newsletter"));
+    if (!code) return { outcome: "kinnitatud", locale, code: null }; // read fine, no code set: no mail either
+  } catch (e) {
+    logFailure("[newsletter] settings unavailable after the confirmation, no code on the page", e);
+  }
   const to = { email: confirmed.sub.email, locale };
   deps.later(() => sendWelcome(deps, to));
-  return { outcome: "kinnitatud", locale, code };
+  return { outcome: "kinnitatud", locale, code: code || null };
 }

@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Db } from "@/db/client";
 import { clients, clientSessions, mailQuota, settings, subscribers } from "@/db/schema";
 import { handleAccountApi, type AccountDeps } from "@/server/account-api";
 import { CLIENT_SESSION_TTL_MS, CONFIRMATION_MAIL_DAILY_CAP } from "@/server/client-auth";
-import { clientNewsletter, confirmNewsletter, newsletterState } from "@/server/newsletter";
+import { clientNewsletter, confirmNewsletter, newsletterState, sendWelcome } from "@/server/newsletter";
 import type { Env } from "@/server/notify";
 import { newToken, sha256 } from "@/server/token";
 import { fakeKv, stubFetch } from "../fakes";
@@ -126,4 +126,61 @@ test("Minu andmed: 'Saada mulle uudiskirja' on confirms at once and sends the we
   expect(await post(true)).toBe(200); // a new row, confirmed at once: the KV mark stops a second welcome
   expect(mails()).toHaveLength(1);
   expect((await db.select().from(subscribers).where(eq(subscribers.email, "kati@example.com")))[0].confirmedAt).toEqual(NOW);
+});
+
+test("a welcome mail that Resend refuses leaves no 'once a year' mark: the next try for that address sends it; the cap slot stays spent", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  let refuse = true;
+  const f = stubFetch(() => (refuse ? Response.json({ name: "application_error", message: "down", statusCode: 500 }, { status: 500 }) : Response.json({ id: "email_1" })));
+  const resend = () => f.calls.filter((c) => c.url.includes("resend"));
+  await setCode("TERE10");
+  const deps = { db, env: env(), now: NOW };
+  await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
+  expect(resend()).toHaveLength(1); // tried, refused
+  expect([...kv.store.keys()].filter((k) => k.startsWith("rl:welcome:"))).toEqual([]); // nothing marks the address as welcomed
+  refuse = false;
+  await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
+  expect(resend()).toHaveLength(2); // sent now
+  expect((resend()[1].body as { to: string }).to).toBe("uus@example.com");
+  expect((await db.select().from(mailQuota)).map((r) => r.sent)).toEqual([2]); // the refused try's place is not given back
+  await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
+  expect(resend()).toHaveLength(2); // delivered: the mark holds for the year
+  expect([...kv.store.keys()].filter((k) => k.startsWith("rl:welcome:"))).toHaveLength(1);
+});
+
+test("a store without a delete forgets the mark by a put that expires at once (and reads as no mark)", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { delete: _delete, ...noDelete } = kv;
+  void _delete;
+  kv = noDelete as unknown as ReturnType<typeof fakeKv>;
+  let refuse = true;
+  const f = stubFetch(() => (refuse ? Response.json({ name: "application_error", message: "down", statusCode: 500 }, { status: 500 }) : Response.json({ id: "email_1" })));
+  await setCode("TERE10");
+  const deps = { db, env: env(), now: NOW };
+  await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
+  refuse = false;
+  await sendWelcome(deps, { email: "uus@example.com", locale: "et" });
+  expect(f.calls.filter((c) => c.url.includes("resend"))).toHaveLength(2);
+});
+
+test("the settings cannot be read after the first confirmation: still 'kinnitatud' (it is true), no code for the page, the welcome task is scheduled and reads the setting itself", async () => {
+  const mails = outbox();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await setCode("TERE10");
+  await db.insert(subscribers).values({ email: "uus@example.com", locale: "et", token: "d".repeat(43) });
+  await db.execute(sql`alter table settings rename to settings_away`);
+  let c: ReturnType<typeof confirm>;
+  try {
+    c = confirm("d".repeat(43));
+    expect(await c.result).toEqual({ outcome: "kinnitatud", locale: "et", code: null });
+  } finally {
+    await db.execute(sql`alter table settings_away rename to settings`);
+  }
+  expect((await db.select().from(subscribers))[0].confirmedAt).toEqual(NOW); // the confirmation itself stood
+  await c.run(); // the setting is back: the welcome mail goes out with the code
+  expect(mails().map((m) => m.to)).toEqual(["uus@example.com"]);
+  expect(mails()[0].text).toContain("TERE10");
+  const lines = JSON.stringify((console.error as unknown as { mock: { calls: unknown[] } }).mock.calls);
+  expect(lines).toContain("settings unavailable after the confirmation");
+  expect(lines).not.toContain("uus@example.com");
 });

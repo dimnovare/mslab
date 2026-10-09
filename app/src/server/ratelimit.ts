@@ -13,6 +13,8 @@ export type TextKv = {
    */
   reserve?(key: string, limit: number, windowSec: number): Promise<boolean>;
   release?(key: string): Promise<void>;
+  /** Removes `key` (PgKv has one). Optional: forgetKey falls back to a put that expires at once for a store without it. */
+  delete?(key: string): Promise<void>;
 };
 
 /** Submissions a visitor may make per form within RATE_WINDOW_SEC. */
@@ -52,6 +54,15 @@ export async function releaseSlot(kv: TextKv, key: string, windowSec: number): P
   if (kv.release) return kv.release(key);
   const n = Number((await kv.get(key)) ?? "0");
   if (n > 0) await kv.put(key, String(n - 1), { expirationTtl: windowSec });
+}
+
+/**
+ * Removes `key`. A store without a delete gets the key re-put with an empty value and a 1-second life, so the mark is gone within
+ * the second, and meanwhile reads as no mark to anything that tests the value for being there (an empty string is falsy).
+ */
+export async function forgetKey(kv: TextKv, key: string): Promise<void> {
+  if (kv.delete) return kv.delete(key);
+  await kv.put(key, "", { expirationTtl: 1 });
 }
 
 /** KV key of one visitor and form: `rl:<form>:<ip>`. */
