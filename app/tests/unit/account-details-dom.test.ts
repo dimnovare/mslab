@@ -442,6 +442,23 @@ describe("Parool: the rest of the behaviour", () => {
     expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("set");
   });
 
+  test("a removal on its way: 'Muuda parooli' opens no form (the answer would close it); the answer then ends the removal as asked", async () => {
+    let release: (r: Response) => void = () => {};
+    api(SET, { "/api/konto/parool": () => new Promise<Response>((resolve) => (release = resolve)) });
+    await mount();
+    await click($("[data-password-remove]"));
+    await click($("[data-password-remove-yes]"));
+    expect($("[data-password-remove-yes]")?.getAttribute("aria-disabled")).toBe("true");
+    await click($("[data-password-change]"));
+    expect($("[data-password-form]")).toBeNull();
+    expect($("[data-password-confirm]")).not.toBeNull();
+    await act(async () => release(json(200, { ok: true })));
+    await settle();
+    expect($("[data-password-state]")?.getAttribute("data-password-state")).toBe("none");
+    expect($("[data-password-form]")).toBeNull();
+    expect($("[data-password-status]")?.textContent).toBe("Parool on eemaldatud.");
+  });
+
   test("a failed removal says 'Ei õnnestunud eemaldada.' (not the saving's words), keeps the question and the password; the retry works", async () => {
     let answer = json(500, { ok: false, error: "server" });
     api(SET, { "/api/konto/parool": async () => answer });

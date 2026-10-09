@@ -326,16 +326,12 @@ test("Parool (phase 2c): set with the password twice, then 'Muuda parooli' and '
 
 /**
  * The part in the state it is in now, at 390, 834 and 1440 px: no horizontal overflow, no control under 44 px, and the part on the
- * screen. Prints each measurement (the task's report lists them); the viewport goes back to the project's own.
+ * screen; the viewport goes back to the project's own.
  */
 async function layoutHolds(page: Page, part: Locator, label: string, own: { width: number; height: number }) {
   for (const width of [390, 834, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const box = (await part.boundingBox())!;
-    const smallest = await part
-      .locator("a:visible, button:visible, input:visible")
-      .evaluateAll((els) => Math.min(...els.map((e) => Math.round(e.getBoundingClientRect().height))));
-    console.log(`LAYOUT ${label} @${width}: part x=${Math.round(box.x)} width=${Math.round(box.width)} height=${Math.round(box.height)}, smallest control ${smallest}px`);
     expect(await noOverflow(page), `${label}: no horizontal overflow at ${width}`).toBe(true);
     expect(await smallTargets(part), `${label}: every control is 44 px or taller at ${width}`).toEqual([]);
     expect(box.x >= 0 && box.x + box.width <= width, `${label}: the part is on the screen at ${width}`).toBe(true);

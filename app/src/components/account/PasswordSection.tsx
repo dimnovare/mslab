@@ -53,6 +53,7 @@ export function PasswordSection({ email, setAt: initial, locale, t, reload }: { 
   });
 
   const open = () => {
+    if (busy.current) return; // a removal is on its way: its answer must not close the form just opened
     setMode("edit");
     setPassword("");
     setRepeat("");
@@ -60,13 +61,17 @@ export function PasswordSection({ email, setAt: initial, locale, t, reload }: { 
     setStatus(null);
     focusNext.current = "field";
   };
+  /** "Tühista": what was typed is forgotten (it is a password); after a server's refusal the form stays as it is, so it can be fixed. */
   const closeForm = () => {
     if (busy.current) return;
     setMode("view");
+    setPassword("");
+    setRepeat("");
     setError(null);
     focusNext.current = "opener";
   };
   const askToRemove = () => {
+    if (busy.current) return;
     setMode("confirm");
     setStatus(null);
     focusNext.current = "question";
