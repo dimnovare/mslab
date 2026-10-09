@@ -1,25 +1,27 @@
 # MS LAB — from prototype to public launch
 
-Phase 1 is live as a **prototype** on https://mslab.diipsolutions.eu (Vercel Hobby, project `mslab`; how it is set up and deployed: `docs/deploy.md`) for Dim and Maria only. This list collects everything that must happen before real visitors arrive (target domain mslab.ee, accounts under Maria's e-mail). Sources: the final whole-branch review and the build ledger of phase 1, and the clean-up after the move from Cloudflare Workers to Vercel (03.10.2026).
+The site is live on **https://mslab.ee** since 08.10.2026, on Maria's accounts (Vercel team `ms-lab`, project `mslab`, Hobby; how it is set up and deployed: `docs/deploy.md`), still as a **prototype** for Dim and Maria only. This list collects everything that must happen before real visitors arrive. Sources: the final whole-branch review and the build ledger of phase 1, and the clean-up after the move from Cloudflare Workers to Vercel (03.10.2026).
 
 The switches below are **Vercel environment variables** (Project → Settings → Environment Variables, or `vercel env add`), not wrangler settings. A change reaches the site with the next deployment, so redeploy after changing one.
 
 ## 1. Accounts and switches
-- [ ] Recreate Vercel (the project `mslab`, its Git integration, domain and environment variables), Cloudflare (R2 bucket `mslab-media` and the DNS zone only), Railway, Resend and the Telegram bot under Maria's accounts; move the data (Postgres dump, R2 objects). The review comments already live in Postgres (`kv_entries`).
-- [ ] `SITE_URL` → https://mslab.ee (Vercel env var). `mslab.ee` and `www.mslab.ee` are already in the link allow-list (`FIXED_LINK_ORIGINS` in `app/src/server/site.ts`); add the domain to the Vercel project and make the DNS record it asks for (`docs/deploy.md` section 4).
+- [x] Done 08.10.2026: Vercel (team `ms-lab`, project `mslab`, its Git integration with `mslabinformation-collab/mslab`, the domains and the variables), Cloudflare (the R2 bucket `mslab-media`), Railway (project `mslab`), Resend (`send.mslab.ee`) and Bunny (library 773592) are Maria's; the data was copied (a Postgres dump; the old bucket was empty). The review comments live in Postgres (`kv_entries`).
+- [x] Done 08.10.2026: `SITE_URL` is https://mslab.ee, and `mslab.ee` and `www.mslab.ee` are on the Vercel project (`docs/deploy.md` section 4).
+- [ ] Public launch: delete `SITE_GATE` in Production of Maria's Vercel project and redeploy (the coming-soon page goes; `PREVIEW_SECRET` may stay).
 - [ ] `MARIA_EMAIL` (Vercel env var) and the Telegram chat (`TELEGRAM_CHAT_ID`, or the `tg:chat` row in `kv_entries`) → Maria's address (today: Dim's).
 - [ ] **Rotate the Telegram bot token** (BotFather `/revoke` gives a new one) and update `TELEGRAM_BOT_TOKEN` on Vercel; redeploy. The current token was copied to Vercel while the site moved.
 - [ ] `NEXT_PUBLIC_REVIEW_TOOLS` → "0" in `app/next.config.ts` (removes the review comment widget and its anonymous Telegram ping).
 - [ ] Remove noindex: the `X-Robots-Tag` rule in the `headers()` of `app/next.config.ts` (keep `frame-ancestors` and `Referrer-Policy`), `ROBOTS` in `app/src/middleware.ts` (its redirects set their own header), `public/robots.txt`, the `robots` metadata of the pages; check the headers on the deployment afterwards.
 - [ ] New OG image for the final home page (`public/og.jpg`; strip metadata with `tools/strip_provenance.py`).
-- [ ] **Delete the unused Cloudflare resources**, once the Vercel site has run without trouble for a while (this ends the Worker rollback of `docs/deploy.md` section 8): the Workers `mslab-web` and `mslab-guide`, the Hyperdrive config, the D1 database `mslab-next-tags`, the R2 bucket `mslab-next-cache`, and the KV namespace (its comments were copied to `kv_entries`; keep nothing but the DNS zone and the R2 bucket `mslab-media`, which holds the uploaded images). **Before deleting the KV namespace**, export it once more and run `db:copy-kv --target railway --file <export>` as a dry run (no `--apply`): every family must show `new 0` and `would be overwritten 0`, otherwise a comment written to the old site between the first copy and the cutover is still missing. Delete the KV export file afterwards.
+- [ ] Cloudflare clean-up: done 08.10.2026 for the Workers `mslab-web` and `mslab-guide`, the Hyperdrive config, the D1 database `mslab-next-tags`, Dim's R2 bucket `mslab-media` and the KV namespace (checked against `kv_entries` first). Left: delete the R2 bucket `mslab-next-cache` once its one-day expiry has emptied it.
+- [ ] After a few weeks: remove Dim's old Vercel project (the mslab.diipsolutions.eu redirect) and the `mslab` CNAME in the Cloudflare zone `diipsolutions.eu`.
 
 ## 1b. Domain, e-mail and Google (mslab.ee is at Elkdata today: DNS, MX, old site)
 - [ ] Confirm with Maria: does a mailbox on mslab.ee exist (e.g. info@mslab.ee — MX points to Elkdata, but the mail service may not be ordered) and who can log in to Elkdata.
 - [ ] Business Google account with the mslab.ee address as login (owned by Maria, Dim added as user/owner) for Search Console, Business Profile, Analytics if used.
 - [ ] Search Console **now** on the current mslab.ee (Domain property, DNS TXT at Elkdata): collect the old site's indexed URLs and traffic → 301 redirect map from old WordPress URLs to the new pages at launch.
-- [ ] Point mslab.ee (and www) at Vercel with the records Vercel shows (an A record for the apex, a CNAME for www). Moving the whole DNS zone to Cloudflare is optional now (the Worker custom domain was the reason): if it is moved, copy every mail record first (MX, SPF, DKIM, DMARC) so e-mail keeps working, and keep the web records DNS only.
-- [ ] Site e-mail on `send.mslab.ee` in Resend (DKIM/SPF/return-path records), separate from the main mailbox. Do not use Resend as Maria's personal SMTP (shared 100/day free quota).
+- [x] Done 08.10.2026: mslab.ee and www point at Vercel; the DNS stays at veebimajutus (Elkdata), the old WordPress site is gone and the mail records were kept.
+- [x] Done 08.10.2026: the site's e-mail is on `send.mslab.ee` in Maria's Resend (DKIM/SPF/return-path records). Do not use Resend as Maria's personal SMTP (shared 100/day free quota).
 - [ ] Optional: mailbox in Gmail via forwarding + "Send mail as" through the mailbox host's SMTP.
 - [ ] Analytics: prefer a cookieless one (Vercel Web Analytics on Hobby, or Cloudflare Web Analytics' script, which works without proxying the site) over GA4. Check the Hobby quota first.
 
@@ -87,10 +89,11 @@ From the final review of phase 2a (04.10.2026); the merge-blocking items were fi
 - [ ] Watch the logs for `[account] login request rate limited`: the per-IP login limits (10 and 20 per 10 minutes) may bite students behind a mobile carrier's shared address (CGNAT).
 
 ## 8. Phase 3a (lessons and video)
-- [ ] Dim creates the Bunny Stream library and sets `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` (and `BUNNY_WEBHOOK_SECRET`) in Vercel Production before the 3a deploy (`docs/deploy.md` section 10); without them the admin says "Video seadistamata" and students "Video lisandub peagi".
+- [ ] The library is Maria's (`mslab`, id 773592, 08.10.2026). Check that `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`, `BUNNY_TOKEN_KEY` and `BUNNY_WEBHOOK_SECRET` are set in Production of Maria's Vercel project (`vercel env ls production` lists the names); without them the admin says "Video seadistamata" and students "Video lisandub peagi".
 - [ ] First live uploads: the four first-use checks of `docs/deploy.md` section 10 (the browser console during the first upload, R2 keeping the file name on a signed download, the player address answering without a redirect, the shape of an upright phone clip).
-- [ ] mslab.ee launch: add `mslab.ee` and `www.mslab.ee` to the Bunny library's allowed domains and change the host of the webhook URL (`docs/deploy.md` section 10).
-- [ ] Maria's own Bunny account later: a new library, new variables, the videos uploaded again; the `lessons.video_id` values change (`docs/deploy.md` section 10).
+- [x] Done 08.10.2026: the library's allowed domains are `mslab.ee` and `www.mslab.ee`, and the webhook URL's host is mslab.ee (`docs/deploy.md` section 10).
+- [ ] Bunny library → allowed domains: replace the stale `mslab-five.vercel.app` with the project's current `*.vercel.app` address (or remove it).
+- [x] Done: the library is on Maria's Bunny account from the start (08.10.2026).
 - [ ] After the first month read Bunny's bill (the estimate is about €5–15 a month at 500 hours watched) and Vercel's function invocations (a watching student makes about 240 progress calls an hour).
 - [ ] Migration 0006 (drops `courses.modules`) only after 3a has run for a few days with no rollback planned: the code first, then the migration (plan 2026-10-05-phase3a, Task 12 step 11).
 - [ ] Accepted limit: the iPhone's own full-screen video player shows no watermark (the page's "Täisekraan" keeps it).

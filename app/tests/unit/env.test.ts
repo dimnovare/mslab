@@ -121,8 +121,8 @@ describe("serverEnv outside production (next dev, the tests)", () => {
     expect(env.ADMIN_EMAILS).toBe("");
     expect(env.ADMIN_NAMES).toBe("");
     expect(env.MARIA_EMAIL).toBe("");
-    expect(env.SITE_URL).toBe("https://mslab.diipsolutions.eu"); // public
-    expect(env.MAIL_FROM).toBe("MS LAB <info@send.diipsolutions.eu>");
+    expect(env.SITE_URL).toBe("https://mslab.ee"); // public
+    expect(env.MAIL_FROM).toBe("MS LAB <info@send.mslab.ee>");
     expect(serverEnv(FULL, false)).toMatchObject(FULL);
   });
 });

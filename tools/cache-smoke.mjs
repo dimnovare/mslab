@@ -1,6 +1,6 @@
 // Read-only smoke test of the deployed site on Vercel. GET and HEAD requests only: nothing is written, no form is sent.
 //
-//   node tools/cache-smoke.mjs [base] [--only=A,B,C]   (default https://mslab.diipsolutions.eu, all three parts)
+//   node tools/cache-smoke.mjs [base] [--only=A,B,C]   (default https://mslab.ee, all three parts)
 //
 // A. 60 requests one after another, about one per second, across the main pages (ET and RU) and the hub;
 // B. 30 requests at the same time, over the same pages.
@@ -20,7 +20,7 @@
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith("--only="));
 const parts = new Set((only ? only.slice("--only=".length) : "A,B,C").split(",").map((p) => p.trim().toUpperCase()));
-const base = (args.find((a) => !a.startsWith("--")) ?? "https://mslab.diipsolutions.eu").replace(/\/+$/, "");
+const base = (args.find((a) => !a.startsWith("--")) ?? "https://mslab.ee").replace(/\/+$/, "");
 if (!/^https?:\/\/[^/\s]+$/.test(base)) {
   console.error(`not a site address: ${base} (expected https://host, without a path)`);
   process.exit(2);

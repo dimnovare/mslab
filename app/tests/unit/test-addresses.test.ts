@@ -20,7 +20,8 @@ const SKIPPED = [/^docs\/feedback\/2026-10-01-maria-/, /(^|\/)package-lock\.json
 /** Public, non-personal addresses, each with the reason it may appear. */
 const PUBLIC: Record<string, string> = {
   "info@mslab.ee": "the training centre's public contact address (site content, prototypes)",
-  "info@send.diipsolutions.eu": "the site's sending address (MAIL_FROM)",
+  "info@send.mslab.ee": "the site's sending address on Maria's Resend since 08.10.2026 (MAIL_FROM)",
+  "info@send.diipsolutions.eu": "the site's sending address until 08.10.2026 (MAIL_FROM; older docs and plans name it)",
   "nimi@e-post.ee": "an Estonian form placeholder ('name@e-mail')",
   "sinu@email.ee": "an Estonian form placeholder in the prototypes ('your@email')",
   "arved@ilustuudio.ee": "a made-up salon's invoice address in the prototype sample data",
