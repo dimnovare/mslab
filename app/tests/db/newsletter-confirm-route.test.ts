@@ -36,7 +36,7 @@ afterEach(() => {
 const confirmedAt = async () => (await db.select().from(subscribers).where(eq(subscribers.token, TOKEN)))[0].confirmedAt;
 const link = () => `${ORIGIN}/api/newsletter/confirm?t=${TOKEN}`;
 /** What Next does for HEAD: the route's HEAD, else its GET. */
-const head = (request: Request) => (route.HEAD ?? route.GET)(request);
+const head = (request: Request) => ((route as { HEAD?: (request: Request) => Response | Promise<Response> }).HEAD ?? route.GET)(request);
 const where = (res: Response) => {
   const location = res.headers.get("location");
   return location ? new URL(location, ORIGIN).pathname + new URL(location, ORIGIN).search : null;
@@ -55,7 +55,8 @@ test("HEAD answers 204, not cached, and confirms nothing: the click after a scan
 });
 
 test("a prefetch GET (Sec-Purpose / Purpose) goes home without a notice and confirms nothing; the real click after it does", async () => {
-  for (const headers of [{ "sec-purpose": "prefetch" }, { purpose: "prefetch" }, { "sec-purpose": "prefetch;prerender" }]) {
+  const prefetches: Record<string, string>[] = [{ "sec-purpose": "prefetch" }, { purpose: "prefetch" }, { "sec-purpose": "prefetch;prerender" }];
+  for (const headers of prefetches) {
     const res = await route.GET(new Request(link(), { headers }));
     expect([res.status, where(res), res.headers.get("cache-control")]).toEqual([303, "/", "no-store"]);
     expect(await confirmedAt(), JSON.stringify(headers)).toBeNull();
