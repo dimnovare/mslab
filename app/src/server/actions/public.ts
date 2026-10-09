@@ -58,7 +58,7 @@ export async function submitContact(formData: FormData): Promise<ActionResult> {
   return run("contact", handleContact, formData);
 }
 
-/** Newsletter sign-up, double opt-in; sending it is the consent. Fields: email, locale, website (honeypot). */
+/** Newsletter sign-up, one step: the address is subscribed at once and the welcome mail follows; sending it is the consent. Fields: email, locale, website (honeypot). */
 export async function subscribe(formData: FormData): Promise<ActionResult> {
   return run("subscribe", handleSubscribe, formData);
 }

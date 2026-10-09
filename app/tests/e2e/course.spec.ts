@@ -35,7 +35,7 @@ test("contact course group registration stays awaiting prepayment", async ({ pag
       { kind: "group", status: "awaiting_prepayment", paidCents: 0, paymentChoice: "half", wantsModelHelp: true, locale: "et", course: "kulmumeistri-baaskoolitus", sessionId: session },
     ]);
 });
-test("the newsletter consent ticked on a group registration: an unconfirmed subscriber follows; the message is the group's too (phase 2c)", async ({ page }, info) => {
+test("the newsletter consent ticked on a group registration: a subscriber follows, confirmed at once (one step, 09.10); the message is the group's too (phase 2c)", async ({ page }, info) => {
   test.skip(!LOCAL_FIXTURES, "reads the local database");
   submitsForms();
   const addr = testEmail("register-nl", info.project.name);
@@ -48,7 +48,7 @@ test("the newsletter consent ticked on a group registration: an unconfirmed subs
   await page.getByLabel(/Sõnum/).fill("Kood E2E");
   await page.getByRole("button", { name: "Registreeru" }).click();
   await expect(page.getByText(/koht kinnitub pärast ettemaksu/)).toBeVisible();
-  await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+  await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: true });
 });
 
 const noErrors = (page: Page) => {
@@ -449,7 +449,7 @@ test.describe("cart (/ostukorv)", () => {
     await expect(page.getByText("Aitäh! Anname teada, kui makse on avatud.")).toBeVisible();
     if (LOCAL_FIXTURES) {
       expect(await storedRequests(addr)).toEqual([{ kind: "contact", payload: { course: "kulmumeistri-e-koolitus", intent: "purchase", email: addr, locale: "et" } }]);
-      await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+      await expect.poll(() => storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: true }); // one step: subscribed at once
     }
   });
 

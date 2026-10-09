@@ -30,9 +30,10 @@ type State = { status: "idle" } | { status: "sent" } | { status: "error"; field:
 
 /**
  * The newsletter sign-up: e-mail, "Liitu", a quiet line (with the privacy link, unless `privacyLink` is off) under it, and the answer in its place.
- * Double opt-in: the action stores the address and sends a confirmation link; the answer is always "check your inbox".
- * There is no consent box: this form's only purpose is the newsletter, so sending it is the consent (the time is stored,
- * and the confirmation link still has to be opened); the line under the button says so, and the button is described by it
+ * One step (owner decision 09.10): the action subscribes the address at once and the welcome mail follows; the answer is always
+ * "thank you, we sent you a welcome mail", whether the address was subscribed before or not.
+ * There is no consent box: this form's only purpose is the newsletter, so sending it is the consent (the time is stored as the
+ * subscription's); the line under the button says so, and the button is described by it
  * (a screen reader hears "signing up = consent" on the button; the e-mail field keeps its own error as its description).
  * Used by the footer's block (Newsletter), the coming-soon page (app/tulekul/[locale]) and the home page's newsletter popup
  * (NewsletterPopup); on a lilac surface or in the popup's card (its colours and focus ring are made for lilac). Submitted by hand

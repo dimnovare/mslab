@@ -439,7 +439,7 @@ test.describe("the newsletter popup (phase 2c)", () => {
     await expect(popup).toBeVisible();
     await expect(popup.locator("[data-newsletter-card] img")).toHaveAttribute("src", "/seed/gift-bag-serum.jpg");
     await expect(popup.getByText("MS LABi kirjad")).toBeVisible();
-    await expect(popup.locator("[data-campaign-code]")).toHaveCount(0); // no code in the popup: it comes after the confirmation
+    await expect(popup.locator("[data-campaign-code]")).toHaveCount(0); // no code in the popup: it comes in the welcome mail
     // no consent box (owner decision 08.10): the line under the button says signing up is the consent, with the privacy link
     await expect(popup.getByRole("checkbox")).toHaveCount(0);
     const notice = popup.locator("[data-newsletter-notice]");
@@ -450,8 +450,8 @@ test.describe("the newsletter popup (phase 2c)", () => {
     const addr = testEmail("nl-popup", info.project.name);
     await popup.getByLabel("Sinu e-post").fill(addr);
     await popup.getByRole("button", { name: "Liitu" }).click();
-    await expect(popup.locator("[data-newsletter-status]")).toHaveText("Saatsime sulle kinnituslingi. Ava see oma postkastis.");
-    expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+    await expect(popup.locator("[data-newsletter-status]")).toHaveText("Aitäh, oled liitunud! Saatsime sulle tervituskirja.");
+    expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: true }); // one step: subscribed at once
     expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBe("1");
     await page.keyboard.press("Escape");
     await page.evaluate(() => sessionStorage.removeItem("mslab-camp")); // a new browser session …
@@ -487,6 +487,21 @@ test.describe("the newsletter popup (phase 2c)", () => {
     expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBeNull();
     await page.goto("/");
     await expect(page.getByRole("dialog", { name: "Hea järgmine samm. Otse sinu postkasti." })).toBeVisible(); // the delay does work here
+  });
+
+  test("the unsubscribed landing (/?uudiskiri=loobutud) shows its notice and no popup, and marks nothing (only kinnitatud marks this browser): the next visit gets the popup", async ({ page }, info) => {
+    test.skip(phone(info), "one popup row: desktop changes it");
+    await changing(["campaign"]);
+    await showNewsletter();
+    await page.goto("/?uudiskiri=loobutud");
+    await expect(page.locator("[data-flash-notice]")).toHaveAttribute("data-flash-notice", "ok");
+    await expect(page.locator("[data-flash-notice]")).toContainText("Oled uudiskirjast loobunud.");
+    await expect(page.locator("[data-flash-notice]")).toContainText("Me ei saada sulle enam MS LABi uudiskirja.");
+    await page.waitForTimeout(1500);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("mslab-nl"))).toBeNull();
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "Hea järgmine samm. Otse sinu postkasti." })).toBeVisible();
   });
 
   test("Russian, at a phone's width: the sheet with the form fits (no overflow, 44 px targets); the campaign is not shown meanwhile; switched off, none", async ({ page }, info) => {

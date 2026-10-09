@@ -117,8 +117,8 @@ test.describe("desktop", () => {
     const footer = page.locator("footer");
     await footer.getByLabel("Sinu e-post").fill(addr);
     await footer.getByRole("button", { name: "Liitu" }).click();
-    await expect(footer.getByText("Kontrolli oma postkasti")).toBeVisible();
-    if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: false });
+    await expect(footer.getByText("Aitäh, oled liitunud!")).toBeVisible();
+    if (LOCAL_FIXTURES) expect(await storedSubscriber(addr)).toMatchObject({ email: addr, confirmed: true });
   });
 });
 

@@ -36,7 +36,6 @@ export function Footer({
             ...d.newsletter,
             body: fill(d.newsletter.body, { discount: newsletter.discountLabel }),
             privacy: d.footer.privacy,
-            sentText: d.newsletter.confirmText,
             errorEmail: d.forms.errorEmail,
             errorTooMany: d.forms.errorTooMany,
             errorGeneric: d.forms.errorGeneric,

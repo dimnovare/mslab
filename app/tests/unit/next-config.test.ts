@@ -69,6 +69,15 @@ describe("next.config.ts headers()", () => {
     expect(valueFor(rules, "/konto", "cache-control")).toBeUndefined(); // the static shell pages keep the CDN's caching
   });
 
+  test("the unsubscribe page's POST keeps its Origin: the loobu route is same-origin, never no-referrer (a strict policy makes the form post Origin: null, which is refused as cross-site)", async () => {
+    const rules = (await (await config()).headers!()) as Rule[];
+    expect(valueFor(rules, "/api/newsletter/loobu", "referrer-policy")).toBe("same-origin");
+    expect(valueFor(rules, "/api/newsletter/loobu", "referrer-policy")).not.toBe("no-referrer");
+    expect(valueFor(rules, "/api/newsletter/loobu", "x-robots-tag")).toBe("noindex, nofollow"); // the route sets none of its own
+    // nothing else is changed: the old confirm link and the other newsletter paths keep the global value
+    for (const path of ["/api/newsletter/confirm", "/api/newsletter", "/api/newsletter/loobux"]) expect(valueFor(rules, path, "referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+  });
+
   test("a lesson file's redirect sends no Referer to R2 (the global rule would replace the route's own header); the other lesson routes keep the global value", async () => {
     const rules = (await (await config()).headers!()) as Rule[];
     const file = "/api/konto/kursus/kulmumeistri-e-koolitus/12/fail/juhend.pdf";

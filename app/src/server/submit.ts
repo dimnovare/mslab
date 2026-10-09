@@ -2,14 +2,12 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { readSetting } from "@/db/queries/public";
 import { courses, courseSessions, practicePackages, registrations, requests, subscribers } from "@/db/schema";
-import type { Course, CourseSession, Registration, Subscriber } from "@/db/schema";
+import type { Course, CourseSession, Registration } from "@/db/schema";
 import { PREPAYMENT_KEY, parsePrepayment } from "@/domain/account-cards";
 import { isSampleAddress, normalizeEmail } from "@/domain/email";
 import { registrationPrice } from "@/domain/registration";
 import { seatState } from "@/domain/sessions";
 import { pick } from "@/i18n/field";
-import { fill } from "@/i18n/format";
-import { getDict } from "@/i18n/locales";
 import {
   isSpam,
   parseContact,
@@ -32,12 +30,13 @@ import {
   type Summary,
 } from "./messages";
 import { registrationConfirmationMail, requestConfirmationMail, type LoginCode } from "./account-mail";
-import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail, reserveNewsletterMail } from "./client-auth";
+import { CONFIRMATION_MAIL_DAILY_CAP, LOGIN_MAIL_DAILY_CAP, accountOf, fillClientContact, issueClientLogin, reserveLoginMail } from "./client-auth";
 import { logFailure, logNote } from "./log";
 import { adminUrl, mailConfigured, notifyMaria, sendMail, type Env, type Mail } from "./notify";
 import { RATE_LIMIT, RATE_WINDOW_SEC, rateKey, rateLimit } from "./ratelimit";
 import type { PublicChange } from "./cache-targets";
-import { isTokenShape, newToken, sha256 } from "./token";
+import { sendWelcome } from "./newsletter";
+import { newToken, sha256 } from "./token";
 import { upcomingFrom } from "@/domain/calendar";
 
 // The public form submissions without Next.js: actions/public.ts builds the dependencies (database, settings,
@@ -71,7 +70,7 @@ export type FormName = "contact" | "subscribe" | "register" | "individual" | "in
 const OK: ActionResult = { ok: true };
 const fail = (errors: Record<string, string>): ActionResult => ({ ok: false, errors });
 
-/** Confirmation e-mails per address and day (signing up again resends the link; this stops mail-bombing an address). */
+/** Welcome e-mails per address and day (an address that unsubscribed and signs up again is a new sign-up each time; this stops mail-bombing an address). */
 const CONFIRM_MAILS_PER_DAY = 3;
 /** The same for the confirmations to a visitor who registered or sent a request: the public forms must not mail any address at will. */
 const VISITOR_MAILS_PER_ADDRESS_PER_DAY = 3;
@@ -85,14 +84,15 @@ type Confirmation = { email: string; wantsAccount: boolean; prepare: () => Promi
 
 /**
  * What a handler stored and what follows the answer. `subscribe`: "Soovin MS LABi uudiseid ja pakkumisi" was ticked on a registration
- * form (phase 2c), so the newsletter's own sign-up runs after the response (subscribeLater).
+ * form (phase 2c), so the newsletter's own sign-up runs after the response (subscribeLater). `welcome`: the newsletter's own forms stored
+ * the sign-up before the answer (subscribeAddress), and the welcome mail it left due goes after it.
  */
 type Stored = {
   result: ActionResult;
   notify?: Summary & { replyTo?: string };
-  mail?: Mail;
   confirm?: Confirmation;
   subscribe?: { email: string; locale: "et" | "ru" };
+  welcome?: WelcomeDue;
 };
 
 /** A rate limit that fails open: when KV is unavailable (or over its daily write quota) the submission goes through. */
@@ -138,26 +138,21 @@ async function submission<T>(
     return fail({ form: "rate" });
   }
   const out = await store(parsed.data);
-  const { notify, mail, confirm } = out;
+  const { notify, confirm } = out;
   if (notify) {
     deps.later(async () => {
       const r = await notifyMaria(deps.env, notify.subject, notify.text, { short: notify.short, replyTo: notify.replyTo, siteUrl: deps.siteUrl });
       console.info(`[forms] ${form}: stored; Maria notified by e-mail: ${r.mail}, Telegram: ${r.telegram}`);
     });
   }
-  if (mail) {
-    deps.later(async () => {
-      const sent = await sendMail(deps.env, mail);
-      console.info(`[forms] ${form}: stored; confirmation e-mail sent: ${sent}`);
-    });
-  }
-  // One task, in this order: the visitor's own confirmation (it carries the prepayment details) first, then the newsletter's sign-up (a
-  // marketing mail). The two count on different daily counters now, so they no longer compete for a place; the order stays so that the
-  // transactional mail is always the first out. sendConfirmation and subscribeLater each catch their own failures, but whatever either
-  // does one day, a throw from the confirmation must never skip the sign-up the visitor ticked: it is caught here and logged (the error
-  // class and code only, never an address).
+  // One task, in this order: the visitor's own confirmation (it carries the prepayment details) first, then the newsletter's mail (the
+  // welcome mail of a marketing sign-up). The two count on different daily counters, so they do not compete for a place; the order stays
+  // so that the transactional mail is always the first out. sendConfirmation, subscribeLater and welcomeLater each catch their own
+  // failures, but whatever either does one day, a throw from the confirmation must never skip the sign-up the visitor ticked: it is caught
+  // here and logged (the error class and code only, never an address).
   const wish = out.subscribe;
-  if (confirm || wish) {
+  const welcome = out.welcome;
+  if (confirm || wish || welcome) {
     deps.later(async () => {
       if (confirm) {
         try {
@@ -167,6 +162,7 @@ async function submission<T>(
         }
       }
       if (wish) await subscribeLater(deps, form, wish);
+      if (welcome) await welcomeLater(deps, form, welcome);
     });
   }
   return out.result;
@@ -460,106 +456,96 @@ export function handleWaitlist(deps: Deps, formData: FormData): Promise<ActionRe
   });
 }
 
-// ---------- newsletter (double opt-in) ----------
+// ---------- newsletter (one step) ----------
 
-export const confirmUrl = (siteUrl: string, token: string) =>
-  `${siteUrl.replace(/\/+$/, "")}/api/newsletter/confirm?t=${encodeURIComponent(token)}`;
-
-function confirmationMail(siteUrl: string, sub: Pick<Subscriber, "email" | "token" | "locale">): Mail {
-  const m = getDict(sub.locale === "ru" ? "ru" : "et").mail;
-  return { to: sub.email, subject: m.confirmSubject, text: fill(m.confirmText, { link: confirmUrl(siteUrl, sub.token) }) };
-}
+/**
+ * A welcome mail that a sign-up has left due: the address that was subscribed just now (a new row, or a row of the old double opt-in
+ * confirmed by this sign-up) and its language. Nothing is due for an address that was subscribed already.
+ */
+type WelcomeDue = { email: string; locale: "et" | "ru" };
 
 /**
  * The newsletter's own sign-up of `email` (lower-cased by the forms), shared by handleSubscribe (the footer, the popup, the coming-soon
- * page) and subscribeLater (the registration forms' box). A new address is stored unconfirmed, an unconfirmed one gets a new consent
- * time, a confirmed one nothing. The consent is the sign-up itself: `consentAt` is the time of the submission. Returns the
- * confirmation mail to send, or null when there is none. The guards run after the row is stored, so each of them still leaves the
- * address signed up, and each ends the work quietly:
- * 1. a sample address (`@example.test`) is never mailed (the live checks register one);
- * 2. a deployment without Resend (local development, the e2e run) has nothing to send with;
- * 3. at most 3 confirmation e-mails per address and day (a KV counter under the hash of the address, which fails open);
- * 4. one place of the newsletter's own daily counter (the `mail_quota` row "<day>:nl", 25 a day, which never fails open; the logins' and
- *    the registrations' confirmations count elsewhere, client-auth.ts) — while the coming-soon gate is on, the sign-up is the only
- *    public form, and without the cap anyone could make the site mail every address they type. Over the cap, or with the quota
- *    failing, there is no e-mail.
- * `form` is the calling form's name, for the log lines.
+ * page) and subscribeLater (the registration forms' box). Since the owner's decision of 09.10 it is one step: the sign-up itself is the
+ * consent and the subscription. A new address is stored confirmed (`confirmedAt` = `consentAt` = the time of the submission); a row of the
+ * old double opt-in that was never confirmed is confirmed now, with its language; an address that is confirmed already is left exactly as
+ * it is. Returns what is due after that — the welcome mail (welcomeLater) — or null when nothing is: the address was subscribed already.
+ * `form` is the calling form's name, for the log lines. The answer to the visitor is the same whichever of the three it was.
  */
-async function subscribeAddress(deps: Deps, form: FormName, email: string, locale: "et" | "ru"): Promise<Mail | null> {
+async function subscribeAddress(deps: Deps, form: FormName, email: string, locale: "et" | "ru"): Promise<WelcomeDue | null> {
   const [created] = await deps.db
     .insert(subscribers)
-    .values({ email, locale, token: newToken(), consentAt: deps.now, clientId: accountOf(normalizeEmail(email)) })
+    .values({ email, locale, token: newToken(), consentAt: deps.now, confirmedAt: deps.now, clientId: accountOf(normalizeEmail(email)) })
     .onConflictDoNothing({ target: subscribers.email })
     .returning();
-  let sub: Subscriber | undefined = created;
-  if (!sub) {
-    const [existing] = await deps.db.select().from(subscribers).where(eq(subscribers.email, email)).limit(1);
-    if (!existing || existing.confirmedAt) return null;
-    [sub] = await deps.db.update(subscribers).set({ consentAt: deps.now, locale }).where(eq(subscribers.id, existing.id)).returning();
-  }
-  if (isSampleAddress(email)) {
-    console.info(`[forms] ${form}: stored; confirmation e-mail skipped (sample address)`);
-    return null;
-  }
-  if (!mailConfigured(deps.env)) return null;
-  if (!(await allowed(deps.env, `rl:confirm:${await sha256(email)}`, CONFIRM_MAILS_PER_DAY, 24 * 60 * 60))) {
-    console.info(`[forms] ${form}: confirmation e-mails for this address are paused for today`);
-    return null;
-  }
-  try {
-    if (!(await reserveNewsletterMail(deps.db, deps.now))) {
-      logNote(`[forms] ${form}: daily mail cap reached: no confirmation e-mail`);
-      return null;
-    }
-  } catch (e) {
-    logFailure(`[forms] ${form}: mail quota unavailable, no confirmation e-mail`, e);
-    return null;
-  }
-  return confirmationMail(deps.siteUrl, sub);
+  if (created) return { email, locale };
+  // Confirmed in one statement, so that two sign-ups of an unconfirmed row at once cannot both think they were the one that subscribed it.
+  const [confirmed] = await deps.db
+    .update(subscribers)
+    .set({ consentAt: deps.now, confirmedAt: deps.now, locale })
+    .where(and(eq(subscribers.email, email), isNull(subscribers.confirmedAt)))
+    .returning();
+  if (confirmed) return { email, locale };
+  console.info(`[forms] ${form}: already subscribed, nothing changed`);
+  return null;
 }
 
 /**
- * "Soovin MS LABi uudiseid ja pakkumisi" ticked on a registration form (phase 2c): the newsletter's own sign-up (subscribeAddress,
- * with all its guards) after the answer. Never throws: the registration is stored whatever happens here, and a failure is logged
- * without the address.
+ * The welcome mail of a sign-up (subscribeAddress left it due), after the response. The guards run in this order and each ends the work
+ * quietly, so each of them still leaves the address subscribed:
+ * 1. a sample address (`@example.test`) is never mailed (the live checks register one);
+ * 2. a deployment without Resend (local development, the e2e run) has nothing to send with;
+ * 3. at most 3 welcome e-mails per address and day (a KV counter under the hash of the address, which fails open);
+ * 4. server/newsletter.ts sendWelcome: the once-a-year mark of the address (removed again when the send fails) and one place of the
+ *    newsletter's own daily counter (the `mail_quota` row "<day>:nl", 25 a day, which never fails open; the logins' and the registrations'
+ *    confirmations count elsewhere, client-auth.ts) — while the coming-soon gate is on, the sign-up is the only public form, and without the
+ *    cap anyone could make the site mail every address they type. Over the cap, or with the quota failing, there is no e-mail.
+ * Never throws: the sign-up is stored, and a failure is logged without the address.
+ */
+async function welcomeLater(deps: Deps, form: FormName, due: WelcomeDue): Promise<void> {
+  try {
+    const address = normalizeEmail(due.email);
+    if (isSampleAddress(address)) {
+      console.info(`[forms] ${form}: stored; welcome e-mail skipped (sample address)`);
+      return;
+    }
+    if (!mailConfigured(deps.env)) return;
+    if (!(await allowed(deps.env, `rl:confirm:${await sha256(address)}`, CONFIRM_MAILS_PER_DAY, 24 * 60 * 60))) {
+      console.info(`[forms] ${form}: welcome e-mails for this address are paused for today`);
+      return;
+    }
+    await sendWelcome(deps, { email: address, locale: due.locale });
+  } catch (e) {
+    logFailure(`[forms] ${form}: welcome e-mail failed`, e);
+  }
+}
+
+/**
+ * "Soovin MS LABi uudiseid ja pakkumisi" ticked on a registration form (phase 2c): the newsletter's own sign-up (subscribeAddress, then
+ * its welcome mail with all the guards) after the answer. Never throws: the registration is stored whatever happens here, and a failure is
+ * logged without the address.
  */
 async function subscribeLater(deps: Deps, form: FormName, wish: { email: string; locale: "et" | "ru" }): Promise<void> {
   try {
-    const mail = await subscribeAddress(deps, form, wish.email, wish.locale);
-    if (!mail) return;
-    const sent = await sendMail(deps.env, mail);
-    console.info(`[forms] ${form}: newsletter confirmation e-mail sent: ${sent}`);
+    const due = await subscribeAddress(deps, form, wish.email, wish.locale);
+    if (due) await welcomeLater(deps, form, due);
   } catch (e) {
     logFailure(`[forms] ${form}: newsletter sign-up failed`, e);
   }
 }
 
 /**
- * Newsletter sign-up. The answer is always the same "check your inbox", so the form never tells whether an address
- * is already subscribed. A new address is stored unconfirmed and gets the confirmation link; an unconfirmed one gets
- * the same link again (new consent time); a confirmed one gets nothing. The consent is the sign-up itself (there is no
- * consent box): `consentAt` is the time of the submission.
- *
- * The confirmation e-mail goes the way the registrations' and requests' do (sendConfirmation): none to a sample address
- * (`@example.test`) or from a deployment without Resend, neither of which takes a place; at most 3 per address and day; and one
- * place of the newsletter's daily cap — all of that in subscribeAddress, which the registration forms' newsletter box shares. Over
- * the cap, or with the quota failing, the address is stored and the answer is the same, with no e-mail.
+ * Newsletter sign-up, in one step. The visitor types the address and presses "Liitu", and is subscribed: the row is stored before the
+ * answer, confirmed, with the time of the submission as the consent (there is no consent box and no confirmation link). The answer is
+ * always the same "thank you, we sent you a welcome mail", so the form never tells whether an address was subscribed already; a
+ * subscribed address is left as it is and gets no mail. The welcome mail follows after the response (welcomeLater): none to a sample
+ * address (`@example.test`) or from a deployment without Resend, neither of which takes a place; at most 3 per address and day; once a
+ * year per address; and one place of the newsletter's daily cap. Over the cap, or with the quota failing, the address is subscribed and
+ * the answer is the same, with no e-mail. The welcome code, when Seaded has one, travels in the mail only, never in the answer.
  */
 export function handleSubscribe(deps: Deps, formData: FormData): Promise<ActionResult> {
   return submission(deps, "subscribe", formData, parseSubscribe, async ({ email, locale }) => {
-    const mail = await subscribeAddress(deps, "subscribe", email, locale);
-    return mail ? { result: OK, mail } : { result: OK };
+    const welcome = await subscribeAddress(deps, "subscribe", email, locale);
+    return welcome ? { result: OK, welcome } : { result: OK };
   });
-}
-
-/**
- * The confirmation link: sets `confirmedAt` once (later clicks keep the first time). `first` is true for the click that confirmed it
- * (the welcome mail follows that one only, server/newsletter.ts). null = unknown token.
- */
-export async function confirmSubscriber(db: Db, token: string, now: Date): Promise<{ sub: Subscriber; first: boolean } | null> {
-  if (!isTokenShape(token)) return null;
-  const [confirmed] = await db.update(subscribers).set({ confirmedAt: now }).where(and(eq(subscribers.token, token), isNull(subscribers.confirmedAt))).returning();
-  if (confirmed) return { sub: confirmed, first: true };
-  const [row] = await db.select().from(subscribers).where(eq(subscribers.token, token)).limit(1);
-  return row ? { sub: row, first: false } : null;
 }

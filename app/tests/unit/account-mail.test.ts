@@ -383,24 +383,61 @@ describe("HTML safety and design", () => {
   });
 });
 
-describe("the welcome mail (phase 2c)", () => {
-  test("Estonian: the subject, the code large, how to use it, and that Maria takes the discount off the invoice", () => {
-    const mail = welcomeMail("uus@example.test", "TERE10", "et");
+describe("the welcome mail (phase 2c; one step, 09.10)", () => {
+  const LINK = "https://mslab.example/api/newsletter/loobu?t=tok-en_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+  test("Estonian, with a code: the subject, the code large, how to use it, that Maria takes the discount off the invoice, and the unsubscribe line last before the signature", () => {
+    const mail = welcomeMail("uus@example.test", "TERE10", "et", LINK);
     expect(mail.to).toBe("uus@example.test");
     expect(mail.subject).toBe("Tere tulemast MS LABi!");
     expect(mail.text).toBe(
-      ["Tere!", "", "Aitäh, et liitusid MS LABi uudiskirjaga.", "", "Sinu tervituskood:", "", "TERE10", "", "Lisa kood registreerimisel lahtrisse „Sõnum“.", "Maria arvestab soodustuse sinu arvelt maha.", "", "MS LAB Koolituskeskus"].join("\n"),
+      [
+        "Tere!", "", "Aitäh, et liitusid MS LABi uudiskirjaga.", "",
+        "Sinu tervituskood:", "", "TERE10", "",
+        "Lisa kood registreerimisel lahtrisse „Sõnum“.", "Maria arvestab soodustuse sinu arvelt maha.", "",
+        `Kui sa ei liitunud ise või ei soovi enam MS LABi kirju, loobu siit: ${LINK}`, "",
+        "MS LAB Koolituskeskus",
+      ].join("\n"),
     );
     expect(mail.html).toContain(">TERE10</div>");
     expect(mail.html).toContain("Lisa kood registreerimisel lahtrisse „Sõnum“.");
     expect(mail.html).toContain("Maria arvestab soodustuse sinu arvelt maha.");
   });
 
-  test("Russian", () => {
-    const mail = welcomeMail("uus@example.test", "TERE10", "ru");
-    expect(mail.subject).toBe("Добро пожаловать в MS LAB!");
-    expect(mail.text).toContain("Укажите код при регистрации в поле «Сообщение».");
+  test("Estonian, without a code: no code lines (nor the text about using one), the unsubscribe line stays", () => {
+    const mail = welcomeMail("uus@example.test", null, "et", LINK);
+    expect(mail.text).toBe(
+      ["Tere!", "", "Aitäh, et liitusid MS LABi uudiskirjaga.", "", `Kui sa ei liitunud ise või ei soovi enam MS LABi kirju, loobu siit: ${LINK}`, "", "MS LAB Koolituskeskus"].join("\n"),
+    );
+    for (const body of [mail.text, mail.html!]) {
+      expect(body).not.toContain("Sinu tervituskood");
+      expect(body).not.toContain("Lisa kood");
+      expect(body).not.toContain("arvestab soodustuse");
+    }
+    expect(mail.html).not.toContain("letter-spacing"); // the code box is not there either
+    expect(mail.html).toContain("loobu siit:");
+  });
+
+  test("the HTML body has the unsubscribe line as the last row before the signature, with the link clickable and escaped", () => {
+    const tricky = "https://mslab.example/api/newsletter/loobu?t=a&b=\"<x>";
+    const html = welcomeMail("uus@example.test", "TERE10", "et", tricky).html!;
+    expect(html).toContain(`<a href="${esc(tricky)}`);
+    expect(html).not.toContain(tricky);
+    expect(html.indexOf("loobu siit")).toBeGreaterThan(html.indexOf("TERE10"));
+    expect(html.indexOf("loobu siit")).toBeLessThan(html.indexOf("MS LAB Koolituskeskus"));
+    expect(welcomeMail("uus@example.test", null, "et", LINK).html).toContain(`<a href="${LINK}"`);
+  });
+
+  test("Russian: the code lines when there is a code, the unsubscribe line in both cases, with no-break spaces where the rule asks (there is no one-letter word in it)", () => {
+    const mail = welcomeMail("uus@example.test", "TERE10", "ru", LINK);
+    expect(mail.subject).toBe("Добро пожаловать в\u00a0MS LAB!");
+    expect(mail.text).toContain(getDict("ru").mail.welcome.use); // "Укажите код при регистрации в поле «Сообщение»."
     expect(mail.text).toContain("Мария вычтет скидку из вашего счёта.");
+    const line = `Если вы не подписывались сами или больше не хотите получать письма MS LAB, отпишитесь здесь: ${LINK}`;
+    expect(mail.text).toContain(line);
+    expect(welcomeMail("uus@example.test", null, "ru", LINK).text).toBe(
+      ["Здравствуйте!", "", "Спасибо, что подписались на рассылку MS LAB.", "", line, "", "MS LAB Учебный центр"].join("\n"),
+    );
   });
 });
 

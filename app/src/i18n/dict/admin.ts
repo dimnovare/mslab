@@ -693,7 +693,7 @@ export const adminEt = {
   newsletter: {
     eyebrow: "Uudiskiri",
     title: "Uudiskirja tellijad",
-    lead: "Uudiskirja võib saata ainult aadressidele, mille omanik on tellimuse e-kirjas kinnitanud.",
+    lead: "Tellijad liituvad ise, aadressi sisestades: kinnituskirja enam ei saadeta. Tervituskirjas on loobumislink. „Ootab kinnitust“ on aadress, mis liitus vanal viisil ega ole kinnituslinki avanud.",
     csvConfirmed: "Lae alla kinnitatud (CSV)",
     csvAll: "Lae alla kõik (CSV)",
     count: "Tellijaid: {n}, neist kinnitatud {confirmed}",
