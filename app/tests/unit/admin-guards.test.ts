@@ -138,7 +138,9 @@ describe("admin guards are inherited by every admin entry point", () => {
     expect(lessonExports).toEqual(["addModule", "renameModule", "moveModuleInList", "deleteModule", "addLesson", "saveLesson", "moveLessonInList", "setLessonHidden", "setLessonKind", "deleteLesson", "deleteLessonFile", "createLessonVideo", "checkLessonVideo"]);
     expect(violations(lessonActions.path, lessonActions.source)).toEqual([]);
     expect([...strip(lessonActions.source).matchAll(/export\s+(?:const|let|var|async\s+function|function|class|default)\s*(\w*)/g)].map((m) => m[1])).toEqual(lessonExports);
-  });
+    // It reads and scans every admin source file: about 2 s alone, but well past the 20 s default while the full run keeps every core
+    // busy (seen at 38 s); the limit is for the machine's load, not for this test's work.
+  }, 120_000);
 
   test("the image and lesson file uploads are admin routes; /media only reads (anyone may see a published image)", () => {
     const upload = files().find((f) => f.path === "app/api/admin/upload/route.ts")!;
