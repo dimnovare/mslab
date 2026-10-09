@@ -8,6 +8,10 @@ The switches below are **Vercel environment variables** (Project → Settings �
 - [x] Done 08.10.2026: Vercel (team `ms-lab`, project `mslab`, its Git integration with `mslabinformation-collab/mslab`, the domains and the variables), Cloudflare (the R2 bucket `mslab-media`), Railway (project `mslab`), Resend (`send.mslab.ee`) and Bunny (library 773592) are Maria's; the data was copied (a Postgres dump; the old bucket was empty). The review comments live in Postgres (`kv_entries`).
 - [x] Done 08.10.2026: `SITE_URL` is https://mslab.ee, and `mslab.ee` and `www.mslab.ee` are on the Vercel project (`docs/deploy.md` section 4).
 - [ ] Public launch: delete `SITE_GATE` in Production of Maria's Vercel project and redeploy (the coming-soon page goes; `PREVIEW_SECRET` may stay).
+- [ ] Before the public launch (phase 2c), still open from the final review of the branch:
+  - the password inputs of Minu andmed (`PasswordSection`) and the login page are controlled React inputs; make them uncontrolled (read at submit) as defence in depth, so a password never sits in React state;
+  - asking a fresh e-mail code before a password is set or changed (design idea, the owner decides; today the session alone is enough, and the change is mailed to her);
+  - the Russian texts of the newsletter popup row (Hüpikaken → Uudiskiri: kicker, title, text; they are database content, not the dictionary) go to the native-speaker check in §9.
 - [ ] `MARIA_EMAIL` (Vercel env var) and the Telegram chat (`TELEGRAM_CHAT_ID`, or the `tg:chat` row in `kv_entries`) → Maria's address (today: Dim's).
 - [ ] **Rotate the Telegram bot token** (BotFather `/revoke` gives a new one) and update `TELEGRAM_BOT_TOKEN` on Vercel; redeploy. The current token was copied to Vercel while the site moved.
 - [ ] `NEXT_PUBLIC_REVIEW_TOOLS` → "0" in `app/next.config.ts` (removes the review comment widget and its anonymous Telegram ping).
@@ -106,6 +110,7 @@ From the final review of phase 2a (04.10.2026); the merge-blocking items were fi
 
 ## 9. Phase 2c (Maria's feedback of 06.10.2026)
 - [ ] Native-speaker check of the Russian texts phase 2c added: `account.lesson.seekLocked`, the `account.dashboard` resume texts (`resumeTag` … `finished`), `newsletter.popupSent`, `newsletter.codeLine`, `mail.welcome.*`, `forms.newsletterConsent`, `account.passwordMail.*`, `account.details.password.*` (`removeFailed` is the line after a failed removal; `none` is the sentence the owner chose), and the login page's password texts (`account.login.toPassword` … `passwordLocked`).
+- [ ] Native-speaker check of the newsletter popup's Russian texts (Hüpikaken → Uudiskiri, the Russian kicker, title and text): they live in the database (the `campaign` row of kind newsletter; the seeded ones are drafts), not in the dictionary, so Maria or the checker edits them in the admin.
 - [ ] Maria fills Seaded → "Tervituskood" (empty: no welcome mail and no code on the confirmed page) and applies the code on her invoice.
 - [ ] Maria chooses in Hüpikaken what the home page shows (Kampaania / Uudiskiri / Väljas); the newsletter popup's picture is a sample one until she uploads her own.
 - [ ] Bunny's speed menu must stop at 2×: the server's progress clock assumes it (`TOP_SPEED` in `app/src/domain/lessons.ts`). If Bunny ever offers more, raise the factor to the top speed.

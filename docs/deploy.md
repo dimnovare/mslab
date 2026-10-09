@@ -125,7 +125,7 @@ The test suites and the e2e run never write to Railway: they use PGlite and a lo
 
 ## 8. Rollback
 
-1. **The code only.** Promote an earlier deployment (section 3). The database stays as it is; migrations are additive, so older code still runs.
+1. **The code only.** Promote an earlier deployment (section 3). The database stays as it is; migrations are additive, so older code still runs. Before rolling back past phase 2c, set Hüpikaken (the admin page) to Kampaania or Väljas: the old admin cannot switch the newsletter popup row off, and the `campaign_one_active` index would refuse turning the campaign on while that row is active.
 2. **Back to Cloudflare: no longer possible.** The Worker `mslab-web`, its Hyperdrive config, the D1 tag cache and Dim's R2 bucket were deleted on 08.10.2026, when the accounts moved; the only rollback is a Vercel deployment (1).
 
 ## 9. Hobby-plan limits to keep in mind
