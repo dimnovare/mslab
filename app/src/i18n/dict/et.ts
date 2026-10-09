@@ -640,7 +640,7 @@ export const et = {
       loading: "Laadin lemmikuid…",
     },
     // "Minu andmed" /konto/andmed (components/account/DetailsTab.tsx): name, phone and language with one "Salvesta"; the newsletter
-    // switch saves at once; "Kustuta konto" at the very bottom with one confirmation step. Each language's name is in that language.
+    // switch saves at once; the optional password; "Kustuta konto" at the very bottom with one confirmation step. Each language's name is in that language.
     details: {
       title: "Sinu andmed",
       email: "E-post",
@@ -659,6 +659,30 @@ export const et = {
       deleteFailed: "Kustutamine ei õnnestunud. Proovi uuesti.",
       // the home page's notice after the deletion (/#konto-kustutatud)
       deleted: "Konto on kustutatud.",
+      // "Parool" (components/account/PasswordSection.tsx, phase 2c): optional, next to the e-mail code. {date} is the last change.
+      password: {
+        title: "Parool",
+        none: "Saad soovi korral määrata parooli ja siseneda edaspidi e-posti ja parooliga. Kood töötab alati edasi.",
+        isSet: "Parool on määratud (muudetud {date}).",
+        set: "Määra parool",
+        change: "Muuda parooli",
+        remove: "Eemalda parool",
+        newPassword: "Uus parool",
+        repeat: "Korda parooli",
+        save: "Salvesta parool",
+        cancel: "Tühista",
+        short: "Parool peab olema vähemalt 10 märki.",
+        long: "Parool võib olla kuni 200 märki.",
+        email: "Parool ei tohi olla sinu e-posti aadress.",
+        mismatch: "Paroolid ei ühti.",
+        saved: "Parool on salvestatud.",
+        removed: "Parool on eemaldatud.",
+        removeQuestion: "Kas eemaldame parooli? Saad edasi siseneda koodiga.",
+        removeYes: "Jah, eemalda",
+        failed: "Ei õnnestunud salvestada. Proovi uuesti.",
+        removeFailed: "Ei õnnestunud eemaldada. Proovi uuesti.",
+        rate: "Oled parooli juba mitu korda muutnud. Proovi tunni aja pärast uuesti.",
+      },
       loading: "Laadin andmeid…",
     },
   },

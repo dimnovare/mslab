@@ -1,7 +1,8 @@
 import type { Locator, Page } from "@playwright/test";
-import { clientEmail, insertAccountFixtures, insertClient, signInAsClient, storedClient, storedNewsletter, storedRegistration } from "./account";
+import { clientEmail, insertAccountFixtures, insertClient, signInAsClient, storedClient, storedNewsletter, storedPassword, storedRegistration } from "./account";
 import { signInAsAdmin, type CreatedRows } from "./admin-login";
 import { removeAdminRows, removeClientRows } from "./fixtures";
+import { smallTargets } from "./targets";
 import { submitsForms, test, expect } from "./test";
 
 // Phase 2a Task 8: "Minu andmed" (/konto/andmed). Name and phone (both optional) and the language with one "Salvesta" ("Salvestatud."
@@ -9,7 +10,8 @@ import { submitsForms, test, expect } from "./test";
 // at once (a confirmed subscriber, or none); at the very bottom "Kustuta konto" with one inline confirmation step: the account goes,
 // the registrations stay with Maria (the admin still sees them), the browser is signed out and forgets the account, and the home page
 // says "Konto on kustutatud.". Every client is a sample address (`e2e-client-details-…@example.test`, never mailed), written straight
-// to the local database and removed after each test.
+// to the local database and removed after each test. Phase 2c: "Parool" between the switch and "Kustuta konto" (set, change, remove
+// the optional password), in every state at 390, 834 and 1440 px.
 
 /** The addresses this worker's tests made rows for: removed after each test. */
 const made = new Set<string>();
@@ -289,3 +291,94 @@ test("the footer's newsletter form is not under the account's pages (Minu andmed
     await expect(page.locator("[data-footer-newsletter]"), path).toBeVisible();
   }
 });
+
+test("Parool (phase 2c): set with the password twice, then 'Muuda parooli' and 'Eemalda parool' (asked once); the session goes on; no overflow", async ({ page }, info) => {
+  submitsForms();
+  const email = address("password", info.project.name);
+  await removeClientRows(email);
+  await insertClient(email);
+  await signInAsClient(page, email);
+  await page.goto("/konto/andmed");
+  const part = page.locator("[data-details-password]");
+  await expect(part.locator("[data-password-state]")).toHaveText("Saad soovi korral määrata parooli ja siseneda edaspidi e-posti ja parooliga. Kood töötab alati edasi.");
+  expect(await storedPassword(email)).toEqual({ hash: null, changedAt: null });
+  await part.getByRole("button", { name: "Määra parool" }).click();
+  await part.getByLabel("Uus parool").fill("pikk-parool-2026");
+  await part.getByLabel("Korda parooli").fill("pikk-parool-2026");
+  await part.getByRole("button", { name: "Salvesta parool" }).click();
+  await expect(part.locator("[data-password-status]")).toHaveText("Parool on salvestatud.");
+  await expect(part.locator("[data-password-state]")).toHaveText(/^Parool on määratud \(muudetud \d\d\.\d\d\.\d{4}\)\.$/);
+  const stored = await storedPassword(email);
+  expect(stored.hash).toMatch(/^scrypt\$/); // only the hash is kept
+  expect(stored.hash).not.toContain("pikk-parool-2026");
+  expect(stored.changedAt).not.toBeNull();
+  expect(await noOverflow(page)).toBe(true);
+  expect(await smallTargets(part)).toEqual([]);
+  await page.reload(); // still signed in, and the server says so
+  await expect(part.locator("[data-password-state]")).toHaveAttribute("data-password-state", "set");
+  await part.getByRole("button", { name: "Eemalda parool" }).click();
+  await expect(part.locator("[data-password-confirm]")).toContainText("Kas eemaldame parooli? Saad edasi siseneda koodiga.");
+  await part.getByRole("button", { name: "Jah, eemalda" }).click();
+  await expect(part.locator("[data-password-status]")).toHaveText("Parool on eemaldatud.");
+  await expect(part.locator("[data-password-state]")).toHaveAttribute("data-password-state", "none");
+  expect(await storedPassword(email)).toEqual({ hash: null, changedAt: null });
+});
+
+/**
+ * The part in the state it is in now, at 390, 834 and 1440 px: no horizontal overflow, no control under 44 px, and the part on the
+ * screen. Prints each measurement (the task's report lists them); the viewport goes back to the project's own.
+ */
+async function layoutHolds(page: Page, part: Locator, label: string, own: { width: number; height: number }) {
+  for (const width of [390, 834, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const box = (await part.boundingBox())!;
+    const smallest = await part
+      .locator("a:visible, button:visible, input:visible")
+      .evaluateAll((els) => Math.min(...els.map((e) => Math.round(e.getBoundingClientRect().height))));
+    console.log(`LAYOUT ${label} @${width}: part x=${Math.round(box.x)} width=${Math.round(box.width)} height=${Math.round(box.height)}, smallest control ${smallest}px`);
+    expect(await noOverflow(page), `${label}: no horizontal overflow at ${width}`).toBe(true);
+    expect(await smallTargets(part), `${label}: every control is 44 px or taller at ${width}`).toEqual([]);
+    expect(box.x >= 0 && box.x + box.width <= width, `${label}: the part is on the screen at ${width}`).toBe(true);
+  }
+  await page.setViewportSize(own);
+}
+
+for (const [language, prefix] of [["Estonian", ""], ["Russian", "/ru"]] as const) {
+  test(`Parool: every state in ${language} holds at 390, 834 and 1440 px (no overflow, targets of 44 px)`, async ({ page }, info) => {
+    submitsForms();
+    const ru = prefix === "/ru";
+    const email = address(`password-layout-${ru ? "ru" : "et"}`, info.project.name);
+    await removeClientRows(email);
+    await insertClient(email, { locale: ru ? "ru" : "et" });
+    await signInAsClient(page, email);
+    await page.goto(`${prefix}/konto/andmed`);
+    const own = info.project.use.viewport!;
+    const part = page.locator("[data-details-password]");
+    const words = ru
+      ? { set: "Задать пароль", remove: "Удалить пароль", cancel: "Отмена", save: "Сохранить пароль", mismatch: "Пароли не совпадают." }
+      : { set: "Määra parool", remove: "Eemalda parool", cancel: "Tühista", save: "Salvesta parool", mismatch: "Paroolid ei ühti." };
+    const fields = ru ? ["Новый пароль", "Повторите пароль"] : ["Uus parool", "Korda parooli"];
+
+    await expect(part.locator("[data-password-state]")).toHaveAttribute("data-password-state", "none");
+    await layoutHolds(page, part, `${language} / no password`, own);
+
+    await part.getByRole("button", { name: words.set, exact: true }).click();
+    await part.getByLabel(fields[0]).fill("pikk-parool-2026");
+    await part.getByLabel(fields[1]).fill("pikk-parool-2025");
+    await part.getByRole("button", { name: words.save, exact: true }).click();
+    await expect(part.locator("[data-password-error]")).toHaveText(words.mismatch);
+    await layoutHolds(page, part, `${language} / the form with an error`, own);
+
+    await part.getByLabel(fields[1]).fill("pikk-parool-2026");
+    await part.getByRole("button", { name: words.save, exact: true }).click();
+    await expect(part.locator("[data-password-state]")).toHaveAttribute("data-password-state", "set");
+    await layoutHolds(page, part, `${language} / with a password, saved`, own);
+
+    await part.getByRole("button", { name: words.remove, exact: true }).click();
+    await expect(part.locator("[data-password-confirm]")).toBeFocused();
+    await layoutHolds(page, part, `${language} / the removal question`, own);
+
+    await part.getByRole("button", { name: words.cancel, exact: true }).click();
+    await expect(part.getByRole("button", { name: words.remove, exact: true })).toBeFocused();
+  });
+}

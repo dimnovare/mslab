@@ -1,9 +1,9 @@
 /* "Minu andmed" in the site's own parts: the page and heading of "Minu koolitused" (CoursesTab.module.css), B .field inputs
    (LoginForm.module.css), the language as the change request's big choices (ChangeRequestDialog.module.css), ui.btn "Salvesta".
-   One narrow column (the login page's 440 px, a little wider). Two parts of its own: the newsletter switch (a checkbox drawn as
-   a switch: off a light neutral track with an outline and a small grey knob, on an ink track with a paper knob) and, at the very
-   bottom, "Kustuta konto" as quiet text in the error colour that opens a B .notice step (rule in the error colour) with "Jah,
-   kustuta" and "Tühista". Targets ≥ 44 px. Tokens only. */
+   One narrow column (the login page's 440 px, a little wider). Three parts of its own: the newsletter switch (a checkbox drawn as
+   a switch: off a light neutral track with an outline and a small grey knob, on an ink track with a paper knob), the password part
+   (phase 2c) and, at the very bottom, "Kustuta konto" as quiet text in the error colour that opens a B .notice step (rule in the
+   error colour) with "Jah, kustuta" and "Tühista". Targets ≥ 44 px. Tokens only. */
 
 .column {
   max-width: 520px;
@@ -33,6 +33,42 @@
 
 .newsletter {
   margin-top: 40px;
+}
+
+/* "Parool" (PasswordSection.tsx, phase 2c): a titled part under a line, the account's fields (LoginForm .field), one outline button */
+.password {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.sectionTitle {
+  margin: 0 0 10px;
+  font: 400 24px/1.2 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.passwordLine {
+  margin: 0 0 16px;
+  font: 400 16px/1.5 var(--font-body);
+}
+
+/* "Tühista" beside "Salvesta parool": quiet text with a 44 px target */
+.quiet {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 500 14px/1.2 var(--font-body);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.passwordConfirm {
+  margin-top: 16px;
 }
 
 /* the whole row is the target: the words at the left, the switch at the right */
