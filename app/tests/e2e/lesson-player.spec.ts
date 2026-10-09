@@ -216,7 +216,7 @@ test("only the player's frame is heard (its origin and its window); leaving the 
 });
 
 test("no word from Bunny (a token it refuses): 'Video ei lae. Proovi hiljem uuesti.' after 20 s, and nothing reported", async ({ page }, info) => {
-  const { lesson, view } = await student(page, "fail", info.project.name);
+  const { lesson, view } = await student(page, "noword", info.project.name);
   const bad = new URL(view.video.embedUrl);
   bad.searchParams.set("token", "0".repeat(64));
   await page.clock.install();
